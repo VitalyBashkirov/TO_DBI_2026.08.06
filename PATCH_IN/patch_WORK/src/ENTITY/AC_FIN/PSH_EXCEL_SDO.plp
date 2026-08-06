@@ -1,0 +1,217 @@
+class AC_FIN;
+
+@import_plsql(true)
+@this(plsql_lock:=false,assert_null:=false)
+@name('[ПСБ] Расшифровка среднедневных остатков по клиентам в Excel')
+@tag('COPIED')
+method PSH_EXCEL_SDO is
+
+@name('V_DEST')             public V_DEST           [STRING_32000];
+@name('Файл шаблона excel') public P_FILE_EXECL     [STRING_512];
+@name('Файл для вывода')    public P_FILE_PORT_DATE [STRING_512];
+pragma include(::[RUNTIME].[DEBUG_MACRO]);
+dp integer:=null;	--управление debug_pipe
+dp2 integer:=null;	--управление debug_pipe
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+fmt	   string(10):='dd/mm/yyyy';
+fmtP   string(10):='dd.mm.yyyy';
+fmtHMS string(22):='dd.mm.yyyy HH24:MI:SS';
+fmt24 string(22):='dd/mm/yyyy HH24:MI:SS';
+dfmt string:='9999999999.99'; --'9999,999,999.99';
+--------
+/** /
+-- Объединение ячеек
+excel.Merge(2,1,2,countColumns);
+	2, -- Начать со 2 строки
+	1, -- Начать с 1 колонки
+	2, -- До 2 строки
+	6  -- До 6 колонки
+-- Запись указанного значения в ячейку по указанному адресу
+Excle.Write(  h 	     -1- номер колонки адреса ячейки
+			, w 	     -2- номер строки адреса ячейки
+			, value      -3- Значение для записи в ячейку
+			, Bold	     -4- Признак выделения жирным шрифтом
+			, Italic     -5- Признак выделения шрифта курсивом
+			, p_size     -6- Размер шрифта
+			, FontName   -7- Имя фонта
+			, Allighment -8- Строка симолов-обозначений выравнивания
+			-	по горизонтали:
+				'R'	- вправо
+				'L'	- влево
+				'C'	- по центру
+			-	по вертикали:
+				'B'	- вниз
+				'T'	- вверх
+				'M'	- по центру
+/**/
+BoldTrue	boolean:=true;	/* Признак выделения жирным шрифтом */
+BoldFalse	boolean:=false;	/* Признак выделения жирным шрифтом */
+ItalicTrue	boolean:=true;  /* Признак выделения шрифта курсивом */
+ItalicFalse	boolean:=false; /* Признак выделения шрифта курсивом */
+p_size_14	number:=14;		/* Размер шрифта */
+p_size_12	number:=12;		/* Размер шрифта */
+p_size_10	number:=10;		/* Размер шрифта */
+p_size_8	number:=8;		/* Размер шрифта */
+FontNameNull varchar2(50):=null;	/* Имя фонта */
+
+Allighment_CM	varchar2(10):='CM'; -- Строка симолов-обозначений выравнивания
+Allighment_RT	varchar2(10):='RT'; -- Строка симолов-обозначений выравнивания
+Allighment_C	varchar2(10):='C';  -- по горизонтали:R-вправо L-влево C-по центру
+Allighment_LM	varchar2(10):='LM'; -- по горизонтали:R-вправо L-влево C-по центру
+Allighment_RM	varchar2(10):='RM'; -- по горизонтали:R-вправо L-влево C-по центру
+Allighment_M	varchar2(10):='M';  -- по вертикали:  B-вниз T-вверх M-по центру
+
+iOrientation1 integer:=1;	/* Ориентации страницы. Значения: 1 - Альбомная, 2 - Книжная. */
+iOrientation2 integer:=2;	/* Ориентации страницы. Значения: 1 - Альбомная, 2 - Книжная. */
+
+PSH_EXCEL_SDO (
+	@name('Дата начала') P_BEG  in [DATE],
+	@name('Дата конца')  P_END  in [DATE],
+	@name('Куратор')     P_USER in [USER_REF]
+) is
+
+validate is
+countStrHead	  integer := 3; -- сколько строк занято шапкой
+countColumns	  integer := 8; -- количество постоянных колонок в отчете
+cntrStr			  integer := 0; -- счетчик по строкам
+
+mainTitle varchar2(120) := 'Расшифровка среднедневных остатков по клиентам куратора ';
+
+column01 varchar2(40) := 'Лицевой счет';
+column02 varchar2(40) := 'Вал.';
+column03 varchar2(40) := 'Наименование';
+column04 varchar2(40) := 'ИНН';
+column05 varchar2(40) := 'Куратор';
+column06 varchar2(40) := 'Оборот Кт в нац.';
+column07 varchar2(40) := 'Среднедневной остаток в нац.';
+column08 varchar2(40) := 'Сумма Комиссий за период';
+
+nn integer:=0;				
+z_ref ref [ZALOG];
+flStepMinus boolean;
+tmpStr string(4000);
+DateTimeEnd date;
+begin
+	if P_MESSAGE = 'DEFAULT' then -- первый запуск процедуры
+		P_BEG := to_date(SYS_CONTEXT('IBS_USER','V_D_START'),'dd/mm/yyyy'); --[SYSTEM].[OP_DATE];
+		P_END := to_date(SYS_CONTEXT('IBS_USER','V_D_STOP'),'dd/mm/yyyy'); 	--[SYSTEM].[OP_DATE];
+		P_USER:=stdlib.UserId;	--::[USER]([NAME]='Куклинов Николай Станиславович');--stdlib.UserId; --::[AC_FIN].[Z1494265900].actual_accountant_name(this%id,to_date(SYS_CONTEXT('IBS_USER','V_D_STOP'),'dd/mm/yyyy'));
+
+		excel.Init_Xls;
+		stdio.close_all;
+		stdio.disable_buf;
+		p_info := 'OK';
+		
+	elsif P_MESSAGE = 'VALIDATE' then
+		debug_pipe('p_info='||p_info||' length(V_DEST)='||length(V_DEST), dp);
+				
+		if p_info = 'OK' then
+			if P_BEG is null then pragma error('Укажите дату начала!'); end if;
+			if P_END is null then pragma error('Укажите дату конца!'); end if;
+			if P_BEG>P_END then pragma error('Укажите отчетные даты правильно!'); end if;
+			if P_USER is null then pragma error('Укажите Куратора!'); end if;
+
+			if excel.F_Click then
+				excel.F_Click := False;
+				
+				P_FILE_EXECL := trim([SYSTEM_PARAMS]::[GET]('PATH_LOCAL', false),'\')||'\'||stdlib.FIO(P_USER.[NAME],'Ф И.О.')||'Расшифровка остатков за '||to_char(P_BEG,'dd.mm.yyyy')||'_'||to_char(P_END,'dd.mm.yyyy')||'.xlsx';
+				debug_pipe('Будем создавать:'||P_FILE_EXECL, dp);
+				excel.open_file(P_FILE_EXECL, false, true); -- запуск Excel
+				
+				-- Первая строка
+				mainTitle:=mainTitle||' '||stdlib.FIO(P_USER.[NAME],'Ф И.О.');
+				debug_pipe(mainTitle, dp2);
+				excel.write(1,1,mainTitle,BoldTrue,ItalicFalse,p_size_14,FontNameNull,Allighment_CM);
+				excel.Merge(1,1,1,countColumns);
+
+				-- Вторая строка
+				excel.write(2,1,'за '||to_char(P_BEG,fmtP)||'-'||to_char(P_END,fmtP),BoldTrue,ItalicFalse,p_size_14,FontNameNull,Allighment_CM);
+				excel.Merge(2,1,2,countColumns);
+				
+				-- Форматирование первых столбцов
+				excel.write(countStrHead,01,column01,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(01,01, 20); --Лицевой счет
+				excel.write(countStrHead,02,column02,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(02,02,  5); --Вал.
+				excel.write(countStrHead,03,column03,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(03,03, 80); --Наименование
+				excel.write(countStrHead,04,column04,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(04,04, 14); --ИНН
+				excel.write(countStrHead,05,column05,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(05,05, 22); --Куратор
+				excel.write(countStrHead,06,column06,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(06,06, 18); --Оборот Кт в нац.
+				excel.write(countStrHead,07,column07,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(07,07, 18); --Среднедневной остаток
+				excel.write(countStrHead,08,column08,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(08,08, 18); --Сумма Комиссий за период
+
+				excel.Wrap_Text (countStrHead,01,countStrHead,countColumns,true); --Устанавка признака переноса текста в диапазоне
+				excel.AutoFitRow(countStrHead,01);	  --Установка свойства автоподбора высоты строк (с какой строки, кол-во строк)
+
+				cntrStr:=countStrHead;
+
+				::[AC_FIN].[PSH_L_LOAN_INSP].v_d_start :=P_BEG; -- updated CHANGE_SHORT_NAME PSB_L_LOAN_INSP->PSH_L_LOAN_INSP 14/10/25
+				::[AC_FIN].[PSH_L_LOAN_INSP].v_d_stop  :=P_END; -- updated CHANGE_SHORT_NAME PSB_L_LOAN_INSP->PSH_L_LOAN_INSP 14/10/25
+				::[AC_FIN].[PSH_L_LOAN_INSP].v_period  :=P_END-P_BEG+1; -- updated CHANGE_SHORT_NAME PSB_L_LOAN_INSP->PSH_L_LOAN_INSP 14/10/25
+
+				for af in ::[AC_FIN]
+				where SubStr(af.[MAIN_V_ID],1,3) in ('407','408')
+				and af.[FILIAL]=::[BRANCH]([CODE]='001')
+				and ::[AC_FIN].[PSH_L_LOAN_INSP].actual_accountant_name(af,P_END)=P_USER.[NAME] -- updated CHANGE_SHORT_NAME PSB_L_LOAN_INSP->PSH_L_LOAN_INSP 14/10/25
+				and (nvl(::[AC_FIN].[PSH_L_LOAN_INSP].get_avg_saldo_r(af)             ,0)<>0 -- updated CHANGE_SHORT_NAME PSB_L_LOAN_INSP->PSH_L_LOAN_INSP 14/10/25
+				  or nvl(::[AC_FIN].[ACC_TURN_LS].turn(af.[ARC_MOVE],'КН',P_BEG,P_END),0)<>0
+				  or nvl(::[AC_FIN].[PSH_L_LOAN_INSP].GetDocAllSum(af,2,P_BEG,P_END)  ,0)<>0) -- updated CHANGE_SHORT_NAME PSB_L_LOAN_INSP->PSH_L_LOAN_INSP 14/10/25
+				order by SubStr(af.[MAIN_V_ID],1,8)||SubStr(af.[MAIN_V_ID],10)
+				loop
+					nn:=nn+1;
+					cntrStr := cntrStr + 1;
+					debug_pipe(Rpad(nn,5)||'['||Rpad(cntrStr,5)||']'||af.[MAIN_V_ID],dp2);
+
+					excel.write(cntrStr,01,''''||af.[MAIN_V_ID]);
+					excel.write(cntrStr,02,af.[FINTOOL].[CUR_SHORT]);
+					excel.write(cntrStr,03,af.[NAME]);
+					excel.write(cntrStr,04,''''||nvl(af.[CLIENT_R],af.[CLIENT_V]).[INN]);
+					excel.write(cntrStr,05,stdlib.fio(::[AC_FIN].[PSH_L_LOAN_INSP].actual_accountant_name(af,P_END),'Ф И.О.')); -- updated CHANGE_SHORT_NAME PSB_L_LOAN_INSP->PSH_L_LOAN_INSP 14/10/25
+					excel.write(cntrStr,06,::[AC_FIN].[ACC_TURN_LS].turn(af.[ARC_MOVE],'КН',P_BEG,P_END));--
+					excel.write(cntrStr,07,::[AC_FIN].[PSH_L_LOAN_INSP].get_avg_saldo_r(af));             --Среднедневной остаток Рубли -- updated CHANGE_SHORT_NAME PSB_L_LOAN_INSP->PSH_L_LOAN_INSP 14/10/25
+					excel.write(cntrStr,08,::[AC_FIN].[PSH_L_LOAN_INSP].GetDocAllSum(af,2,P_BEG,P_END));  --2-Комиссий за период -- updated CHANGE_SHORT_NAME PSB_L_LOAN_INSP->PSH_L_LOAN_INSP 14/10/25
+				end loop;
+
+				--Cуммы
+				cntrStr:=cntrStr+1;
+				excel.write(cntrStr,05,'ИТОГО',BoldTrue,null,p_size_10,null,Allighment_RM);
+				excel.write(cntrStr,06,'=SUM(R[-'||(cntrStr-countStrHead-1)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--Оборот Кт в нац.
+				excel.write(cntrStr,07,'=SUM(R[-'||(cntrStr-countStrHead-1)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--Среднедневной остаток
+				excel.write(cntrStr,08,'=SUM(R[-'||(cntrStr-countStrHead-1)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма Комиссий за перио
+
+				--Задание числового формата
+				excel.Set_number_Format(countStrHead+1,06,cntrStr,06,2, true); ---Оборот Кт в нац.
+				excel.Set_number_Format(countStrHead+1,07,cntrStr,07,2, true); ---Среднедневной остаток
+				excel.Set_number_Format(countStrHead+1,08,cntrStr,08,2, true); ---Сумма Комиссий за период
+				
+				-- Рамки
+				cntrStr:=cntrStr-1; --ИТОГО без рамки
+				debug_pipe('<<Рамки>> '||countStrHead||','||1||','||cntrStr||','||countColumns,dp2);
+				excel.BORDERS(countStrHead,1,cntrStr,countColumns,'RLBTVH');
+
+				DateTimeEnd:=sysdate;
+				tmpStr:='Сформировано '||to_char(DateTimeEnd,fmtHMS)||' __________________________________/'||stdlib.UserId.[NAME]||'/';
+				debug_pipe(tmpStr, dp2);
+				
+				cntrStr:=cntrStr+1;
+				excel.write(cntrStr+1,1,tmpStr,Boldfalse,ItalicFalse,p_size_10);
+				excel.Merge(cntrStr+1,1,cntrStr+1,countColumns);
+
+				excel.set_orientation(iOrientation2);	--Ориентации страницы. Значения: 1 - Альбомная, 2 - Книжная
+				excel.fit_in_page_width();				--Вписать данные в страницу по ширине
+				excel.Save_as(P_FILE_EXECL);			--NameFile_OutXlsx);
+
+				excel.Visible;							--Перевод Excel в режим отображения данных
+				excel.Release;							--Закрытие COM интерфейса Excel сервера
+			end if;
+			
+			if Length(V_DEST)>0 then
+				debug_pipe('(Размер VB-скрипта:'||Length(V_DEST)||')',dp2);
+			end if;
+			excel.Exec_Script(V_DEST);
+		end if;
+	end if;
+end;
+end;
+end;

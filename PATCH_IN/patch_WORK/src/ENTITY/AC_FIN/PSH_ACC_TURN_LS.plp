@@ -1,0 +1,639 @@
+class AC_FIN;
+
+@import_plsql(true)
+@this(plsql_lock:=false)
+@name('[ПСБ] Оборотная ведомость с валютным эквивалентом  с ИНН, ОГРН, ОКАТО')
+@tag('COPIED')
+method PSH_ACC_TURN_LS is
+
+@name('Группировка 1')                              public V_GROUP1                 [COMBO_BOXES_REF];
+@name('Группировка 2')                              public V_GROUP2                 [COMBO_BOXES_REF];
+@name('Группа счетов')                              public V_ACC_GR                 [ANALYTIC_COD_REF];
+@name('Уровень балансового счета')                  public V_BS_LEVEL               [USV_LEVEL_REF];
+@name('Балансовый счет')                            public V_BALACC                 [PL_US_REF];
+@name('Тип результата')                             public V_RES_TYPE               [ONE_FROM_4];
+@name('Шаблоны лицевых счетов')                     public V_PATTERN                [STRING_1000];
+@name('Валюта эквивалента')                         public V_OUT_CUR                [FT_MONEY_REF];
+@name('План счетов')                                public V_ACCPLAN                [TYPE_PL$];
+@name('Счета второго уровня')                       public V_LEVEL_2                [USV_LEVEL_REF];
+@name('Список валют')                               public V_CUR_PATT               [STRING_100];
+@name('Категория клиента')                          public V_CL_CAT                 [CL_GROUP_REF];
+@name('Основной код ОКВЭД')                         public V_OKVED                  [OKVED_REF];
+@name('Отображение счетов')                         public V_SHOW_NUL               [ONE_FROM_4];
+@name('Разрешить трассировку')                      public V_TRACE                  [BOOLEAN];
+@name('Порядок просмотра Подразделений')            public V_CASE_DEP               [CASE_BETWEEN_TWO];
+@name('Выводить в отчет дату и время формирования') public V_SHOW_PRN_DATE          [BOOLEAN];
+@name('Группировать по валюте счета')               public V_GROUP_VAL              [BOOLEAN];
+@name('Фильтр подразделений (быстрый фильтр)')      public V_DEPART_FILTER          [STRING_250];
+@name('Список подразделений филиала (ГРИД)')        public V_DEPART_GRID   table of [SERVICE_TUN];
+@name('Тип расчета')                                public V_CALCTYPE               [COMBO_BOXES_REF];
+@name('Отметить/снять все')                         public V_CHECK_ALL              [BOOLEAN];
+@name('[ПСБ] ОКАТО')                                public V_OKATO                  [STRING_1000];
+-- структура подразделений, отобранных быстрым фильтром
+type tp_rec_ChkDepart is record
+	(	id			varchar2	-- id подразделения
+	,	vCode		varchar2	-- код подразделения
+	,	bChoose		boolean		-- признак выбора
+	);
+
+-- массив отмеченных подразделений
+type tp_tab_ChkDepart_v is table of tp_rec_ChkDepart index by varchar2;
+ltvChkDepart		tp_tab_ChkDepart_v;
+
+ltvCalcTypes		::[REPS_DATA].[LIB_TYPE].tab_str_s;		-- массив типов расчета
+
+-- Процедура инициализации переменных операции, необходимсых для расчёта остатков и оборотов по счетам
+public procedure init_varg(	P_ED					date			-- ВНИМАНИЕ! сначала д.б. окончание периода
+					,	P_SD					date			:= null
+					,	P_CLIENT				ref	[CLIENT]	:= null
+) is
+begin
+	::[TURN_DATA].[SLIB].init_varg(
+									P_ED
+								,	P_SD
+								,	P_CLIENT
+	);
+end;
+
+
+-- обороты и остатки в валюте счета и нац.покрытии
+-- Параметр REF_ACC_SUMMARY добавлен 21/01/2005
+-- для корректного отображения по шифрованным счетам доходов-расходов аналитических данных
+-- (выполнения операции разбивки документов по счетам МФР)
+public function turn(	P_ARC_MOVE			::[RECORDS]%collection%type
+			,	par					varchar2
+			,	P_DATE_BEG			date
+			,	P_DATE_END			date
+			,	REF_ACC				ref [AC_FIN]					:= null
+			,	REF_ACC_SUMMARY		ref [AC_FIN]					:= null
+			,	status				ref [COM_STATUS_PRD]			:= null
+			,	P_D_STORNO			date							:= null
+			,	ARH_CORR			::[ARH_COR_ACC]%collection%type	:= null
+) return number is
+begin
+	return ::[TURN_DATA].[SLIB].turn(
+				P_ARC_MOVE
+			,	par
+			,	P_DATE_BEG
+			,	P_DATE_END
+			,	REF_ACC
+			,	REF_ACC_SUMMARY
+			,	status
+			,	P_D_STORNO
+			,	ARH_CORR
+	);
+end;
+pragma restrict_references(turn, WNDS, trust);
+
+
+-- обороты и остатки в указанной валюте
+-- Параметр REF_ACC_SUMMARY добавлен 21/01/2005
+-- для корректного отображения по шифрованным счетам доходов-расходов аналитических данных
+-- (выполнения операции разбивки документов по счетам МФР)
+public function turnv(	P_ARC_MOVE			::[RECORDS]%collection%type
+			,	par					varchar2
+			,	P_DATE_BEG			date
+			,	P_DATE_END			date
+			,	VAL_ISO				varchar2
+			,	VAL_ACC				varchar2
+			,	REF_ACC				ref [AC_FIN]					:= null
+			,	REF_ACC_SUMMARY		ref [AC_FIN]					:= null
+			,	status				ref [COM_STATUS_PRD]			:= null
+			,	P_D_STORNO			date							:= null
+			,	ARH_CORR			::[ARH_COR_ACC]%collection%type	:= null
+) return number is
+begin
+	return ::[TURN_DATA].[SLIB].turnv(	
+				P_ARC_MOVE
+			,	par
+			,	P_DATE_BEG
+			,	P_DATE_END
+			,	VAL_ISO
+			,	VAL_ACC
+			,	REF_ACC
+			,	REF_ACC_SUMMARY
+			,	status
+			,	P_D_STORNO
+			,	ARH_CORR
+	);
+end;
+pragma restrict_references(turnv, WNDS, trust);
+
+
+-- Функция преобразует строку, заполненную кодами ИСО, короткими именами валюты и т.п. в список идентификаторов этих валют строкой, через #
+public function GetCurList( P_CUR_LIST	varchar2 ) return varchar2 is
+	vRet	varchar2(32767);
+begin
+	if p_cur_list is null then
+		return null;
+	end if;
+
+	for	(	select a( a%id	: id )
+			in ::[FT_MONEY]
+			where	instr( p_cur_list, a.[CODE_ACC])	> 0
+				or	instr( p_cur_list, a.[CODE_ISO])	> 0
+				or	instr( p_cur_list, a.[CUR_SHORT])	> 0
+	) loop
+		vRet	:= vRet || a.id || '#';
+	end loop;
+
+	if vRet is null then
+		debug(&METHOD$||'.GetCurList:'
+			||LF$||'ВНИМАНИЕ! Валюты, указанные в строке "'||p_cur_list||'", не найдены.'
+			||LF$||lpad('-', length('-'||p_cur_list)+51, '-')
+			||LF$||LF$||LF$, 0);
+	else
+		vRet	:= '#' || vRet;
+	end if;
+
+	return vRet;
+end;
+
+-- Функция возвращает ссылку на элемент выпадающего списка
+public function idComboBoxes( P_IS_1_ST varchar2 default '0') return ref [COMBO_BOXES] is
+	rRet	ref	[COMBO_BOXES];
+begin
+	for	(	select u( u	: id )
+			in	::[COMBO_BOXES]
+			where	u.[CODE] = 'ACC_TURN'
+				and u.[NUM] = 1
+	) loop
+		rRet	:= u.id;
+	end loop;
+
+	if rRet is null and P_IS_1_ST <> '0' then
+		::[COMBO_BOXES].[PSH_STD_LOAD]('ACC_TURN'); -- updated CHANGE_SHORT_NAME PSB_STD_LOAD->PSH_STD_LOAD 15/10/25
+		rRet	:= idComboBoxes('1');
+	end if;
+
+	return rRet;
+end;
+
+-- Установка значений комбобокса "Тип расчета"
+procedure SetComboCalcType
+is
+	vMask		varchar2(20) := 'ACC_TURN_CALCTYPE';
+begin
+	for	(	select u( u			: id
+					, u.[NUM]	: C_NUM )
+			in	::[COMBO_BOXES]
+			where	u.[CODE] = vMask
+	) loop
+		case u.C_NUM of
+			:1:	ltvCalcTypes('SVOD') := to_char(u.id);
+			:2:	ltvCalcTypes('FILIAL') := to_char(u.id);
+				V_CALCTYPE := u.id;
+			:3:	ltvCalcTypes('SOMEDEPART') := to_char(u.id);
+		end;
+	end loop;
+end;
+
+-- Заполнение грида "Подразделения филиала"
+procedure fillGridBranchDeparts ( P_BRANCH		ref [BRANCH]
+								, P_DATE_BEG		date
+								, P_DATE_END		date
+								, P_FILTER			varchar2(250)
+								)
+is
+	iCnt			integer;
+begin
+	iCnt		:= 0;
+	V_DEPART_GRID.delete;
+	if P_BRANCH is not null then
+		-- Заполняем грид для каждого подразделения филиала
+		for ( select d 	( d%id			: ID		--ссылка на подразделение
+						, d.[CODE] 		: C_CODE	--код подразделения
+						, d.[NAME] 		: C_NAME	--наименование подразделения
+						)
+			in ::[DEPART]
+			where d.[FILIAL] = P_BRANCH
+				and (P_FILTER is null or d.[CODE] like P_FILTER||'%' or upper(d.[NAME]) like '%'||upper(P_FILTER)||'%')
+			order by d.[CODE]
+		)
+		loop
+			iCnt := iCnt + 1;
+			V_DEPART_GRID(iCnt).[N1]			:= d.ID;
+			V_DEPART_GRID(iCnt).[CODE]			:= d.C_CODE;
+			V_DEPART_GRID(iCnt).[NAME]			:= d.C_NAME;
+			if ltvChkDepart.exists(d.ID) then
+				V_DEPART_GRID(iCnt).[CHOOSE]	:= ltvChkDepart(d.ID).bChoose;
+			end if;
+		end loop;
+	end if;
+end;
+PSH_ACC_TURN_LS (
+	@name('Дата начала периода')             P_SD          in  [DATE],
+	@name('Дата окончания периода')          P_ED          in  [DATE],
+	@name('Дата учета сторнирования')        P_STORNO      in  [DATE],
+	@name('Филиал')                          P_BRANCH      in  [BRANCH_REF],
+	@name('Подразделение')                   P_DEPART      in  [DEPART_REF],
+	@name('ID нац.валюты')                   P_NT_ID       in  [FT_MONEY_REF],
+	@name('Операционист')                    P_OTV         in  [USER_REF],
+	@name('Название ответственного за счет') UserName      in  [STRING_50],
+	@name('Глава')                           P_CHAPTER     in  [STRING_20],
+	@name('Исключить')                       P_EXCL_CUR    in  [BOOLEAN],
+	@name('Группировать по физ/юр лицам')    P_CL_GROUP    in  [BOOLEAN],
+	@name('Только итоги')                    P_ONLY_ITOG   in  [BOOLEAN],
+	@name('Разделители тысяч')               P_THS         in  [BOOLEAN],
+	@name('Клиент')                          P_CLIENT      in  [CLIENT_REF],
+	@name('Минимальные обороты')             P_MIN         in  [SUMMA202],
+	@name('Максимальные обороты')            P_MAX         in  [SUMMA202],
+	@name('Группа клиентов')                 P_CL_GRP      in  [GROUP_LINK_REF],
+	@name('Итог по группе с одним счетом')   P_ITOG_ONE    in  [BOOLEAN],
+	@name('Клиент-владелец')                 P_CLIENT_V    in  [BOOLEAN]        default null,
+	@name('Клиент, для расчетов с которым')  P_CLIENT_R    in  [BOOLEAN]        default null,
+	@name('Заголовок 1-ой группировки')      P_NAME_G1     in  [BOOLEAN]        default null,
+	@name('Заголовок 2-ой группировки')      P_NAME_G2     in  [BOOLEAN]        default null,
+	@name('Балансовый счет')                 P_BA          out [STRING],
+	@name('Код подразделения')               P_DEPART_CODE out [STRING],
+	@name('Наименование группы счетов')      P_GR_ACC_NAME out [STRING],
+	@name('1-я группировка')                 P_GROUP1      out [INTEGER],
+	@name('2-я группировка')                 P_GROUP2      out [INTEGER],
+	@name('Категория клиента')               P_CL_CAT      out [STRING_20],
+	@name('Основной код ОКВЭД')              P_OKVED       out [STRING_20],
+	@name('Трассировка')                     P_TRACE       in  [BOOLEAN],
+	@name('Дочерние подразделения')          P_IS_ALL_DEP  in  [BOOLEAN],
+	@name('Подразделение по ответственному') P_IS_DEP_OTV  out [BOOLEAN],
+	@name('Переносить текст в наименовании') P_WRAP_NAME   in  [BOOLEAN]        default null,
+	@name('Банк')                            P_BANK        in  [CL_BANK_REF]    default null,
+	@name('[ПСБ] ОКАТО')                     P_OKATO       out [STRING_1000]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_BRANCH := this.[FILIAL];
+	P_NT_ID := [SYSTEM]::[SYS_MAIN_VAL];
+
+end if;
+-- End initialization of parameters and variables
+declare
+mData				::[TURN_DATA].[PSH_LIB_INN_REGN].map_accounts;		-- данные по счетам -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+vIdx				varchar2;								-- индекс
+rTmpDepart		ref [DEPART];								-- временное подразделение
+rTmpFilial		ref [BRANCH];								-- временный филиал
+rTmpBank		ref [CL_BANK];								-- временный банк
+bTmpAllDep			boolean;								-- флаг "Дочерние"
+recChkDepart		tp_rec_ChkDepart;						-- структура подразделений, отобранных быстрым фильтром
+vListDepart			varchar2(4000);							-- id отмеченных подразделений
+vListDepartCode		varchar2(4000);							-- коды отмеченных подразделений
+
+-- проверка даты учета сторнирования
+procedure ChkStorno is
+begin
+	if P_STORNO < P_ED then
+		P_STORNO := null;
+	end if;
+end;
+
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		-- Установка значений комбобокса "Тип расчета"
+		SetComboCalcType;
+
+		V_LEVEL_2		:= ::[USV_LEVEL]([CODE] = '2');
+		P_ED = P_SD		:= ::[SYSTEM].[OP_DATE];
+		UserName		:= P_OTV.[NAME];
+		P_CL_GROUP		:= false;					-- Группировать по физ/юр лицам
+		P_ONLY_ITOG		:= false;					-- Только итоги
+		P_THS			:= true;					-- Разделители тысяч
+		V_CHECK_ALL		:= false;					-- Отметить/снять все
+		V_ACCPLAN		:= ::[SYSTEM].[SYS_MAIN_PLAN];
+		P_BRANCH		:= ::[SYSTEM].[VARIABLES].GetOurBranch;
+		P_BANK			:= ::[REPS_DATA].[LIB_CLIENT].GetBankByBranch(P_BRANCH);
+		rTmpFilial		:= null;
+		rTmpBank		:= null;
+		rTmpDepart		:= null;
+
+		V_BS_LEVEL		:= ::[SYSTEM].[VARIABLES].LastLevel;
+		P_NT_ID			:= ::[SYSTEM].[VARIABLES].NatCur;
+		V_SHOW_NUL.[0]	:= 4;
+		p_itog_one		:= false;
+
+		if V_BS_LEVEL	= V_LEVEL_2 then
+			V_BS_LEVEL	:= null;
+		end if;
+
+		if security.Check_Equal(stdlib.UserId.[USERNAME], 'ADMIN_GRP')	= '1' then
+			V_TRACE		:= true;
+		else
+			V_TRACE		:= false;
+		end if;
+		P_TRACE			:= false;
+
+		V_RES_TYPE.[0]	:= 1;
+		V_CASE_DEP.[0]	:= 1;
+
+		V_GROUP1		:= idComboBoxes;
+		V_GROUP2		:= V_GROUP1;
+		
+		ltvChkDepart.delete;
+		fillGridBranchDeparts(P_BRANCH, P_SD, P_ED, V_DEPART_FILTER);
+
+		P_INFO	:= 'P_OTV,P_STORNO,%VAR%.V_BS_LEVEL,%VAR%.V_RES_TYPE,'
+				|| '%VAR%.V_GROUP1.NAME,%VAR%.V_GROUP2.NAME,'
+				|| '%VAR%.V_BS_LEVEL,%VAR%.V_BALACC';
+
+	elsif P_MESSAGE = 'VALIDATE' then
+		-- Если изменился филиал
+		if P_INFO = 'P_BRANCH' then
+			if P_BRANCH is null then
+				-- выставляем признак свод				
+				V_CALCTYPE%id	:= ltvCalcTypes('SVOD');
+				P_BANK			:= coalesce(P_BANK, rTmpBank, ::[SYSTEM].[VARIABLES].GetOurBank);
+				rTmpFilial		:= P_BRANCH;
+				P_BRANCH 		:= null;
+				rTmpDepart		:= P_DEPART;
+				P_DEPART		:= null;
+				bTmpAllDep		:= P_IS_ALL_DEP;
+				P_IS_ALL_DEP	:= false;
+			else
+				P_BANK 			:= ::[REPS_DATA].[LIB_CLIENT].GetBankByBranch(P_BRANCH);
+			end if;
+			ltvChkDepart.delete;
+			fillGridBranchDeparts(P_BRANCH, P_SD, P_ED, V_DEPART_FILTER);
+		
+		-- Если изменился банк
+		elsif P_INFO = 'P_BANK' then
+			if P_BANK is null then
+				P_BANK := ::[REPS_DATA].[LIB_CLIENT].GetBankByBranch(P_BRANCH);
+			end if;
+								
+		elsif P_INFO = 'P_OTV' then
+			UserName := P_OTV.[NAME];
+
+		elsif P_INFO = 'P_SD' then
+			P_ED := P_SD;
+			ChkStorno;
+			ltvChkDepart.delete;
+			fillGridBranchDeparts(P_BRANCH, P_SD, P_ED, V_DEPART_FILTER);
+
+		elsif P_INFO = 'P_ED' then
+			if P_SD > P_ED then
+				P_SD:= P_ED;
+			end if;
+			ChkStorno;
+			ltvChkDepart.delete;
+			fillGridBranchDeparts(P_BRANCH, P_SD, P_ED, V_DEPART_FILTER);
+
+		elsif P_INFO = 'P_STORNO' then
+			ChkStorno;
+
+		elsif P_INFO = '%VAR%.V_BS_LEVEL' then
+			if V_BALACC is not null then
+				declare
+					vTemp	varchar2;
+				begin
+					vTemp		:= substr(V_BALACC.[NUM], 1, 2*to_number(''||V_BS_LEVEL.[CODE])+1) || '%';
+					V_BALACC	:= ::[PL_US]([LEVEL] = V_BS_LEVEL and [NUM] like vTemp and rownum < 2);
+
+				exception when NO_DATA_FOUND then
+					stdio.put_line_buf('Для         ['	|| P_INFO			|| ']'
+						|| LF$ || 'не найден счет   ['	|| vTemp			|| ']'
+						|| LF$ || 'id уровня б/с    ['	|| V_BS_LEVEL%id	|| ']'
+						|| LF$ || 'кол-во символов   '	|| to_char( 2*to_number(V_BS_LEVEL.[CODE])+1 )
+					);
+				end;
+			end if;
+
+		elsif P_INFO in ('%VAR%.V_GROUP1.NAME', '%VAR%.V_GROUP2.NAME') then
+			if		V_BS_LEVEL is null
+				and (nvl(V_GROUP1.[NUM],0) = 2 or nvl(V_GROUP2.[NUM],0) = 2)
+				and ::[SYSTEM].[VARIABLES].LastLevel <> ::[USV_LEVEL]([CODE] = '2')
+			then
+				V_BS_LEVEL := ::[SYSTEM].[VARIABLES].LastLevel;
+			end if;
+
+
+		elsif P_INFO = '%VAR%.V_BS_LEVEL' then
+			if V_BS_LEVEL <> V_BALACC.[LEVEL] then
+				V_BALACC := null;
+				for	(
+						select u(u	: id)
+						in	::[PL_US]
+						where	u.[LEVEL] = V_BS_LEVEL
+							and	u.[NUM]||'' like substr(u.[NUM], 1, 1 + V_BS_LEVEL.[CODE]*2) || '%'
+				) loop
+					V_BALACC := u.id;
+					exit;
+				end loop;
+			end if;
+
+		elsif P_INFO = '%VAR%.V_BALACC' then
+			if V_BALACC.[LEVEL] <> ::[USV_LEVEL]([CODE] = '2') then
+				V_BS_LEVEL := V_BALACC.[LEVEL];
+			end if;
+		
+		-- флаг "Отметить/снять все"
+		elsif P_INFO = '%VAR%.V_CHECK_ALL' then	
+			for i in 1..V_DEPART_GRID.count loop
+				V_DEPART_GRID(i).[CHOOSE] := V_CHECK_ALL;
+				
+				recChkDepart.id			:= V_DEPART_GRID(i).[N1];
+				recChkDepart.vCode		:= V_DEPART_GRID(i).[CODE];
+				recChkDepart.bChoose	:= V_DEPART_GRID(i).[CHOOSE];
+
+				vIdx := V_DEPART_GRID(i).[N1];
+				ltvChkDepart(vIdx) := recChkDepart;
+			end loop;
+		
+		-- если изменен выбор подразделений
+		elsif P_INFO like '%VAR%.V_DEPART_GRID.CHOOSE[%]' then
+			for i in 1..V_DEPART_GRID.count loop
+				recChkDepart.id			:= V_DEPART_GRID(i).[N1];
+				recChkDepart.vCode		:= V_DEPART_GRID(i).[CODE];
+				recChkDepart.bChoose	:= V_DEPART_GRID(i).[CHOOSE];
+				
+				vIdx := V_DEPART_GRID(i).[N1];
+				ltvChkDepart(vIdx) := recChkDepart;
+			end loop;
+		
+		-- Если произошло нажатие Enter в поле для ввода быстрого фильтра
+		elsif P_INFO = 'DEPART_FILTER' then
+			fillGridBranchDeparts(P_BRANCH, P_SD, P_ED, V_DEPART_FILTER);
+
+		-- если изменен тип расчета
+		elsif P_INFO = '%VAR%.V_CALCTYPE' then
+			--не даем выбрать пустой тип расчета
+			if V_CALCTYPE%id is null then
+				V_CALCTYPE%id := ltvCalcTypes('FILIAL');
+			end if;
+
+			case V_CALCTYPE%id of
+				: ltvCalcTypes('FILIAL') : -- расчет по филиалу(подразделению)
+					P_BRANCH		:= coalesce(P_BRANCH, rTmpFilial, ::[SYSTEM].[VARIABLES].GetOurBranch);
+					P_DEPART		:= coalesce(P_DEPART, rTmpDepart);
+					rTmpBank		:= P_BANK;
+					P_BANK 			:= null;
+					P_IS_ALL_DEP	:= bTmpAllDep;
+
+				: ltvCalcTypes('SVOD') : -- сводный расчет
+					P_BANK			:= coalesce(P_BANK, rTmpBank, ::[SYSTEM].[VARIABLES].GetOurBank);
+					rTmpFilial		:= P_BRANCH;
+					P_BRANCH 		:= null;
+					rTmpDepart		:= P_DEPART;
+					P_DEPART		:= null;
+					bTmpAllDep		:= P_IS_ALL_DEP;
+					P_IS_ALL_DEP	:= false;
+
+				: ltvCalcTypes('SOMEDEPART') : -- по нескольким подраздедениям филиала
+					P_BRANCH		:= coalesce(P_BRANCH, rTmpFilial, ::[SYSTEM].[VARIABLES].GetOurBranch);
+					rTmpDepart		:= P_DEPART;
+					P_DEPART		:= null;
+					bTmpAllDep		:= P_IS_ALL_DEP;
+					P_IS_ALL_DEP	:= false;
+					rTmpBank		:= P_BANK;
+					P_BANK 			:= null;
+					fillGridBranchDeparts(P_BRANCH, P_SD, P_ED, V_DEPART_FILTER);
+			end;		
+		
+		elsif P_INFO = 'PRINT' then	-- Печать
+			if	not (	P_CL_GRP is null
+					and	P_CLIENT is null
+					)
+			and not (	nvl(P_CLIENT_V, false)
+					or	nvl(P_CLIENT_R, false)
+					)
+			then
+				pragma error('Пожалуйста, выберите категорию отношения указанного клиента (группы) к счету');
+			end if;
+		
+			if V_RES_TYPE.[0] = 3 and V_OUT_CUR is null then
+				pragma error('Пожалуйста, выберите выходную валюту');
+			end if;
+		
+			V_PATTERN	:= nvl( ltrim( rtrim( V_PATTERN )), '');
+			V_OKATO	:= nvl( ltrim( rtrim( V_OKATO )), ''); --28.03.2024 ОКАТО
+		
+			P_GROUP1	:= nvl( V_GROUP1.[NUM], 1);
+			P_GROUP2	:= nvl( V_GROUP2.[NUM], 1);
+		
+			if V_BALACC is not null then
+				P_BA	:= substr( V_BALACC.[NUM], 1, 2*to_number( nvl( V_BS_LEVEL.[CODE], nvl( V_BALACC.[LEVEL].[CODE], '2') ))+1)||'%';
+			end if;
+		
+			P_IS_DEP_OTV	:= V_CASE_DEP.[0] = 2;
+			
+			if V_CL_CAT	is not null then
+				P_CL_CAT	:= V_CL_CAT.[CODE];
+			end if;
+
+			if V_OKVED	is not null then
+				P_OKVED	:= V_OKVED.[CODE];
+			end if;
+
+			::[TURN_DATA].[SLIB].InitData;
+			::[TURN_DATA].[PRN_001].init;
+
+			-- Режим расчета по нескольким подразделениям филиала
+			if V_CALCTYPE%id = ltvCalcTypes('SOMEDEPART') then
+				vListDepart := '#';
+				vListDepartCode := null;
+				-- Обработка ранее выбранных подразделений
+				vIdx := ltvChkDepart.first;
+				while vIdx is not null loop
+					recChkDepart := ltvChkDepart(vIdx);
+					if recChkDepart.bChoose then
+						vListDepart := vListDepart || recChkDepart.id || '#' ;
+						vListDepartCode := vListDepartCode || recChkDepart.vCode || ', ';
+					end if;
+					vIdx := ltvChkDepart.next(vIdx);
+				end loop;
+				vListDepartCode := trim(trim(vListDepartCode, ' '), ',');
+			end if;
+
+			if P_TRACE then
+				::[RUNTIME].[TRACE].START_TRACE;
+			end if;
+		
+		  --Башкиров В.Г. 03.04.2019 добавил ИНН и ОГРН
+		  --mData := ::[TURN_DATA].[CLC_ACC_001].run(
+		    mData := ::[TURN_DATA].[PSH_CLC_ACC_001].run( -- updated CHANGE_SHORT_NAME PSB_CLC_ACC_001->PSH_CLC_ACC_001 15/10/25
+						p_beg						== P_SD
+					,	p_end						== P_ED+1
+					,	p_storno					== P_STORNO
+		
+					,	p_cur_out					== V_OUT_CUR
+					,	p_chapter_list				== P_CHAPTER
+					,	p_bs_num					== substr( V_BalAcc.[NUM], 1, 2*to_number( nvl( V_BS_LEVEL.[CODE], nvl( V_BalAcc.[LEVEL].[CODE], '2') ))+1)
+		
+					,	P_DEPART					== P_DEPART
+					,	p_dep_with_child			== P_IS_ALL_DEP
+					,	p_select_depart_from_otv	== V_CASE_DEP.[0] = 2
+
+					,	P_PATTERN					== V_PATTERN
+					,	p_cur_list					== V_CUR_PATT
+					,	p_exclude_cur				== nvl(P_EXCL_CUR, false)
+		---------------------------------------------------------------[переменные]--
+					,	P_BRANCH					== P_BRANCH
+					,	P_BANK						== P_BANK
+					,	P_CLIENT					== P_CLIENT
+					,	p_CLIENT_R					== P_CLIENT_R
+					,	p_CLIENT_V					== P_CLIENT_V
+
+					,	P_OTV						== P_OTV
+					,	p_client_group				== P_CL_GRP.[CLIENTS_HISTORY]
+					,	p_client_category			== V_CL_CAT.[CODE]
+					,	P_OKVED						== V_OKVED.[CODE]
+		---------------------------------------------------------------------[***]--
+					,	P_GROUP1					== nvl( V_GROUP1.[NUM], 1)
+					,	P_GROUP2					== nvl( V_GROUP2.[NUM], 1)
+					,	P_GROUP_VAL					== nvl(V_GROUP_VAL, false)
+					,	P_RES_TYPE					== V_RES_TYPE.[0]
+					,	P_SHOW_ZERO					== V_SHOW_NUL.[0]
+
+					,	p_max_turn					== P_MAX
+					,	p_min_turn					== P_MIN
+		
+					,	p_analytic					==	V_ACC_GR
+					,	p_total_only				== nvl(P_ONLY_ITOG, false)
+					,	P_CL_GROUP					== P_CL_GROUP
+					
+					,	P_DEPART_LIST				== vListDepart
+					,	P_OKATO						== V_OKATO	--28.03.2024 ОКАТО
+			);
+
+			if P_TRACE then
+				::[RUNTIME].[TRACE].STOP_TRACE;
+			end if;
+
+		  --Башкиров В.Г. 03.04.2019 добавил ИНН и ОГРН
+		  --Башкиров В.Г. 28.03.2024 добавил ОКАТО
+		  --::[TURN_DATA].[PRN_001].run(
+		    ::[TURN_DATA].[PSH_PRN_001].run( -- updated CHANGE_SHORT_NAME PSB_PRN_001->PSH_PRN_001 15/10/25
+						p_beg				== P_SD
+					,	p_end				== P_ED
+					,	p_branch			==	p_branch
+					,	p_bank				==	p_bank
+					,	p_total_only		== nvl(P_ONLY_ITOG, false)
+					,	P_GROUP1			== nvl( V_GROUP1.[NUM], 1)
+					,	P_GROUP2			== nvl( V_GROUP2.[NUM], 1)
+					,	P_RES_TYPE			== V_RES_TYPE.[0]
+
+					,	p_show_thousand		== P_THS		-- Разделители тысяч
+
+					,	p_wrap_name			== nvl(P_WRAP_NAME, false)	-- Переносить текст в столбце "Наименование"
+					,	p_cl_group			==	P_CL_GROUP
+					,	P_NAME_G1			==	P_NAME_G1	-- Заголовок 1-ой группировки
+					,	P_NAME_G2			==	P_NAME_G2	-- Заголовок 2-ой группировки
+					,	p_show_every_group	==	p_itog_one
+					,	p_show_prn_date		==	v_show_prn_date
+					,	p_data				==	mData
+					,	P_OUT_CUR			==	V_OUT_CUR
+					,	P_ACC_GR			==	V_ACC_GR
+					,	P_PATTERN			==	V_PATTERN
+					,	P_BALACC			==	substr( V_BalAcc.[NUM], 1, 2*to_number( nvl( V_BS_LEVEL.[CODE], nvl( V_BalAcc.[LEVEL].[CODE], '2') ))+1)
+					,	P_GROUP_VAL			==	V_GROUP_VAL
+					,	P_DEPART_LIST		==	vListDepartCode
+					,	P_OKATO				== V_OKATO	--28.03.2024 ОКАТО
+			);
+			mData.delete;
+			
+			UTILS.FREE_MEMORY;
+		end if;
+	end if;
+end;
+end;
+end;
+end;

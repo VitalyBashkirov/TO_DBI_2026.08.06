@@ -1,0 +1,541 @@
+class HOOK_BANK;
+
+@optimize(false)
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Платежные документы. Анализ счета деб/кр при проводке пл. документа (точка вызова)  Доп.контроль')
+@tag('COPIED')
+static method MD_FOR_PROV_CP_3 is
+pragma include(::[RUNTIME].[DEBUG_MACRO]);
+PRAGMA INCLUDE([DEPN]::[LIB_MACRO]);
+
+dp  integer:=0;			--управление debug_pipe
+dp1 integer:=0;			--управление debug_pipe
+dp2 integer:=0;			--управление debug_pipe
+dp3 integer:=0;			--управление debug_pipe
+dp4 integer:=0;			--управление debug_pipe
+dp5 integer:=null;		--управление debug_pipe
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+fmt	string(10):='dd/mm/yyyy';
+fmtP   string(10):='dd.mm.yyyy';
+fmt24  string(22):='dd/mm/yyyy HH24:MI:SS';
+fmtHMS string(22):='dd/mm/yyyy HH24:MI:SS';
+fmtS_5 string(28):='dd/mm/yyyy HH24:MI:SS.SSSSS'; --.SSSSS секунд до полуночи (0-86399)
+
+ComStatusWork		ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'WORK');
+ComStatusClose		ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'CLOSE');
+ComStatusToClose	ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'TO_CLOSE');
+
+public procedure do_debug(p_str varchar2, dp number default null) is
+begin
+	if	coalesce(::[FP_TUNE].[LIB].get_bool_value('PSB_DEBUG_AUX', stdlib.userid, 0), false) then
+		stdio.setup_pipes('TMP', 'TMP');
+		stdio.put_line_pipe(p_str, 'TMP');
+		-- debug_pipe(p_str,0);
+	else &debug(p_str,dp)
+	end if;
+end;
+
+function GetTimeInterval(tEnd number, tBeg number) return number is
+tMax    number:= 2147483647;
+tMin    number:=-2147483648;
+nLength number:=tMax - tMin + 1;
+Minhalf number:=tMin/2;
+Maxhalf number:=(tMax+1)/2;
+begin
+	if    tBeg>Maxhalf and tEnd<Minhalf then return tEnd-tBeg+nLength;
+	elsif tBeg<Minhalf and tEnd>Maxhalf then return tEnd-tBeg-nLength;
+	end if;
+	return tEnd-tBeg;
+end;
+
+function InfoDocS(d ref [DOCUMENT]) return string(32000) is
+ExStr string(4000);
+md ref [MAIN_DOCUM];
+fp ref [FOLDER_PAY];
+nErr integer:=0;
+OkDoc boolean:=false;
+OkProd boolean:=false;
+RefProd ref [PRODUCT];
+begin
+	begin
+		ExStr:=SubStr(ExStr||d%class||'.'||d%id||'.'||d%state||' №'||d.[DOCUMENT_NUM]||iif(d.[DOCUMENT_UNO],' UNO:'||d.[DOCUMENT_UNO],'')||' '||d.[DEPART].[CODE]||iif(d.[DOCUMENT_DATE] is null,'',' ДСозд:'||to_char(d.[DOCUMENT_DATE],fmt))||iif(d.[ASTR_DATE_PROV]is null,'',' ДПрАс:'||to_char(d.[ASTR_DATE_PROV],fmt24))||iif(d.[DOCUMENT_USER] is null,'',' UsrСозд:'||d.[DOCUMENT_USER].[USERNAME])||iif(d.[USER_EXEC]  is null,'',' UsrИсп:' ||d.[USER_EXEC].[USERNAME])||LF$,1,2000);
+	exception when others then
+		&debug('.InfoDocS -- В тип [DOCUMENT] передано что-то непонятное. Ищем объект id:'||d,dp)
+		if d is not null then
+			for (select dkm(dkm%id) in ::[DOCUMENT] all where dkm%id=d%id) loop
+				OkDoc:=true;
+				exit;
+			end loop;
+			if not OkDoc then
+				&debug('.InfoDocS -- Это не документ!!!',dp)
+			end if;
+		end if;
+		for (select prd(prd%id:C_ID) in ::[PRODUCT] all where prd%id=d%id) loop
+			OkProd:=true;
+			RefProd:=prd.C_ID;
+			&debug('.InfoDocS -- Это продукт '||RefProd%class||'.'||RefProd%id,dp)
+			exit;
+		end loop;
+		if not OkProd then
+			&debug('.InfoDocS -- Это не продукт!!!',dp)
+			ExStr:=SubStr('Объект id:'||d||' не опознан! '||ExStr,1,ExStr%size);
+			--begin
+			--	::[RKO].[ABS_OBJ](d%id);
+			--exception when others then
+			--	ExStr:=SubStr('Объект id:'||d||' не опознан! '||ExStr,1,ExStr%size);
+			--	&debug('.InfoDocS -- Объект id:'||d||' не опознан!',dp)
+			--end;
+		end if;
+	end;
+	
+	begin
+		if d%class='MAIN_DOCUM' then md:=d;       ExStr:=SubStr(ExStr||md%class||'.'||md%id||'.'||md%state||' №'||md.[DOCUMENT_NUM]||iif(md.[DOCUMENT_UNO],' UNO:'||md.[DOCUMENT_UNO],'')||' '||md.[DEPART].[CODE]||' Папка(id:'||md.[IN_FOLDER]%id||'.'||md.[IN_FOLDER]%state||'){'||md.[IN_FOLDER].[DOCS_IN_FOLD]%size(0)||'}'
+			||iif(md.[DATE_PROV] is null,'',' ДПров:'||to_char(md.[DATE_PROV],fmt24))||' '
+			||md.[SUM]||' '||md.[VALUTA].[CUR_SHORT]||' '
+			||md.[ACC_DT].[MAIN_V_ID]||'-'||md.[ACC_KT].[MAIN_V_ID]||' '
+			||iif(md.[KL_DT].[0]=1,md.[KL_DT].[1].[2].[MAIN_V_ID],md.[KL_DT].[2].[1])
+			||'-'
+			||iif(md.[KL_KT].[0]=1,md.[KL_KT].[1].[2].[MAIN_V_ID],md.[KL_KT].[2].[1])
+			||' '
+			||md.[NAZN]||LF$,1,2000);
+		elsif d%class='FOLDER_PAY' then fp:=d%id; ExStr:=SubStr(ExStr||fp%class||'.'||fp%id||'.'||fp%state||' №'||fp.[DOCUMENT_NUM]||iif(fp.[DOCUMENT_UNO],' UNO:'||fp.[DOCUMENT_UNO],'')||' '||fp.[DEPART].[CODE]||' {'||fp.[IN_FOLDER].[DOCS_IN_FOLD]%size(0)||'}'||' БО:'||fp.[BUSINESS_OP].[PATTERN_CODE]||'-'||fp.[BUSINESS_OP].[PATTERN_NAME]||LF$,1,2000);
+		  for dif in fp.[IN_FOLDER].[DOCS_IN_FOLD] loop
+		  ExStr:=SubStr(ExStr||TB$||rpad(dif.[NUM],5)||' '||Rpad('ID:'||dif.[PATT_REF]%id||'.'||dif.[PATT_REF].[NOTE],35)||' '||InfoDocS(dif.DOCUMENT),1,2000);
+		  if nErr>20 then ExStr:=SubStr(ExStr||'...',1,2000); exit; end if;
+		  end loop;
+		end if;
+	exception when others then
+		&debug('.InfoDocS -- Объект id:'||d||' не опознан',dp)
+	end;
+	return SubStr(ExStr,1,2000);
+end;
+
+function CheckAcInShablon(NumAcc [ACCNUM], vPatt [STRING_300], separator string(1) default ',') return boolean is
+FlOk boolean:=false;
+CntWord number;
+vWord string(100);
+begin
+	do_debug(TB$||'.CheckAcInShablon -- NumAcc='||NumAcc||' vPatt='||vPatt||' separator='||separator, dp4);
+	vPatt:=trim(vPatt);
+	vPatt:=Replace(vPatt,' ');
+	vPatt:=trim(vPatt,separator);
+	vPatt:=Replace(vPatt,separator||separator,separator);
+	if vPatt is null or NumAcc is null then 
+		FlOk:=true;
+	else
+		CntWord:=Length(vPatt)-Length(Replace(vPatt,separator))+1;
+		for i in 1..CntWord loop
+			vWord:=::[CL_PRIV].[PSH_DATE_DEATH].wbn(vPatt,separator,i);
+			do_debug(TB$||'.CheckAcInShablon -- '||vWord, dp4);
+			if InStr(NumAcc,vWord)=1 then
+				FlOk:=true;
+				exit;
+			end if;
+		end loop;
+	end if;
+	do_debug(TB$||'.CheckAcInShablon -< '||FlOk, dp4);
+	return FlOk;
+end;
+
+procedure DbpBusinessOp(CntTB number default 0, DebugOnOff boolean default false) is
+begin
+	if DebugOnOff then
+		begin
+			if PATTERN_DOC.BUSINESS_OP.date_val_bo is not null then &debug(lpad(TB$,CntTB)||'PATTERN_DOC.BUSINESS_OP.date_val_bo='||to_char(PATTERN_DOC.BUSINESS_OP.date_val_bo,fmt24),dp1)--DATE;
+			end if;
+			if PATTERN_DOC.BUSINESS_OP.doc_ref     is not null then &debug(lpad(TB$,CntTB)||'PATTERN_DOC.BUSINESS_OP.doc_ref    ='||HOOK_BANK.RKO_CALC_PAR_1.InfoDoc(PATTERN_DOC.BUSINESS_OP.doc_ref),dp1)--ref [DOCUMENT];
+			end if;
+			if PATTERN_DOC.BUSINESS_OP.mdoc%id     is not null then &debug(lpad(TB$,CntTB)||'PATTERN_DOC.BUSINESS_OP.mdoc%id    ='||PATTERN_DOC.BUSINESS_OP.mdoc%id                   ,dp1)--[MAIN_DOCUM];
+			end if;
+			if PATTERN_DOC.BUSINESS_OP.fold_ref    is not null then &debug(lpad(TB$,CntTB)||'PATTERN_DOC.BUSINESS_OP.fold_ref   ='||HOOK_BANK.RKO_CALC_PAR_1.InfoDoc(PATTERN_DOC.BUSINESS_OP.fold_ref),dp1)--[FOLDER_PAY_REF];
+			end if;
+			if PATTERN_DOC.BUSINESS_OP.folder%id   is not null then &debug(lpad(TB$,CntTB)||'PATTERN_DOC.BUSINESS_OP.folder%id  ='||PATTERN_DOC.BUSINESS_OP.folder%id                 ,dp1)--[FOLDER_PAY];
+			end if;
+			if PATTERN_DOC.BUSINESS_OP.val_op      is not null then &debug(lpad(TB$,CntTB)||'PATTERN_DOC.BUSINESS_OP.val_op     ='||PATTERN_DOC.BUSINESS_OP.val_op.[CUR_SHORT]        ,dp1)--[FT_MONEY_REF];
+			end if;
+			if PATTERN_DOC.BUSINESS_OP.begin_num   is not null then &debug(lpad(TB$,CntTB)||'PATTERN_DOC.BUSINESS_OP.begin_num  ='||PATTERN_DOC.BUSINESS_OP.begin_num                 ,dp1)--integer;
+			end if;
+			if PATTERN_DOC.BUSINESS_OP.kol_doc     is not null then &debug(lpad(TB$,CntTB)||'PATTERN_DOC.BUSINESS_OP.kol_doc    ='||PATTERN_DOC.BUSINESS_OP.kol_doc                   ,dp1)--number;
+			end if;
+			if PATTERN_DOC.BUSINESS_OP.str_sim     is not null then &debug(lpad(TB$,CntTB)||'PATTERN_DOC.BUSINESS_OP.str_sim    ='||SubStr(PATTERN_DOC.BUSINESS_OP.str_sim,1,2000)    ,dp1)--[MEMO];
+			end if;
+			if PATTERN_DOC.BUSINESS_OP.CL_         is not null then &debug(lpad(TB$,CntTB)||'PATTERN_DOC.BUSINESS_OP.CL_        ='||PATTERN_DOC.BUSINESS_OP.CL_.[NAME]                ,dp1)--ref [CL_PRIV]; -- вноситель/получатель средств (jack 07/05/2002) метка &&JACK
+			end if;
+			if PATTERN_DOC.BUSINESS_OP.need_repeat is not null then &debug(lpad(TB$,CntTB)||'PATTERN_DOC.BUSINESS_OP.need_repeat='||PATTERN_DOC.BUSINESS_OP.need_repeat               ,dp1)--[BOOLEAN];
+			end if;
+			if PATTERN_DOC.BUSINESS_OP.tarif_bo    is not null then &debug(lpad(TB$,CntTB)||'PATTERN_DOC.BUSINESS_OP.tarif_bo   ='||PATTERN_DOC.BUSINESS_OP.tarif_bo.[OPER].[PATTERN_CODE]||'-'||PATTERN_DOC.BUSINESS_OP.tarif_bo.[OPER].[PATTERN_NAME],dp1)--ref [TARIF_BO];
+			end if;
+		exception when others then debug_pipe('.DbpBusinessOp -- Ош.:'||LF$||sqlerrm,dp1);
+		end;
+	end if;
+end;
+MD_FOR_PROV_CP_3 (
+	@name('Документ')                   DOCUMENT   in     [MAIN_DOCUM_REF],
+	@name('Счет дебета')                ACCOUNT_DT in     [AC_FIN_REF],
+	@name('Счет кредита')               ACCOUNT_CT in     [AC_FIN_REF],
+	@name('Признак счета дебета')       IT_DT      in     [BOOLEAN],
+	@name('Признак успешности анализа') ANALYSE_OK in out [BOOLEAN],
+	@name('Дополнительные параметры')   P_ADDS     in out [STRING_32000],
+	@name('Тип вызова')                 P_MESS     in     [STRING_100]
+) is
+
+execute is
+OkDoc boolean:=false;
+FlNotDoc  boolean:=false;
+timeStart number;
+md [MAIN_DOCUM];
+SumAux [SUMMA];
+SumAuxNT [SUMMA];
+ValAux [FT_MONEY_REF];
+adress_001 ref [PSH_EMAIL_RASSIL];
+
+vSumDt [SUMMA];
+vSumPo [SUMMA];
+vSumNt [SUMMA];
+vRateDt [SUMMA_16_6];
+vRateKt [SUMMA_16_6];
+
+ValDt [FT_MONEY_REF];
+ValKt [FT_MONEY_REF];
+ValRub [FT_MONEY_REF]:=::[FT_MONEY]([CUR_SHORT]='RUB');
+
+DateVal [DATE];
+
+dt_expn [DIG_6_2];
+kt_expn [DIG_6_2];
+
+VarSumType number;
+
+flOk     boolean;
+flDtOk   boolean;
+flKtOk   boolean;
+flKlDtOk boolean;
+flKlKtOk boolean;
+
+next_call boolean; -- это не первый вызов
+hist [HISTORY_STATES];
+
+oMd [MAIN_DOCUM];	--Башкиров В.Г. 20.01.2023 
+md3 ref [MAIN_DOCUM];
+oMd3 [MAIN_DOCUM];
+md4 ref [MAIN_DOCUM];
+oMd4 [MAIN_DOCUM];
+UserProvMainDoc ref [USER];
+PsbDocUser boolean; --Пользователь-создатель документа комиссии-пользователь, проведший основной документ
+
+BusinessOpDocRef ref [MAIN_DOCUM];
+oBusinessOpDocRef ref [MAIN_DOCUM];
+
+fpRef ref [FOLDER_PAY];
+oFp [FOLDER_PAY];
+DepnRef ref [DEPN];
+oDepn [DEPN];
+bank_for_prov string(16);
+
+message_text varchar2(32000);
+aux_ctrl_accept ref [AUX_CTRL_ACCEPT];
+usr ref [USER]:=STDLIB.USERID;
+
+begin
+	timeStart:=utils.get_time;
+  --&debug(utils.call_stack, dp2)
+	begin
+		do_debug('MD_FOR_PROV_CP_3 -> Старт:'||to_char(sysdate,'hh24:mm:ss')
+			||' P_MESS='||P_MESS
+			||' DOCUMENT='||DOCUMENT%class||'.'||DOCUMENT%id||'.'||DOCUMENT%state
+			||' ACCOUNT_DT='||ACCOUNT_DT.[MAIN_V_ID]
+			||' ACCOUNT_CT='||ACCOUNT_CT.[MAIN_V_ID]
+			||' IT_DT='||IT_DT
+			||' ANALYSE_OK='||ANALYSE_OK
+			||' P_ADDS='||P_ADDS
+			,dp);
+			do_debug('DOCUMENT         ->'||::[HOOK_BANK].[RKO_CALC_PAR_1].InfoDoc(DOCUMENT),dp);
+		if ::[PATTERN_DOC].[BUSINESS_OP].doc_ref%class='DOCUMENT' then
+			BusinessOpDocRef:=::[PATTERN_DOC].[BUSINESS_OP].doc_ref; --Документ, с которого удерживается комиссия
+			oBusinessOpDocRef:=oBusinessOpDocRef;
+			do_debug('BusinessOpDocRef ->'||::[HOOK_BANK].[RKO_CALC_PAR_1].InfoDoc(BusinessOpDocRef),dp);
+		end if;
+		if DOCUMENT%class='MAIN_DOCUM' then --Башкиров В.Г. 23.01.2023 
+			md3:=DOCUMENT;
+			oMd3:=md3;
+		end if;
+	exception when others then
+		&debug('!!! Ош.:'||to_char(sysdate,'hh24:mm:ss')||' DOCUMENT%id='||DOCUMENT%id,dp)
+	  --&debug('utils.call_stack='||utils.call_stack,dp)
+		if DOCUMENT is not null then
+			for (select d(d%id) in ::[DOCUMENT] all where d%id=DOCUMENT%id) loop
+				OkDoc:=true;
+				exit;
+			end loop;
+			if not OkDoc then
+				&debug('В DOCUMENT не документ!!!',dp)
+				DOCUMENT:=null; FlNotDoc:=true;
+				goto nnn;
+			end if;
+		end if;
+	end;
+
+	if not coalesce(::[FP_TUNE].[LIB].get_bool_value('PSB_AUX_ON', null, false), false) 
+	then 
+		--do_debug('Локальный доп.контроль отключен (Настройка. PSB_AUX_ON)', dp5);
+		goto nnn;
+	end if;
+	
+	::[RUNTIME].[STR].get_par(P_ADDS, 'NEXT_CALL', next_call);
+	if next_call then
+		do_debug('Это не первый вызов. Выходим', dp2);
+		goto nnn;
+	end if;
+	
+	/** /
+	if DOCUMENT%state in ('AUX_CTRL','FORM') and (
+	[DOCUMENT].[DOC_LIB].check_history_state(DOCUMENT, 'AUX_CTRL')
+	or [DOCUMENT].[DOC_LIB].check_history_state(DOCUMENT, 'PSB_AUX_CTRL'))
+	/**/
+/*	if DOCUMENT%state in ('AUX_CTRL') and InStr(utils.call_stack,'PSB_AUX_CTRL_EXECUTE')=0
+	then
+		pragma error('Для проводки документа из состояния "Дополнительный контроль"'||LF$
+		||'используйте операцию "[ПСБ] Дополнительный контроль. Подтверждение документа" (Alt+С)');
+		goto nnn;
+	end if;
+	--*/
+	/** /
+	if DOCUMENT%state = 'FORM' and 
+	(::[DOCUMENT].[DOC_LIB].check_history_state(DOCUMENT, 'AUX_CTRL') or 
+	 ::[DOCUMENT].[DOC_LIB].check_history_state(DOCUMENT, 'PSB_AUX_CTRL'))
+	then
+		do_debug('Документ уже был на доп.контроле. Выходим', dp2);
+		goto nnn;
+	end if;
+	/**/
+	
+	do_debug('Доп.контроль:'||InfoDocS(DOCUMENT), dp2);
+
+	md		:=DOCUMENT;
+	do_debug('md.[SUM]   ='||md.[SUM]   , dp2);
+	do_debug('md.[SUM_PO]='||md.[SUM_PO], dp2);
+	do_debug('md.[SUM_NT]='||md.[SUM_NT], dp2);
+	do_debug('md.[VALUTA]   :'||md.[VALUTA].[CUR_SHORT]   , dp2);
+	do_debug('md.[VALUTA_PO]:'||md.[VALUTA_PO].[CUR_SHORT], dp2);
+	do_debug('md.[DATE_VAL] :'||to_char(md.[DATE_VAL],fmt)||' md.[FILIAL].[OP_DATE]='||to_char(md.[FILIAL].[OP_DATE],fmt), dp2);
+	do_debug('md.[SUM   ]='||md.[SUM]   , dp2);
+	do_debug('md.[SUM_PO]='||md.[SUM_PO], dp2);
+	do_debug('md.[SUM_NT]='||md.[SUM_NT], dp2);
+
+	ValDt	:=coalesce(md.[VALUTA],    ACCOUNT_DT.[FINTOOL], md.[ACC_DT].[FINTOOL]);
+	ValKt	:=coalesce(md.[VALUTA_PO], ACCOUNT_CT.[FINTOOL], md.[ACC_KT].[FINTOOL]);
+	DateVal	:=nvl(md.[DATE_VAL],md.[FILIAL].[OP_DATE]);
+
+	vRateDt :=nvl(md.[RATE_DT],::[DOCUMENT].[LIB_CUR].Get_rate(ValDt,DateVal));
+	vRateKt :=nvl(md.[RATE_KT],::[DOCUMENT].[LIB_CUR].Get_rate(ValKt,DateVal));
+	dt_expn :=nvl(ValDt.[EXPN],2);
+	kt_expn :=nvl(ValKt.[EXPN],2);
+
+	do_debug('ValDt ='||ValDt.[CUR_SHORT]||' Курс('||to_char(DateVal,fmt)||')='||vRateDt||' Экспонента:'||dt_expn, dp3);
+	do_debug('ValKt ='||ValKt.[CUR_SHORT]||' Курс('||to_char(DateVal,fmt)||')='||vRateKt||' Экспонента:'||kt_expn, dp3);
+
+	vSumDt :=coalesce(md.[SUM],md.[SUM_PO],0);
+	vSumPo :=nvl(md.[SUM_PO],Round(vSumDt*vRateDt/vRateKt, kt_expn));
+	vSumNt :=nvl(md.[SUM_NT],Round(vSumDt*vRateDt, dt_expn));
+	
+	do_debug('vSumDt='||vSumDt, dp3);
+	do_debug('vSumPo='||vSumPo, dp3);
+	do_debug('vSumNt='||vSumNt, dp3);
+	
+	for pacc in var oPacc ::[PSH_AUX_CTRL_CND]  -- updated CHANGE_QUALIFIER PSB_AUX_CTRL_CND->PSH_AUX_CTRL_CND 08/10/25
+	where Pacc.[ACTIVE] and nvl(Pacc.[COND_STATE],'FORM')=md%state
+	loop
+		SumAux		:=nvl(oPacc.[SUMMA],0);
+		VarSumType	:=nvl(oPacc.[SUM_TYPE].[0],1);
+		ValAux		:=nvl(oPacc.[CURRENCY],ValRub);
+		SumAuxNT	:=SumAux*::[DOCUMENT].[LIB_CUR].Get_rate(ValAux,DateVal);
+
+		do_debug(LF$||'-= '||oPacc.[CODE]||'-'||oPacc.[NAME]||' '||oPacc.[COND_STATE]||' =-', dp3);
+		do_debug(rPad('oPacc.[SUMMA]       ='||oPacc.[SUMMA]               ,35)||'SumAux    ='||SumAux,dp4);
+		do_debug(rPad('oPacc.[SUM_TYPE].[0]='||oPacc.[SUM_TYPE].[0]        ,35)||'VarSumType='||VarSumType||' '||iif(VarSumType=1,'Сумма Дт',iif(VarSumType=2,'Сумма Кт',iif(VarSumType=3,'Сумма нац.',''))), dp4);
+		do_debug(rPad('oPacc.[CURRENCY]    ='||oPacc.[CURRENCY].[CUR_SHORT],35)||'ValAux    ='||ValAux.[CUR_SHORT],dp4);
+		do_debug('SumAuxNT='||SumAuxNT||' vSumNt='||vSumNt,dp4);
+		
+		if SumAuxNT<=vSumNt then
+			do_debug('Дт-Кт:'||oPacc.[PATT_DT]||'-'||oPacc.[PATT_DT]||' Счет Плательщика-Получателя:'||oPacc.[PATT_KL_DT]||'-'||oPacc.[PATT_KL_DT], dp4);
+			flOk:=false;
+			flDtOk  :=CheckAcInShablon(coalesce(ACCOUNT_DT.[MAIN_V_ID],md.[ACC_DT].[MAIN_V_ID]),oPacc.[PATT_DT]);
+			flKtOk  :=CheckAcInShablon(coalesce(ACCOUNT_CT.[MAIN_V_ID],md.[ACC_KT].[MAIN_V_ID]),oPacc.[PATT_KT]);
+			flKlDtOk:=CheckAcInShablon(coalesce(md.[KL_DT].[2].[1], md.[KL_DT].[1].[2].[MAIN_V_ID],ACCOUNT_DT.[MAIN_V_ID]),oPacc.[PATT_KL_DT]);
+			flKlKtOk:=CheckAcInShablon(coalesce(md.[KL_KT].[2].[1], md.[KL_KT].[1].[2].[MAIN_V_ID],ACCOUNT_CT.[MAIN_V_ID]),oPacc.[PATT_KL_KT]);
+			if flDtOk and flKtOk and flKlDtOk and flKlKtOk then
+				flOk:=true;
+			  --ANALYSE_OK:=false;
+				DOCUMENT%state	:='AUX_CTRL';
+				hist.[STATE]	:='PSB_AUX_CTRL';
+				hist.[DATE]		:=sysdate;
+				hist.[ADD_INFO]	:=SubStr(stdlib.userid.USERNAME||' '||trim(oPacc.[NAME],'.')||'. '||oPacc.[REJECT_MESSAGE],1,hist.[ADD_INFO]%size);
+				DOCUMENT.[HISTORY_STATE]%insert(hist);
+				adress_001:=::[PSH_EMAIL_RASSIL]([PSH_EMAIL_COD] = 'LEGALIZ' and [PSH_EMAIL_FIL].[CODE]='001');
+			::[FP_INTERFACE].[PRX_PCORE].Send_Mail(  --Башкиров В.Г. 17.12.2023
+			 adress_001.[PSH_EMAIL_ADRES]	
+			, 'Документ направлен на дополнительный контроль'	
+			, 'Док.№'||md.[DOCUMENT_NUM]||' от '||to_char(md.[DATE_DOC],fmt)||' '||md.[ACC_DT].[MAIN_V_ID]||'-'||md.[ACC_KT].[MAIN_V_ID]||' '||md.[SUM]||' '||md.[VALUTA].[CUR_SHORT]
+			, 'IT@pshb.ru'					
+			, false						
+			,null
+			);
+
+				if oPacc.[REJECT_MESSAGE] is not null then
+					stdio.put_line_buf(
+					'Док.№'||md.[DOCUMENT_NUM]||' от '||to_char(md.[DATE_DOC],fmt)||' '||md.[ACC_DT].[MAIN_V_ID]||'-'||md.[ACC_KT].[MAIN_V_ID]||' '||md.[SUM]||' '||md.[VALUTA].[CUR_SHORT]||LF$||
+					oPacc.[NAME]||LF$||
+					oPacc.[REJECT_MESSAGE]
+					);
+				end if;
+				exit;
+			end if;
+		end if;
+	end loop;
+
+    if DOCUMENT%state = 'FORM' 
+	and ::[HOOK_BANK].[MD_FOR_PROV_CP_1].Check_PSH_CL_UFMPAYOK(DOCUMENT.[KL_DT]) 
+	and not next_call then 
+	    message_text:='Документ приостановлен на этапе "Доп. контроль" по отметке УФМ на клиенте: требуется доп. контроль платежей.';
+	    DOCUMENT.[TEXT_VOZV]:=message_text;
+		DOCUMENT%state := 'AUX_CTRL';				    
+		stdio.put_line_buf(message_text);
+		
+	    aux_ctrl_accept:= ::[AUX_CTRL_ACCEPT].[NEW_AUTO](
+		                               null		--Породившее условие
+		                               ,::[AUX_CTRL_TYPE]([CODE]='COMMON')		--Вид операции
+									   ,true		--Разрешен контроль одним пользователем
+									   ,DOCUMENT%id	--Объект контроля
+									   ,::[COM_STATUS_PRD]([CODE]='WAIT_CONF')		--Статус подтверждения
+									   ,[SYSTEM]::[OP_DATE]		--Дата контроля
+									   ,null		--Подтвердивший пользователь
+								       ,usr		--Пользователь-создатель
+		                               ,1		--Приоритет
+								       ,false	--Архивная запись
+									);
+		aux_ctrl_accept.[CREATE_DATE]:=	[SYSTEM]::[OP_DATE];
+		
+	end if;
+
+	<<nnn>>
+	--Башкиров В.Г. 25.02.2023 Если платежный документ связан с Документом РЦ
+	-- и ДПП/Дата валютирования/Дата операционного дня - выходной по календарю TRC-Нерабочие дни ТРЦ
+	-- Прерываем проводку документа
+	/*if P_MESS='BEGIN' then
+		var dProvCalc [DATE];
+		dProvCalc:=coalesce(oMD3.[DATE_VAL], oMD3.[FILIAL].[OP_DATE]); --, oMD3.[DATE_VAL])
+		do_debug('MD_FOR_PROV_CP_3 '||TB$||'(1)dProvCalc='||to_char(dProvCalc,fmt)||' md3%id='||md3%id, dp);
+		for (select drc(drc%id : C_ID
+			--, drc.[BEGDATE] : C_BEGDATE
+			--, drc.[FILIAL].[OP_DATE] : C_FILIAL_OP_DATE
+			) in ::[DOCUM_RC]
+		where drc.[MAIN_DOC]=md3%id)
+		loop
+			--dProvCalc:=coalesce(drc.C_BEGDATE, drc.C_FILIAL_OP_DATE, dProvCalc);
+			do_debug('MD_FOR_PROV_CP_3 '||TB$||'(2)dProvCalc='||to_char(dProvCalc,fmt), dp);
+			if CALENDAR.Check_Date('TRC',dProvCalc)='1' then
+				do_debug('MD_FOR_PROV_CP_3 '||TB$||'Документ РЦ не может быть обработан т.к. '||to_char(dProvCalc,fmt)||' в РЦ Банка не рабочий день', dp);
+				pragma error('Документ РЦ(ID:'||drc.C_ID||') не может быть обработан т.к. '||to_char(dProvCalc,fmt)||' в РЦ Банка не рабочий день');
+			end if;
+			exit;
+		end loop;
+	end if;*/
+
+	/** /
+	[HOOK_BANK]::[MD_FOR_PROV_CP_3]MD_FOR_PROV_CP_3 -> Старт:14:02:32 
+	P_MESS=BEGIN 
+	DOCUMENT=MAIN_DOCUM.3969741901.FORM 
+	ACCOUNT_DT=42301810116100010745 
+	ACCOUNT_CT=20202810501000000015 
+	IT_DT=0 ANALYSE_OK=1 
+	P_ADDS=^~BANK_FOR_PROV~BEFORE~^
+	^~DT_KT_OUT~0~^
+	^~NEXT_CALL~1~^
+	/**/
+	[STR].GET_PAR(P_ADDS, 'BANK_FOR_PROV', bank_for_prov);
+	
+	--Башкиров В.Г. 09.02.2023 Если это БО:DEP_RET-Списание депозита/процентов, конвертация
+	-- и Папка документа=Папке БО
+	-- и есть ФР "Закрытие счетов депозита" и Депозит в состоянии "Помечен к закрытию"
+	-- Депозит возвращаем с состояние "Рабоает"
+	if P_MESS='BEGIN' and bank_for_prov='BEFORE'
+	and oMD3.[IN_FOLDER].[BUSINESS_OP]=::[PATTERN_DOC]([PATTERN_CODE]='DEP_RET') --Списание депозита/процентов, конвертация
+	and PATTERN_DOC.BUSINESS_OP.fold_ref=oMD3.[IN_FOLDER] --Папка БО и Папка документа должны совпадать
+	then
+		--do_debug('MD_FOR_PROV_CP_3 -- &METHOD$CLASS.&METHOD$SNAME='||&METHOD$CLASS||'.'||&METHOD$SNAME||' '||iif(&EnableDebug(&METHOD$CLASS,&METHOD$SNAME)='1','Отладка ON','Отладка Off'), dp5);
+		do_debug('MD_FOR_PROV_CP_3 -- P_MESS='||P_MESS||' oMd3.[ACC_DT]='||oMd3.[ACC_DT].[MAIN_V_ID]||' oMd3.[ACC_KT]='||oMd3.[ACC_KT].[MAIN_V_ID]||' Продукт ID='||oFp.[PROD_FOLD], dp);
+		DbpBusinessOp(1,&EnableDebug(&METHOD$CLASS,&METHOD$SNAME)='1');
+
+		fpRef:=oMD3.[IN_FOLDER]; oFp:=fpRef;
+
+		do_debug('MD_FOR_PROV_CP_3 -- Ищем Депозит по Продукту из папки ID='||oFp.[PROD_FOLD], dp);
+		DepnRef=oDepn:=null;
+		for (select d(d%class:C_CLASS,d%id:C_ID) in ::[DEPN] all where d%id=oFp.[PROD_FOLD])
+		loop
+			if d.C_CLASS in ('DEPOSIT_PRIV','DEPOSIT_ORG') then
+				DepnRef:=d.C_ID; oDepn:=DepnRef;
+				do_debug('MD_FOR_PROV_CP_3 -- Нашли '||oDepn.[ACCOUNT].[MAIN_V_ID]||' '||oDepn.[CLIENT].[NAME]||' Состояние:'||oDepn.[COM_STATUS].[NAME], dp);
+			end if;
+			exit;
+		end loop;
+		if DepnRef.[VID_DOG]=::[VID_DEPOSIT]([CODE]='PSB_DOVOSTR') and DepnRef.[COM_STATUS]=ComStatusToClose then
+			do_debug('MD_FOR_PROV_CP_3 -- Вернем депозиту "До востребования" статус WORK (в т.ч. в кэше), иначе документы будут застревать при проводке', dp);
+			DepnRef.[COM_STATUS]:=ComStatusWork;
+			
+			var Idx	number; --в т.ч. в кэше
+			Idx:=::[DEPN].[LIB_CASH].Is_Cash_Depn(DepnRef%id);
+			do_debug('MD_FOR_PROV_CP_3 -- В кэше индекс депозита Idx='||Idx, dp);
+			if Idx is not null
+			then
+				do_debug('MD_FOR_PROV_CP_3 -- ::[DEPN].[LIB_CASH].CH_DEPN('||Idx||').COM_STATUS='||::[DEPN].[LIB_CASH].CH_DEPN(Idx).COM_STATUS.[NAME], dp);
+				if ::[DEPN].[LIB_CASH].CH_DEPN(Idx).COM_STATUS<>ComStatusWork then
+					::[DEPN].[LIB_CASH].CH_DEPN(Idx).COM_STATUS:=ComStatusWork;
+					do_debug('MD_FOR_PROV_CP_3 -- Меняем на '||::[DEPN].[LIB_CASH].CH_DEPN(Idx).COM_STATUS.[NAME], dp);
+				end if;
+			end if;
+		end if;
+	end if;
+
+	--Башкиров В.Г. 23.01.2023 Пользователь-создатель документа комиссии-пользователь, проведший основной документ
+	if P_MESS='END'	and oMd3.[ACC_DT].[MAIN_V_ID] like '4%' and oMd3.[ACC_KT].[MAIN_V_ID] like '70601%' 
+	then
+		PsbDocUser := nvl(::[FP_TUNE].[LIB].get_bool_value('PSB_DOC_USER', null/*canon_vals*/, '0'/*throw_error*/), false);
+		do_debug('MD_FOR_PROV_CP_3 -- PsbDocUser='||PsbDocUser, dp);
+		if PsbDocUser and oMd3.[IN_FOLDER].[DOCS_IN_FOLD]%size(1)>0 then
+			do_debug('MD_FOR_PROV_CP_3 -- oBusinessOpDocRef.[PROV_USER]='||oBusinessOpDocRef.[PROV_USER].[NAME], dp);
+			UserProvMainDoc := oBusinessOpDocRef.[PROV_USER];
+			if UserProvMainDoc is null then
+				for dif in oMd3.[IN_FOLDER].[DOCS_IN_FOLD] where dif.[DOCUMENT]%class='MAIN_DOCUM'
+				loop
+					md4:=dif.[DOCUMENT];
+					oMd4:=md4;
+					if  oMd4.[ACC_DT]=ACCOUNT_DT
+					and oMd4.[ACC_KT].[MAIN_V_ID] like '3%' and 
+					oMd4.[PROV_USER].[NAME] not like 'Банковский Расчетный Центр%'
+					then
+						UserProvMainDoc:=md4.[PROV_USER];
+						do_debug('MD_FOR_PROV_CP_3 -- Основной документ ID:'||md4%id||' Провел "'||UserProvMainDoc.[NAME]||'"', dp);
+						exit;
+					end if;
+				end loop;
+			end if;
+			if UserProvMainDoc is not null then
+				if oMd3.[ACC_KT].[MAIN_V_ID] like '706%'
+				and oMd3.[DOCUMENT_USER].[NAME] like 'Банковский Расчетный Центр%'
+				then
+					do_debug('MD_FOR_PROV_CP_3 -- У документа комиссии ID:'||md3%id||' меняем Создателя "'||oMd3.[DOCUMENT_USER].[NAME]||'" На Проведшего основной док-т ->"'||UserProvMainDoc.[NAME]||'"', dp);
+					md3.[DOCUMENT_USER]:=UserProvMainDoc;
+				end if;
+			end if;
+		end if;
+	end if;
+	
+	do_debug('MD_FOR_PROV_CP_3 -< "'||ANALYSE_OK||'" - ANALYSE_OK DOCUMENT%state='||DOCUMENT%state, dp);
+	&debug('Стоп :'||to_char(sysdate,'hh24:mm:ss')||' ('||GetTimeInterval(utils.get_time,timeStart)||'сотыхСек.)',dp)
+end;
+end;
+end;

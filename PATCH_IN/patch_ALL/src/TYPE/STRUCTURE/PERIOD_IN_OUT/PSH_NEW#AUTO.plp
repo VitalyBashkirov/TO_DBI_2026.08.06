@@ -1,0 +1,66 @@
+class PERIOD_IN_OUT;
+
+@this(create_on_start:=true)
+@name('[ПСБ] Добавить')
+@tag('COPIED')
+constructor PSH_NEW#AUTO uses EDIT#AUTO is
+PSH_NEW#AUTO (
+	@name('Код размещения (привлечения)')                         P#IN_OUT          in [DIG_6],
+	@name('Код срока размещения (привлечения) средств')           P#RANGE           in [DIG_6],
+	@name('Порядок сортировки')                                   P#SORT_ORDER      in [DIG_6],
+	@name('Короткое наименование срока привлечения (размещения)') P#SHORT_NAME      in [STRING_30],
+	@name('Признак размещения (привлечения)')                     P#PRIZNAK         in [STRING_16],
+	@name('Максимальный срок(количество интервалов)')             P#MAX_PERIOD      in [SHORT5],
+	@name('Единица измерения интервала в периоде')                P#UNIT_PERIOD     in [REF_UNIT_OF_TIME],
+	@name('Минимальный срок(количество интервалов)')              P#MIN_PERIOD      in [SHORT5],
+	@name('Признак дублирования')                                 P#PRIZN_D         in [STRING_1],
+	@name('Единица измерения максимального периода')              P#UNIT_PERIOD_MAX in [REF_UNIT_OF_TIME]
+) return ref [PERIOD_IN_OUT] is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P#IN_OUT := this.[IN_OUT];
+	P#RANGE := this.[RANGE];
+	P#SORT_ORDER := this.[SORT_ORDER];
+	P#SHORT_NAME := this.[SHORT_NAME];
+	P#PRIZNAK := this.[PRIZNAK];
+	P#MAX_PERIOD := this.[MAX_PERIOD];
+	P#UNIT_PERIOD := this.[UNIT_PERIOD];
+end if;
+-- End initialization of parameters and variables
+begin
+if P_MESSAGE = 'DEFAULT' then
+P#IN_OUT:=1;
+P#RANGE:=273;
+P#SORT_ORDER:=1;
+P#SHORT_NAME:='273-365 дней';
+P#PRIZNAK:='ПРИВЛЕЧЕНО';
+P#MIN_PERIOD:=273;
+P#MAX_PERIOD:=365;
+P#UNIT_PERIOD=P#UNIT_PERIOD_MAX:=2052561;
+end if;
+end;
+end;
+
+execute is
+begin
+-- Установка значения реквизита "Код размещения (привлечения)"
+[IN_OUT] := P#IN_OUT;
+-- Установка значения реквизита "Код срока размещения (привлечения) средств"
+[RANGE] := P#RANGE;
+-- Установка значения реквизита "Порядок сортировки"
+[SORT_ORDER] := P#SORT_ORDER;
+-- Установка значения реквизита "Короткое наименование срока привлечения (размещения)"
+[SHORT_NAME] := P#SHORT_NAME;
+-- Установка значения реквизита "Признак размещения (привлечения)"
+[PRIZNAK] := P#PRIZNAK;
+-- Установка значения реквизита "Максимальный срок(количество интервалов)"
+[MAX_PERIOD] := P#MAX_PERIOD;
+-- Установка значения реквизита "Единица измерения интервала в периоде"
+[UNIT_PERIOD] := P#UNIT_PERIOD;
+[UNIT_PERIOD_MAX] := P#UNIT_PERIOD_MAX;
+end;
+end;
+end;

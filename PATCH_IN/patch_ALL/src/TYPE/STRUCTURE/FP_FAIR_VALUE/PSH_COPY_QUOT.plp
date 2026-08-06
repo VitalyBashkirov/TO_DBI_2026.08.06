@@ -1,0 +1,234 @@
+class FP_FAIR_VALUE;
+
+@import_plsql(true)
+@name('[ПСБ] Копировать рыночные цены в ТСС')
+@tag('COPIED')
+static method PSH_COPY_QUOT is
+PSH_COPY_QUOT (
+	@name('Дата')                  P_DATE       in [DATE],
+	@name('Торговая площадка')     P_MARKET     in [MARKET_PLACE_REF],
+	@name('Вид стоимости')         P_TYPE_VALUE in [FP_FAIR_TYPE_REF],
+	@name('Активный рынок')        P_IS_ACT     in [BOOLEAN],
+	@name('Признак наблюдаемости') P_IS_OBSERVE in [BOOLEAN]
+) is
+
+validate is
+begin
+	if p_message = 'DEFAULT' then
+		P_DATE := [SYSTEM].[OP_DATE];
+		begin
+			select x(x) in ::[MARKET_PLACE] where x.[RESERVE]=true and rownum=1 into P_MARKET;
+		exception when NO_DATA_FOUND then
+			null;
+		end;
+		P_TYPE_VALUE := ::[FP_FAIR_TYPE]([CODE] = 'MARKET_VALUE');
+		P_IS_ACT 	 := nvl(P_IS_ACT, true);
+		P_IS_OBSERVE := nvl(P_IS_OBSERVE, true);
+	elsif p_message = 'VALIDATE' then
+		if p_info = 'P_IS_ACT' then
+			if P_IS_ACT then
+				P_IS_OBSERVE := true;
+			end if;		
+		end if;	
+	end if;
+end;
+
+execute is
+/*********************************************************************
+Назначение:
+
+Tshkurihina, последнее изменение 8 Октябрь 2009 г.
+*********************************************************************/
+
+v_req_qout		varchar2(128);
+v_req_qout_obl	varchar2(128);
+v_ns_price		number;
+v_ns_price_obl	number;
+v_value			number;
+v_value_obl		number;
+v_pkd			number;
+v_coupon	ref [COUPON];
+v_class			varchar2(16);
+v_reval_separate boolean;
+v_cur_obl		ref [FT_MONEY];
+v_type_val_obl 	ref [FP_FAIR_TYPE];
+v_source_obl	ref [SVU_SR_MRKT_COST];
+v_parent 		ref [FP_FAIR_VALUE];
+t_FP_FAIR_HIST		[FP_FAIR_HIST]%rowtable;	--Каждое поле - таблица
+v_hist_ref		ref [FP_FAIR_HIST];
+pragma macro(	set_value,				
+				'if [1]<>0 then
+					[2] := ::[FP_FAIR_HIST].[NEW#AUTO].calc_fair_value(	P_DATE,
+																		x.ns,
+																		v_class,
+																		[1],
+																		v_pkd
+																		);
+				end if',
+				substitute
+				);
+v_res boolean;				
+begin
+	if P_DATE is null then
+		pragma error('Не указана дата операции');
+	end if;
+	
+	if P_MARKET is null then
+		pragma error ('Не указана торговая площадка');
+	end if;
+
+	v_res:=::[HOOK].[EMIS_COPY_QUOT](P_DATE,P_MARKET,P_TYPE_VALUE,P_IS_ACT,P_IS_OBSERVE);
+	
+	if v_res=true then
+		::[STOCK].[MSG].umess('Заполнение с использованием точки вызова EMIS_COPY_QUOT');	
+		return;	
+	end if;		
+
+	v_reval_separate := [FP_TUNE].[LIB].get_bool_value('EMIS_REV_SEP_FAIR_V');	-- Переоценка активов и обязательств по разным ТСС
+
+	-- Значение настройки для "активов"
+	v_req_qout := [FP_TUNE].[LIB].get_str_value('EMIS_QUOT_FAIR_V',::[FP_TUNE].[LIB].set_canons('<TYPE_ACT_OBL>', 'ACT'));	
+	if v_req_qout is null then
+		pragma error('Не задано значение настройки с кодом <EMIS_QUOT_FAIR_V>');
+	end if;
+	
+	-- Значение настройки для "обязательств"
+	if v_reval_separate then	-- Переоценка активов и обязательств по разным ТСС
+		v_req_qout_obl := [FP_TUNE].[LIB].get_str_value('EMIS_QUOT_FAIR_V',::[FP_TUNE].[LIB].set_canons('<TYPE_ACT_OBL>', 'OBL'));
+	end if;
+
+	for (	select x (distinct 	p							: ns,
+								p%class						: cl,
+								p.[IDENT]					: ident,
+								x.[VAL_ARR]					: val_arr,
+								nvl(x.[DATE_CHECK],P_DATE-1): date_check,
+								p.[BE_COUPONS]				: is_coup_oblig,
+								quot						: quot,
+								quot.[SOURCE]				: source,
+								quot.[NKD]					: pkd,
+								quot.[CURR]					: cur
+					)
+			in 	 ::[FP_FAIR_VALUE],
+				(::[PAPER] all : p),
+				(P_MARKET.[QUOTATIONS] : quot)
+			where 	nvl(x.[DATE_CHECK],P_DATE-1)<=P_DATE and	-- Если дата последней проверки не указана считаем, что случай аналогичен случаю < P_DATE
+					p%id = x.[NS] and
+					not exists ( select obl('1') in ::[OBLIGATION]
+								 where	obl%id = x.[NS] and
+										obl.[MAT_DATE]<P_DATE
+								) and	-- Исключаем погашенные облигации
+					quot.[NS] = x.[NS] and
+					quot.[DATE] = P_DATE	
+		)
+	loop
+		v_ns_price = v_ns_price_obl := null;
+		-- Если реквизит, указанный в настройке EMIS_QUOT_FAIR_V не найден среди реквизитов котировок, то операция GET_REQ сломается с ошибкой
+		v_ns_price := to_number(x.quot.[GET_REQ](v_req_qout,true));
+		if v_reval_separate then	-- Переоценка активов и обязательств по разным ТСС
+			v_ns_price_obl := to_number(x.quot.[GET_REQ](v_req_qout_obl,true));
+		end if;
+
+		if v_ns_price<>0 or v_ns_price_obl<>0 then
+			v_pkd := null;
+			if nvl(x.is_coup_oblig,false) then
+				if x.pkd is not null then
+					v_pkd	:= x.pkd;
+				else
+					v_pkd	:= ::[COUPON].[LIBS].Recalc_Nkd(	x.ns,
+															 	1,
+															 	P_DATE,
+															 	v_coupon
+															);
+				end if;
+			end if;
+
+			if ::[RUNTIME].[LIB].IS_PARENT('OBLIGATION',x.cl) then
+				v_class := 'OBLIGATION';
+			else
+				v_class := x.cl;
+			end if;
+			
+			v_value = v_value_obl := null;
+			&set_value(v_ns_price, v_value);
+			&set_value(v_ns_price_obl, v_value_obl);
+			
+			if v_reval_separate then
+				v_cur_obl := x.cur;
+				v_type_val_obl := P_TYPE_VALUE;
+				v_source_obl := x.source;
+			else
+				v_cur_obl := null;
+				v_type_val_obl := null;
+				v_source_obl := null;
+			end if;
+			
+			if x.date_check=P_DATE then
+				for z in x.val_arr where z.[DATE_DEF] = P_DATE	-- такая запись должна быть одна!
+				loop
+					-- Операция [Изменить] над типом [ФПЭ Изменение справедливой стоимости]
+					z.[EDIT#AUTO](	P_DATE,	 		-- Дата определения справедливой стоимости
+									P_TYPE_VALUE,	-- Вид стоимости
+									x.source,	 	-- Источник
+									v_ns_price,	 	-- Цена ЦБ
+									x.cur,	 		-- Валюта
+									v_pkd,	 		-- Процентный купонный доход на дату определения ст-ти
+									v_value, 		-- Справедливая стоимость
+									v_value_obl,	-- Справедливая стоимость для обязательств
+									v_ns_price_obl,	-- Цена ЦБ для обязательств
+									v_cur_obl,		-- Валюта для обязательств
+									v_type_val_obl,	-- Вид стоимости для обязательств
+									v_source_obl,	-- Источник цены для обязательств
+									P_IS_ACT,		-- Активный рынок
+									P_IS_OBSERVE	-- Признак наблюдаемости
+								);
+					v_hist_ref := z;			
+				end loop;
+			elsif x.date_check<P_DATE then
+				-- Операция [Добавить] над типом [ФПЭ Изменение справедливой стоимости]
+				v_hist_ref := x.val_arr.[PSH_NEW#AUTO](	P_DATE,	 		-- Дата определения справедливой стоимости -- updated CHANGE_SHORT_NAME PSB_NEW#AUTO->PSH_NEW#AUTO 15/10/25
+													P_TYPE_VALUE,	-- Вид стоимости
+													x.source,	 	-- Источник
+													v_ns_price,	 	-- Цена ЦБ
+													x.cur,	 		-- Валюта
+													v_pkd,	 		-- Процентный купонный доход на дату определения ст-ти
+													v_value, 		-- Справедливая стоимость
+													v_value_obl,	-- Справедливая стоимость для обязательств
+													v_ns_price_obl,	-- Цена ЦБ для обязательств
+													v_cur_obl,		-- Валюта для обязательств
+													v_type_val_obl,	-- Вид стоимости для обязательств
+													v_source_obl,	-- Источник цены для обязательств
+													P_IS_ACT,		-- Активный рынок
+													P_IS_OBSERVE	-- Признак наблюдаемости
+												);
+			end if;
+			--Изменить реквизиты хозяина
+			v_parent:=v_hist_ref%parent;
+			select y(y%ID,
+					y%class,
+					y%collection,
+					null,--state_id
+					y%rowtype('nosys')
+					)
+				in v_hist_ref%collection,(select z(max(z.[DATE_DEF]):DATE_DEF) in v_hist_ref%collection)
+				where y.[DATE_DEF]=z.DATE_DEF
+				into t_FP_FAIR_HIST%rowtype;
+			
+			update y(	y.[CUR] 			= t_FP_FAIR_HIST.[CUR](1),
+						y.[TYPE_VALUE] 		= t_FP_FAIR_HIST.[TYPE_VALUE](1),
+						y.[VALUE]			= t_FP_FAIR_HIST.[VALUE](1),
+						y.[CUR_OBL]			= t_FP_FAIR_HIST.[CUR_OBL](1),
+						y.[TYPE_VALUE_OBL]	= t_FP_FAIR_HIST.[TYPE_VALUE_OBL](1),
+						y.[VALUE_OBL]		= t_FP_FAIR_HIST.[VALUE_OBL](1),
+						y.[DATE_CHECK]		= t_FP_FAIR_HIST.[DATE_DEF](1),
+						y.[IS_ACT]			= t_FP_FAIR_HIST.[IS_ACT](1),
+						y.[IS_OBSERVE]		= t_FP_FAIR_HIST.[IS_OBSERVE](1)
+					)
+				in ::[FP_FAIR_VALUE]
+				where y=v_parent;
+
+		end if;
+	end loop;
+
+end;
+end;
+end;

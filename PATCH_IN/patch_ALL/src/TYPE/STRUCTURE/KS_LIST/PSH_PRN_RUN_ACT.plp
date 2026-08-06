@@ -1,0 +1,595 @@
+class KS_LIST;
+
+@this(create_on_start:=true)
+@name('[ПСБ] Печать акта приема передачи')
+@tag('COPIED')
+@speciality('print')
+method PSH_PRN_RUN_ACT is
+dp number:=1;	--управление debug_pipe
+fmt string(10):='dd/mm/yyyy';
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+rur_cash	[STRING_32000];		-- наличные рубли
+val_cash	[STRING_32000];		-- наличная валюта
+doc_cash	[STRING_32000];		-- платежные документы
+blank_cash	[STRING_32000];		-- бланки
+blank_cash2	[STRING_32000];		-- бланки 2
+blank_cash3	[STRING_32000];		-- бланки 3
+sprav_cash	[STRING_32000];		-- бланки справок № 04060007
+V_VAL_NOM_ARR [VAL_NOMINAL_ARR];		--Массив "Кассы. Валюта + Номиналы"
+
+
+/** /
+-------------------------------------------------------------------------------------------------------------------
+|  Номера балансовых |            Наименование ценностей          |   По данным   |  Фактическое | Расхождение с  |
+|   и внебалансовых  |                                            |бухгалтерского |   наличие    | данными книг   |
+|        счетов      |                                            |учета и книгам |              |учета ценностей |
+|                    |                                            |учета ценностей|              |(лицевых счетов)|
+|                    |                                            |               |              |  +излишек      |
+|                    |                                            |               |              |  -недостача    |
+|--------------------+--------------------------------------------+---------------+--------------+----------------|
+ 1---+---10----+---20 1---+---10----+---20----+---30----+---40---- 1---+---10----+ 1---+---10---- 1---+---10----+-
+/**/
+ln1 number:=20;
+ln2 number:=44;
+ln3 number:=15;
+ln4 number:=14;
+ln5 number:=16;
+
+-- Обнуляются переменные с ценностями
+procedure clear_blank_cash is
+begin
+	blank_cash = blank_cash2 = blank_cash3 := null;
+end;
+
+procedure add2str(inString in out string(32000), inField string(32000)) is
+begin
+	if length(inField)>ln2 then
+	inString := inString||NL$
+				||'|'||rpad(' ',ln1)
+				||'|'||rpad(substr(inField,ln2+1),ln2)
+				||'|'||lpad(' ',ln3)
+				||'|'||lpad(' ',ln4)
+				||'|'||lpad(' ',ln5)
+				||'|';
+	end if;
+end;
+
+function lpadDiff(Amnt [SUMMA], tmpSum [SUMMA], lnN number, add2zero boolean default true) return string(512) is
+ret_str string(512);
+begin
+	if Amnt is null or tmpSum is null then
+		ret_str:=' '; 
+	else
+		if Amnt=tmpSum    then 
+			ret_str:=' '; 
+		elsif Amnt<tmpSum then
+			ret_str:=Amnt-tmpSum;
+			if instr(ret_str,'.')=0 and add2zero then
+				ret_str:=ret_str||'.00';
+			end if;
+		elsif Amnt>tmpSum then
+			ret_str:=Amnt-tmpSum;
+			ret_str:='+'||ret_str;
+			if instr(ret_str,'.')=0 and add2zero then
+				ret_str:=ret_str||'.00';
+			end if;
+		end if;
+	end if;
+	return lpad(ret_str,lnN);
+end;
+
+function lpadSum(strSum string(32), lnN number, add2zero boolean default true, suf string(10) default null) return string(512) is
+ret_str string(512);
+begin
+	if strSum is null then strSum:=' '; 
+	else
+		if instr(strSum,'.')=0 and add2zero then
+			strSum:=strSum||'.00';
+		end if;
+		if length(suf)>0 then
+			strSum:=strSum||suf;
+		end if;
+	end if;
+	
+	ret_str:=strSum;
+	return lpad(ret_str,lnN);
+end;
+
+-- Прибавляет строку по одной ценности к общему списку, затем разбивает по трем переменным.
+procedure add_blank_cash(p_str [STRING_32000]) is
+tmp [CLOB];
+begin
+	if p_str is null then
+		return;
+	end if;
+	-- Сложим все строки
+	tmp := blank_cash || blank_cash2 || blank_cash3 || p_str;
+	debug_pipe('blank_cash = '||blank_cash, 0);
+	debug_pipe('blank_cash2 = '||blank_cash2, 0);
+	debug_pipe('blank_cash3 = '||blank_cash3, 0);
+	debug_pipe('p_str = '||p_str, 0);
+	-- и снова разобьем
+	blank_cash := substr(tmp, 1, 32000);
+	blank_cash2 := substr(tmp, 32000 + 1, 32000);
+	blank_cash3 := substr(tmp, 32000 + 32000 + 1); -- Строки размером 3*32000 должно хватить, иначе будет ошибка.
+end;
+PSH_PRN_RUN_ACT (
+	@name('Текст')                      TEXT             in [MEMO],
+	@name('Наименование банка')         P#BANK_NAME      in [STRING_500],
+	@name('Дата акта')                  P#ACT_DATE       in [STRING_20],
+	@name('Реквизиты обменного пункта') P#OP_PROPS       in [STRING_32000],
+	@name('Первый кассир')              P#FIRST_CASHIER  in [NAME],
+	@name('Второй кассир')              P#SECOND_CASHIER in [NAME],
+	@name('Наличные рубли')             P#CASH_RUR       in [STRING_32000],
+	@name('Наличная валюта')            P#CASH_VAL       in [STRING_32000],
+	@name('Платежные документы')        P#CASH_DOC       in [STRING_32000],
+	@name('Бланки документов')          P#CASH_BLANK     in [STRING_32000],
+	@name('Бланки справок')             P#CASH_SPRAV     in [STRING_32000],
+	@name('Наименование кассы')         P_KASSA_NAME     in [STRING_140]   default null,
+	@name('Контролер1')                 P_CONTROLER1     in [NAME]         default null,
+	@name('Контролер2')                 P_CONTROLER2     in [NAME]         default null,
+	@name('Передали')                   P_GIVERS         in [STRING_500]   default null,
+	@name('Приняли')                    P_GETTERS        in [STRING_500]   default null,
+	@name('Передали подпись')           P_GIVERS_SIGN    in [STRING_1000]  default null,
+	@name('Приняли подпись')            P_GETTERS_SIGN   in [STRING_500]   default null,
+	@name('Бланки документов2')         P_CASH_BLANK2    in [STRING_32000],
+	@name('Бланки документов3')         P_CASH_BLANK3    in [STRING_32000],
+	@name('Уполномоченное лицо')        P_UL             in [USER_REF]     default null,
+	@name('Все строки таблицы')         P_ALL            in [STRING_32000] default null,
+	@name('Подразделение')              P_DEPART         in [DEPART_REF],
+	@name('Касса')                      P_KASSA          in [S_NOTRADE]
+) is
+
+validate is
+opRich ref [RICHES_BANK];
+oper_coins ref [RICHES_BANK];
+strLine string(100):='_______________________';
+strLine2 string(100):='   /'||strLine||'/';
+strLine3 string(512):='|                    |                                            |               |              |                |'||NL$;
+fiolength number:=33;
+P#LIST [LIST_ADVANCE_ARR]; --Список валют. Массив "Кассы. Подкрепление списком"
+P#NUM_PK [S_NOTRADE]; --Номер пункта. Ссылка на "Кассы"
+P_KASSIR_OUT Ref [USER];
+P#WHO_PASS [CASHIER_REF]; --Передал. Ссылка на "Кассы. Кассиры"
+V_SIGN_COINS boolean; --Признак внедрения "Монет". Логика
+actDate [DATE];
+v_coins_exists	integer;
+sPsbActivNotrade string(1024):=::[FP_TUNE].[LIB].get_str_value('PSB_ACTIV_NOTRADE', null, '0');
+
+money			Ref [FT_MONEY];
+cash_doc		Ref [CHECK_OTHER];
+cash_blank		Ref [RICHES];
+rch_len cash_blank.[LENGTH]%type;
+
+tmpBlankCash	[STRING_32000];		-- бланки
+strSum string(32);
+tmpSum [SUMMA];
+
+firstAcc ref [AC_FIN];
+lastAcc ref [AC_FIN];
+footer ref [CERT_RICHES]; --последняя записи по сертификатам ценностей
+addAmount [SUMMA];
+tmpStrSN string(32000);
+v_first_position varchar2(1000);
+v_second_position varchar2(1000);
+v_controller_one  varchar2(1000); 
+v_controller_two  varchar2(1000);
+flg				  boolean:=true;
+ctn               number:=1;  	
+ctx               number:=1;
+
+type TBookRec is record (
+	
+	amount    number,
+	book_acc  varchar2(20),
+	book_name varchar2(100),  
+	book_acc_short varchar2(5),	
+	book_count     varchar2(50),
+	book_valuta    varchar2(10),
+	checked        boolean
+);
+type BookRecord is table of TBookRec index by string(128);
+tBookRecord BookRecord;
+
+
+
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		rur_cash	:=null; -- наличные рубли
+		val_cash	:=null; -- наличная валюта
+		doc_cash	:=null; -- платежные документы
+		blank_cash	:=null; -- бланки
+		blank_cash2	:=null; -- бланки 2
+		blank_cash3	:=null; -- бланки 3
+		sprav_cash	:=null; -- бланки справок № 04060007
+		
+		firstAcc	:=null;
+		lastAcc		:=null;
+		footer		:=null; --последняя записи по сертификатам ценностей
+		addAmount	:=null;
+
+		opRich    :=KS_LIST.RUN_ACT_EXT.oper_rich;
+		oper_coins:=KS_LIST.RUN_ACT_EXT.oper_coins;
+		P#NUM_PK:=KS_LIST.RUN_ACT.number_pk;
+		
+		debug_pipe(       '>---',dp);
+		debug_pipe(       '>от кого                   KS_LIST.RUN_ACT.who_pass   ='|| KS_LIST.RUN_ACT.who_pass.[KASSIR].[NAME],dp);
+		debug_pipe(       '>кому                      KS_LIST.RUN_ACT.who_get    ='|| KS_LIST.RUN_ACT.who_get.[KASSIR].[NAME],dp);
+		debug_pipe(       '>Контролллёр 1             KS_LIST.RUN_ACT.controler1 ='|| KS_LIST.RUN_ACT.controler1.[KASSIR].[NAME],dp);
+		debug_pipe(       '>Контролллёр 2             KS_LIST.RUN_ACT.controler2 ='|| KS_LIST.RUN_ACT.controler2.[KASSIR].[NAME],dp);
+		debug_pipe(       '>обменный пункт            KS_LIST.RUN_ACT.number_pk  ='|| KS_LIST.RUN_ACT.number_pk.[NAME_PK],dp);
+		debug_pipe(substr('>наличные рубли            KS_LIST.RUN_ACT.rur_cash   ='|| KS_LIST.RUN_ACT.rur_cash   ,1,2000),dp);
+		debug_pipe(substr('>наличная валюта           KS_LIST.RUN_ACT.val_cash   ='|| KS_LIST.RUN_ACT.val_cash   ,1,2000),dp);
+		debug_pipe(substr('>платежные документы       KS_LIST.RUN_ACT.doc_cash   ='|| KS_LIST.RUN_ACT.doc_cash   ,1,2000),dp);
+		debug_pipe(substr('>бланки                    KS_LIST.RUN_ACT.blank_cash ='|| KS_LIST.RUN_ACT.blank_cash ,1,2000),dp);
+		debug_pipe(substr('>бланки 2                  KS_LIST.RUN_ACT.blank_cash2='|| KS_LIST.RUN_ACT.blank_cash2,1,2000),dp);
+		debug_pipe(substr('>бланки 3                  KS_LIST.RUN_ACT.blank_cash3='|| KS_LIST.RUN_ACT.blank_cash3,1,2000),dp);
+		debug_pipe(substr('>бланки справок № 04060007 KS_LIST.RUN_ACT.sprav_cash ='|| KS_LIST.RUN_ACT.sprav_cash,1,2000),dp);
+		--debug_pipe(       '>Уполномоченное лицо       KS_LIST.RUN_ACT.user_ul    ='|| KS_LIST.RUN_ACT.user_ul.[NAME],dp);
+		debug_pipe(       '>Операция с ценностями KS_LIST.RUN_ACT_EXT.oper_rich  ='|| opRich,dp);
+		debug_pipe(       '>Оп. по передаче монет KS_LIST.RUN_ACT_EXT.oper_coins ='|| KS_LIST.RUN_ACT_EXT.oper_coins,dp);
+
+		--P_UL := coalesce([KS_LIST]::[RUN_ACT].user_ul,::[DEFVALS].[SLIB].RestoreRef(stdlib.userid, &METHOD$CLASS, 'RUN_ACT', 'P_UL'),::[USER]([USERNAME]='ANDREEVA_NM'));
+		
+		P#BANK_NAME := ::[NOTRADE].[LIB_RPT].GET_BANK_NAME_3353U(::[KS_LIST].[RUN_ACT].number_pk.[DEPART]);
+		--debug_pipe('P#BANK_NAME1 = '||P#BANK_NAME, 0);
+		--P#BANK_NAME := P#BANK_NAME||LF$||[KS_LIST]::[RUN_ACT].number_pk.[NAME_PK]; --
+		--debug_pipe('P#BANK_NAME2 = '||P#BANK_NAME, 0);
+
+		if [KS_LIST]::[RUN_ACT].number_pk.[ADDRESS] is not null then
+			--P#OP_PROPS := substr(P#OP_PROPS || 'По адресу ' || [KS_LIST]::[RUN_ACT].number_pk.[ADDRESS], 1, 1000);
+			P#OP_PROPS := replace(P#OP_PROPS,chr(10)||chr(13),' ');
+			P#OP_PROPS := substr(P#OP_PROPS || [KS_LIST]::[RUN_ACT].number_pk.[ADDRESS], 1, 1000);
+		end if;
+
+		if opRich is not null then
+			actDate := opRich.[DATE_OP];
+			P#ACT_DATE := substr('"' || To_Char(opRich.[DATE_OP], 'DD') || '"' || To_Char(opRich.[DATE_OP], ' Month YYYY') || 'г.',1,P#ACT_DATE%size);
+		else
+			actDate := ::[SYSTEM].[OP_DATE];
+			P#ACT_DATE := '"' || To_Char(::[SYSTEM].[OP_DATE], 'DD') || '"' || To_Char(::[SYSTEM].[OP_DATE], ' Month YYYY') || 'г.';
+		end if;
+		
+		if [KS_LIST]::[RUN_ACT].number_pk.[REG_NUMBER] is not null then --
+			P#OP_PROPS := substr(P#OP_PROPS || ', рег.номер '||[KS_LIST]::[RUN_ACT].number_pk.[REG_NUMBER], 1 ,1000);
+		end if;
+		
+		P#FIRST_CASHIER := [KS_LIST]::[RUN_ACT].who_pass.[KASSIR].[NAME];
+		v_first_position:= [KS_LIST]::[RUN_ACT].who_pass.[KASSIR].[CASTA].[VALUE];
+		v_second_position:= [KS_LIST]::[RUN_ACT].who_get.[KASSIR].[CASTA].[VALUE];
+		P#SECOND_CASHIER := RTrim([KS_LIST]::[RUN_ACT].who_get.[KASSIR].[NAME]);
+		P_CONTROLER1 := [KS_LIST]::[RUN_ACT].controler1.[KASSIR].[NAME];
+		P_CONTROLER2 := [KS_LIST]::[RUN_ACT].controler2.[KASSIR].[NAME];
+		v_controller_one:=[KS_LIST]::[RUN_ACT].controler1.[KASSIR].[CASTA].[VALUE];
+		v_controller_two:=[KS_LIST]::[RUN_ACT].controler2.[KASSIR].[CASTA].[VALUE];
+		
+		--Первый кассир(P#FIRST_CASHIER)
+		--Второй кассир(P#SECOND_CASHIER)
+		--Контролер1(P_CONTROLER1)
+		--Контролер2(P_CONTROLER2)
+		--v_first_position:=P#FIRST_CASHIER
+		
+		P_GIVERS :=substr('Сдал (кассовый работник '||v_first_position||NL$||iif(P#FIRST_CASHIER is null, strLine,rpad(P#FIRST_CASHIER,length(P#FIRST_CASHIER)))||', '|| to_char(::[SYSTEM].[OP_DATE], 'dd.mm.yyyy') ||')',1,P_GIVERS%size)||NL$||lpad(strLine2, 91);	 	    
+	    P_GETTERS :=substr('Принял (кассовый работник '||v_second_position||NL$||iif(P#SECOND_CASHIER is null,strLine,rpad(P#SECOND_CASHIER,length(P#SECOND_CASHIER)))||', '|| to_char(::[SYSTEM].[OP_DATE], 'dd.mm.yyyy') ||')',1,P_GETTERS%size)||NL$||lpad(strLine2, 91);
+		P_GIVERS_SIGN  :=substr('Сдал (операционный работник '||v_controller_one||NL$||iif(P_CONTROLER1 is null,    strLine,rpad(P_CONTROLER1,length(P_CONTROLER1)))||', '|| to_char(::[SYSTEM].[OP_DATE], 'dd.mm.yyyy') ||')',1,P_GIVERS_SIGN%size)||NL$||lpad(strLine2, 91);
+		P_GETTERS_SIGN :=substr('Принял (операционный работник '||v_controller_one||NL$||iif(P_CONTROLER2 is null,    strLine,rpad(P_CONTROLER2,length(P_CONTROLER2)))||', '|| to_char(::[SYSTEM].[OP_DATE], 'dd.mm.yyyy') ||')',1,P_GETTERS_SIGN%size)||NL$||lpad(strLine2, 91);
+		
+		
+		if P_UL is not null then
+			P_GETTERS_SIGN := substr(P_GETTERS_SIGN||NL$||NL$||NL$,1,P_GETTERS_SIGN%size);
+			P_GETTERS_SIGN := substr(P_GETTERS_SIGN||'Подпись уполномоченного лица  '||iif(P_UL.[NAME] is null,strLine,rpad(P_UL.[NAME],fiolength))||strLine2,1,P_GETTERS_SIGN%size);
+		end if;
+
+		debug_pipe('opRich ID:'||opRich||' ('||opRich.[LIST_RICHES]%size(0)||')',dp);
+		if opRich is not null then
+
+			debug_pipe('-= Операции с ценностями №'||opRich.[NUM_DOG]||' opRich.[LIST_RICHES]%size(0)='||opRich.[LIST_RICHES]%size(0),dp);
+			for amount in opRich.[LIST_RICHES]
+			order by substr(amount.[ACCOUNT].[MAIN_V_ID],1,8)||substr(amount.[ACCOUNT].[MAIN_V_ID],10), amount.[SERIES]||amount.[NUM_FROM]
+			loop	debug_pipe('amount.[RICHES]='||amount.[RICHES].[NAME]||' amount.[AMOUNT]='||amount.[AMOUNT],dp);
+				if amount.[AMOUNT] > 0 then			debug_pipe('amount.[CASH]='||amount.[CASH].[CUR_SHORT],dp);
+					if amount.[CASH] is not Null then
+						money := amount.[CASH];		debug_pipe('money='||money.[CUR_SHORT],dp);
+						
+						-- 1. Наличные рубли:
+						if money = ::[SYSTEM].[VARIABLES].NatCur then
+							if rur_cash is null then rur_cash:=NL$; end if;
+							tmpSum:=f.a('И'||amount.[ACCOUNT],trunc(actDate)+1); strSum:=abs(tmpSum);
+							rur_cash := NL$
+										||'|'||rpad(amount.[ACCOUNT].[MAIN_V_ID],ln1)
+										||'|'||rpad(money.[NAME],ln2)
+										||'|'||lpadSum(strSum,ln3,true)
+										||'|'||lpadSum(amount.[AMOUNT],ln4,true)
+										||'|'||lpadDiff(amount.[AMOUNT],abs(tmpSum),ln5,true)
+										||'|';
+							add2str(rur_cash,money.[NAME]);
+						
+						-- 2. Наличная иностранная валюта:
+						else
+							tmpSum:=f.a('И'||amount.[ACCOUNT],trunc(actDate)+1); strSum:=abs(tmpSum);
+							val_cash := val_cash||NL$
+										||'|'||rpad(amount.[ACCOUNT].[MAIN_V_ID],ln1)
+										||'|'||rpad(money.[NAME],ln2)
+										||'|'||lpadSum(strSum,ln3,true,iif(amount.[ACCOUNT].[MAIN_V_ID] like '20302%',' гр.',''))
+										||'|'||lpadSum(amount.[AMOUNT],ln4,true,iif(amount.[ACCOUNT].[MAIN_V_ID] like '20302%',' гр.',''))
+										||'|'||lpadDiff(amount.[AMOUNT],abs(tmpSum),ln5,true)
+										||'|';
+							add2str(val_cash,money.[NAME]);
+						end if;
+
+					-- 3. Платежные документы в иностранной валюте:
+					elsif amount.[RICHES]%class = 'CHECK_OTHER' then
+						--cash_doc := amount.[RICHES];
+						debug_pipe('cash_doc='||amount.[RICHES].[NAME],dp);
+						tmpSum:=f.a('И'||amount.[ACCOUNT],trunc(actDate)+1); strSum:=abs(tmpSum);
+						cash_doc := cash_doc||NL$
+									||'|'||rpad(amount.[ACCOUNT].[MAIN_V_ID],ln1)
+									||'|'||rpad(cash_doc.[NAME],ln2)
+									||'|'||lpadSum(strSum,ln3)
+									||'|'||lpadSum(amount.[AMOUNT],ln4,true)
+									||'|'||lpadDiff(amount.[AMOUNT],abs(tmpSum),ln5,true)
+									||'|';
+						add2str(cash_doc,cash_doc.[NAME]);
+						
+					-- 5. Бланки строгой отчетности:
+					elsif amount.[RICHES]%class = 'RICHES' then
+						cash_blank := amount.[RICHES];	debug_pipe('cash_blank='||cash_blank.[NAME],dp);
+						
+						--Ищем последнюю записи по сертификатам ценностей для бланка
+						if footer is not null and (firstAcc is null or firstAcc<>amount.[ACCOUNT]) then --последняя записи по сертификатам ценностей для бланка
+							footer:=null;
+							firstAcc:=null;
+							addAmount:=null;
+						end if;
+
+						if footer is null then --последняя записи по сертификатам ценностей для бланка
+							footer:=amount;
+							firstAcc:=amount.[ACCOUNT];
+							addAmount:=null;
+
+							for amount2 in opRich.[LIST_RICHES]
+							where amount2.[ACCOUNT]=firstAcc
+							order by substr(amount2.[ACCOUNT].[MAIN_V_ID],1,8)||substr(amount2.[ACCOUNT].[MAIN_V_ID],10), amount2.[SERIES]||amount2.[NUM_FROM]
+							loop
+								footer:=amount2;
+								addAmount:=nvl(addAmount,0)+amount2.[AMOUNT];
+
+								
+							end loop;
+							--addAmount:=nvl(addAmount,0)+1;
+							debug_pipe('Последняя запись для '||firstAcc.[MAIN_V_ID]||' Серия: ' || footer.[SERIES]|| ' № ' ||footer.[NUM_FROM]||' '||footer%class||'.'||footer%id||' addAmount='||addAmount,dp);
+						end if;
+						
+						--Бланки строгой отчетности
+						if cash_blank.[KIND_RICHES] = ::[KIND_RICHES]([CODE] = 'BLANK_STRICT') then
+						
+							rch_len := nvl(cash_blank.[LENGTH], 7);
+							if amount.[NUM_FROM] = amount.[NUM_TO] then
+								if sprav_cash is null then sprav_cash:=NL$; end if;
+								tmpSum:=f.a('И'||amount.[ACCOUNT],trunc(actDate)+1); strSum:=abs(tmpSum);
+								tmpStrSN:='Серия: ' || amount.[SERIES] || ' № ' ||lpad(amount.[NUM_FROM], rch_len, '0');
+								sprav_cash := sprav_cash||NL$
+											||'|'||rpad(amount.[ACCOUNT].[MAIN_V_ID],ln1)
+											||'|'||rpad(tmpStrSN,ln2)
+											||'|'||lpadSum(iif(lastAcc=amount.[ACCOUNT],null,strSum),ln3,false,'-00')
+											||'|'||lpadSum(amount.[AMOUNT],ln4,false,'-00')
+											||'|'||lpadDiff(iif(footer<>amount,null,addAmount),abs(tmpSum),ln5,false)
+											||'|';
+								add2str(sprav_cash,tmpStrSN);
+								lastAcc:=amount.[ACCOUNT];
+							else
+	---------------------------------------------------------------	
+			if flg then		
+					flg:=false;
+			for amount in opRich.[LIST_RICHES]
+			order by substr(amount.[ACCOUNT].[MAIN_V_ID],1,8)||substr(amount.[ACCOUNT].[MAIN_V_ID],10), amount.[SERIES]||amount.[NUM_FROM]
+			loop
+				if cash_blank.[KIND_RICHES] = ::[KIND_RICHES]([CODE] = 'BLANK_STRICT') then
+				    if amount.[NUM_FROM] != amount.[NUM_TO] then
+				    	        tBookRecord(ctn).amount:=amount;
+		                        tBookRecord(ctn).book_acc:=amount.[ACCOUNT].[MAIN_V_ID];
+								tBookRecord(ctn).book_name:=amount.[RICHES].[NAME];
+								tBookRecord(ctn).book_acc_short:=substr(amount.[ACCOUNT].[MAIN_V_ID], 1, 5);
+								tBookRecord(ctn).book_count:=amount.[AMOUNT];
+								tBookRecord(ctn).book_valuta:=amount.[ACCOUNT].[FINTOOL].[CUR_SHORT];
+								tBookRecord(ctn).checked:=true;
+								ctn:=ctn + 1;
+		            end if;
+		        end if;
+			end loop;
+			for i in 1..ctn-1 loop
+				for j in i+1..ctn-1 loop
+					if tBookRecord(i).book_name=tBookRecord(j).book_name and tBookRecord(j).checked
+					 and tBookRecord(i).checked then
+						tBookRecord(j).checked:=false;
+						tBookRecord(i).book_count:=tBookRecord(i).book_count + tBookRecord(j).book_count;
+					end if;	
+				end loop;
+			end loop;
+			end if;
+	-----------------------------------------------------------------------------								
+					if tBookRecord(ctx).checked then 			
+								tmpSum:=f.a('И'||amount.[ACCOUNT],trunc(actDate)+1); strSum:=abs(tmpSum);
+								tmpStrSN:='Серия: ' || amount.[SERIES] || ' № ' ||lpad(amount.[NUM_FROM], rch_len, '0') || '-' || lpad(amount.[NUM_TO], rch_len, '0');
+								sprav_cash := sprav_cash||NL$
+											/* ||'|'||rpad(amount.[ACCOUNT].[MAIN_V_ID],ln1)
+											||'|'||rpad(tmpStrSN,ln2)
+											||'|'||lpadSum(iif(lastAcc=amount.[ACCOUNT],null,strSum),ln3,false,'-00')
+											||'|'||lpadSum(amount.[AMOUNT],ln4,false,'-00')
+											||'|'||lpadDiff(iif(footer<>amount,null,addAmount),abs(tmpSum),ln5,false)
+											||'|';*/
+											||'|'||rpad(tBookRecord(ctx).book_acc,ln1)
+											||'|'||rpad(tBookRecord(ctx).book_name,ln2)
+										--	||'|'||rpad(tBookRecord(ctx).book_acc_short,ln3)
+										--  ||'|'||lpadSum(tBookRecord(ctx).book_count,ln4,false, ' '||tBookRecord(ctx).book_valuta)
+										  --||'|'||lpadSum(tBookRecord(ctx).book_count,ln3,false, ' '||tBookRecord(ctx).book_valuta)
+										  --||'|'||lpadSum(tBookRecord(ctx).book_count,ln4,false, ' '||tBookRecord(ctx).book_valuta)
+										    ||'|'||lpadSum(tBookRecord(ctx).book_count,ln3,false, '-00')
+										    ||'|'||lpadSum(tBookRecord(ctx).book_count,ln4,false, '-00')
+										    ||'|'||lpadDiff(iif(footer<>amount,null,addAmount),abs(tmpSum),ln5,false)
+											||'|';										
+								add2str(sprav_cash,tmpStrSN);
+								lastAcc:=amount.[ACCOUNT];
+					end if;		
+					ctx:=ctx+1;	
+							end if;
+
+						-- 4. Прочие ценности:
+						elsif cash_blank.[KIND_RICHES] in (::[KIND_RICHES]([CODE] = 'BAD_MONEY')		--Поврежденные денежные знаки
+															,::[KIND_RICHES]([CODE] = 'BLANK_EXPERT')	--Принятые на экспертизу
+															,::[KIND_RICHES]([CODE] = 'FALSE_EXPERT')	--Ценности с признаками подделки
+															,::[KIND_RICHES]([CODE] = 'INKAS_BAG')		--Сомнительные дензнаки 
+															)
+						then
+							tmpSum:=f.a('И'||amount.[ACCOUNT],trunc(actDate)+1); strSum:=abs(tmpSum);
+							tmpBlankCash := NL$
+										||'|'||rpad(amount.[ACCOUNT].[MAIN_V_ID],ln1)
+										||'|'||rpad(cash_blank.[NAME],ln2)
+										||'|'||lpadSum(strSum,ln3,false,'-00')
+										||'|'||lpadSum(amount.[AMOUNT],ln4,false,'-00')
+										||'|'||lpadDiff(amount.[AMOUNT],abs(tmpSum),ln5)
+										||'|';
+							add2str(tmpBlankCash,cash_blank.[NAME]);
+							
+							add_blank_cash(tmpBlankCash);
+							debug_pipe(cash_blank.[NAME] || '(1)Количество: ' || amount.[AMOUNT] || '-00' || NL$,dp);
+						else
+							tmpSum:=f.a('И'||amount.[ACCOUNT],trunc(actDate)+1); strSum:=abs(tmpSum);
+							tmpBlankCash := NL$
+										||'|'||rpad(amount.[ACCOUNT].[MAIN_V_ID],ln1)
+										||'|'||rpad(cash_blank.[NAME],ln2)
+										||'|'||lpadSum(strSum,ln3,false,'-00')
+										||'|'||lpadSum(amount.[AMOUNT],ln4,false,'-00')
+										||'|'||lpadDiff(amount.[AMOUNT],abs(tmpSum),ln5)
+										||'|';
+							add2str(tmpBlankCash,cash_blank.[NAME]);
+							
+							add_blank_cash(tmpBlankCash);
+							debug_pipe(cash_blank.[NAME] || '(2)Количество: ' || amount.[AMOUNT] || '-00' || NL$,dp);
+						end if;
+					end if;
+				end if;
+			end loop;
+			
+			for amount in oper_coins.[LIST_RICHES] loop
+				if amount.[AMOUNT] > 0 then
+					if amount.[RICHES]%class = 'RICHES' then
+						cash_blank := amount.[RICHES];
+						tmpSum:=f.a('И'||amount.[ACCOUNT],trunc(actDate)+1); strSum:=abs(tmpSum);
+						tmpBlankCash := NL$
+									||'|'||rpad(amount.[ACCOUNT].[MAIN_V_ID],ln1)
+									||'|'||rpad(cash_blank.[NAME],ln2)
+									||'|'||lpadSum(strSum,ln3,false,'-00')
+									||'|'||lpadSum(amount.[AMOUNT],ln4,false,'-00')
+									||'|'||lpadDiff(amount.[AMOUNT],abs(tmpSum),ln5)
+									||'|';
+						add2str(tmpBlankCash,cash_blank.[NAME]);
+						
+						add_blank_cash(tmpBlankCash);
+						debug_pipe(cash_blank.[NAME] || ' (3)Количество: ' || amount.[AMOUNT] || '-00' || NL$,dp);
+					end if;
+				end if;
+			end loop;
+
+			P#CASH_RUR    := iif(rur_cash   =NL$,null,rur_cash   ||NL$);
+			P#CASH_VAL    := iif(val_cash   =NL$,null,val_cash   ||NL$);
+			P#CASH_DOC    := iif(doc_cash   =NL$,null,doc_cash   ||NL$);
+			P#CASH_BLANK  := iif(blank_cash =NL$,null,blank_cash ||NL$);
+			P_CASH_BLANK2 := iif(blank_cash2=NL$,null,blank_cash2||NL$);
+			P_CASH_BLANK3 := iif(blank_cash3=NL$,null,blank_cash3||NL$);
+			P#CASH_SPRAV  := iif(sprav_cash =NL$,null,sprav_cash ||NL$);
+		  --P_KASSA_NAME := number_pk.[NAME_PK];
+
+			P#CASH_RUR   :=ltrim(ltrim(P#CASH_RUR   ,chr(13)),chr(10));
+			P#CASH_VAL   :=ltrim(ltrim(P#CASH_VAL   ,chr(13)),chr(10));
+			P#CASH_DOC   :=ltrim(ltrim(P#CASH_DOC   ,chr(13)),chr(10));
+			P#CASH_BLANK :=ltrim(ltrim(P#CASH_BLANK ,chr(13)),chr(10));
+			P_CASH_BLANK2:=ltrim(ltrim(P_CASH_BLANK2,chr(13)),chr(10));
+			P_CASH_BLANK3:=ltrim(ltrim(P_CASH_BLANK3,chr(13)),chr(10));
+			P#CASH_SPRAV :=ltrim(ltrim(P#CASH_SPRAV ,chr(13)),chr(10));
+			
+			P_ALL:=substr(rtrim(rtrim(P#CASH_RUR||P#CASH_VAL||P#CASH_DOC||P#CASH_BLANK||P_CASH_BLANK2||P_CASH_BLANK3||P#CASH_SPRAV,chr(10)),chr(13)),1,P_ALL%size);
+		else
+			P#CASH_RUR := [KS_LIST]::[RUN_ACT].rur_cash;
+			P#CASH_VAL := [KS_LIST]::[RUN_ACT].val_cash;
+			P#CASH_DOC := [KS_LIST]::[RUN_ACT].doc_cash;
+			P#CASH_BLANK := [KS_LIST]::[RUN_ACT].blank_cash;
+			P_CASH_BLANK2 := [KS_LIST]::[RUN_ACT].blank_cash2;
+			P_CASH_BLANK3 := [KS_LIST]::[RUN_ACT].blank_cash3;
+			P#CASH_SPRAV := [KS_LIST]::[RUN_ACT].sprav_cash;
+		  --P_KASSA_NAME := [KS_LIST]::[RUN_ACT].number_pk.[NAME_PK];
+		end if;
+		-------касса
+		
+		if P_KASSA is null then
+			P_KASSA:=::[DEFVALS].[SLIB].RestoreRef(stdlib.userid, &METHOD$CLASS, &METHOD$SNAME, 'P_KASSA');
+			if P_KASSA is not null then P_DEPART:=null; end if;
+			debug_pipe('(1)P_KASSA='||P_KASSA.[NUM_PK]||' P_DEPART='||P_DEPART.[CODE],0);
+			
+			if P_KASSA is null then
+				for (
+				select n(n%id : C_ID, n.[PK_CASH] :C_PK_CASH) in ::[NOTRADE]
+				where instr(sPsbActivNotrade,''''||n.[NUM_PK]||'''')>0
+				order by n.[KASS_DEP] desc --Основная касса первой
+						,n.[NUM_PK]
+				) loop
+					for pkc in n.C_PK_CASH
+					where pkc.[KASSIR].[KASSIR]=stdlib.userid
+					loop
+						P_KASSA:=n.C_ID;
+						P_DEPART:=null;
+						debug_pipe('(2)P_KASSA='||P_KASSA.[NUM_PK]||' P_DEPART='||P_DEPART.[CODE],0);
+						exit;
+					end loop;
+					if P_KASSA is not null then
+						exit;
+					end if;
+				end loop;
+			end if;
+			if P_KASSA is null then
+				P_KASSA:=this.[NUM_PK];
+				P_DEPART:=null;
+				debug_pipe('(3)P_KASSA='||P_KASSA.[NUM_PK]||' P_DEPART='||P_DEPART.[CODE],0);
+			end if;
+		end if;
+		P_KASSA_NAME:=P_KASSA.[NAME_PK];
+        ---------------- 
+		-- почистим P#LIST
+		for tmpList in P#LIST loop
+			tmpList.[DELETE#AUTO];
+		end loop;
+
+		debug_pipe(substr('<TEXT            ('||lpad(length(TEXT            ),5)||')='||NL$||TEXT             ,1,2000),dp);
+		debug_pipe(substr('<P#BANK_NAME     ('||lpad(length(P#BANK_NAME     ),5)||')='||NL$||P#BANK_NAME      ,1,2000),dp);
+		debug_pipe(substr('<P#ACT_DATE      ('||lpad(length(P#ACT_DATE      ),5)||')='||NL$||P#ACT_DATE       ,1,2000),dp);
+		debug_pipe(substr('<P#OP_PROPS      ('||lpad(length(P#OP_PROPS      ),5)||')='||NL$||P#OP_PROPS       ,1,2000),dp);
+		debug_pipe(substr('<P#FIRST_CASHIER ('||lpad(length(P#FIRST_CASHIER ),5)||')='||NL$||P#FIRST_CASHIER  ,1,2000),dp);
+		debug_pipe(substr('<P#SECOND_CASHIER('||lpad(length(P#SECOND_CASHIER),5)||')='||NL$||P#SECOND_CASHIER ,1,2000),dp);
+		debug_pipe(substr('<P#CASH_RUR      ('||lpad(length(P#CASH_RUR      ),5)||')='||NL$||P#CASH_RUR       ,1,2000),dp);
+		debug_pipe(substr('<P#CASH_VAL      ('||lpad(length(P#CASH_VAL      ),5)||')='||NL$||P#CASH_VAL       ,1,2000),dp);
+		debug_pipe(substr('<P#CASH_DOC      ('||lpad(length(P#CASH_DOC      ),5)||')='||NL$||P#CASH_DOC       ,1,2000),dp);
+		debug_pipe(substr('<P#CASH_BLANK    ('||lpad(length(P#CASH_BLANK    ),5)||')='||NL$||P#CASH_BLANK     ,1,2000),dp);
+		debug_pipe(substr('<P#CASH_SPRAV    ('||lpad(length(P#CASH_SPRAV    ),5)||')='||NL$||P#CASH_SPRAV     ,1,2000),dp);
+		debug_pipe(substr('<P_KASSA_NAME    ('||lpad(length(P_KASSA_NAME    ),5)||')='||NL$||P_KASSA_NAME     ,1,2000),dp);
+		debug_pipe(substr('<P_CONTROLER1    ('||lpad(length(P_CONTROLER1    ),5)||')='||NL$||P_CONTROLER1     ,1,2000),dp);
+		debug_pipe(substr('<P_CONTROLER2    ('||lpad(length(P_CONTROLER2    ),5)||')='||NL$||P_CONTROLER2     ,1,2000),dp);
+		debug_pipe(substr('<P_GIVERS        ('||lpad(length(P_GIVERS        ),5)||')='||NL$||P_GIVERS         ,1,2000),dp);
+		debug_pipe(substr('<P_GETTERS       ('||lpad(length(P_GETTERS       ),5)||')='||NL$||P_GETTERS        ,1,2000),dp);
+		debug_pipe(substr('<P_GIVERS_SIGN   ('||lpad(length(P_GIVERS_SIGN   ),5)||')='||NL$||P_GIVERS_SIGN    ,1,2000),dp);
+		debug_pipe(substr('<P_GETTERS_SIGN  ('||lpad(length(P_GETTERS_SIGN  ),5)||')='||NL$||P_GETTERS_SIGN   ,1,2000),dp);
+		debug_pipe(substr('<P_CASH_BLANK2   ('||lpad(length(P_CASH_BLANK2   ),5)||')='||NL$||P_CASH_BLANK2    ,1,2000),dp);
+		debug_pipe(substr('<P_CASH_BLANK3   ('||lpad(length(P_CASH_BLANK3   ),5)||')='||NL$||P_CASH_BLANK3    ,1,2000),dp);
+		debug_pipe(substr('<P_UL            ('||lpad(length(P_UL            ),5)||')='||NL$||P_UL             ,1,2000),dp);
+		debug_pipe(substr('<P_ALL           ('||lpad(length(P_ALL           ),5)||')='||NL$||P_ALL            ,1,2000),dp);
+	end if;
+end;
+
+execute is
+begin
+	::[DEFVALS].[SLIB].SaveRef(stdlib.userid, &METHOD$CLASS, 'RUN_ACT', 'P_UL', P_UL, 'USER');
+end;
+end;
+end;

@@ -1,0 +1,48 @@
+class CL_ANK_TEMPLATES;
+
+@name('[ПСБ] Добавить доп. свойства анкеты')
+@tag('COPIED')
+constructor PSH_NEW_AUTO_EXT is
+PSH_NEW_AUTO_EXT (
+	@name('Код')                P_CODE            in [STRING_64],
+	@name('Значение')           P_VALUE           in [STRING_2000],
+	@name('Свойства договоров') P_ADDITIONAL_PROP in [PROPERTY_GRP_REF]
+) return ref [CL_ANK_TEMPLATES] is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_CODE := this.[CODE];
+	P_VALUE := this.[VALUE];
+	P_ADDITIONAL_PROP := this.[ADDITIONAL_PROP];
+end if;
+-- End initialization of parameters and variables
+begin
+	if p_message = 'VALIDATE' then
+
+		if p_info = 'P_ADDITIONAL_PROP' then
+			P_CODE := P_ADDITIONAL_PROP.[CODE];
+		end if;
+		
+	end if;
+end;
+end;
+
+execute is
+begin	
+	if trim(P_CODE) is null then
+		pragma error('Не задан код');
+	end if;
+	if trim(P_VALUE) is null then
+		pragma error('Не задано значение');
+	end if;
+	-- Установка значения реквизита "Код"
+	[CODE] 	:= P_CODE;
+	-- Установка значения реквизита "Значение"
+	[VALUE] := P_VALUE;
+	-- Установка значения ссылки на "Группу свойств договоров"
+	[ADDITIONAL_PROP] := P_ADDITIONAL_PROP;
+end;
+end;
+end;

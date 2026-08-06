@@ -1,0 +1,24 @@
+class HOOK;
+
+@name('[ПСБ] Электронный обмен с таможенными органами. Получение списка рассылки и текста запроса')
+@tag('COPIED')
+static method PSB_CUST_GET_DLV is
+
+pragma include (::[APPAUX_CALLPOINT].[COMPILE_LIB]);
+&setcallpoint('PSB_CUST_GET_DLV', '[ПСБ] Электронный обмен с ФТС. Получение списка рассылки и текста запроса', 1)
+PSB_CUST_GET_DLV (
+	@name('Документ таможенного органа') P_DOC           in              [PSH_CUST_DIN_REF],
+	@name('Тип документа')               P_DOC_TYPE      in              [PSH_CUST_DOC_REF],
+	@name('Текст документа')             P_DOC_DATA      in              [CLOB],
+	@name('Список рассылки')             P_DELIVERY_LIST in out table of [TAX_IC_TEXT_LIST],
+	@name('Список ошибок')               P_ERROR_LIST    in out table of [TAX_ERROR_EXEC],
+	@name('Дополнительные параметры')    P_ADDS          in              [STRING_32000]     default null
+) is
+
+execute is
+begin
+	null;
+	&call_meth
+end;
+end;
+end;

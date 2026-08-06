@@ -1,0 +1,1045 @@
+class F_405_DATA;
+
+@generate_ansi_joins(true)
+@import_plsql(true)
+@name('Обработка реестра сделок с ЭЦБ (7047-У)')
+library CLC_SDELKA_006 is
+pragma include(::[REPS_DEBUG].[LIB]);
+pragma include(::[REPS_DATA].[LIB_FIX]);
+pragma include(::[REPS_DATA].[LIB_VIEW]);
+
+pragma macro(lc,	'::[REPS_DATA].[LIB_CLIENT]');
+pragma macro(rcl,	'::[REPS_CLIENT].[LIB]');
+pragma macro(lib,	'::[F_405_DATA].[LIB_FUNC_005]');
+pragma macro(slib,	'::[F_405_DATA].[SLIB]');
+pragma macro(prx,	'::[REPS_F_405_INT].[PRX_STOCK]');
+
+-- Таблица клиентов с кодом страны
+type map_CountryCode is table of varchar2(3) index by varchar2(50);
+
+lvCorever const varchar2(10) := '11:';
+
+/**
+ * Получение ядра конфигурации операции
+ * 
+ * @return:	Строка с версией ядра конфигурации операции
+ */
+public function GetCoreVer
+	return varchar2(10)
+is
+begin
+	return lvCorever;
+end;
+
+-- Типы сделок
+lcvBuy				const	::[CONTRACT_TYPE].[IDENT]%type := 'BUY';				-- Покупка
+lcvSell				const	::[CONTRACT_TYPE].[IDENT]%type := 'SELL';				-- Продажа
+lcvAuction			const	::[CONTRACT_TYPE].[IDENT]%type := 'AUCTION';			-- Аукционная покупка
+lcvRepoBuySell		const	::[CONTRACT_TYPE].[IDENT]%type := 'REPO_BUY_SELL';		-- Покупка с обязательством обратной продажи
+lcvRepoSellBuy		const	::[CONTRACT_TYPE].[IDENT]%type := 'REPO_SELL_BUY';		-- Продажа с обязательством обратного выкупа
+
+-- Виды сделок
+lcvDilDeal			const	::[KIND_DEAL].[CODE]%type := 'DIL_DEAL';				-- Собственная сделлка
+lcvBrokDeal			const	::[KIND_DEAL].[CODE]%type := 'BROK_DEAL';				-- Брокерская сделка
+
+-- Статусы клиента по договору
+lcvClientStatusDU			const	::[SVU_CLIENT_STAT].[CODE]%type := 'DU';			-- Статус клиента: Доверительный управляющий
+lcvClientStatusBrok			const	::[SVU_CLIENT_STAT].[CODE]%type := 'BROK';			-- Статус клиента: Брокер
+lcvClientStatusBrokCl		const	::[SVU_CLIENT_STAT].[CODE]%type := 'BROK_CLIENT';	-- Статус клиента: Клиент брокера
+
+lrecParam					&lib.rec_Param;							-- Параметры реализации
+lrTun_1_1					ref [REPS_TUNING];						-- Подраздел 1.1
+lrTun_2_1					ref [REPS_TUNING];						-- Подраздел 2.1
+lrTun_2_2					ref [REPS_TUNING];						-- Подраздел 2.2
+lvFTtypes					varchar2(32767);						-- Фин. инструменты
+lvSharePref					varchar2(32767);						-- Виды акций
+lvMarker					varchar2(32767);						-- Маркер сессии
+
+lmComissTypes				::[REPS_DATA].[LIB_TYPE].map_str; 	-- Типы комиссий в соответствии с торговыми площадками
+laProtocol					&lib.arr_Protocol;						-- Протокольная таблица
+lmCountryCode				map_CountryCode;						-- Таблица с кодом страны
+
+/**
+ * Инициализация настроек
+ *
+ */
+procedure InitTuning
+is
+begin
+	lrTun_1_1 = lrTun_2_1 = lrTun_2_2 := null;
+	for(
+			select t
+				(	t			: ID
+				,	t.[CODE]	: C_CODE
+				)
+			in ::[REPS_TUNING] all
+			where	t.[PROF] = lrecParam.rProf
+				and	t.[CODE] in ('1.1', '2.1', '2.2')
+		)
+	loop
+		case t.C_CODE of
+			:'1.1':
+				lrTun_1_1 := t.ID;
+			:'2.1':
+				lrTun_2_1 := t.ID;
+			:'2.2':
+				lrTun_2_2 := t.ID;
+		end;
+	end loop;
+
+	if lrTun_1_1 is null then
+		&debug_output('Внимание! В профиле "' || lrecParam.rProf.[CODE] || '" не задана настройка с кодом 1.1! Расчет данных по подразделу 1.1 произведен не будет!', 0);
+	end if;
+	if lrTun_2_1 is null then
+		&debug_output('Внимание! В профиле "' || lrecParam.rProf.[CODE] || '" не задана настройка с кодом 2.1! Расчет данных по подразделу 2.1 произведен не будет!', 0);
+	end if;
+	if lrTun_2_2 is null then
+		&debug_output('Внимание! В профиле "' || lrecParam.rProf.[CODE] || '" не задана настройка с кодом 2.2! Расчет данных по подразделу 2.2 произведен не будет!', 0);
+	end if;
+
+	-- Инициализация типов комиссий
+	lmComissTypes := &lib.InitComissTypes(lrecParam.rProf);
+
+	-- Собираем виды акций
+	lvSharePref := &lib.InitSharePref(lrecParam.rProf);
+	&debug_output('Привилегированные акции: "' || lvSharePref || '"', 0);
+end;
+
+/**
+ * Инициализация параметров расчета
+ *
+ * @param P_PARAM	ссылка на параметры реализации
+ */
+procedure InitParam
+		(
+			P_PARAM	ref [REPS_PARAMS]
+		)
+is
+begin
+	lrecParam := &lib.grecParam;
+	&lib.GetAcPatTun(lrecParam.rProf);
+
+	-- Инициализация библиотеки для работы с клиентами
+	&lc.init();
+
+	-- Инициализация валют
+	::[REPS].[CUR_LIB].init_rates(lrecParam.dBeg - 10, lrecParam.dEnd + 10);
+
+	--Инициализация кэша данных по эмитентам
+	&lib.DeleteIssuerData;
+
+	-- Инициализация настроек
+	InitTuning();
+
+	-- Инициализация фин. инструментов
+	lvFTtypes := &lib.InitFTtypes;
+	&debug_output('Список типов ЭЦБ: "' || lvFTtypes || '"', 0);
+
+end;
+
+
+/**
+ * Добавление записи в протокол
+ *
+ * @param P_REC_PROTOCOL	Данные для протокола
+ * @param P_EXCLUDE_REASON	сообщение по исключению из расчета
+ */
+procedure AddToProtocol
+	(
+		P_REC_PROTOCOL		&lib.rec_Protocol
+	,	P_EXCLUDE_REASON	varchar2(32767)			default null
+	)
+is
+	recProt &lib.rec_Protocol;
+begin
+	if lrecParam.bProtocol then
+		recProt := P_REC_PROTOCOL;
+		recProt.vReasonIskl	:= P_EXCLUDE_REASON;
+		if P_EXCLUDE_REASON is not null then
+			&debug_output('Запись исключена из расчета, причина: ' || P_EXCLUDE_REASON, 10);
+		end if;
+		laProtocol(laProtocol.count + 1) := recProt;
+	end if;
+end;
+
+/**
+ * Проверка типа комиссии по настройке
+ *
+ * @param P_MARKET_PLACE	торговая площадка
+ * @param P_COMISS_TYPE		типы комиссий
+ */
+function CheckComissType
+	(
+		P_MARKET_PLACE	varchar2(32767)
+	,	P_COMISS_TYPE	varchar2(32767)
+	)
+	return				boolean
+is
+begin
+
+	if lmComissTypes.exists(P_MARKET_PLACE) then
+		if instr(lmComissTypes(P_MARKET_PLACE), '#' || P_COMISS_TYPE || '#') > 0 then
+			return true;
+		end if;
+	end if;
+
+	return false;
+end;
+
+/**
+ *	Функция возвращает код страны по ссылке на клиента(Используется кэш)
+ *
+ *	@PARAM	P_CLIENT	-- Ссылка на клиента
+ *	@return				-- возвращает код страны по ссылке на клиента
+ */
+function GetCountryCode
+			(	P_CLIENT	ref	[CLIENT])
+	return	::[COUNTRY].[CODE]%type
+is
+
+begin
+	-- Проверка необходимости переинициализации и переинициализация при необходимости.
+	if	lvMarker = ::[REPS_DATA].[LIB_MARKER].Value	then
+		null;
+	else
+		lvMarker := ::[REPS_DATA].[LIB_MARKER].Value;
+		lmCountryCode.delete;
+	end if;
+	-- Если значение в кэше отсутствует, выполняется его добавление
+	if	lmCountryCode.exists(P_CLIENT%id) then
+		return lmCountryCode(P_CLIENT%id);
+	else
+		for	(
+			select	z
+				(	z.[COUNTRY].[CODE]		: C_CODE_CLIENT
+				)
+			in	::[CLIENT] all
+			where	z = P_CLIENT
+			fetch	1
+			)
+		loop
+			lmCountryCode(P_CLIENT%id) := z.C_CODE_CLIENT;
+		end loop;
+	end if;
+	return lmCountryCode(P_CLIENT%id);
+end;
+
+/**
+ *	Процедура сохранения данных
+ *	@param	p_recData		-- Рассчитанные данные для сохранения
+ *	@param	p_mSumFragment	-- Разбивка по КВВО
+ */
+procedure SaveData
+		(
+			p_recData		[F_405_DATA]
+		,	p_mSumFragment	&lib.map_SumFragment
+		)
+is
+begin
+	-- Добавление записи в Ф-405-Данные
+	p_recData.[SUM_FRAGMENT]	:= next_value('SEQ_ID');
+	::[F_405_DATA]%insert(p_recData);
+
+	-- Заполнение массива с разбивкой по КВВО
+	&fforeach(p_mSumFragment, xIdx, null)
+		p_recData.[SUM_FRAGMENT]%insert(p_mSumFragment(xIdx));
+	&end_foreach;
+end;
+
+/**
+ *	Процедура обработки реестра сделок с ЭЦБ
+ */
+procedure Calc
+is
+	rTuning				ref [REPS_TUNING];
+
+	recProtocol			&lib.rec_Protocol;		-- Данные для протокола
+
+	recClType			&lc.ClientTypeRec;
+	nPayArrSum			number;					-- Сумма платежа
+	nComissSum			number;					-- Сумма комиссии
+	nCommissDeal		number;					-- Сумма комиссии по 1й части сделки
+	nCommissDeal2		number;					-- Сумма комиссии по 2й части сделки
+	iSignComiss			integer;				-- Знак комиссии
+	nSumTotalUsd		number;					-- Сумма в отчет в $
+	bHasSupply			boolean;				-- Есть поставки
+
+	bResCoagent			boolean;				-- Резидентность контрагента
+	bResInvestor		boolean;				-- Резидентность инвестора
+	bResEmitent			boolean;				-- Резидентность эмитента
+	bResEmitentBA		boolean;				-- Резидентность эмитента базового актива
+
+	recCBDataInt		&lib.rec_CBDataInt;		-- структура с данными интерфейса GetCBData405
+
+	aCBDealInt			&prx.arr_CBDeal;		-- массив структур с данными интерфейса GetCBDealInf
+	aCBSupComissInt		&prx.arr_CBSupComiss;	-- массив структур с данными интерфейса GetCBSupComiss
+	aCBSupPayInt		&prx.arr_SupPay;		-- массив структур с данными интерфейса GetCBSupPay
+	rCBDocPayInt		ref [MAIN_DOCUM];		-- Ссылка на платежный документ по операции
+	aSupList			&prx.arr_SupList;		-- Массив структур поставки по сделкам.
+
+	vInvestorName		::[CLIENT].[NAME]%type;	-- Имя инвестора
+	vCoagentName		::[CLIENT].[NAME]%type;	-- Имя контрагента
+
+	vInvestorNameGr		::[CLIENT].[NAME]%type;	-- Имя инвестора
+	vCoagentNameGr		::[CLIENT].[NAME]%type;	-- Имя контрагента
+
+	vEmitentName		::[CLIENT].[NAME]%type;	-- Имя эмитента
+	nSumPercPay			number;					-- Сумма оплаты процентов по сделке РЕПО в валюте платежа.
+	recData				[F_405_DATA];			-- Рассчитанные данные для сохранения
+	mSumFragment		&lib.map_SumFragment;	-- Разбивка по КВВО
+	iCntSaveData		integer;				-- Кол-во добавленых записей в F_405_DATA
+	nDealPart			number;					-- Номер части сделки.
+	
+begin
+	&debug_output('+ Обработка реестра сделок с ЭЦБ', 0);
+		-- Получение сведений о сделках с ценными бумагами за период из интерфейса
+	iCntSaveData := 0;
+	aCBDealInt := &prx.GetCBDealInf(lrecParam.dbeg, lrecParam.dend, lrecParam.rBranch);
+	&debug_output(	'Результат работы интерфейса GetCBDealInf, получено сделок: ' || aCBDealInt.count, 0);
+	&fix.inc(&method$ || '.Calc - цикл по сделкам', aCBDealInt.count);
+	&fforeach(aCBDealInt, xIdx, null)
+		-- Определяем Наименование клиента и инвестора по ссылке, полученной из интерфейса,
+		-- с учетом историчности на отчетную дату.
+		vInvestorName	:= &lib.GetNameClQual(aCBDealInt(xIdx).rInvestor,	'NAME', lrecParam.dEnd);
+		vCoagentName	:= &lib.GetNameClQual(aCBDealInt(xIdx).rCoagent,	'NAME', lrecParam.dEnd);
+
+		&debug_output	(	'> Обработка сделки № "'		|| aCBDealInt(xIdx).vDealNum								|| '" (' || aCBDealInt(xIdx).idDeal		||'), '
+						||	'валюта платежа: ['				|| &slib.GetCurShort(aCBDealInt(xIdx).rIsoPl)				|| '], '
+						||	'торговая площадка: ['			|| aCBDealInt(xIdx).vMarketCode								|| '], '
+						||	'внебиржевая: ['				|| aCBDealInt(xIdx).bIsVnebirj								|| '], '
+						||	'контрагент: "'					|| vCoagentName												|| '" (' || aCBDealInt(xIdx).rCoagent	|| '), '
+						||	'инвестор: "'					|| vInvestorName											|| '" (' || aCBDealInt(xIdx).rInvestor	|| '), '
+						||	'тип сделки: "'					|| aCBDealInt(xIdx).vContType								|| '" (' || aCBDealInt(xIdx).idDeal		|| '), '
+						||	'вид сделки: "	['				|| aCBDealInt(xIdx).vKindDeal								|| '], '
+						||	'группа сделки: ['				|| aCBDealInt(xIdx).bIsPFI									|| '], '
+						||	'дата оплаты (ч1): "'			|| to_char(aCBDealInt(xIdx).dDatePayReal, 'dd.mm.yyyy')		||'", '
+						||	'дата оплаты (ч2): "'			|| to_char(aCBDealInt(xIdx).dDatePayReal2, 'dd.mm.yyyy')	||'"'
+						||	'дата плановой оплаты (ч2): "'	|| to_char(aCBDealInt(xIdx).dDatePayPlan2, 'dd.mm.yyyy')	||'"'
+						, 10);
+
+		-- Предварительная инициализация протокола
+		if lrecParam.bProtocol then
+			recProtocol := null;
+			recProtocol.vProduct	:= 'SDELKA';																	-- Продукт
+			recProtocol.vIDDeal		:= aCBDealInt(xIdx).idDeal;														-- ID Сделки
+			recProtocol.vCodeDeal	:= aCBDealInt(xIdx).vDealNum;													-- Код сделки
+			recProtocol.vCurPay		:=  &slib.GetCurShort(aCBDealInt(xIdx).rIsoPl);									-- Валюта платежа
+			recProtocol.vCoagent	:= vCoagentName;																-- Наименование контрагента
+			recProtocol.vInvestor	:= vInvestorName;																-- Наименование инвестора
+			recProtocol.vKindDeal	:= aCBDealInt(xIdx).vKindDeal;													-- Вид сделки
+			recProtocol.vTypeDeal	:= aCBDealInt(xIdx).vContType;													-- Тип сделки
+			recProtocol.vMarket		:= aCBDealInt(xIdx).vMarketCode;												-- Торговая площадка
+			recProtocol.vFilialNum	:= ::[REPS_DATA].[LIB_GENL].GetBranchOrDepart(aCBDealInt(xIdx).rFilial).fCode;	-- Номер филиала
+		end if;
+
+		-- "Форвард на ЭЦБ" - признак сделок ПФИ, которые мы исключаем
+		if aCBDealInt(xIdx).bIsPFI then
+			&debug_output('Сделка является сделкой ПФИ - исключаем сделку.', 10);
+			AddToProtocol(recProtocol, 'Сделка является сделкой ПФИ');
+			continue;
+		end if;
+
+		-- Если массив поставок по сделке [aSupList] пустой, исключаем.
+		if aCBDealInt(xIdx).mSupList.count = 0 then
+			&debug_output('Отсутствуют поставки по сделкам - исключаем сделку.', 10);
+			AddToProtocol(recProtocol, 'Отсутствуют поставки по сделкам');
+			continue;
+		end if;
+
+		-- Определение резидентности контрагента и инвестора
+		bResCoagent		:= &lib.isResident(aCBDealInt(xIdx).rCoagent, lrecParam.dEnd);
+		bResInvestor	:= &lib.isResident(aCBDealInt(xIdx).rInvestor, lrecParam.dEnd);
+
+		&debug_output('Резидентность: контрагент - "' || bool_char(bResCoagent, 'резидент', 'нерезидент', 'не определено')
+					|| '", инвестор - "' || bool_char(bResInvestor, 'резидент', 'нерезидент', 'не определено') || '"', 10);
+
+		-- Определение принадлежности к настройке
+		rTuning := null;
+
+		if		bResCoagent is not null
+			and	bResInvestor is not null
+		then
+			-- Если резидентность контрагента и инвестора различаются, то сделка относится к подразделу 1.1
+			if bool_char(bResCoagent) || bool_char(bResInvestor) in ('01', '10') then
+				rTuning := lrTun_1_1;
+				&debug_output('Резидентность контрагента и инвестора различаются, сделка относится к разделу: "'
+							|| rTuning.[CODE] || '" (' || rTuning%id || ')', 10);
+
+			-- Если контрагент и инвестор - резиденты
+			elsif	bResCoagent
+				and	bResInvestor
+			then
+				-- Собственные сделки относятся к подразделу 2.1
+				if aCBDealInt(xIdx).vKindDeal = lcvDilDeal then
+					rTuning := lrTun_2_1;
+				-- Брокерские сделки относятся к подразделу 2.2
+				elsif aCBDealInt(xIdx).vKindDeal = lcvBrokDeal then
+					rTuning := lrTun_2_2;
+					&debug_output('Сделка брокерская, контрагент и инвестор - резиденты, сделка относится к разделу: "'
+								|| rTuning.[CODE] || '" (' || rTuning%id || ')', 10);
+				end if;
+			end if;
+		end if;
+
+		-- определение наименования клиента-резидента и инвестора, добавленного пользователем в группу, указанную в настройке FOREIGN_ORG_BR_NAME
+		vCoagentNameGr	:=	&lib.GetNameClRes(aCBDealInt(xIdx).rCoagent, bResCoagent, lrecParam.dEnd, lrecParam.rProf);		-- Наименование контрагента
+		vInvestorNameGr	:=	&lib.GetNameClRes(aCBDealInt(xIdx).rInvestor, bResInvestor, lrecParam.dEnd, lrecParam.rProf);	-- Наименование инвестора
+
+		if vCoagentName <> vCoagentNameGr then
+			&debug_output('Наименование контрагента добавленного пользователем в группу, указанную в настройке FOREIGN_ORG_BR_NAME: [' || vCoagentNameGr || ']', 10 );
+			vCoagentName := vCoagentNameGr;
+		end if;
+
+		if vInvestorName <> vInvestorNameGr then
+			&debug_output('Наименование инвестора добавленного пользователем в группу, указанную в настройке FOREIGN_ORG_BR_NAME: [' || vInvestorNameGr || ']', 10 );
+			vInvestorName := vInvestorNameGr;
+		end if;
+
+		-- Если контрагент или инвестор нерезидент и  являются "Участниками SWIFT": наименование выводится из реквизита NAME с учетом историчности.
+		if not bResCoagent and aCBDealInt(xIdx).rCoagent%class = ::[CL_BANK_F]%class then
+			vCoagentName := &lib.GetNameClQual(aCBDealInt(xIdx).rCoagent,	'NAME', lrecParam.dEnd);
+		end if;
+
+		if not bResInvestor and aCBDealInt(xIdx).rInvestor%class = ::[CL_BANK_F]%class then
+			vCoagentName := &lib.GetNameClQual(aCBDealInt(xIdx).rInvestor,	'NAME', lrecParam.dEnd);
+		end if;
+
+		-- Предварительная инициализация протокола
+		if lrecParam.bProtocol then
+			recProtocol.rTuning		:= rTuning;
+			recProtocol.vRZCoagent	:= bool_char(bResCoagent);	-- Резидентность контрагента
+			recProtocol.vRZInvestor	:= bool_char(bResInvestor);	-- Резидентность инвестора
+			recProtocol.vCoagent	:= vCoagentName;			-- Наименование контрагента
+			recProtocol.vInvestor	:= vInvestorName;			-- Наименование инвестора
+		end if;
+
+		-- Если настройка не определена
+		if rTuning is null then
+			if bResCoagent is null then
+				AddToProtocol(recProtocol, 'Не определена резидентность контрагента');
+			elsif bResInvestor is null then
+				AddToProtocol(recProtocol, 'Не определена резидентность инвестора');
+			else
+				AddToProtocol(recProtocol, 'Не определена принадлежность к настройке');
+			end if;
+			continue;
+		end if;
+
+		-- Проверка на включение и исключение сделок в подразделы отчета
+		if rTuning = lrTun_1_1 then
+			-- Из подраздела 1.1 исключаются операции по собственным сделкам РЕПО
+			if		aCBDealInt(xIdx).vKindDeal = lcvDilDeal
+				and	aCBDealInt(xIdx).vContType in (lcvRepoBuySell, lcvRepoSellBuy)
+			then
+				AddToProtocol(recProtocol, 'Это собственная сделка РЕПО на возвратной основе');
+				continue;
+			end if;
+
+		elsif rTuning = lrTun_2_2 then
+			-- Из подраздела 2.2 исключаются операции по брокерским сделкам РЕПО
+			if aCBDealInt(xIdx).vContType in (lcvRepoBuySell, lcvRepoSellBuy) then
+				AddToProtocol(recProtocol, 'Это брокерская сделка РЕПО на возвратной основе');
+				continue;
+			end if;
+
+			-- Для сделок "Покупка" и "Аукционная покупка"
+			if aCBDealInt(xIdx).vContType in (lcvBuy, lcvAuction) then
+				-- Инвестор не должен являться кредитной организацией
+				recClType := &lc.GetClientType(aCBDealInt(xIdx).rInvestor);
+				if recClType.ClClass = 'CL_BANK_N' then
+					AddToProtocol(recProtocol, 'Инвестор является кредитной организацией');
+					continue;
+				end if;
+
+				-- Инвестор не должен являться доверительным управляющим
+				if aCBDealInt(xIdx).vInvestorStatus = lcvClientStatusDU then
+					AddToProtocol(recProtocol, 'Инвестор является доверительным управляющим');
+					continue;
+				end if;
+
+				-- Инвестор не должен являться брокером
+				if aCBDealInt(xIdx).vInvestorStatus in (lcvClientStatusBrok, lcvClientStatusBrokCl) then
+					AddToProtocol(recProtocol, 'Инвестор является брокером');
+					continue;
+				end if;
+
+			else
+				-- Контрагент не должен являться кредитной организацией
+				recClType := &lc.GetClientType(aCBDealInt(xIdx).rCoagent);
+				if recClType.ClClass = 'CL_BANK_N' then
+					AddToProtocol(recProtocol, 'Контрагент является кредитной организацией');
+					continue;
+				end if;
+
+				-- Контрагент не должен являться доверительным управляющим
+				if aCBDealInt(xIdx).vCoagentStatus = 'Доверительный управляющий' then
+					AddToProtocol(recProtocol, 'Контрагент является доверительным управляющим');
+					continue;
+				end if;
+
+				-- Контрагент не должен являться брокером (комиссионер ? это по сути брокер)
+				if aCBDealInt(xIdx).vCoagentStatus = 'Комиссионер' then
+					AddToProtocol(recProtocol, 'Контрагент является брокером');
+					continue;
+				end if;
+			end if;
+		end if;
+
+		-- Предварительная инициализация итоговой структуры
+		recData				:= null;
+		recData.[PARAM]		:= lrecParam.rParam;
+		recData.[TUNING]	:= rTuning;
+		recData.[DATA]		:= 'SDELKA';
+		recData.[SRC_ID]	:= aCBDealInt(xIdx).idDeal;
+		recData.[FILIAL]	:= aCBDealInt(xIdx).rFilial;
+		recData.[CUR_PL]	:= aCBDealInt(xIdx).rIsoPl;
+
+		nCommissDeal = nCommissDeal2 := 0;
+		bHasSupply := false;
+
+		-- Обработка поставок
+		&fix.beg(&method$ || '.Calc - Обработка поставок');
+		aSupList.delete;
+		aSupList := aCBDealInt(xIdx).mSupList;
+		&fforeach(aSupList, xIdxSup, null)
+			--Поставки, созданные в результате операции "Компенсационный взнос по ЦБ" не включаются в отчет (подраздел 1 раздела 1).
+			if		aSupList(xIdxSup).bOperType
+				or	instr(lvFTtypes, '#' || aSupList(xIdxSup).vFTClass || '#') = 0
+			then
+				continue;
+			end if;
+
+			nDealPart := coalesce(aSupList(xIdxSup).nDealPart, 1);
+			-- Для несобственных сделок переопределяем дату поставки датой оплаты
+			if aCBDealInt(xIdx).vKindDeal <> lcvDilDeal then
+				aSupList(xIdxSup).dDateSupReal := aSupList(xIdxSup).dDatePayReal;
+			end if;
+
+			-- Проверяем дату поставки
+			if	aSupList(xIdxSup).dDateSupReal >= lrecParam.dBeg
+			and	aSupList(xIdxSup).dDateSupReal < lrecParam.dEnd + 1
+			then
+				bHasSupply := true;
+				&debug_output	(
+									'>> Поставка ID: ['			|| aSupList(xIdxSup).rSup%id				|| '], '
+								||	'часть: ['					|| nDealPart								|| '], '
+								||	'количество: ['				|| aSupList(xIdxSup).nAmount				|| '], '
+								||	'дата оплаты: ['			|| to_char(aSupList(xIdxSup).dDateSupReal, 'dd.mm.yyyy') || '], '
+								||	'ЦБ ID: ['					|| aSupList(xIdxSup).rPaper					|| '], '
+								||	'класс ЦБ: ['				|| aSupList(xIdxSup).vFTClass				|| '], '
+								||	'наименование ЦБ: "'		|| aSupList(xIdxSup).vFTName				|| '", '
+								, 10);
+			else
+				continue;
+			end if;
+
+			-- информация по коду ценной бумаги из интерфейса
+			recCBDataInt := &lib.GetCBDataInt(	P_CB_ID	== aSupList(xIdxSup).rPaper
+											,	P_DATE	== aSupList(xIdxSup).dDateSupReal + 1 -- дата сделки + 1
+											);
+			-- Определение резидентности эмитента
+			bResEmitent		:= &lib.isResident(aSupList(xIdxSup).rClient, lrecParam.dEnd);
+			-- Наименование эмитента опредяеляем в зависимости от резидентности и нахождении клиента в группах,
+			-- указанных в настройке FOREIGN_ORG_BR_NAME
+			vEmitentName	:=	case
+									when	recCBDataInt.recIssuer.rIssuer%class = ::[CL_BANK_F]%class
+									then	&lib.GetNameClQual(recCBDataInt.recIssuer.rIssuer, 'NAME', lrecParam.dEnd)
+									else	&lib.GetNameClRes(recCBDataInt.recIssuer.rIssuer, &lib.isResident(recCBDataInt.recIssuer.rIssuer, lrecParam.dEnd), lrecParam.dEnd, lrecParam.rProf)
+								end;
+
+			&debug_output	(	'Результат интерфейса GetCBDataOnDate для ЦБ: [' || aSupList(xIdxSup).rPaper	|| ']: '
+							||	'Эмитент: "'					|| vEmitentName		|| '" (' || recCBDataInt.recIssuer.rIssuer%id || '), '
+							||	'Класс ЦБ: ['					|| recCBDataInt.vFTClass					|| '], '
+							||	'Наименование ЦБ: ['			|| recCBDataInt.vFTName						|| '], '
+							||	'Код ЦБ: ['						|| recCBDataInt.vCBCode						|| '], '
+							||	'Регистрационный номер ЦБ: ['	|| recCBDataInt.vRegNum						|| '], '
+							||	'Регистрационный номер ISIN: ['	|| recCBDataInt.vIsinNum					|| '], '
+							||	'Признак эмиссионной ЦБ: ['		|| recCBDataInt.iIsEmission					|| '], '
+							||	'Дата выпуска ЦБ: ['			|| recCBDataInt.dDateEmission				|| '], '
+							||	'Дата погашения ЦБ: ['			|| recCBDataInt.dDateMaturity				|| '], '
+							||	'Валюта ЦБ: ['					|| recCBDataInt.rCBCur%id					|| ']'
+							, 5);
+
+
+
+			-- Определение резидентности эмитента базового актива
+			-- Если тип ЦБ является депозитарной распиской
+			if recCBDataInt.vFTClass = 'DR_SHARE' then
+				-- получить резидентность по эмитенту базового актива
+				bResEmitentBA := &lib.isResident(recCBDataInt.recIssuer.rIssuer, lrecParam.dEnd);
+			else
+				bResEmitentBA := bResEmitent;
+			end if;
+
+			&debug_output	(	'Резидентность эмитента (ID клиента:' || aSupList(xIdxSup).rClient%id || '): "' || bool_char(bResEmitent, 'резидент', 'нерезидент', 'не определено') || '"'
+					|| NL$ ||	'Резидентность эмитента базового актива (ID клиента:' || recCBDataInt.recIssuer.rIssuer%id || '): "' || bool_char(bResEmitentBA, 'резидент', 'нерезидент', 'не определено') || '"'
+							, 10);
+
+			-- Предварительная инициализация структуры протокола
+			if lrecParam.bProtocol then
+				recProtocol.nIDSupply		:= aSupList(xIdxSup).rSup%id;
+				recProtocol.dOper			:= aSupList(xIdxSup).dDateSupReal;		-- Дата операции
+				recProtocol.vEmitent		:= vEmitentName;						-- Наименование эмитента
+				recProtocol.vRZEmitent		:= bool_char(bResEmitentBA);			-- Резидентность эмитента
+				recProtocol.vCBClass		:= recCBDataInt.vFTClass;				-- Класс ЭЦБ
+				recProtocol.vCBName			:= recCBDataInt.vFTName;				-- Наименование ЦБ
+				recProtocol.vRegNum			:= recCBDataInt.vRegNum;				-- Регистрационный номер
+				recProtocol.vISIN			:= recCBDataInt.vIsinNum;				-- Международный идентификационный код ценной бумаги (ISIN)
+
+				if bResEmitent then
+					if recCBDataInt.vCBCode in ('DR1', 'KSU') then
+						recProtocol.vRegNumRep		:= nvl(recCBDataInt.vIsinNum, 'не определено');
+					else
+						if recCBDataInt.iIsEmission in (1, 2) then
+							recProtocol.vRegNumRep	:= nvl(recCBDataInt.vRegNum, recCBDataInt.vIsinNum);
+						else
+							recProtocol.vRegNumRep	:= 'не определено';
+						end if;
+					end if;
+				else
+					if recCBDataInt.iIsEmission in (1, 2) then
+						recProtocol.vRegNumRep	:= nvl(recCBDataInt.vIsinNum, recCBDataInt.vRegNum);
+					else
+						recProtocol.vRegNumRep	:= 'не определено';
+					end if;
+				-- если интерфейс передал значение "Тип номера ЦБ" = 0 то источник не определен
+				end if;
+
+				recProtocol.dRegCB			:= recCBDataInt.dDateEmission;			-- Дата регистрации ЦБ
+				recProtocol.dRegRep			:= recCBDataInt.dDateEmission;			-- Дата регистрации ЦБ в отчет
+				recProtocol.vBuyerName		:= null;
+				recProtocol.vSellerName		:= null;
+				recProtocol.nSumPrc			:= null;
+				recProtocol.nSumTotal		:= null;
+				recProtocol.nSumTotalUsd	:= null;
+			end if;
+
+			-- Если сделка относится ко второму разделу, то эмитент должен быть нерезидентом
+			if		recData.[TUNING] in (lrTun_2_1, lrTun_2_2)
+				and	nvl(bResEmitentBA, true)
+			then
+				if bResEmitentBA is null then
+					AddToProtocol(recProtocol, 'Не определена резидентность эмитента');
+				else
+					AddToProtocol(recProtocol, 'Эмитент по сделке является резидентом');
+				end if;
+				continue;
+			end if;
+
+			-- Предварительная инициализация структуры информацией о поставке
+			recData.[QUANTITY]		:= aSupList(xIdxSup).nAmount;
+			recData.[DATE_OP]		:= aSupList(xIdxSup).dDateSupReal;
+			recData.[CUR_CB]		:= recCBDataInt.rCBCur;
+			recData.[EMITENT]		:= recCBDataInt.recIssuer.rIssuer;
+			recData.[EMIT_CODE]		:= null;
+			recData.[DATE_PAY]		:= recCBDataInt.dDateMaturity;
+			recData.[SUM_TOTAL]		:= null;
+			recData.[SUM_PRC]		:= null;
+			recData.[REZIDENT]		:= null;
+			recData.[RES_CODE]		:= null;
+			recData.[NEREZIDENT]	:= null;
+			recData.[NRES_CODE]		:= null;
+			recData.[BUYER]			:= null;
+			recData.[BUYER_CODE]	:= null;
+			recData.[SELLER]		:= null;
+			recData.[SELLER_CODE]	:= null;
+			recData.[KOD_N_PL]		:= null;
+			recData.[KOD_CB]		:= recCBDataInt.vCBCode;	-- Код ЦБ
+			recData.[KOD_OPER]		:= null;
+			recData.[REGNUM]		:= recProtocol.vRegNumRep;
+			recData.[DATE_REG]		:= recCBDataInt.dDateEmission;
+			recData.[NOTES]			:= null;
+			recData.[NOTES_5]		:= null;
+			recData.[OWN_DEAL]		:= null;
+
+			-- Код эмитента
+			-- в первую очередь определяем из справочника "ОП Группы клиентов"(REPS_CLIENTS)
+			-- по группе F_405_COUNTRY_CODE
+			recData.[EMIT_CODE]	:= &lib.GetRepsClientCodeCountry
+												(
+													P_CODE_GROUP	== 'F_405_COUNTRY_CODE'
+												,	P_CLIENT		== recData.[EMITENT]
+												);
+			if recCBDataInt.recIssuer.rIssuerCountry = ::[SYSTEM].[COUNTRY] then
+				recData.[EMIT_CODE] := nvl(recData.[EMIT_CODE], recCBDataInt.recIssuer.vIssuerInn);
+			else
+				recData.[EMIT_CODE] := nvl(recData.[EMIT_CODE], recCBDataInt.recIssuer.vIssuerCountryCode);
+			end if;
+
+			-- Для РЕПО формируем примечание
+			if aCBDealInt(xIdx).vContType in (lcvRepoBuySell, lcvRepoSellBuy) then
+				if nDealPart = 1 then
+					recData.[NOTES_5]	:= nvl(aCBDealInt(xIdx).dDatePayReal2, aCBDealInt(xIdx).dDatePayPlan2);
+				else
+					recData.[NOTES_5]	:= aCBDealInt(xIdx).dDatePayReal;
+				end if;
+			end if;
+
+			-- Подсчет комиссии
+			nComissSum := 0;
+			&debug_output('Подсчет комиссии за получение услуг: ', 10);
+
+			-- Получаем сведения о комиссиях по сделкам с ценными бумагами в разрезе поставок из интерфейса.
+			aCBSupComissInt := &prx.GetCBSupComiss(aSupList(xIdxSup).rSup);
+			&fforeach(aCBSupComissInt, xIdxCom, null)
+				&debug_output(	'Результат работы интерфейса GetCBSupComiss в разрезе поставки: [' || aSupList(xIdxSup).rSup	|| ']: '
+							||	'комиссия [' || aCBSupComissInt(xIdxCom).vComTypeCode || ']'
+							||	', сумма [' || aCBSupComissInt(xIdxCom).nComissSum || ']'
+							,	5
+				);
+
+				if CheckComissType(aCBDealInt(xIdx).vMarketCode, aCBSupComissInt(xIdxCom).vComTypeCode) then
+					nComissSum := nComissSum + aCBSupComissInt(xIdxCom).nComissSum;
+				else
+					&debug_output('		Не пройдена проверка по настройке', 10);
+				end if;
+			&end_foreach;
+
+			&debug_output('Рассчитана комиссия: [' || nComissSum || ']', 10);
+			-- Знак комиссии
+			iSignComiss := 1;
+			if bResCoagent then
+				if nDealPart = 1 then
+					if aCBDealInt(xIdx).vContType in (lcvSell, lcvRepoSellBuy) then
+						iSignComiss := -1;
+					end if;
+				else
+					if aCBDealInt(xIdx).vContType = lcvRepoBuySell then
+						iSignComiss := -1;
+					end if;
+				end if;
+			end if;
+			&debug_output('Комиссия по поставке (с учетом знака): [' || (iSignComiss * nComissSum) || ']', 10);
+
+			-- Подсчет платежа
+			nPayArrSum := 0;
+			mSumFragment.delete;
+			-- Выполняем проход по массиву "Исполнение оплат"
+
+			-- Получаем сведения об оплатах поставок по сделкам с ценными бумагами из интерфейса.
+			aCBSupPayInt := &prx.GetCBSupPay(aSupList(xIdxSup).rSup%id, lrecParam.dbeg, lrecParam.dend);
+			nSumPercPay := 0;
+			&fforeach(aCBSupPayInt, xIdxPay, null)
+				&debug_output	(	'Результат работы интерфейса GetCBSupPay в разрезе поставки: [' || aSupList(xIdxSup).rSup	|| ']: '
+								||	'Связанная с поставкой оплата ID: ['	|| aCBSupPayInt(xIdxPay).rPay%id				|| '], '
+								||	'сумма платежа в валюте: ['				|| aCBSupPayInt(xIdxPay).nSumPay				|| '], '
+								||	'сумма оплаты процентов: ['				|| aCBSupPayInt(xIdxPay).nPercPay				|| '], '
+								, 5);
+
+				if	nDealPart <> 1 and aCBSupPayInt(xIdxPay).bIsPartialPayment
+				then
+					&debug_output('Для сделки ID: [' || aCBDealInt(xIdx).idDeal || '] по второй части в примечании указывается "РАССРОЧКА"', 10);
+					recData.[NOTES] := 'РАССРОЧКА';
+				end if;
+
+				-- Сумма платежа по операции (отрицательные проценты не учитываем - они уже учтены в сумме)
+				if aCBDealInt(xIdx).vKindDeal = lcvDilDeal then
+					nPayArrSum := nPayArrSum + aCBSupPayInt(xIdxPay).nSumPay + greatest(coalesce(aCBSupPayInt(xIdxPay).nPercPay, 0), 0);
+				else
+					nPayArrSum := nPayArrSum + aCBSupPayInt(xIdxPay).nSumPay;
+				end if;
+				-- Разбивку по КВВО выполняем только для первого раздела
+				if recData.[TUNING] = lrTun_1_1 then
+					-- Из массива оплат нас интересует первая попавшаяся запись, у которой тип создавшей операции "Отметить оплату"
+					if aCBSupPayInt(xIdxPay).bIsDocs then
+						-- Получаем Сведения документах по оплате поставок по сделкам с ценными бумагами из интерфейса.
+						rCBDocPayInt := &prx.GetCBDocPay(aCBSupPayInt(xIdxPay).rPay);
+						&debug_output	(	'Результат работы интерфейса GetCBDocPay в разрезе исполнения по оплате: [' || aCBSupPayInt(xIdxPay).rPay	|| ']: '
+								||	'Ссылка на платежный документ по операции ID: ['	|| rCBDocPayInt%id				|| '], '
+								||	'Вид валютной операции: ['							|| rCBDocPayInt.[CURR_OPER]		|| '], '
+								||	'Сумма Дт: ['										|| rCBDocPayInt.[SUM]			|| '], '
+								||	'Сумма Кт: ['										|| rCBDocPayInt.[SUM_PO]		|| '], '
+								, 5);
+						-- Формирование массива "Разбиение суммы по КВВО". Только для собственных внебиржевых сделок.
+							if		aCBDealInt(xIdx).vKindDeal = lcvDilDeal
+								and	aCBDealInt(xIdx).bIsVnebirj
+								and	mSumFragment.count = 0
+							then
+								mSumFragment := &lib.FillSumFragment
+												(	mSumFragment
+												,	rCBDocPayInt%id
+												,	rCBDocPayInt.[CURR_OPER]
+												,	rCBDocPayInt.[SUM]
+												,	rCBDocPayInt.[SUM_PO]
+												);
+							end if;
+
+						-- Сопоставление разбиваемой суммы со сделки и собранной информации по КВВО. Только для собственных внебиржевых сделок.
+						if		aCBDealInt(xIdx).vKindDeal = lcvDilDeal
+							and	aCBDealInt(xIdx).bIsVnebirj
+							and	mSumFragment.count > 0
+						then
+							mSumFragment := &lib.EquateSumFragment
+											(	mSumFragment
+											,	aCBSupPayInt(xIdxPay).nSumPay
+											,	aSupList(xIdxSup).nAmount
+											);
+						end if;
+					end if;
+				end if;
+				nSumPercPay := nSumPercPay + coalesce(aCBSupPayInt(xIdxPay).nPercPay, 0);
+			&end_foreach;
+			-- Итоговая сумма платежа
+			recData.[SUM_TOTAL] := round(nPayArrSum + nComissSum * iSignComiss, 2);
+			if lrecParam.bProtocol then
+				recProtocol.nSumTotal := recData.[SUM_TOTAL];
+			end if;
+			&debug_output('Итоговая сумма платежа [' || recData.[SUM_TOTAL] || '], рассчитана как: (сумма платежа: ['
+						|| nPayArrSum || '] + сумма комиссии [' || nComissSum * iSignComiss || '])', 10);
+
+			-- Для первого раздела контрагента и инвестора сохраняем как резидента и нерезидента
+			if recData.[TUNING] = lrTun_1_1 then
+				-- Если контрагент - резидент
+				if bResCoagent then
+					recData.[REZIDENT]	:= aCBDealInt(xIdx).rCoagent;
+					recData.[RES_CODE]	:= &lib.GetResCode
+												(
+													P_CLIENT == aCBDealInt(xIdx).rCoagent
+												,	P_IS_FIRST_RAZD == true
+												,	P_DATE == recData.[DATE_OP]
+												);
+					recData.[NEREZIDENT]	:= aCBDealInt(xIdx).rInvestor;
+					recData.[NRES_CODE]	:= coalesce	(	&lib.GetRepsClientCodeCountry
+																(
+																	P_CODE_GROUP	== 'F_405_COUNTRY_CODE'
+																,	P_CLIENT		== recData.[NEREZIDENT]
+																)
+													,	GetCountryCode(aCBDealInt(xIdx).rInvestor)
+													,	'999'
+													);
+				-- Если инвестор - резидент
+				else
+					recData.[REZIDENT]	:= aCBDealInt(xIdx).rInvestor;
+					recData.[RES_CODE]	:= &lib.GetResCode
+												(
+													P_CLIENT == aCBDealInt(xIdx).rInvestor
+												,	P_IS_FIRST_RAZD == true
+												,	P_DATE == recData.[DATE_OP]
+												);
+					recData.[NEREZIDENT]	:= aCBDealInt(xIdx).rCoagent;
+					recData.[NRES_CODE]	:= coalesce	(	&lib.GetRepsClientCodeCountry
+																(
+																	P_CODE_GROUP	== 'F_405_COUNTRY_CODE'
+																,	P_CLIENT		== recData.[NEREZIDENT]
+																)
+													,	GetCountryCode(aCBDealInt(xIdx).rCoagent)
+													,	'999'
+													);
+				end if;
+
+			-- Подсчет суммы процентов
+			-- Если код вида операции 13 и сумма % > 0, указываем сумму, полученную интерфейсом GetCBSupPay, данные параметра nPercPay.
+				if nDealPart = 2 and nSumPercPay > 0 then
+					recData.[SUM_PRC] := nSumPercPay;
+				else
+					recData.[SUM_PRC] := 0;
+				end if;
+				if lrecParam.bProtocol then
+					recProtocol.nSumPrc	:= recData.[SUM_PRC];
+				end if;
+				&debug_output('Сумма процентов: ' || recData.[SUM_PRC], 10);
+
+				-- Код направления платежа
+				if nDealPart = 1 then
+					case aCBDealInt(xIdx).vContType of
+						:lcvBuy, lcvRepoBuySell, lcvAuction:
+							recData.[KOD_N_PL] := 'OUT';
+						:lcvSell, lcvRepoSellBuy:
+							recData.[KOD_N_PL] := 'IN';
+					end;
+				else
+					case aCBDealInt(xIdx).vContType of
+						:lcvRepoBuySell:
+							recData.[KOD_N_PL] := 'IN';
+						:lcvRepoSellBuy:
+							recData.[KOD_N_PL] := 'OUT';
+					end;
+				end if;
+				recData.[KOD_N_PL] := recData.[KOD_N_PL] || bool_char(bResCoagent, 'N', 'R');
+				-- Код операции
+				if nDealPart = 1 then
+					if aCBDealInt(xIdx).vContType in (lcvBuy, lcvSell, lcvAuction) then
+						recData.[KOD_OPER] := '11';
+					else
+						recData.[KOD_OPER] := '12';
+					end if;
+				else
+					recData.[KOD_OPER] := '13';
+				end if;
+
+				-- Заполнение флага "Собственные бумаги"
+				recData.[OWN_DEAL]	:= &slib.IsOwnDeal
+											(	recData.[EMITENT]
+											,	recData.[REZIDENT]
+											,	recData.[NEREZIDENT]
+											,	recData.[KOD_CB]
+											);
+				recData.[DATE_PAY]	:= recCBDataInt.dDateMaturity;
+
+				&debug_output('Код операции: [' || recData.[KOD_OPER] || '], код ЦБ: [' || recData.[KOD_CB]
+							|| '], код направления платежа: [' || recData.[KOD_N_PL] || ']', 10);
+
+				-- В случае одной записи в разбивке по КВВО и отсутствия информации о процентах
+				-- сохраняем сумму процентов с recData
+				if mSumFragment.count = 1 then
+					if mSumFragment(mSumFragment.first).[SUM_PRC] is null then
+						mSumFragment(mSumFragment.first).[SUM_PRC] := recData.[SUM_PRC];
+					end if;
+				end if;
+
+			-- Для второго раздела контрагента и инвестора сохраняем как покупателя и продавца
+			else
+				-- Во второй раздел проходят сделки с датой операции >= 10 млн.$
+				if recData.[TUNING] = lrTun_2_2 then
+					-- Переводим сумму сделки в доллары
+					nSumTotalUsd := &slib.ConvertSumToUsd
+												(	recData.[SUM_TOTAL]
+												,	recData.[CUR_PL]
+												,	recData.[DATE_OP]
+												);
+					&debug_output('Сумма платежа в долларах: [' || nSumTotalUsd || ']', 10);
+					if lrecParam.bProtocol then
+						recProtocol.nSumTotalUsd := nSumTotalUsd;
+					end if;
+					if nSumTotalUsd < 10000000 then
+						AddToProtocol(recProtocol, 'Сумма платежа меньше 10 млн.$');
+						continue;
+					end if;
+				end if;
+
+				-- Для сделок типа покупка: покупатель - инвестор, продавец - контрагент
+				if		aCBDealInt(xIdx).vContType in (lcvBuy, lcvAuction)
+					or	(	aCBDealInt(xIdx).vContType = lcvRepoBuySell
+						and	nDealPart = 1
+						)
+					or	(	aCBDealInt(xIdx).vContType = lcvRepoSellBuy
+						and	nDealPart = 2
+					)
+				then
+					recData.[BUYER]			:= aCBDealInt(xIdx).rInvestor;
+					recData.[BUYER_CODE]	:= &lib.GetResCode
+													(
+														P_CLIENT == aCBDealInt(xIdx).rInvestor
+													,	P_IS_FIRST_RAZD == false
+													,	P_DATE == recData.[DATE_OP]
+													);
+					recData.[SELLER]		:= aCBDealInt(xIdx).rCoagent;
+					recData.[SELLER_CODE]	:= &lib.GetResCode
+													(
+														P_CLIENT == aCBDealInt(xIdx).rCoagent
+													,	P_IS_FIRST_RAZD == false
+													,	P_DATE == recData.[DATE_OP]
+													);
+					if lrecParam.bProtocol then
+						recProtocol.vBuyerName	:= vInvestorName;
+						recProtocol.vSellerName	:= vCoagentName;
+					end if;
+
+				-- Для сделок типа продажа: покупатель - контрагент, продавец - инвестор
+				else
+					recData.[BUYER]			:= aCBDealInt(xIdx).rCoagent;
+					recData.[BUYER_CODE]	:= &lib.GetResCode
+													(
+														P_CLIENT == aCBDealInt(xIdx).rCoagent
+													,	P_IS_FIRST_RAZD == false
+													,	P_DATE == recData.[DATE_OP]
+													);
+					recData.[SELLER]		:= aCBDealInt(xIdx).rInvestor;
+					recData.[SELLER_CODE]	:= &lib.GetResCode
+													(
+														P_CLIENT == aCBDealInt(xIdx).rInvestor
+													,	P_IS_FIRST_RAZD == false
+													,	P_DATE == recData.[DATE_OP]
+													);
+					if lrecParam.bProtocol then
+						recProtocol.vBuyerName	:= vCoagentName;
+						recProtocol.vSellerName	:= vInvestorName;
+					end if;
+				end if;
+
+				-- Код операции
+				if recData.[TUNING] = lrTun_2_1 then
+					if nDealPart = 1 then
+						if aCBDealInt(xIdx).vContType in (lcvBuy, lcvSell, lcvAuction) then
+							recData.[KOD_OPER] := '15';
+						else
+							recData.[KOD_OPER] := '12';
+						end if;
+					else
+						recData.[KOD_OPER] := '13';
+					end if;
+				elsif recData.[TUNING] = lrTun_2_2 then
+					recData.[KOD_OPER] := '15';
+				end if;
+
+				&debug_output('Код операции: [' || recData.[KOD_OPER] || '], код ЦБ: [' || recData.[KOD_CB] || ']', 10);
+
+			end if;
+			-- сохранение данных
+			SaveData(recData, mSumFragment);
+
+			&debug_output('Выполнено добавление записи', 10);
+
+			-- Дозаполнение оставшихся полей
+			if lrecParam.bProtocol then
+				recProtocol.vRegNumRep	:= recData.[REGNUM];	-- Код который пошел в отчет
+				recProtocol.dRegRep		:= recData.[DATE_REG];	-- Дата регистрации ЦБ в отчет
+				recProtocol.vOperCode	:= recData.[KOD_OPER];	-- Код операции
+				recProtocol.vPaperCode	:= recData.[KOD_CB];	-- Код ЦБ
+				AddToProtocol(recProtocol);
+			end if;
+		iCntSaveData := iCntSaveData + 1;
+		&end_foreach; -- Обработка поставок
+		&fix.fin(&method$ || '.Calc - Обработка поставок');
+		-- Если поставки отсутствуют
+		if not bHasSupply then
+			&debug_output('Отсутствуют поставки в отчетном периоде', 10);
+		end if;
+	&end_foreach; -- Обработка сделок
+	&debug_output('- Выполнена обработка реестра сделок с ЭЦБ, всего добавлено записей: ' || iCntSaveData, 0);
+end;
+
+/**
+ *	Процедура очистки накопленных массивов.
+ */
+procedure ClearCache
+is
+begin
+	--Очистка накопленного кеша
+	lmComissTypes.delete;
+	laProtocol.delete;
+	lmCountryCode.delete;
+end;
+
+/**
+ * @param P_PARAM	ссылка на параметры реализации
+ * @return	ссылка на реализацию
+ */
+public function Run
+	(
+		P_PARAM		ref [REPS_PARAMS]
+	)
+	return			ref [REPS_PARAMS]
+is
+
+begin
+	-- Очистка кэша.
+	ClearCache;
+	-- Инициализация параметров расчета
+	InitParam(P_PARAM);
+	-- Обработка реестра сделок с ЭЦБ
+	&fix.beg(&method$ || '.Calc');
+	Calc;
+	&fix.fin(&method$ || '.Calc');
+	&debug_output('>> Расчет завершен.', 0);
+
+	-- Сохранение данных в протокол
+	&lib.SaveProtocol(P_TAB_PROTOCOL == laProtocol);
+
+	&lc.deInit();
+	-- Очистка кэша.
+	ClearCache;
+
+	return lrecParam.rParam;
+end;
+end;

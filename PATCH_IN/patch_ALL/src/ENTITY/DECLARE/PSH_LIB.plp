@@ -1,0 +1,331 @@
+class DECLARE;
+
+@name('[ПСБ] Библиотека')
+library PSH_LIB is
+dp integer:=0;	--управление debug_pipe
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+fmt	   string(10):='dd/mm/yyyy';
+fmtHMS string(22):='dd/mm/yyyy HH24:MI:SS';
+
+public function CalcErrorMsg (p_SENDER_RECEIVER_REQ in [SHORT_CLIENT], rDecl ref [DECLARE]) return varchar2(1024) is 
+ret varchar2(1024);
+
+nameBASE varchar(32):=sys_context('USERENV','DB_NAME'); --BVG 19/12/2021 Лимиты БОС
+OpDate [DATE];
+
+cnt_DAY_IN	[SUMMA];     cnt_DAY_OUT	[SUMMA];
+summ_DAY_IN	[SUMMA];     summ_DAY_OUT	[SUMMA];
+
+cntDays_03_IN number;    cntDays_03_OUT number;
+cnt_03_IN	[SUMMA];     cnt_03_OUT		[SUMMA];
+summ_03_IN	[SUMMA];     summ_03_OUT	[SUMMA];
+
+cntDays_12_IN number;    cntDays_12_OUT number;
+cnt_12_IN	[SUMMA];     cnt_12_OUT		[SUMMA];
+summ_12_IN	[SUMMA];     summ_12_OUT	[SUMMA];
+
+LastMonths_03_IN [DATE]; LastMonths_03_OUT [DATE];
+LastMonths_12_IN [DATE]; LastMonths_12_OUT [DATE];
+
+--ПСБ. Лимит переводов по клиенту на количество опраций по переводам БОС за день
+liminCnt_DAY_OUT		number :=coalesce(::[FP_TUNE].[LIB].get_num_value('PSB_LIMIT_CNT', 				::[FP_TUNE].[LIB].set_canons('METACLASS','KASSA_V')), 1);
+--ПСБ. Лимит переводов по клиенту на количество опраций по переводам БОС за три месяца
+liminCnt_3MON_OUT	number :=coalesce(::[FP_TUNE].[LIB].get_num_value('PSB_LIMIT_CNT_3_MONTHS',		::[FP_TUNE].[LIB].set_canons('METACLASS','KASSA_V')), 1);
+--ПСБ. Лимит переводов по клиенту на количество опраций по переводам БОС за год
+liminCnt_12MON_OUT	number :=coalesce(::[FP_TUNE].[LIB].get_num_value('PSB_LIMIT_CNT_12_MONTHS',	::[FP_TUNE].[LIB].set_canons('METACLASS','KASSA_V')), 4);
+
+--ПСБ. Лимит переводов по клиенту в день
+limit_DAY_OUT		[SUMMA]:=coalesce(::[FP_TUNE].[LIB].get_num_value('PSB_LIMIT_DAY', 				::[FP_TUNE].[LIB].set_canons('METACLASS','KASSA_V')), 200000);
+--ПСБ. Лимит переводов по клиенту на 3 месяца
+limit_03_OUT		[SUMMA]:=coalesce(::[FP_TUNE].[LIB].get_num_value('PSB_LIMIT_03', 				::[FP_TUNE].[LIB].set_canons('METACLASS','KASSA_V')), 200000);
+--ПСБ. Лимит переводов по клиенту на год
+limit_12_OUT		[SUMMA]:=coalesce(::[FP_TUNE].[LIB].get_num_value('PSB_LIMIT_12', 				::[FP_TUNE].[LIB].set_canons('METACLASS','KASSA_V')), 200000);
+
+liminCnt_DAY_IN		number :=coalesce(::[FP_TUNE].[LIB].get_num_value('PSB_LIMIT_CNT_IN', 			::[FP_TUNE].[LIB].set_canons('METACLASS','KASSA_V')), 1);
+liminCnt_3MON_IN	number :=coalesce(::[FP_TUNE].[LIB].get_num_value('PSB_LIMIT_CNT_3_MONTHS_IN',	::[FP_TUNE].[LIB].set_canons('METACLASS','KASSA_V')), 1);
+liminCnt_12MON_IN	number :=coalesce(::[FP_TUNE].[LIB].get_num_value('PSB_LIMIT_CNT_12_MONTHS_IN',	::[FP_TUNE].[LIB].set_canons('METACLASS','KASSA_V')), 4);
+
+limit_DAY_IN		[SUMMA]:=coalesce(::[FP_TUNE].[LIB].get_num_value('PSB_LIMIT_DAY_IN',		::[FP_TUNE].[LIB].set_canons('METACLASS','KASSA_V')), 200000);
+limit_03_IN			[SUMMA]:=coalesce(::[FP_TUNE].[LIB].get_num_value('PSB_LIMIT_03_IN',			::[FP_TUNE].[LIB].set_canons('METACLASS','KASSA_V')), 200000);
+limit_12_IN			[SUMMA]:=coalesce(::[FP_TUNE].[LIB].get_num_value('PSB_LIMIT_12_IN',			::[FP_TUNE].[LIB].set_canons('METACLASS','KASSA_V')), 200000);
+
+tmpSum [SUMMA];
+begin
+	--if nameBASE<>'IBSO' then OpDate:=rDecl.[DOCUMENT_DATE];
+	--else					 OpDate:=trunc(sysdate);
+	--end if;
+	OpDate:=rDecl.[DOCUMENT_DATE];
+	
+	LastMonths_03_IN	= LastMonths_03_OUT	:=Add_Months(trunc(sysdate),-3);
+	LastMonths_12_IN	= LastMonths_12_OUT	:=OpDate-365; --Add_Months(trunc(sysdate),-12)
+	cntDays_03_IN		= cntDays_03_OUT	:=OpDate-LastMonths_03_OUT+1;
+	cntDays_12_IN		= cntDays_12_OUT	:=OpDate-LastMonths_12_OUT+1;
+
+	cnt_DAY_IN	= cnt_DAY_OUT	:= 0;
+	cnt_03_IN	= cnt_03_OUT	:= 0;
+	cnt_12_IN	= cnt_12_OUT 	:= 0;
+	summ_DAY_IN	= summ_DAY_OUT	:= 0;
+	summ_03_IN	= summ_03_OUT	:= 0;
+	summ_12_IN	= summ_12_OUT	:= 0;
+	
+	if rDecl.[OPER].[CODE] = 'OUTPUT' then	p_SENDER_RECEIVER_REQ:=rDecl.[SENDER_REQ];
+	else									p_SENDER_RECEIVER_REQ:=rDecl.[RECEIVER_REQ];
+	end if;
+	for decl in ::[DECLARE] where --decl.[OPER].[CODE] = 'OUTPUT' and
+							decl.[SENDER_REQ].[NAME] = p_SENDER_RECEIVER_REQ.[NAME]
+							and decl.[DOCUMENT_DATE] >= LastMonths_12_OUT --trunc(sysdate)-365
+							and decl.[COM_STATUS].[CODE] != 'ANNUL'
+		--order by decl.[OPER].[CODE], decl.[DOCUMENT_DATE] desc
+	loop
+		if decl.[OPER].[CODE] = 'OUTPUT' then
+			if decl.[DOCUMENT_DATE] >= OpDate then -- за день
+				cnt_DAY_OUT	:= cnt_DAY_OUT	+1;
+				cnt_03_OUT	:= cnt_03_OUT	+1;
+				cnt_12_OUT 	:= cnt_12_OUT	+1;
+				
+				summ_DAY_OUT	:= summ_DAY_OUT	+ trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+				summ_03_OUT		:= summ_03_OUT	+ trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+				summ_12_OUT		:= summ_12_OUT	+ trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+			elsif decl.[DOCUMENT_DATE] >= LastMonths_03_OUT then --trunc(sysdate)-62 then -- за последние 3 месяца
+				cnt_03_OUT	:= cnt_03_OUT	+1;
+				cnt_12_OUT 	:= cnt_12_OUT	+1;
+				
+				summ_03_OUT := summ_03_OUT + trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+				summ_12_OUT := summ_12_OUT + trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+			else	-- за год
+				cnt_12_OUT 	:= cnt_12_OUT	+1;
+				summ_12_OUT := summ_12_OUT + trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+			end if;
+		else
+			if decl.[DOCUMENT_DATE] >= OpDate then -- за день
+				cnt_DAY_IN	:= cnt_DAY_IN	+1;
+				cnt_03_IN	:= cnt_03_IN	+1;
+				cnt_12_IN 	:= cnt_12_IN	+1;
+				
+				summ_DAY_IN	:= summ_DAY_IN	+ trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+				summ_03_IN		:= summ_03_IN	+ trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+				summ_12_IN		:= summ_12_IN	+ trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+			elsif decl.[DOCUMENT_DATE] >= LastMonths_03_IN then --trunc(sysdate)-62 then -- за последние 3 месяца
+				cnt_03_IN	:= cnt_03_IN	+1;
+				cnt_12_IN 	:= cnt_12_IN	+1;
+				
+				summ_03_IN := summ_03_IN + trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+				summ_12_IN := summ_12_IN + trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+			else	-- за год
+				cnt_12_IN 	:= cnt_12_IN	+1;
+				summ_12_IN := summ_12_IN + trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+			end if;
+		end if;
+		if nameBASE<>'IBSO' then
+			tmpSum:=trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+			debug_pipe(nameBASE||'.CalcErrorMsg -- '
+			||decl.[OPER].[CODE]
+			||' №'||rDecl.[DOCUMENT_NUM]
+			||' '||to_char(rDecl.[DOCUMENT_DATE],fmt)
+			||' Сумма:'||decl.[SUM_PAY]
+			||' Курс:'||decl.[CUR_PAY]
+			||' СуммаRUB:'||tmpSum,dp);
+			
+			debug_pipe(nameBASE||'.CalcErrorMsg -- '||TB$||' summ_DAY_IN |summ_03_IN |summ_12_IN ='||summ_DAY_IN||'|'||summ_03_IN||'|'||summ_12_IN   ||' cnt_DAY_IN |cnt_03_IN |cnt_12_IN ='||cnt_DAY_IN||'|'||cnt_03_IN||'|'||cnt_12_IN,dp);
+			debug_pipe(nameBASE||'.CalcErrorMsg -- '||TB$||' summ_DAY_OUT|summ_03_OUT|summ_12_OUT='||summ_DAY_OUT||'|'||summ_03_OUT||'|'||summ_12_OUT||' cnt_DAY_OUT|cnt_03_OUT|cnt_12_OUT='||cnt_DAY_OUT||'|'||cnt_03_OUT||'|'||cnt_12_OUT,dp);
+		end if;
+	end loop;
+	if cnt_DAY_OUT	> liminCnt_DAY_OUT
+	or cnt_03_OUT	> liminCnt_3MON_OUT
+--	or cnt_12_OUT	> liminCnt_12MON_OUT
+	or summ_DAY_OUT	> limit_DAY_OUT
+	or summ_03_OUT	> limit_03_OUT
+--	or summ_12_OUT	> limit_12_OUT
+	--ПСБ. Включить контроль лимитов клиента при получении денежных переводов без открытия счета
+	or (nvl([FP_TUNE]::[LIB].get_bool_value ('PSH_LIMIT_DECL_CHECK_IN_ON', throw_error == '0'), false) and 
+	 ( cnt_DAY_IN	> liminCnt_DAY_IN
+	or cnt_03_IN	> liminCnt_3MON_IN
+--	or cnt_12_IN	> liminCnt_12MON_IN
+	or summ_DAY_IN	> limit_DAY_IN
+	or summ_03_IN	> limit_03_IN))
+--	or summ_12_IN	> limit_12_IN))
+	then
+		/*ret := 'Внимание!'||NL$||
+				'Запросите док-ты,подтверждающие источники происхождения денежных средств и письменное пояснение о цели перевода (куда,кому и за что перевод или получение д/с)'||NL$||
+				NL$||
+				'Операция не может быть проведена'||NL$;
+				*/
+		if cnt_DAY_OUT	> liminCnt_DAY_OUT
+		or cnt_03_OUT	> liminCnt_3MON_OUT
+--		or cnt_12_OUT	> liminCnt_12MON_OUT
+		then	ret:=ret||'Превышен общий лимит кол-ва переводов на Клиента'||NL$||
+				iif(cnt_DAY_OUT	> liminCnt_DAY_OUT   ,'за день '||liminCnt_DAY_OUT      ||NL$,'')||
+				iif(cnt_03_OUT	> liminCnt_3MON_OUT  ,'за три мес. '||liminCnt_3MON_OUT ||NL$,'')||
+--				iif(cnt_12_OUT	> liminCnt_12MON_OUT ,'за год '||liminCnt_12MON_OUT     ||NL$,'')||
+				NL$;
+		end if;
+		if summ_DAY_OUT	> limit_DAY_OUT
+		or summ_03_OUT	> limit_03_OUT
+--		or summ_12_OUT	> limit_12_OUT
+		then	ret:=ret||'Превышен общий лимит суммы переводов на Клиента'||NL$||
+				iif(cnt_DAY_OUT	> liminCnt_DAY_OUT   ,'за день '||limit_DAY_OUT     ||NL$,'')||
+				iif(cnt_03_OUT	> liminCnt_3MON_OUT  ,'за три мес. '||limit_03_OUT  ||NL$,'')||
+--				iif(cnt_12_OUT	> liminCnt_12MON_OUT ,'за год '||limit_12_OUT       ||NL$,'')||
+				NL$;
+		end if;
+		
+
+		--ПСБ. Включить контроль лимитов клиента при получении денежных переводов без открытия счета
+		if nvl([FP_TUNE]::[LIB].get_bool_value ('PSH_LIMIT_DECL_CHECK_IN_ON', throw_error == '0'), false) then
+			if cnt_DAY_IN	> liminCnt_DAY_IN
+			or cnt_03_IN	> liminCnt_3MON_IN
+--			or cnt_12_IN	> liminCnt_12MON_IN
+			then	ret:=ret||'Превышен общий лимит кол-ва получений на Клиента'||NL$||
+					iif(cnt_DAY_IN	> liminCnt_DAY_IN   ,'за день '||liminCnt_DAY_IN      ||NL$,'')||
+					iif(cnt_03_IN	> liminCnt_3MON_IN  ,'за три мес. '||liminCnt_3MON_IN ||NL$,'')||
+--					iif(cnt_12_IN	> liminCnt_12MON_IN ,'за год  '||liminCnt_12MON_IN    ||NL$,'')||
+					NL$;
+			end if;
+			if summ_DAY_IN	> limit_DAY_IN
+			or summ_03_IN	> limit_03_IN
+--			or summ_12_IN	> limit_12_IN
+			then	ret:=ret||'Превышен общий лимит суммы получений на Клиента'||NL$||
+					iif(cnt_DAY_IN	> liminCnt_DAY_IN   ,'за день '||limit_DAY_IN     ||NL$,'')||
+					iif(cnt_03_IN	> liminCnt_3MON_IN  ,'за три мес. '||limit_03_IN  ||NL$,'')||
+--					iif(cnt_12_IN	> liminCnt_12MON_IN ,'за год  '||limit_12_IN      ||NL$,'')||
+					NL$;
+			end if;
+		end if;
+		ret:=ret||'Сумма (в руб.эквиваленте) переводов за последний'||NL$||
+		'год '       ||iif(summ_12_OUT =0,'0',trim(to_char(summ_12_OUT,  '99G999G999D99')))||' Кол-во '||cnt_12_OUT||NL$||
+		'три мес. '  ||iif(summ_03_OUT =0,'0',trim(to_char(summ_03_OUT,  '99G999G999D99')))||' Кол-во '||cnt_03_OUT||NL$||
+		'день '      ||iif(summ_DAY_OUT=0,'0',trim(to_char(summ_DAY_OUT, '99G999G999D99')))||' Кол-во '||cnt_DAY_OUT||NL$;
+		ret:=ret||'Сумма (в руб.эквиваленте) полученных за последний'||NL$||
+		'год '       ||iif(summ_12_IN =0,'0',trim(to_char(summ_12_IN,   '99G999G999D99')))||' Кол-во '||cnt_12_IN||NL$||
+		'три мес. '  ||iif(summ_03_IN =0,'0',trim(to_char(summ_03_IN,   '99G999G999D99')))||' Кол-во '||cnt_03_IN||NL$||
+		'день '      ||iif(summ_DAY_IN=0,'0',trim(to_char(summ_DAY_IN,  '99G999G999D99')))||' Кол-во '||cnt_DAY_IN||NL$||
+		NL$||'Клиент: '||p_SENDER_RECEIVER_REQ.[NAME];
+		--NL$||'Действующий лимит по клиенту:отсутствует.';
+	end if;
+	if nameBASE<>'IBSO' then
+		debug_pipe(SubStr(nameBASE||'.CalcErrorMsg -- '||rDecl%class||'.'||rDecl%id||' '||ret,1,2000),dp);
+	end if;
+	/**/
+	if Length(ret)>0 then --BWG 24/12/2021 Есть отметка ФМ !!!
+		if ::[DECLARE].[RUN_SCHEME_EXT].Only_Check_FM(rDecl)='Да' then
+			debug_pipe(nameBASE||'.CalcErrorMsg -- Есть отметка ФМ !!! Пропускаем',dp);
+			ret:=null;
+		end if;
+	end if;
+	/**/
+	debug_pipe(ret,0);
+	return ret;
+end;
+
+public function CalcErrorMsg_short (p_SENDER_RECEIVER_REQ in [SHORT_CLIENT], rDecl ref [DECLARE]) return varchar2(1024) is 
+ret varchar2(1024);
+summ_03_OUT 	[SUMMA];
+cnt_03_OUT	[SUMMA];
+summ_12_OUT [SUMMA];
+cnt_12_OUT 	[SUMMA];
+cnt_DAY_OUT 	[SUMMA];
+
+limit_03_OUT  [SUMMA]:=coalesce(::[FP_TUNE].[LIB].get_num_value('PSB_LIMIT_12', 			 ::[FP_TUNE].[LIB].set_canons('METACLASS','KASSA_V')), 200000);
+limit_12_OUT  [SUMMA]:=coalesce(::[FP_TUNE].[LIB].get_num_value('PSB_LIMIT_03', 			 ::[FP_TUNE].[LIB].set_canons('METACLASS','KASSA_V')), 200000);
+ErrMsg string(32000);
+begin
+	/** /
+	return ret;
+
+	summ_03_OUT 	:= 0;
+	cnt_03_OUT	:= 0;
+	summ_12_OUT := 0;
+	cnt_12_OUT 	:= 0;
+	cnt_DAY_OUT 	:= 0;
+	for decl in ::[DECLARE] where decl.[OPER].[CODE] = 'OUTPUT'
+							  and decl.[SENDER_REQ].[NAME] = p_SENDER_RECEIVER_REQ.[NAME]
+							  and decl.[DOCUMENT_DATE] >= trunc(sysdate)-365
+							  and decl.[COM_STATUS].[CODE] != 'ANNUL'
+	loop
+		
+		
+		if decl.[DOCUMENT_DATE] >= trunc(sysdate) then
+			summ_03_OUT  := summ_03_OUT  + trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+			summ_12_OUT := summ_12_OUT + trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+			
+			cnt_DAY_OUT 	:= cnt_DAY_OUT		+1;
+			cnt_03_OUT	:= cnt_03_OUT	+1;
+			cnt_12_OUT 	:= cnt_12_OUT	+1;
+		elsif decl.[DOCUMENT_DATE] >= trunc(sysdate)-62 then
+			summ_03_OUT  := summ_03_OUT  + trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+			summ_12_OUT := summ_12_OUT + trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+					
+			cnt_03_OUT	:= cnt_03_OUT	+1;
+			cnt_12_OUT 	:= cnt_12_OUT	+1;		
+		else
+			summ_12_OUT := summ_12_OUT + trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);		
+			cnt_12_OUT 	:= cnt_12_OUT	+1;			
+		end if;
+		
+	end loop;
+	/**/
+  	if  nvl ([FP_TUNE]::[LIB].get_bool_value ('PSH_LIMIT_DECL_CHECK_ON', throw_error == '0'), false) then
+  		ErrMsg:=CalcErrorMsg(p_SENDER_RECEIVER_REQ, rDecl);
+  		if ErrMsg is not null then
+  			--pragma error (ErrMsg);
+			ret :='Внимание! Превышен общий лимит на Клиента '||limit_03_OUT||' руб. Запросите док-ты, подтверждающие источники происхождения денежных средства и письменные пояснения с какой целью и кому переводятся денежных средства';
+  		end if;
+  	end if;
+	/**/
+	return ret;	
+	
+end;
+
+public function isDecl (p_mdoc ref [MAIN_DOCUM]) return boolean is 
+ret boolean;
+begin
+	ret := true;
+	if p_mdoc.[IN_FOLDER].[BUSINESS_OP].[GROUP_ID] = 'DECLARE' then
+		ret := true;
+	end if;
+	return ret;	
+end;
+
+public function CheckLim (ClRef ref [CL_PRIV], p_SENDER_RECEIVER_REQ in [SHORT_CLIENT], rDecl ref [DECLARE]) return boolean is 
+ret boolean;
+summ [SUMMA];
+
+LastMonths_03_OUT [DATE];
+limit_03_OUT [SUMMA]:=coalesce(::[FP_TUNE].[LIB].get_num_value('PSB_LIMIT_12', 	 ::[FP_TUNE].[LIB].set_canons('METACLASS','KASSA_V')), 200000);
+
+ErrMsg string(32000);
+begin
+	ret := true;
+	/** /
+	if  nvl ([FP_TUNE]::[LIB].get_bool_value ('PSH_LIMIT_DECL_CHECK_ON', throw_error == '0'), false) then
+		LastMonths_03_OUT:=Add_Months(trunc(sysdate),-3);
+		summ := 0;
+		
+		for decl in ::[DECLARE] where decl.[OPER].[CODE] = 'OUTPUT'
+								  and decl.[SENDER_REQ].[NAME] = p_SENDER_RECEIVER_REQ.[NAME]
+								  and decl.[DOCUMENT_DATE] >= LastMonths_03_OUT --trunc(sysdate)-62
+								  and decl.[COM_STATUS].[CODE] != 'ANNUL'
+		loop
+			summ := summ + trunc((decl.[SUM_PAY]*::[DOCUMENT].[LIB_CUR].Get_rate(decl.[CUR_PAY],decl.[DOCUMENT_DATE])),2);
+		end loop;
+		
+		if summ > limit_03_OUT then --200 000
+			ret := false;
+		else
+			ret := true;
+		end if;
+	end if;
+	/**/
+	
+	if  nvl ([FP_TUNE]::[LIB].get_bool_value ('PSH_LIMIT_DECL_CHECK_ON', throw_error == '0'), false) then
+		ErrMsg:=CalcErrorMsg(p_SENDER_RECEIVER_REQ, rDecl);
+		if ErrMsg is not null then
+			ret := false;	--pragma error (ErrMsg);
+		end if;
+	end if;
+	return ret;
+end;
+end;

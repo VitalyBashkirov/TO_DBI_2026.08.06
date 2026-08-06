@@ -1,0 +1,94 @@
+class PSH_CUST_DOCS_IN;
+
+@import_plsql(true)
+@name('[ПСБ] 4.Исполнить')
+@tag('COPIED')
+static method PSH_PROCESS_DOCS is
+pragma include(::[RUNTIME].[MACRO_LIB]);
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB_TC]); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+
+type TDocs is table of ref [PSH_CUST_DOCS_IN]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+PSH_PROCESS_DOCS is
+
+execute is
+
+v_type		ref [PSH_CUST_DOC_TYP]; -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+
+type Q_DocsType is
+	select	x(x)
+	in		::[PSH_CUST_DOCS] -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	where	x%class = ::[PSH_CUST_DOCS_IN]%class -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+			and x.[DOC_STATE] in (&libtc.stPodtv, &libtc.stErrCheckSt)
+			and x.[DOC_TYPE] = v_type;
+
+type Q_Docs is
+	select	x(x)
+	in		::[PSH_CUST_DOCS] -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	where	x%class = ::[PSH_CUST_DOCS_IN]%class -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+			and x.[DOC_STATE] in (&libtc.stPodtv, &libtc.stErrCheckSt);
+
+type ref_QDocs is ref cursor return Q_Docs;
+type ref_QDocsType is ref cursor return Q_DocsType;
+
+type T_Prioritet is table of ref [PSH_CUST_DOC_TYP]; -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+
+v_cur 		ref_QDocs;
+v_curType	ref_QDocsType;
+v_tab_docs	TDocs;
+v_prior		T_Prioritet;
+n			pls_integer;
+v_lockId	pls_integer;
+
+begin
+	v_lockId := &lib.setLock(&METHOD$ID);	
+	
+	v_prior(1) := &libtc.typeTPO;
+	v_prior(2) := &libtc.typeTOO;
+	v_prior(3) := &libtc.typeUCO;
+	v_prior(4) := &libtc.typeUCC;
+	v_prior(5) := &libtc.typeCSO;
+	v_prior(6) := &libtc.typeSTO;
+	
+	n := v_prior.first;
+	while n is not null loop
+		v_type := v_prior(n);
+		v_curType.open(Q_DocsType);
+		loop
+			v_curType.fetch_limit(100, v_tab_docs);
+			
+			exit when v_tab_docs.count = 0;			
+			
+			v_tab_docs.[PSH_PROCESS_DOC]();
+			
+			v_tab_docs.delete;
+						
+			exit when v_curType.notfound;
+		end loop;
+		
+		v_curType.close;
+		n := v_prior.next(n);
+	end loop;
+	
+	v_cur.open(Q_Docs);
+	loop
+		v_cur.fetch_limit(100, v_tab_docs);			
+		
+		exit when v_tab_docs.count = 0;
+		
+		v_tab_docs.[PSH_PROCESS_DOC]();
+		
+		v_tab_docs.delete;
+		
+		exit when v_cur.notfound;
+	end loop;
+	v_cur.close;
+	
+	&lib.delLock(v_lockId);
+	
+exception
+	when others then
+		&lib.delLock(v_lockId);	
+		raise;
+end;
+end;
+end;

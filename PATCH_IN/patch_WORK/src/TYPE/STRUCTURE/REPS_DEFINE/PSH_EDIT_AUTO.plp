@@ -1,0 +1,27 @@
+class REPS_DEFINE;
+
+@name('[ПСБ] Изменить')
+@tag('CREATED')
+method PSH_EDIT_AUTO is
+PSH_EDIT_AUTO (
+	@name('Справочник приложений') P_SRC_APP  in [NAME],
+	@name('Список приложений')     P_LIST_APP in [LIST_APP_ARR]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_SRC_APP := this.[SRC_APP];
+	P_LIST_APP := this.[LIST_APP];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+begin
+	-- Установка значения реквизита "Справочник приложений"
+	[SRC_APP] := P_SRC_APP;
+end;
+end;
+end;

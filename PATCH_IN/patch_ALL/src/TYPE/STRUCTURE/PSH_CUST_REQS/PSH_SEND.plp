@@ -1,0 +1,59 @@
+class PSH_CUST_REQS;
+
+@import_plsql(true)
+@name('[ПСБ] Отправить')
+@tag('COPIED')
+method PSH_SEND is
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma include(::[GOV_INTERFACE].[PRX_CIT]);
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB_TC]);
+pragma macro(cit, '[GOV_INTERFACE].[PRX_CIT]', substitute);
+PSH_SEND is
+
+execute is
+/*********************************************************************
+Назначение:
+
+stuly, последнее изменение 23 Февраль 2017 г.
+*********************************************************************/
+
+v_bo		ref [CIT_BO];
+v_CodeBo 		::[CIT_BO].[CODE]%type;
+v_sa		ref [CIT_ABONENT];
+begin
+	if this.[IS_OUT] then
+		begin
+			v_CodeBo := nvl(&libfun.getBP(this.[DOC]), this.[CODE_BO]);
+			v_sa 	:= this.[SYS_AB];
+			
+			if not (v_CodeBo is null or v_sa is null) then
+				begin
+					-- поищем бизнес-процесс
+					select	x(x)
+					in		::[CIT_BO] all
+					where	x.[CODE] = v_CodeBo
+						and x.[ABONENT] = v_sa
+					fetch 1
+					into	v_bo;
+				exception
+					when NO_DATA_FOUND then
+						pragma error('Не найден бизнес-процесс по коду <' || v_CodeBo || '>');
+				end;
+				
+				&cit.send(v_bo, this.[CONTENT], p_self == case when v_sa.[IS_OUR_SYS] and v_sa.[DB_LINK_NAME] is null then true else false end);	
+				this.[REQ]	:= &cit.get_last_request;
+				
+			else
+				pragma error('Не заполнен бизнес-процесс или система-абонент');
+			end if;
+		exception
+			when message.app_exception then
+				&debug('Ошибка: ' || sqlerrm ,0)
+				this.[STATE_REQ]:= &libtc.stRSendErr;			
+		end;
+	else
+		pragma error('Операция работает только с исходящими запросами!');
+	end if;
+end;
+end;
+end;

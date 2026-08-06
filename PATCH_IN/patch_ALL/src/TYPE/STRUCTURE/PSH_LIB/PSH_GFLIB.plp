@@ -1,0 +1,678 @@
+class PSH_LIB;
+
+@import_plsql(true)
+@name('[ПСБ] Библиотека')
+@tag('gf')
+static method PSH_GFLIB is
+public pragma macro(gfLib,'::[PSH_LIB].[PSH_GFLIB]'); -- updated CHANGE_QUALIFIER ITB_LIB->TCB_LIB 02/06/16 -- updated CHANGE_QUALIFIER TCB_LIB->PSHB_LIB 23/01/19 -- updated CHANGE_QUALIFIER PSHB_LIB->PSH_LIB 09/10/25 -- updated CHANGE_SHORT_NAME GFLIB->PSH_GFLIB 14/10/25
+
+public pragma macro(gfDbgStr0,'&METHOD$||'' : ''||([1])', substitute);
+public pragma macro(gfDbgStr1,'&METHOD$||'' : [1]=''||([1])', substitute);
+public pragma macro(gfDbgStr2,'&METHOD$||'' : [1]=''||([1])||''  [2]=''||([2])', substitute);
+public pragma macro(gfDbgStr3,'&METHOD$||'' : [1]=''||([1])||''  [2]=''||([2])||''  [3]=''||([3])', substitute);
+public pragma macro(gfDbgStr4,'&METHOD$||'' : [1]=''||([1])||''  [2]=''||([2])||''  [3]=''||([3])||''  [4]=''||([4])', substitute);
+public pragma macro(gfDbgStr5,'&METHOD$||'' : [1]=''||([1])||''  [2]=''||([2])||''  [3]=''||([3])||''  [4]=''||([4])||''  [5]=''||([5])', substitute);
+public pragma macro(gfDbgStr6,'&METHOD$||'' : [1]=''||([1])||''  [2]=''||([2])||''  [3]=''||([3])||''  [4]=''||([4])||''  [5]=''||([5])||''  [6]=''||([6])', substitute);
+public pragma macro(gfDbgStr7,'&METHOD$||'' : [1]=''||([1])||''  [2]=''||([2])||''  [3]=''||([3])||''  [4]=''||([4])||''  [5]=''||([5])||''  [6]=''||([6])||''  [7]=''||([7])', substitute);
+public pragma macro(gfDebug,'debug(replace([1],chr(0),chr(8)))',substitute);  -- Решение проблемы нулевого символа, вместо него выдается BackSpace - кружок в прямоугольнике
+public pragma macro(gfDebug_pipe,'debug_pipe(replace([1],chr(0),chr(8)))',substitute);
+
+public pragma macro(gfInc, '[1]:=nvl([1],0)+1',substitute);
+public pragma macro(gfInc2,'nvl([1],0)+1',substitute);
+public pragma macro(gfIf,'if [1] then [2]; end if',substitute);
+public pragma macro(gfIfElse,'if [1] then [2]; else [3]; end if',substitute);
+public pragma macro(gfAdd2ArEl,'if [1].exists([2]) then [1]([2]):=[1]([2])+[3]; else [1]([2]):=[3]; end if',substitute);
+public pragma macro(gfBetween,'(([2] is null or [1]>=[2]) and ([3] is null or [1]<=[3]))',substitute);
+public pragma macro(gfBetween2,'([1]>=coalesce([2],to_date(''01.01.0001'',''DD.MM.YYYY'')) and [1]<=coalesce([3],to_date(''09.09.9999'',''DD.MM.YYYY'')))',substitute); -- для  where в select'ах
+public pragma macro(gfBetween3,'([1]>=coalesce([2],to_date(''01.01.0001'',''DD.MM.YYYY'')) and [1]<coalesce([3]+1,to_date(''09.09.9999'',''DD.MM.YYYY'')))',substitute); -- для  where в select'ах
+
+public pragma macro(gfLocate, 'pragma DEFOPTIONS(get,SUBSTITUTE); pragma SUBSTITUTE(false); [1]:=[2]([3]); pragma DEFOPTIONS(set,SUBSTITUTE); if [1] is null then [4]; end if',substitute);
+public pragma macro(gfLocate2,'pragma DEFOPTIONS(get,SUBSTITUTE); pragma SUBSTITUTE(false); if [1]%locate(x where [2]) is null then pragma DEFOPTIONS(set,SUBSTITUTE); [3]; else [4]; end if',substitute);
+public pragma macro(gfLocate3,'pragma DEFOPTIONS(get,SUBSTITUTE); pragma SUBSTITUTE(false); [1]:=[2]([3])[4]; pragma DEFOPTIONS(set,SUBSTITUTE)',substitute);
+public pragma macro(gfLocate4,'select x(count(x%id)) in [2] where [3] into [1]',substitute);
+public pragma macro(gfLocate5,'[1]:=null; pragma DEFOPTIONS(get,SUBSTITUTE); pragma SUBSTITUTE(false); select y(y.z) in (select x(x[4] z) in [2] where [3] /* в терминах x, order by здесь же в конце */) where rownum<=1 into [1]; pragma DEFOPTIONS(set,SUBSTITUTE)',substitute);
+
+public pragma macro(gfStamp,'sysdate||'' ''||StdLib.FIO(stdlib.userid.[NAME],''Ф И.О.'')||'' ''||sys_context(''USERENV'',''DB_NAME'')');
+
+public pragma macro(gfDP,'::[PSH_LIB].[PSH_GFLIB].Debug_Pipe_2'); -- updated CHANGE_QUALIFIER ITB_LIB->TCB_LIB 02/06/16 -- updated CHANGE_QUALIFIER TCB_LIB->PSHB_LIB 23/01/19 -- updated CHANGE_QUALIFIER PSHB_LIB->PSH_LIB 09/10/25 -- updated CHANGE_SHORT_NAME GFLIB->PSH_GFLIB 14/10/25
+public pragma macro(gfDate,'trunc(to_date(lpad([1],2,''0'')||lpad([2],2,''0'')||[3],''DDMMYYYY''))',substitute);
+
+public pragma macro(gfLength,'nvl(length([1]),0)',substitute);
+
+public pragma macro(gfOne,'[1]');
+	-- Для обращения к полю [1] в определении макроса, например: pragma macro(x,'ac:=cr.[ARRAY_DOG_ACC]([NAME_ACCOUNT].[COD]=''[1]'').[ACCOUNT_DOG].&gfOne.[2]');
+public pragma macro(gfTwo,'[2]');
+public pragma macro(gfThree,'[3]');
+
+public pragma macro(gfNVL2Num,'bool_num([1] is null,[3],[2])',substitute);
+public pragma macro(gfNVL2Char,'bool_char([1] is null,[3],[2])',substitute);
+
+public pragma macro(gfMSL,'32000');  -- Maximal String Length в здешних строковых функциях, доложна быть <=32767
+
+	-- Выполнение чего-то на локальном компе - эту строку надо передать ф-ции Execute в клиент-скрипте.
+	-- [1] - переменная/константа со строкой выполнения, [2] - вид окна  (пусто или 0 - без окна, 1 - нормальное,
+	-- про остальные см., например, http://ss64.com/vb/run.html, [3] - с ожиданием завершения (true) или без (пусто или false).
+	-- Пример употребления (при использовании CSMD): V_TEXT:=V_TEXT||&gfExecLocal('notepad',6,false);
+public pragma macro(gfExecLocal,'NL$||
+	''set wscript_shell=createobject("wscript.shell")''||NL$||
+	''wscript_shell.Run "''||[1]||''",[2],[3]''||NL$||
+	''wscript_shell=null''
+	',substitute);
+	
+	-- Выполнение командной строки из под командного интерпретатора на локальном компе
+public pragma macro(gfExecLocal2,'&gfExecLocal(''%comspec% /c ''||[1],[2],[3])
+	',substitute);
+	
+	-- Получение полного имени батника. [1] - переменная куда, [2] - имя настройки ([FP_TUNE]) с именем батника,
+	-- [3] - строка критериев. К имени спереди добавляется каталог из системного параметра ([SYSTEM_PARAMS]) ITB_PATH_BAT .
+	-- Пример употребления:
+	-- &gfGetBatFullName(bat,'ITB_BAT_CONVERT_REESTR',::[FP_TUNE].[LIB].set_canons('LIST',::[LIST]([HISTORY_FILES] = V_COLL));
+public pragma macro(gfGetBatFullName,'
+	[1]:=::[FP_TUNE].[LIB].get_str_value([2],[3],null);
+	if [1] is not null then
+		[1]:=::[SYSTEM_PARAMS].[GET](''ITB_PATH_BAT'',true)||''\''||[1];
+	end if
+	',substitute);
+
+---------------- ФУНКЦИИ ------------------
+
+public type gt_StrTable is table of varchar2(255);
+public function InvertStr				-- Перевернуть строку p_s
+	(p_s varchar2(&gfMSL)
+	) return varchar2(&gfMSL) is 
+ret_s varchar2(&gfMSL);
+
+begin
+	for i in 1 .. &gfLength(p_s) loop
+		ret_s:=substr(p_s,i,1)||ret_s;
+	end loop;
+
+	return ret_s;
+end;
+
+public function StrBrk    -- Первая позиция p_s, в которой стоит символ из p_s2
+	(p_s varchar2(&gfMSL)
+	,p_s2 varchar2(&gfMSL)
+	) return number is 
+
+begin
+	for i in 1 .. &gfLength(p_s) loop
+		if instr(p_s2,substr(p_s,i,1))>0 then
+			return i;
+		end if;
+	end loop;
+	return 0;
+end;
+
+v_NthpieceS0 varchar2(&gfMSL);
+v_NthPieceN0 number;
+v_NthPieceD0 varchar2(&gfMSL);
+v_NthPieceS varchar2(&gfMSL);
+v_NthPieceD varchar2(&gfMSL);
+v_NthPieceIsOneSymb0 boolean;
+
+public function NthPiece
+/* N-тый кусок строки p_s. p_d - разделитель, если не задан - пробел. Если в p_d больше
+одного символа, то в зависимости от p_IsOneSymb ищется любой символ из p_d (true) или
+вся строка (false). Если разделитель - пробел, строка тримится и группы пробелов
+считаются одним.
+Если p_n<0 - (-p_n)-тый кусок с конца.
+p_IsLast - выходной, последний ли это кусок.
+*/
+	(p_s varchar2(&gfMSL)
+	,p_n number
+	,p_d varchar2(&gfMSL) default ' '
+	,p_IsOneSymb boolean default false
+	,p_IsLast out boolean
+) return varchar2(&gfMSL) is 
+
+i number := 0;
+j number;
+ret_s varchar2(&gfMSL);
+IsFromEnd boolean :=false;
+IsTrimSpaces boolean ;
+
+begin
+	if p_n<0 then
+		p_n:=-p_n;
+		p_s:=InvertStr(p_s);
+		IsFromEnd:=true;
+	end if;
+
+	p_IsOneSymb:=p_IsOneSymb or &gfLength(p_d)=1;
+	
+	if ((p_s=v_NthPieceS0) and (p_n>v_NthPieceN0) and (p_d=v_NthPieceD0) and
+		(p_IsOneSymb=v_NthPieceIsOneSymb0)) then -- Ускорение
+		p_s:=v_NthPieceS;
+		j:=p_n-v_NthPieceN0;
+		v_NthPieceN0:=p_n;
+		p_n:=j;
+		p_d:=v_NthPieceD;
+	else
+		v_NthPieceS0:=p_s;
+		v_NthPieceN0:=p_n;
+		v_NthPieceD0:=p_d;
+		v_NthPieceIsOneSymb0:=p_IsOneSymb;
+		if trim(p_d) is null then  -- Группа пробелов
+			p_d:=' ';
+		end if;
+	end if;
+	
+	IsTrimSpaces:=p_d=' ' or p_IsOneSymb and replace(p_d,' ')!=p_d;
+	if IsTrimSpaces and p_s is not null then
+		p_s:=trim(p_s);
+	end if;
+	
+	ret_s:=Null;
+	p_IsLast:=false;
+	while p_s is not null and i<p_n loop
+		i:=i+1;
+		if (p_IsOneSymb) then
+			j:=StrBrk(p_s,p_d);
+		else
+			j:=instr(p_s,p_d);
+		end if;
+		if j>0 then
+			if (i=p_n) then
+				ret_s:=substr(p_s,1,j-1);
+			end if;
+			if p_IsOneSymb then
+				p_s:=substr(p_s,j+1);
+			else
+				p_s:=substr(p_s,j+&gfLength(p_d));
+			end if;
+			if IsTrimSpaces then
+				p_s:=trim(p_s);
+			end if;
+		else         -- Последний кусок
+			if i=p_n then
+				ret_s:=p_s;
+				p_IsLast:=true;
+			end if;
+			p_s:=null;
+		end if;
+	end loop;
+	
+	v_NthPieceS:=p_s;
+	v_NthPieceD:=p_d;
+	
+	if ret_s is not null and IsFromEnd then
+		ret_s:=InvertStr(ret_s);
+	end if;
+	
+	return ret_s;
+end;
+
+public function NthPiece  -- Предыдущая функция без последнего параметра
+	(p_s varchar2(&gfMSL)
+	,p_n number
+	,p_d varchar2(&gfMSL) default ' '
+	,p_IsOneSymb boolean default false
+) return varchar2(&gfMSL) is 
+IsLast boolean;
+begin
+	return NthPiece(p_s,p_n,p_d,p_IsOneSymb,IsLast);
+end;	
+
+public function IsNumStr   -- Состоит ли строка p_s только из цифр ?
+	(p_s varchar2(&gfMSL)
+) return boolean is 
+i number;
+
+begin
+	i:=replace(p_s,' ','*');  -- При преобразовании строки в число тримит !
+	return true;
+exception
+	when VALUE_ERROR then
+		return false;
+end;
+
+public function StrSet	-- Вставить строку p_s2 в строку p_s1 с n-той позиции - overwrite
+	(p_s1 varchar2(&gfMSL)
+	,p_n number
+	,p_s2 varchar2(&gfMSL)
+) return varchar2(&gfMSL) is 
+begin
+	&gfIf(p_s2 is null or nvl(p_n,0)<=0,return p_s1);
+	return Substr(p_s1,1,p_n-1)||p_s2||Substr(p_s1,p_n+&gfLength(p_s2));
+end;	
+
+public function StrIns	-- Вставить строку p_s2 в строку p_s1 с n-той позиции - insert
+	(p_s1 varchar2(&gfMSL)
+	,p_n number
+	,p_s2 varchar2(&gfMSL)
+) return varchar2(&gfMSL) is 
+begin
+	&gfIf(p_s2 is null or nvl(p_n,0)<=0,return p_s1);
+	return Substr(p_s1,1,p_n-1)||p_s2||Substr(p_s1,p_n);
+end;	
+
+public function Occures -- Сколько раз p_s1 встречается в p_s2
+	(p_s1 varchar2(&gfMSL)
+	,p_s2 varchar2(&gfMSL)
+	) return number is 
+begin
+	if p_s1 is null or p_s2 is null then
+		return 0;
+	else
+		return (&gfLength(p_s2)-&gfLength(replace(p_s2,p_s1)))/&gfLength(p_s1);
+	end if;
+end;
+
+public function Substr2	-- Обертка вокруг substr, параметры те же
+-- Отличия от substr:
+-- при p_n=0 возвращает null (substr воспринимает 0 как 1);
+-- при p_l<0 возвращает до конца кроме -l последних
+	(p_s varchar2(&gfMSL)	-- см. substr
+	,p_n integer			-- см. substr
+	,p_l integer			-- см. substr
+	) return varchar2(&gfMSL) is 
+begin
+	if p_n=0 then
+		return null;
+	elsif p_l<0 then
+		return substr(p_s,p_n,&gfLength(p_s)-p_n+1+p_l);
+	else
+		return substr(p_s,p_n,p_l);
+	end if;
+end;
+
+public function InStr2	-- instr с точностью p_n (возможны p_n отличий). В отличие от InStr boolean
+	(p_s1 varchar2(&gfMSL) -- см. instr
+	,p_s2 varchar2(&gfMSL) -- см. instr
+	,p_n number default 0
+	,p_UseRegExp boolean default false -- Если задана - regexp-сравнение
+) return boolean is 
+
+RESymbols varchar2(&gfMSL) :='.?+*'; -- Разрешаются только эти regexp-выражения: ., .?, .+, .* и их комбинации
+
+begin
+	if p_UseRegExp then
+		if Regexp_InStr(p_s1,replace(p_s2,'_','.'))>0 then
+			return true;
+		end if;
+	else
+		if &gfLength(p_s1)<&gfLength(p_s2) then
+			return false;
+		end if;
+		if p_s1 like '%'||p_s2||'%' then
+			return true;
+		end if;
+	end if;
+	
+	if p_n<=0 then
+		return false;
+	end if;
+	
+	for i in 1..bool_num(instr(p_s2,'_')>0,instr(p_s2,'_')-1,&gfLength(p_s2)) loop
+		if p_UseRegExp and instr(RESymbols,substr(p_s2,i,1))>0 then
+			continue;
+		end if;
+		if InStr2(p_s1,StrSet(p_s2,i,'_'),p_n-1,p_UseRegExp) then -- Рекурсия
+			return true;
+		end if;
+	end loop;
+	
+	return false;
+end;	
+
+public function InList -- Возвращает номер куска p_s2 (разделитель p_d (любой из символов), defaut - запятая), равного p_s1
+	(p_s1 varchar2(&gfMSL)
+	,p_s2 varchar2(&gfMSL)
+	,p_d varchar2(255) default ','
+) return integer is 
+
+s3 varchar2(&gfMSL);
+IsLast boolean;
+
+begin
+	&gfIf(p_s2='*',return 1);
+
+	for i in 1..&gfMSL loop
+		s3:=NthPiece(p_s2,i,p_d,true,IsLast);
+		&gfIf(s3=p_s1,return i);
+		&gfIf(IsLast,return 0);
+	end loop;
+
+	return 0;
+end;
+
+public function NormaliseAc -- Нормализация номера счета
+	(p_Ac varchar2(&gfMSL) -- Номер счета
+	,p_Cur varchar2(&gfMSL) default null -- 'RUB', '810' или '*'(='810'). Null - не трогать
+	,p_Filial varchar2(&gfMSL) default null  -- '02', '*'(=свой). Null - не трогать
+	,p_Dopofis varchar2(&gfMSL) default null  -- '21', '*'(=свой). Null - не трогать
+	,p_BIC varchar2(&gfMSL) default null -- '123456789', '*'(=свой). Null - не ключевать
+	) return varchar2(&gfMSL) is 
+k char;	
+begin
+	if p_Cur is not null then
+		if p_Cur='*' or p_Cur='RUB' or p_Cur='643' then
+			p_Cur:='810';
+		elsif not IsNumStr(p_Cur) then
+			p_Cur:=::[FT_MONEY]([CUR_SHORT]=p_Cur).[CODE_ISO];
+		end if;
+		p_Ac:=StrSet(p_Ac,6,p_Cur);
+	end if;
+	if p_Filial is not null then
+		if p_Filial='*' then -- Свой
+			p_Filial:=Substr([SYSTEM].[VARIABLES].OurBranch.[CODE],2);
+		end if;
+		p_Ac:=StrSet(p_Ac,10,p_Filial);
+	end if;	
+	if p_Dopofis is not null then
+		if p_Dopofis='*' then -- Свой
+			p_Dopofis:=Substr([SYSTEM].[VARIABLES].OurDepart.[CODE],5,2);
+		end if;
+		p_Ac:=StrSet(p_Ac,12,p_Dopofis);
+	end if;	
+	if p_BIC is not null then
+		&gfIf(p_BIC='*',p_BIC:=::[SYSTEM].[VARIABLES].OurBank.BIC);
+		k:=::[PSH#INTERFACE].[PSH_PRX_FIN_ACCO].AC_FIN_CHECK_KEY(StrSet(p_Ac,9,'0'),p_BIC,false);
+		&gfIf(k is not null,p_Ac:=StrSet(p_Ac,9,k));
+	end if;
+
+	return p_Ac;
+end;
+
+public function GetCallStack return gt_StrTable is   -- Стэк вызовов в понятной форме и без лишнего  -- Стэк вызовов в понятной форме и без лишнего
+
+ret_Stack gt_StrTable;
+s varchar2(&gfMSL) :=[UTILS].call_stack;
+s2 varchar2(128);
+j integer;
+
+begin
+	for i in 1..99 loop
+		s2:=NthPiece(s,i,chr(10));
+		if s2 is null then
+			exit;
+		end if;
+		if instr(InvertStr(s2),InvertStr(&METHOD$PACK))=1 then -- пропускаем вызовы ф-ций gflib
+			j:=0;
+		elsif j is not null then
+			if InStr(s2,'.')>0 then
+				j:=j+1;
+				ret_Stack(j):=NthPiece(s2,5)||' line '||NthPiece(s2,2);
+			end if;
+		end if;
+	end loop;
+	
+	return ret_Stack;
+end;
+
+public function ExceptionMessage -- Удобочитаемое сообщение о произошедшем исключении
+	return varchar2(&gfMSL) is 
+
+st gt_StrTable;
+ret_s varchar2(&gfMSL);
+
+begin
+	st:=GetCallStack;
+	for i in 1..st.Count loop
+		ret_s:=ret_s||NL$||st(i);
+	end loop;
+
+	return SQLERRM||NL$||dbms_utility.FORMAT_ERROR_BACKTRACE()||substr(ret_s,3);
+end;
+
+public function UniqueFileName  -- Возвращает относительно уникализированное имя файла. qq.txt -> qq.DDMMYYYY.HHMMSS.txt
+	(p_fn varchar2(255)  -- Исходное имя файла
+	) return varchar2(255) is 
+begin
+	return StrIns(
+		p_fn,
+		&gfLength(p_fn)-instr(InvertStr(p_fn),'.')+1,
+		To_Char(SysDate,'.DDMMYYYY_HH24MISS'));
+end;
+
+public procedure ExcelWriteA1Cell -- Запись в ячейку, заданную в A1-нотации
+	(p_A1Cell		varchar(10)  -- 'B10'. Остальные параметры соответствуют параметрам дистрбутивной [EXCEL].Write
+	,p_Value		varchar2(32767)		default null
+	,p_Bold		boolean				default false
+	,p_Italic		boolean				default false
+	,p_size		number				default null
+	,p_FontName	varchar2(50)		default null
+	,p_Allighment	varchar2(10)		default null
+	) is 
+h				number;
+w				number;
+
+begin
+	w:=0;
+	for i in 1..&gfLength(p_A1Cell) loop
+		if &gfBetween(substr(p_A1Cell,i,1),'0','9') then
+			h:=Substr(p_A1Cell,i);
+			Exit;
+		else
+			w:=w*26+ascii(upper(substr(p_A1Cell,i,1)))-64;
+		end if;
+	end loop;
+	
+	[EXCEL].Write
+	(h
+	,w	
+	,p_Value
+	,p_Bold
+	,p_Italic
+	,p_Size
+	,p_FontName
+	,p_Allighment
+	);
+end;
+
+public function StrContainsFio  -- Содержит ли строка p_Str ФИО p_FIO ?
+	(p_Str varchar2(&gfMSL)
+	,p_FIO varchar2(&gfMSL) -- Фамилия Имя Отчество
+	,p_Prec integer default 0 -- точность (в скольких позициях могут быть отличия)
+	,p_ToCheckSklon boolean default false -- Проверять склонения
+	) return boolean is 
+s varchar2(256);
+begin
+	p_Str:=' '||upper(regexp_replace(translate(p_Str,'.',' '),'\s{2,}',' '))||' ';  -- Нормализуем
+	p_FIO:=' '||upper(regexp_replace(p_FIO,'\s{2,}',' '))||' ';
+
+	s:=&GFLIB.NthPiece(p_FIO,1)||' '||  -- ИВАНОВ И И
+		substr(&GFLIB.NthPiece(p_FIO,2),1,1)||' '||
+		substr(&GFLIB.NthPiece(p_FIO,3),1,1);
+	if &GFLIB.InStr2(p_Str,s,p_Prec) then
+		return true;
+	end if;
+
+	if p_ToCheckSklon then
+		s:=&GFLIB.Substr2(&GFLIB.NthPiece(p_FIO,1),1,-1)||'..?'||' '||
+			substr(&GFLIB.NthPiece(p_FIO,2),1,1)||' '||
+			substr(&GFLIB.NthPiece(p_FIO,3),1,1);
+		if &GFLIB.InStr2(p_Str,s,p_Prec,true) then
+			return true;
+		end if;
+	end if;
+	
+	s:=&GFLIB.NthPiece(p_FIO,1)||' '|| -- ИВАНОВ ИВАН ИВАНЫЧ
+		&GFLIB.NthPiece(p_FIO,2)||' '||
+		&GFLIB.NthPiece(p_FIO,3);
+	if &GFLIB.InStr2(p_Str,s,p_Prec) then
+		return true;
+	end if;
+
+	if p_ToCheckSklon then
+		s:=&GFLIB.Substr2(&GFLIB.NthPiece(p_FIO,1),1,-1)||'..?'||' '||
+			&GFLIB.Substr2(&GFLIB.NthPiece(p_FIO,2),1,-1)||'..?'||' '||
+			&GFLIB.Substr2(&GFLIB.NthPiece(p_FIO,3),1,-1)||'..?';
+		if &GFLIB.InStr2(p_Str,s,p_Prec,true) then
+			return true;
+		end if;
+	end if;
+	
+	return false;
+end;
+
+v_DR DEBUG_REC;
+v_LogHandle integer;
+
+public procedure Debug_Pipe_2  -- Debug_Pipe с дублированием в лог на сервере  -- <Модуль>_<Юзер>_<DDMMYYYY>_<HHMMSS>.txt
+	(p_s varchar2(&gfMSL)  -- Что писать
+	,p_DebugLevel integer default 0 -- 0, не 1 как у debug'a ! Если <0, без записи в файл
+	,p_Ini boolean default null -- true - первый вызов (инициализация), false - последний (сброс на диск)
+	) is 
+dir varchar2(&gfMSL);
+fn varchar2(&gfMSL);
+st gt_StrTable;
+pn varchar2(255);	
+ofn varchar2(255);	
+begin
+	if p_Ini then
+		GET_DEBUG_ALL(v_DR);
+
+		st:=GetCallStack;
+		pn:=NthPiece(st(1),1); -- Имя пакета
+		v_LogHandle:=0;
+		if p_DebugLevel>=0 then
+			dir:='.';
+			fn:=UniqueFileName(NthPiece(pn,2,'.')||'_'||sys_context('IBS_SYSTEM','OSUSER')||'.txt');
+			begin
+				v_LogHandle:=stdio.open(dir,fn,'w'); -- Если не сможет, отвалится
+			exception when others then
+				debug('Файл '||dir||'/'||fn||' не открылся на запись',0);
+				raise;
+			end;			
+			debug_pipe('Копия этого лога - '||dir||'/'||fn,p_DebugLevel);
+		end if;
+		st:=GetCallStack;
+		&gfLocate3(ofn,::[METHOD],[PACKAGE_NAME]=NthPiece(pn,2,'.'),.[NAME]);  -- Полное имя операции
+		p_s:=' '||lf$||
+			'***** '||SysDate||' '||ofn||chr(10)||stdlib.userid.[NAME]||
+			'/'||stdlib.userid.[USERNAME]||'/'||sys_context('IBS_SYSTEM','OSUSER')||lf$||
+			' '||lf$||p_s;
+	end if;
+
+	p_DebugLevel:=abs(p_DebugLevel);
+	debug_pipe(p_s,p_DebugLevel);
+	
+	if v_DR.debug_level>=p_DebugLevel and v_LogHandle!=0 then
+		stdio.put_line(v_LogHandle,p_s||CR$,null,null,stdio.dostext); -- Default'ная кодировка - 28595
+	end if;
+
+	if not p_Ini and v_LogHandle!=0 then
+		stdio.put_line(v_LogHandle,'***** '||SysDate,null,null,stdio.dostext);
+		stdio.close(v_LogHandle);  -- Только здесь сбросит на диск
+		v_LogHandle:=0;
+	end if;
+end;
+
+public function AccIdByAccNumber  -- Поиск счета по номеру p_AccNumber
+	(p_AccNumber varchar2(&gfMSL)
+	,p_Filial ref [BRANCH] default [SYSTEM].[VARIABLES].OurBranch
+	) return ref [AC_FIN] is 
+	
+ret_AccId ref [AC_FIN];	
+
+begin
+	&gfLocate(ret_AccId,::[AC_FIN],[MAIN_V_ID]=p_AccNumber and [FILIAL]=p_Filial,return null);
+	return ret_AccId;
+end;
+
+public function GetReferencingObjects /*
+Возвращает список объектов, ссылающихся на объект ObjId класса ClassId в виде строки,
+состоящей из разделенных пробелом подстрок вида <Класс>,<Атрибут>,<Число ссылающихся объектов>,<Объект1>,<Объект2>,...
+Например: AC_FIN,CLIENT_R,3,1345467,687875645,234344355 PR_CRED,CLIENT,1,22334534 (легко парсится NthPiece'ом).
+Если задан ClassFilter в виде списка классов через запятую, возвращаются только объекты этих классов или их детей.
+Если NotToAddIds, Id объектов не выводятся.
+*/	(p_ObjId number
+	,p_ClassId varchar2(128)  -- можно parent, можно даже sibling !
+	,p_ClassFilter varchar2(&gfMSL):=null  -- только эти классы - короткие имена классов (или родителей !) через запятую
+	,p_NotToAddIds boolean:=false
+	) return varchar2(&gfMSL) is 
+
+ClassFilter2 varchar2(&gfMSL):=bool_char(p_ClassFilter is null,null,','||upper(p_ClassFilter)||',');
+b boolean;
+cl varchar2(&gfMSL);
+attr varchar2(&gfMSL);
+
+s1 varchar2(&gfMSL);
+s2 varchar2(&gfMSL);
+s3 varchar2(&gfMSL);
+s4 varchar2(&gfMSL);
+s5 varchar2(&gfMSL);
+
+ret_s varchar2(&gfMSL);
+	
+begin
+	b:=Valmgr.first_referencing_on(p_ObjId,p_ClassId);
+	while b loop  -- Перебор РАЗНЫХ ПАР <ТБП,ссылающееся поле>
+		b:=Valmgr.next_referencing(cl,s1,attr,s2,s3);
+		exit when not b;
+		
+		if ClassFilter2 is not null then
+			s1:=cl;
+			while instr(ClassFilter2,','||s1||',')=0 loop
+				s3:=lib.CLASS_PARENT(s1);
+				if s3 is null then
+					s1:=null;  -- ни класса, ни родителей в фильтре нету
+					exit;
+				end if;
+				s1:=s3;	
+			end loop;
+			if s1 is null then
+				continue;
+			end if;
+		end if;
+				-- ищем родителя (или самого), в котором сидит этот реквизит attr
+		s1:=cl;
+		s2:=&GFLIB.NthPiece(attr,1,'.'); -- иначе не найдет
+		while true loop
+			s3:=lib.CLASS_PARENT(s1);
+			exit when lib.ATTR_NAME(s2,s3) is null;
+			s1:=s3;
+		end loop;
+		ret_s:=ret_s||cl||','||attr||',';
+				-- получаем строку с Id экземпляров через запятую
+		s4:='BEGIN select listagg(t.id,'','') WITHIN GROUP (ORDER BY id) into :s5 from z#'||s1||' t '||
+			'where t.C_'||replace(attr,'.','#')||'=:p_ObjId; END;';
+		begin
+			EXEC_SQL_OUT(s4,':s5',s5,':p_ObjId',p_ObjId);
+			ret_s:=ret_s||(&GFLIB.Occures(',',s5)+1);	
+		exception when others then
+			if SQLCODE=-1489 then -- result of string concatenation is too long
+				s4:='BEGIN select count(t.id) into :s5 from z#'||s1||' t '||
+					'where t.C_'||replace(attr,'.','#')||'=:p_ObjId; END;'; -- число экземпляров
+				EXEC_SQL_OUT(s4,':s5',s5,':p_ObjId',p_ObjId);
+				ret_s:=ret_s||s5;	
+				s5:='не_влезли';
+			else
+				raise;
+			end if;
+		end;
+
+		if p_NotToAddIds then
+			ret_s:=ret_s||' ';	
+		else
+			ret_s:=ret_s||','||s5||' ';	
+		end if;
+	end loop;
+
+	return trim(ret_s);	
+end;
+
+public function DebugInSQL -- Для отладки select'ов в предсталениях - вставлять в where: ... and &GFLIB.DebugInSQL(...)>0
+	(p_Mes varchar2(&gfMSL)
+	,p_DebugLevel integer:=1
+	) return integer is 
+begin
+	debug_pipe(p_Mes,p_DebugLevel);
+	return 1;
+end;
+
+public function ExcelColumnLetters  -- 1 -> A, 27 -> AA, ...
+	(columnNumber integer
+	) return varchar2(10) is 
+s varchar2(10);	
+begin
+	s:=chr(ascii('A')+mod(columnNumber-1,26));
+	if (columnNumber<27) then
+		return s;
+	else
+		return ExcelColumnLetters(trunc((columnNumber-1)/26))||s;
+	end if;	
+end;
+end;

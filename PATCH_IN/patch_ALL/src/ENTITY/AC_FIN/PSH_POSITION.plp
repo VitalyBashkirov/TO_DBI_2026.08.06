@@ -1,0 +1,286 @@
+class AC_FIN;
+
+@import_plsql(true)
+@name('[ПСБ] Скорректированный позишн')
+static method PSH_POSITION is
+
+@name('На дату') public P_ON_DATE [DATE];
+pragma macro (xl,'[OOXML]::[API_XL]');
+xl_tmpl			blob	:= empty_blob();
+inum integer;
+iFmt2 integer;
+
+
+vRepId		string;
+p_sum_val number;
+p_sum number;
+p_date date;
+i integer;
+y integer;
+sum_cred number;
+sum_res number;
+
+type saldo_bal_rec is record (NUM varchar2(8), SUMM_BAL [SUMMA], VID_ACC varchar(1));
+type saldo_bal_table is table of saldo_bal_rec;
+saldo_bal saldo_bal_table;
+
+type saldo_acc_rec is record (NUM varchar2(20), SUMM_BAL [SUMMA], VID_ACC varchar(1));
+type saldo_acc_table is table of saldo_acc_rec;
+saldo_acc saldo_acc_table;
+
+
+
+procedure calc_bal_sum is
+begin
+     saldo_bal.delete;
+     i := 1;
+     for (select a( sum(abs(F.A('И'||a%id||'С',p_date))) : sum_b
+                 --  ,a.[VID].[CODE]: type_b
+                   ,substr(a.[MAIN_V_ID],1,8) num_b
+                   )
+          in [AC_FIN] all where 
+          substr(a.[MAIN_V_ID],1,3) in ('202','203','306','319','322','501','407','408','421','437','476','496','423','523','933','963','964') 
+          or substr(a.[MAIN_V_ID],1,5) in ('30102','30110','30114','47411','47404') 
+          group by substr(a.[MAIN_V_ID],1,8) --, a.[VID].[CODE]
+          order by substr(a.[MAIN_V_ID],1,8))
+     loop
+         saldo_bal(i).NUM := a.num_b;
+         saldo_bal(i).SUMM_BAL := a.sum_b;
+         --saldo_bal(i).VID_ACC := a.type_b;
+         i := i + 1;
+     end loop;
+end;
+
+
+procedure calc_acc_sum is
+begin
+     saldo_acc.delete;
+     i := 1;
+     for (select a( abs(F.A('И'||a%id||'С',p_date)) : sum_b
+                --   ,a.[VID].[CODE]: type_b
+                   ,a.[MAIN_V_ID] num_b
+                   )
+          in [AC_FIN] all where a.[MAIN_V_ID] in ('47404156007710000001','47404840407710000001','30424810801000000004','30424810707710000003',
+           '30424810501000023682','30424810701000024643','30424810107710000001','30601810501000000017','30601810901000000015', '30424810107710000001'
+           ,'40702810710000118676','40702810810000018676','47404840407710000001','47404156007710000001','47404978007710000001','93304840501000000004') 
+           
+      ) 
+     loop
+         saldo_acc(i).NUM := a.num_b;
+         saldo_acc(i).SUMM_BAL := a.sum_b;
+        -- saldo_acc(i).VID_ACC := a.type_b;
+         i := i + 1;
+     end loop;
+end;
+
+
+
+function get_bal_sum (p_bal varchar) return number is
+nsum number;
+begin
+     nsum := 0;
+     for c in 1..saldo_bal.count loop if substr(saldo_bal(c).NUM,1,length(p_bal)) like  p_bal then nsum := nsum + saldo_bal(c).SUMM_BAL; end if; end loop;
+     return nsum;
+end;
+
+function get_acc_sum (p_acc varchar) return number is
+nsum number;
+begin
+     nsum := 0;
+     for c in 1..saldo_acc.count loop if saldo_acc(c).NUM = p_acc then nsum := saldo_acc(c).SUMM_BAL; return nsum; end if; end loop;
+end;
+
+
+function is_par_acc (p_bal varchar) return boolean is
+begin
+     for a in ::[PAIR_BS] all where substr(a.[DT].[NUM],1,length(p_bal)) = p_bal or 
+                                    substr(a.[KT].[NUM],1,length(p_bal)) = p_bal
+     loop return true; end loop;
+     return false;
+end;
+
+function get_bal_sum2 (p_bal varchar, p_pr varchar(1)) return number is
+nsum number;
+begin
+     nsum := 0;
+     for c in 1..saldo_bal.count 
+     loop 
+         if substr(saldo_bal(c).NUM,1,length(p_bal)) = p_bal and saldo_bal(c).VID_ACC = p_pr and is_par_acc(saldo_bal(c).NUM) = false 
+         then 
+             nsum := nsum + saldo_bal(c).SUMM_BAL; 
+        end if; 
+     end loop;
+     return nsum;
+end;
+	
+procedure write_calc (ns integer, c_sum number, p_str varchar(32000)) is
+begin
+	 &xl.Put(ns,3,c_sum); 
+	 if c_sum >0 then &xl.Put(ns,4,round(c_sum/1000)); else &xl.Put(ns,4,c_sum/1000); end if; 	
+	 &xl.Put(ns,5,p_str);		
+end;
+PSH_POSITION is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_ON_DATE := [SYSTEM]::[OP_DATE];
+end if;
+-- End initialization of parameters and variables
+begin
+	If P_MESSAGE = 'DEFAULT' Then
+		P_ON_DATE		:= ::[SYSTEM].[OP_DATE];
+	end if;	
+end;	
+end;
+
+execute is
+l_RUB	const ref [FT_MONEY]:=::[FT_MONEY]([CUR_SHORT] = 'RUB'); 
+l_USD	const ref [FT_MONEY]:=::[FT_MONEY]([CUR_SHORT] = 'USD'); 
+l_EUR	const ref [FT_MONEY]:=::[FT_MONEY]([CUR_SHORT] = 'EUR'); 
+l_CNY	const ref [FT_MONEY]:=::[FT_MONEY]([CUR_SHORT] = 'CNY'); 
+l_TRY	const ref [FT_MONEY]:=::[FT_MONEY]([CUR_SHORT] = 'TRY'); 
+l_INR	const ref [FT_MONEY]:=::[FT_MONEY]([CUR_SHORT] = 'INR'); 
+l_XAU	const ref [FT_MONEY]:=::[FT_MONEY]([CUR_SHORT] = 'XAU'); 
+
+begin
+		::[SHABLON_DOC].[LIB_OOXML].load_blob('PSB_POS', xl_tmpl, null, null, null, null);
+		     
+		if xl_tmpl is null then pragma error('Не найден шаблон отчета'); end if;				
+		if not &xl.open_file(xl_tmpl) then pragma error('Ошибка при открытии печатной формы шаблона');	end if;	
+		p_date := P_ON_DATE; 
+	     
+		if p_date is null then p_date	:= ::[SYSTEM].[OP_DATE]; end if;
+		calc_bal_sum;		
+		calc_acc_sum;
+		--iFmt2 := &xl.Get_numFmt ('#,##0.00');
+		
+		
+		&xl.Open_Sheet('Сегодня');		
+		--&xl.Ins_Row(inum+1,p_is_styles == true);
+		      
+		
+		&xl.Put(1,1,'Позиция Промсельхозбанк на '||to_char(p_date,'DD/MM/YYYY'));
+
+		&xl.Put(1,3,to_char(p_date,'DD/MM/YYYY'));
+		&xl.Put(3,2,'Rub');
+		&xl.Put(3,3,'Usd'); &xl.put( 2, 3, ::[DOCUMENT].[LIB_CUR].Get_Rate(l_USD, p_date));
+		&xl.Put(3,4,'Eur');&xl.put( 2, 4, ::[DOCUMENT].[LIB_CUR].Get_Rate(l_EUR, p_date));
+		&xl.Put(3,5,'Cny');&xl.put( 2, 5, ::[DOCUMENT].[LIB_CUR].Get_Rate(l_CNY, p_date));
+		&xl.Put(3,6,'Try');&xl.put( 2, 6, ::[DOCUMENT].[LIB_CUR].Get_Rate(l_TRY, p_date));
+		&xl.Put(3,7,'Inr');&xl.put( 2, 7, ::[DOCUMENT].[LIB_CUR].Get_Rate(l_INR, p_date));
+		&xl.Put(3,8,'Xau');&xl.put( 2, 8, ::[DOCUMENT].[LIB_CUR].Get_Rate(l_XAU, p_date));
+		
+		--20302A98101000000001
+		&xl.put( 7, 2, get_bal_sum('20202810')); &xl.put( 7, 3, get_bal_sum('20202840')); &xl.put( 7, 4, get_bal_sum('20202978'));  
+		&xl.put( 7, 5, get_bal_sum('20202156'));     &xl.put( 7, 6, get_bal_sum('20202949'));   &xl.put( 7, 7, get_bal_sum('20202356'));  &xl.put( 7, 8, get_bal_sum('20302A98'));          
+		
+		&xl.put( 8, 2, get_bal_sum('30102810'));    
+		&xl.put( 9, 2, get_bal_sum('30110810')); &xl.put( 9, 3, get_bal_sum('3011_840'));  &xl.put( 9, 4, get_bal_sum('3011_978'));  &xl.put( 9, 5, get_bal_sum('3011_156')); 
+		 &xl.put( 9, 6, get_bal_sum('3011_949'));  &xl.put( 9, 7, get_bal_sum('3011_356'));                               
+
+		--&xl.put( 10, 2, get_bal_sum('47404810')); &xl.put( 10, 3, get_bal_sum('47404840')); &xl.put( 10, 4, get_bal_sum('47404978')); &xl.put( 10, 5, get_bal_sum('47404156'));    
+		
+		
+		&xl.put( 14, 2, get_acc_sum('30424810107710000001')); &xl.put( 14, 3, get_acc_sum('47404840407710000001')); &xl.put( 14, 4, get_acc_sum('47404978007710000001'));       &xl.put( 14, 5, get_acc_sum('47404156007710000001'));     
+		
+		&xl.put( 17, 2, get_acc_sum('30424810801000000004'));    
+		&xl.put( 18, 2, get_acc_sum('30424810707710000003'));    
+
+		&xl.put( 20, 2, get_acc_sum('30424810501000023682'));   &xl.put( 20, 3,-1*get_bal_sum('9630_840')+get_bal_sum('9330_840')-get_acc_sum('93304840501000000004')); 
+		&xl.put( 20, 4, -1*get_bal_sum('9630_978')+get_bal_sum('9330_978'));      &xl.put( 20, 5, -1*get_bal_sum('9630_156')+get_bal_sum('9330_156'));      
+		  &xl.put( 20, 8, -1*get_bal_sum('96404A98')); 
+		  
+		&xl.put( 21, 2, get_acc_sum('30424810701000024643'));    
+		
+		&xl.put( 23, 2, get_bal_sum('319'));
+		&xl.put( 24, 2, get_bal_sum('32202')+get_bal_sum('32203'));
+		&xl.put( 25, 2, get_bal_sum('5010')+get_bal_sum('50118')-get_bal_sum('50120')+get_bal_sum('50121')); 	
+		-- ====================================================================
+		
+        &xl.put( 33, 2, get_bal_sum('40701810')+get_bal_sum('40702810')+get_bal_sum('40703810')+get_bal_sum('40802810'));    
+		&xl.put( 33, 3, get_bal_sum('40701840')+get_bal_sum('40702840')+get_bal_sum('40703840')+get_bal_sum('40802840'));    
+		&xl.put( 33, 4, get_bal_sum('40701978')+get_bal_sum('40702978')+get_bal_sum('40703978')+get_bal_sum('40802978'));    
+		
+		&xl.put( 35, 2, get_acc_sum('40702810810000018676'));   
+		&xl.put( 36, 2, get_acc_sum('40702810710000118676'));   
+		
+		&xl.put( 38, 2, get_bal_sum('40817810')+get_bal_sum('40820810'));    
+		&xl.put( 38, 3, get_bal_sum('40817840')+get_bal_sum('40820840'));    
+		&xl.put( 38, 4, get_bal_sum('40817978')+get_bal_sum('40820978'));    
+		
+		&xl.put( 39, 2, get_bal_sum('40807810'));   
+
+		&xl.put( 51, 2, get_bal_sum('30601')+get_bal_sum('30606'));    --45
+		&xl.put( 53, 2, get_acc_sum('30601810901000000015')+get_acc_sum('30601810501000000017'));    --47 ООО ИК "ПРАЙВЕТ КАПИТАЛ"
+		
+		&xl.put( 59, 2, get_bal_sum('421'));    --53
+		&xl.put( 60, 2, get_bal_sum('437'));    --54
+		&xl.put( 61, 2, get_bal_sum('476'));    --55
+		&xl.put( 62, 2, get_bal_sum('496'));    --56
+		&xl.put( 58+5, 2, get_bal_sum('4230_810')-get_bal_sum('42301810')); &xl.put( 58+5, 3, get_bal_sum('4230_840')-get_bal_sum('42301840'));  &xl.put( 58+5, 4, get_bal_sum('4230_978')-get_bal_sum('42301978'));         
+		
+		&xl.put( 65, 2, get_bal_sum('42301810')); &xl.put( 65, 3, get_bal_sum('42301840'));  &xl.put( 65, 4, get_bal_sum('42301978'));         
+		
+		&xl.put( 67, 2, get_bal_sum('47411810'));    
+		&xl.put( 68, 2, get_bal_sum('523'));    
+				
+		
+		i:=41;
+      for (select a( abs(F.A('И'||a%id||'СН',p_date)) : sum_b
+                   ,a.[CLIENT_V].[NAME]: name
+                   ,a.[MAIN_V_ID] : MAIN_V_ID
+                   )
+          in [AC_FIN] all where substr(a.[MAIN_V_ID],1,5) in ('40807') 
+          
+          order by 1 desc
+      ) 
+     loop
+         if a.sum_b<10000000 or i=50   then exit; end if;
+        
+     --   &xl.Ins_Row(i,1,1, true,true);
+     --   &xl.CopyPasteRows(i,i,i+1,1,1,true);
+     --   &xl.ClearFormula( i, 2);
+        &xl.put( i, 1, a.name);    
+        &xl.put( i, 12, substr(a.MAIN_V_ID,6,3));    
+        case substr(a.MAIN_V_ID,6,3) of
+        :'840': y:=3;
+        :'978': y:=4;
+        :'156': y:=5;
+        :'949': y:=6;
+        :'356': y:=7;
+        
+        else y:=2;
+        end; --*/
+        &xl.put( i, y, a.sum_b);   
+        i := i + 1;         
+     --  &xl.put( i, 5, i);   
+     --    if i>43 then exit;end if;
+     end loop; --*/
+
+       if i>40 then 
+          &xl.put( i, 1, 'Прочее');    &xl.Formula(i,2,'=B39-SUM(B41:B'||to_char(i-1)||')');
+        else 
+          &xl.put( i, 1, 'Прочее');    &xl.Formula(i,2,'=B39');
+       end if;--*/
+       -- while i<44 loop  &xl.put( i, 1, ''); &xl.put( i, 2, ''); i:=i+1;     end loop;
+    	
+--=============================================================================================
+		
+		/*&xl.ClearFormula( i, 2);
+		&xl.Formula(49,2,'=B'||to_char(i+1)||'+B'||to_char(i+7)||'+B'||to_char(i+12));--'=B50+B56+B61'
+		i:=i+1;
+		&xl.ClearFormula( i, 2);
+		i:=50;
+		&xl.Formula(50,2,'=B'||to_char(i)||'+B'||to_char(i+1)||'+B'||to_char(i+2)||'+B'||to_char(i+3)); --'=B52+B53+B54+B55'
+		
+    	--*/
+    	
+    	
+    	    
+		&xl.finish(xl_tmpl);
+		[OOXML]::[API_ORSA].putReport2RunExtProc(xl_tmpl,'xlsx','Скорректированный Позишн на утро '||to_char(p_on_date,'dd.mm.yy')||' ');	
+end;
+end;
+end;

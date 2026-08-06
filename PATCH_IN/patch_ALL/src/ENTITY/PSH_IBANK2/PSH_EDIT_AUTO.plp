@@ -1,0 +1,61 @@
+class PSH_IBANK2;
+
+@name('[ПСБ] Изменить')
+@tag('CREATED')
+method PSH_EDIT_AUTO uses PSH_NEW_AUTO is
+
+@name('constructor')                 public V_IS_NEW    [BOOLEAN];
+@name('class_id')                    public V_CLASS     [STRING_32];
+@name('Право на отправку сообщений') public V_SEND_MAIL [BOOLEAN];
+@name('Обслуживаемые счета')         public V_ACC_TRACE [BC_ACC_PROPS_ARR];
+@name('Командная строка валидатора') public DEST_STR    [STRING_32000];
+PSH_EDIT_AUTO (
+	@name('Клиент')                           P_CLIENT_REF in [CLIENT_REF],
+	@name('Филиал')                           P_FILIAL     in [BRANCH_REF],
+	@name('Номер договора')                   P_NUM_DOG    in [PRODUCT_NUM],
+	@name('Идентификатор во внешней системе') P_REG_NUMBER in [STRING_40],
+	@name('Дата открытия договора')           P_DATE_OPEN  in [DATE],
+	@name('Блокировочное слово')              P_PASSWORD   in [NAME],
+	@name('Ответственное лицо')               P_FIO_STR    in [NAME],
+	@name('Телефон')                          P_PHONE_STR  in [NAME]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_CLIENT_REF := this.[CLIENT];
+	P_FILIAL := this.[FILIAL];
+	P_NUM_DOG := this.[NUM_DOG];
+	P_REG_NUMBER := this.[REG_NUMBER];
+	P_DATE_OPEN := this.[DATE_OPEN];
+	P_PASSWORD := this.[PASSWORD];
+	P_FIO_STR := this.[FIO_STR];
+	P_PHONE_STR := this.[PHONE_STR];
+
+	V_ACC_TRACE := this.[ACC_TRACE];
+end if;
+-- End initialization of parameters and variables
+declare
+	v_this ref [PSH_IBANK2];
+begin
+	if this is not null then
+		v_this := this;
+		&BASE$SETVARS;
+		&BASE$VALIDATE(v_this);
+		&BASE$GETVARS;
+	end if;
+end;
+end;
+
+execute is
+	v_this ref [PSH_IBANK2];
+begin
+	if this is not null then
+		v_this := this;
+		&BASE$SETVARS;
+		v_this := &BASE$EXECUTE(v_this);
+	end if;
+end;
+end;
+end;

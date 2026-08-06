@@ -1,0 +1,149 @@
+class AC_FIN;
+
+@name('[ПСБ] Справка об оборотах за период')
+@tag('COPIED')
+method PSH_OBOR_SPR_XLS is
+
+@name('V_DEST') public V_DEST [MEMO_32767];
+public vUserFilial ref [BRANCH] 	:= ::[SYSTEM].[VARIABLES].OurBranch;
+PSH_OBOR_SPR_XLS (
+	@name('Дата начала')         P_DATE      in [DATE],
+	@name('Дата конца')          P_DATE_END  in [DATE],
+	@name('Дата выдачи справки') P_DATE_PODP in [DATE],
+	@name('Номер справки')       P_NUM_SPR   in [STRING_30],
+	@name('Подписант')           P_PODPISANT in [USER_REF],
+	@name('Исполнитель')         P_ISPOLNIT  in [USER_REF]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATE := [SYSTEM]::[OP_DATE];
+	P_DATE_END := [SYSTEM]::[OP_DATE];
+	P_DATE_PODP := [SYSTEM]::[OP_DATE];
+
+end if;
+-- End initialization of parameters and variables
+declare
+pragma include( ::[PR_CRED].[LIB_MACRO] );
+
+i 			number;
+--j 			number;
+periodov 			number;
+--itogo		number;
+vColCount 	number; -- колво колонок в отчете
+vLineCount 	number; -- первая строка в Excel
+vFileName 	varchar2(250); -- имя Excel-шаблона
+end_month date;
+first_month date;
+temp varchar2(300);
+
+begin
+  if P_MESSAGE = 'DEFAULT' then -- первый запуск процедуры
+		[EXCEL].Init_Xls;
+		P_ISPOLNIT:=stdlib.user_id;
+					
+  elsif P_MESSAGE = 'VALIDATE' then -- переход между полями
+
+		if p_info = 'OK' then
+  			
+  			if P_DATE is null or P_DATE_END is null then
+  				pragma error('Дата начала и конца обязательно для заполнения!');
+  			end if;
+
+  			
+  			vFileName := 'PSH_Справка об оборотах за период.xlsx';
+  			  			  	
+			if [EXCEL].F_Click then
+				[EXCEL].F_Click := False;
+
+				vColCount := 5; -- всего колонок в отчете
+				vLineCount := 18; -- первая строка в Excel
+				i:=vLineCount;
+				
+				-- обнуляем переменные
+				periodov:= trunc(MONTHS_BETWEEN(P_DATE_END, P_DATE))+1;
+				
+				-- запуск Excel
+				[EXCEL].open_file(::[REPS].[SLIB].GetPath('PATH_PRINT_EXCEL', vFileName),false);
+
+
+				if this.[FILIAL].[CODE]='001' then --temp := 'Россия, 123290, г.Москва 1-й Магистральный тупик д.11 стр. 1'||CHR(10)||'Тел./Факс: (499) 245-15-62;'||CHR(10)||'(499) 245-24-16';
+					temp := 'г.Москва, вн.тер.г. муниципальный округ Тверской,'
+					||CHR(10)||'ул.Малая Дмитровка, д.14, стр.4.' --'пер.Успенский, д.3, стр.2.'
+					||CHR(10)||'Телефон: +7(495)665-15-62';
+				elsif this.[FILIAL].[CODE]='101' then temp := 'Россия, 413100, г.Энгельс ул.Маяковского, д.48-а'||CHR(10)||'Тел./Факс: (8453) 55-66-14;'||CHR(10)||'(8453) 55-64-61';
+				end if;
+				
+				[EXCEL].Write(1, 4, temp);
+				[EXCEL].Write(7, 1, to_char(P_DATE_PODP,'DD')||' '||::[USER].[PSH_KAV].kav_data_propis(P_DATE_PODP,'M')||' '||to_char(P_DATE_PODP,'YYYY')||' № '||P_NUM_SPR);
+				[EXCEL].Write(11, 1, this.[FILIAL].[BANK].[NAME]||' настоящим уведомляет Вас о том, что у ' ||this.[CLIENT_V].[NAME]
+									||CHR(10)|| ' обороты по расчетному счету № '||this.[MAIN_V_ID]|| ' за период с '||to_char(P_DATE,'DD.MM.YYYY')||' по '
+									||to_char(P_DATE_END,'DD.MM.YYYY')||' составили: ');
+
+				-- цикл по договорам
+				end_month:=LAST_DAY(P_DATE);
+				if end_month>P_DATE_END then end_month:=P_DATE_END; end if;	
+				[EXCEL].Write(i,2,to_char(P_DATE,'DD.MM.YYYY')||'-'||to_char(end_month,'DD.MM.YYYY'));
+				[EXCEL].Write(i,3,abs(::[RUNTIME].[F_5].A('И'||this%id||'С'||'В',P_DATE)));
+				[EXCEL].Write(i,4,abs(::[RUNTIME].[F_5].A('И'||this%id||'Д'||'В',P_DATE,end_month)));
+				[EXCEL].Write(i,5,abs(::[RUNTIME].[F_5].A('И'||this%id||'К'||'В',P_DATE,end_month)));
+				[EXCEL].Write(i,6,abs(::[RUNTIME].[F_5].A('И'||this%id||'С'||'В',end_month+1)));
+				i:=i+1;
+				
+				for j in 1 .. periodov-1 loop
+
+				-- вывод в Ексель
+				first_month:=end_month+1;
+				end_month:=LAST_DAY(first_month);
+				if end_month>P_DATE_END then end_month:=P_DATE_END; end if;				
+				[EXCEL].Write(i,2,to_char(first_month,'DD.MM.YYYY')||'-'||to_char(end_month,'DD.MM.YYYY'));
+				[EXCEL].Write(i,3,abs(::[RUNTIME].[F_5].A('И'||this%id||'С'||'В',first_month)));
+				[EXCEL].Write(i,4,abs(::[RUNTIME].[F_5].A('И'||this%id||'Д'||'В',first_month,end_month)));
+				[EXCEL].Write(i,5,abs(::[RUNTIME].[F_5].A('И'||this%id||'К'||'В',first_month,end_month)));
+				[EXCEL].Write(i,6,abs(::[RUNTIME].[F_5].A('И'||this%id||'С'||'В',end_month+1)));
+				i:=i+1;				
+				end loop;
+				
+				
+				[EXCEL].Borders(vLineCount, 2, i-1, vColCount+1, 'RLBTVH'); 		-- границы всюду
+				
+				i:=i+1;
+				[EXCEL].Write(i, 1,::[CASE_GRAM].[LIB].get_case(P_PODPISANT.[CASTA].[DECL_CAST], ::[CASE_GRAM]([CODE]='И')));
+				[EXCEL].Write(i, 6,::[RUNTIME].[STDLIB].FIO(P_PODPISANT.[NAME]));
+				i:=i+2;
+				
+				[EXCEL].Write(i, 1,'Исполнитель: '||::[RUNTIME].[STDLIB].FIO(P_ISPOLNIT.[NAME]));
+				i:=i+1;
+				
+			-- Реквизиты подразделений
+			VAR PSH_PODR ref [PSH_SPRAV_PODR];
+			begin
+				select x (x) in ::[PSH_SPRAV_PODR]
+				where (x.[PSH_PODR_DEPART].[CODE]  = substr(P_ISPOLNIT.[DEPART].[CODE],1,instr(P_ISPOLNIT.[DEPART].[CODE],'-',1,2)-1)
+							or x.[PSH_PODR_DEPART]=P_ISPOLNIT.[DEPART])
+					and x.[PSH_PODR_PRINT] into PSH_PODR;
+			exception 	when TOO_MANY_ROWS then PSH_PODR:=null;
+	        			when NO_DATA_FOUND then PSH_PODR:=null;
+			end;
+			VAR telef varchar2(170):=null;
+				for tel in PSH_PODR.[PSH_PODR_CONTAKT] where tel.[TYPE].[CODE]='PHONE' and tel.[ACTIV]
+				loop
+				telef := telef||tel.[NUMB]||'; ';
+				end loop;		
+				
+				[EXCEL].Write(i, 1,'Тел: '||telef);
+
+				[EXCEL].Visible;
+				[EXCEL].Release;
+				
+			end if;
+			
+			[EXCEL].Exec_Script(V_DEST);	
+		end if;	
+  end if;
+end;
+end;
+end;
+end;

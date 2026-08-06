@@ -1,0 +1,25 @@
+class RICHES_GUIDE;
+
+@name('[ПСБ] Прописать "Монета памятная" для 20202810201000000001 (служебная)')
+method PSH_M_MONEY is
+PSH_M_MONEY is
+
+execute is
+m_money_ref ref [RICHES]:=::[RICHES]([CODE]='M_MONEY');
+begin
+	if this.[CERT].[ACCOUNT].[MAIN_V_ID]<>'20202810201000000001' -- Монеты из драгметаллов РФ
+	--and this.[CERT].[RICHES].[CODE]='M_MONEY' --Памятные монеты
+	then
+		pragma error ('Операция предназначена только для счета 20202810201000000001 -- Монеты из драгметаллов РФ');
+	else
+		if this.[CERT].[RICHES].[CODE]='M_MONEY' --Памятные монеты
+		then
+			pragma error ('Ценность "'||this.[CERT].[RICHES].[NAME]||'" уже привязана');
+		end if;
+		this.[CERT].[RICHES]:=m_money_ref;
+		this.[CERT].[CASH]:=null;
+		debug_pipe('Ценность "'||this.[CERT].[RICHES].[NAME]||'" привязана к '||this.[CERT].[ACCOUNT].[MAIN_V_ID],0);
+	end if;
+end;
+end;
+end;

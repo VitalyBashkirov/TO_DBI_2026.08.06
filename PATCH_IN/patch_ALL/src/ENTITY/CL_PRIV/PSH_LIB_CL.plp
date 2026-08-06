@@ -1,0 +1,563 @@
+class CL_PRIV;
+
+@name('[ПСБ] Библиотека')
+@tag('KUP_P')
+library PSH_LIB_CL is
+public function vid_prod(cl_id varchar2, dog_num varchar2, dog_id varchar2, class_id string, TypeCardInfo integer default null) return memo is  -- возвращает продукт
+rez_vid memo;
+begin
+	--debug_pipe(cl_id||' '||nvl(dog_num,0)||' '||nvl(dog_id,0)||' '||class_id,0);
+	if class_id = 'KRED_PERS' then
+		 for dp in ::[PR_CRED] all where dp.[CLIENT]=cl_id AND dp.[NUM_DOG]=dog_num AND dp%Id=dog_id
+			loop	
+				rez_vid:= dp.[KIND_CREDIT].[NAME];
+			end loop;
+	elsif class_id = 'DEPOSIT_PRIV' then
+		 for dp in ::[DEPN] all where dp.[CLIENT]=cl_id AND dp%id=dog_id
+			loop	
+			  rez_vid:=dp.[VID_DOG].[NAME];
+			end loop;
+	elsif class_id = 'IND_SAFE_LEASE' then
+		for pr in ::[PRODUCT] all where pr.[NUM_DOG]=dog_num
+			loop
+		 		for dp in ::[IND_SAFE_LEASE] all where dp.[WHO_PAY]=cl_id AND dp%id=pr%id
+					loop	
+			  			rez_vid:=dp.[TYPE_DOG].[NAME]||'(Аренда индивидуальных сейфовых ячеек)';
+					end loop;		
+			end loop;
+	elsif class_id = 'ZALOG' then
+		for pr in ::[PRODUCT] all where pr.[NUM_DOG]=dog_num
+			loop
+		 		for dp in ::[ZALOG] all where dp.[USER_ZALOG]=cl_id AND dp%id=pr%id
+					loop	
+			  			rez_vid:=dp.[VID_GUARANTEE].[NAME]||'(Обеспечение)';
+					end loop;		
+			end loop;		
+	end if;
+	
+	--Башкиров В.Г. 24.06.2015 Вытаскиеваем данные по пластику
+	if TypeCardInfo=0 then
+	 	rez_vid:=null;
+	 	for vc in ::[VZ_CARDS] where vc.[CLIENT]=cl_id and vc.[IP_ACCOUNTS_REF].[PROD_REF]=dog_id order by vc.[DATE_BEGIN], vc loop
+	 	  --Карта (PAN карты)-Вид продукта (карты)-Состояние
+	 		  rez_vid:=rez_vid||vc.[PAN]||'   '||vc.[IP_PRODUCTS_REF].[NAME]||'   '||vc%statename||LF$;
+	 	end loop;
+	  --rez_vid:=trim(trim(rez_vid,';'));
+	end if;
+
+	return rez_vid;	
+end;
+
+public function vid_stat(cl_id varchar2, dog_num varchar2, dog_id varchar2, class_id string) return memo is  -- возвращает статус
+rez_vid memo;	
+begin
+	if class_id = 'KRED_PERS' then
+		 for dp in ::[PR_CRED] all where dp.[CLIENT]=cl_id AND dp.[NUM_DOG]=dog_num AND dp%Id=dog_id
+			loop	
+				rez_vid:= dp.[COM_STATUS].[NAME];
+			end loop;
+	elsif class_id = 'DEPOSIT_PRIV' then
+		 for dp in ::[DEPN] all where dp.[CLIENT]=cl_id AND dp%id=dog_id
+			loop	
+			  rez_vid:=dp.[COM_STATUS].[NAME];
+			end loop;
+	elsif class_id = 'IND_SAFE_LEASE' then
+		for pr in ::[PRODUCT] all where pr.[NUM_DOG]=dog_num
+			loop
+		 		for dp in ::[IND_SAFE_LEASE] all where dp.[WHO_PAY]=cl_id AND dp%id=pr%id
+					loop	
+			  			rez_vid:=dp.[COM_STATUS].[NAME];
+					end loop;		
+			end loop;
+	elsif class_id = 'ZALOG' then
+		for pr in ::[PRODUCT] all where pr.[NUM_DOG]=dog_num
+			loop
+		 		for dp in ::[ZALOG] all where dp.[USER_ZALOG]=cl_id AND dp%id=pr%id
+					loop	
+			  			rez_vid:=dp.[COM_STATUS].[NAME];
+					end loop;		
+			end loop;
+	end if;
+	return rez_vid;	
+end;
+
+public function vid_sum(cl_id varchar2, dog_num varchar2, dog_id varchar2, class_id string) return string is  -- возвращает сумма
+rez_vid string;	
+begin
+	if class_id = 'KRED_PERS' then
+		 for dp in ::[PR_CRED] all where dp.[CLIENT]=cl_id AND dp.[NUM_DOG]=dog_num AND dp%Id=dog_id
+			loop	
+				rez_vid:= dp.[SUMMA_DOG];
+			end loop;
+	elsif class_id = 'DEPOSIT_PRIV' then
+		 for dp in ::[DEPN] all where dp.[CLIENT]=cl_id AND dp%id=dog_id
+			loop	
+			  rez_vid:=dp.[SUMMA_DOG];
+			end loop;
+	elsif class_id = 'IND_SAFE_LEASE' then
+		rez_vid:=null;
+	elsif class_id = 'ZALOG' then
+		for pr in ::[PRODUCT] all where pr.[NUM_DOG]=dog_num
+			loop
+		 		for dp in ::[ZALOG] all where dp.[USER_ZALOG]=cl_id AND dp%id=pr%id
+					loop	
+			  			rez_vid:=dp.[SUMMA];
+					end loop;		
+			end loop;
+	end if;
+	return rez_vid;	
+end;
+
+public function vid_val(cl_id varchar2, dog_num varchar2, dog_id varchar2, class_id string) return string is  -- возвращает валюту
+rez_vid string;	
+begin
+	if class_id = 'KRED_PERS' then
+		 for dp in ::[PR_CRED] all where dp.[CLIENT]=cl_id AND dp.[NUM_DOG]=dog_num AND dp%Id=dog_id
+			loop	
+				rez_vid:= dp.[FT_CREDIT].[CUR_SHORT];
+			end loop;
+	elsif class_id = 'DEPOSIT_PRIV' then
+		 for dp in ::[DEPN] all where dp.[CLIENT]=cl_id AND dp%id=dog_id
+			loop	
+			  rez_vid:=dp.[FINTOOL].[CUR_SHORT];
+			end loop;
+	elsif class_id = 'IND_SAFE_LEASE' then
+		rez_vid:=null;
+	elsif class_id = 'ZALOG' then
+		for pr in ::[PRODUCT] all where pr.[NUM_DOG]=dog_num
+			loop
+		 		for dp in ::[ZALOG] all where dp.[USER_ZALOG]=cl_id AND dp%id=pr%id
+					loop	
+			  			rez_vid:=dp.[VALUTA].[CUR_SHORT];
+					end loop;		
+			end loop;
+	end if;
+	return rez_vid;	
+end;
+
+public function vid_sum_rub(cl_id varchar2, dog_num varchar2, dog_id varchar2, class_id string) return string is  -- возвращает сумму в н.п.
+rez_vid string;	
+begin
+	if class_id = 'KRED_PERS' then
+		for(	
+			select x(rec.[SUMMA_NAT]  : sum_nat
+					 ,rec.[SUMMA]	  : sum_prov
+					 ,x.[SUMMA_DOG]	  : sum_dog)
+					 --,rec.[DATE]	  : prov_date
+					 --,x.[DATE_BEGIN]  : dog_date
+					 --,x.[ACCOUNT].[MAIN_V_ID] : acc)
+			in ::[PR_CRED], ([RECORDS] all:rec) all
+			where 	x.[ACCOUNT].[MAIN_V_ID]=rec.[ACC_CORR].[MAIN_V_ID] AND
+					rec.[DATE] >= nvl(x.[DATE_BEGIN],x.[DATE_BEGINING]) AND
+					x.[CLIENT]=cl_id AND
+					x.[NUM_DOG]=dog_num AND
+					x%Id=dog_id
+			order by rec.[DATE]
+		) loop
+			
+			if x.sum_dog = 0 then rez_vid:=0;
+			else rez_vid:=x.sum_nat;
+			end if;
+			
+			--debug_pipe(x.acc||' '||x.sum_nat||' '||x.dog_date||' '||x.prov_date,0);
+			exit;
+		end loop;
+	elsif class_id = 'DEPOSIT_PRIV' then
+			for(	
+			        select x(rec.[SUMMA_NAT]  : sum_nat
+					 		,rec.[SUMMA]	  : sum_prov
+					 		,x.[SUMMA_DOG]	  : sum_dog)
+			        in ::[DEPN], ([RECORDS] all:rec) all
+			        where 	x.[ACCOUNT].[MAIN_V_ID]=rec.[ACC_CORR].[MAIN_V_ID] AND
+			        		rec.[DATE] >= nvl(x.[DATE_BEGINING],x.[DATE_BEGIN]) AND
+			        		x.[CLIENT]=cl_id AND
+			        		x%Id=dog_id
+					order by rec.[DATE]
+			) loop
+			
+				if x.sum_dog = 0 then rez_vid:=0;
+				else rez_vid:=x.sum_nat;
+				end if;
+				exit;
+			end loop;
+	elsif class_id = 'IND_SAFE_LEASE' then
+		rez_vid:=null;
+	elsif class_id = 'ZALOG' then
+			for(	
+			        select x(rec.[SUMMA_NAT]  	: sum_nat
+					 		,rec.[SUMMA]	  	: sum_prov
+					 		,x.[ARRAY_SUM_DOG]	: sum_dog)
+			        in ::[PRODUCT], ([ZALOG] all:zal),([RECORDS] all:rec) all
+			        where 	x.[NUM_DOG]=dog_num AND
+			        		zal.[USER_ZALOG]=cl_id AND
+			        		zal%id=x%id AND
+			        		zal.[ACC_ZALOG].[MAIN_V_ID]=rec.[ACC_CORR].[MAIN_V_ID] AND
+			        		rec.[DATE] >= nvl(x.[DATE_BEGINING],x.[DATE_BEGIN])
+					order by rec.[DATE]
+			) loop
+			
+				if x.sum_dog = 0 then rez_vid:=0;
+				else rez_vid:=x.sum_nat;
+				end if;
+				exit;
+			end loop;
+	end if;
+	return rez_vid;	
+end;
+
+public function vid_date_st(cl_id varchar2, dog_num varchar2, dog_id varchar2, class_id string) return memo is  -- возвращает дату начала
+rez_vid memo;	
+begin
+	if class_id = 'KRED_PERS' then
+		 for dp in ::[PR_CRED] all where dp.[CLIENT]=cl_id AND dp.[NUM_DOG]=dog_num AND dp%Id=dog_id
+			loop	
+				rez_vid:= to_char(dp.[DATE_BEGIN],'dd/mm/yyyy');
+			end loop;
+	elsif class_id = 'DEPOSIT_PRIV' then
+		 for dp in ::[DEPN] all where dp.[CLIENT]=cl_id AND dp%id=dog_id
+			loop	
+			  rez_vid:=to_char(dp.[DATE_BEGIN],'dd/mm/yyyy');
+			end loop;
+	elsif class_id = 'IND_SAFE_LEASE' then
+		for pr in ::[PRODUCT] all where pr.[NUM_DOG]=dog_num
+			loop
+		 		for dp in ::[IND_SAFE_LEASE] all where dp.[WHO_PAY]=cl_id AND dp%id=pr%id
+					loop	
+			  			rez_vid:=to_char(dp.[DATE_BEGIN],'dd/mm/yyyy');
+					end loop;		
+			end loop;
+	elsif class_id = 'ZALOG' then
+		for pr in ::[PRODUCT] all where pr.[NUM_DOG]=dog_num
+			loop
+		 		for dp in ::[ZALOG] all where dp.[USER_ZALOG]=cl_id AND dp%id=pr%id
+					loop	
+			  			rez_vid:=to_char(dp.[DATE_BEGIN],'dd/mm/yyyy');
+					end loop;		
+			end loop;
+	end if;
+	return rez_vid;	
+end;
+
+public function vid_date_end(cl_id varchar2, dog_num varchar2, dog_id varchar2, class_id string) return memo is  -- возвращает дату окончания
+rez_vid memo;	
+begin
+	if class_id = 'KRED_PERS' then
+		 for dp in ::[PR_CRED] all where dp.[CLIENT]=cl_id AND dp.[NUM_DOG]=dog_num AND dp%Id=dog_id
+			loop	
+				rez_vid:= to_char(dp.[DATE_ENDING],'dd/mm/yyyy');
+			end loop;
+	elsif class_id = 'DEPOSIT_PRIV' then
+		 for dp in ::[DEPN] all where dp.[CLIENT]=cl_id AND dp%id=dog_id
+			loop	
+			  rez_vid:=to_char(dp.[DATE_ENDING],'dd/mm/yyyy');
+			end loop;
+	elsif class_id = 'IND_SAFE_LEASE' then
+		for pr in ::[PRODUCT] all where pr.[NUM_DOG]=dog_num
+			loop
+		 		for dp in ::[IND_SAFE_LEASE] all where dp.[WHO_PAY]=cl_id AND dp%id=pr%id
+					loop	
+			  			rez_vid:=to_char(dp.[DATE_ENDING],'dd/mm/yyyy');
+					end loop;		
+			end loop;
+	elsif class_id = 'ZALOG' then
+		for pr in ::[PRODUCT] all where pr.[NUM_DOG]=dog_num
+			loop
+		 		for dp in ::[ZALOG] all where dp.[USER_ZALOG]=cl_id AND dp%id=pr%id
+					loop	
+			  			rez_vid:=to_char(dp.[DATE_ENDING],'dd/mm/yyyy');
+					end loop;		
+			end loop;
+	end if;
+	return rez_vid;	
+end;
+
+public function cl_job(job_id number, cl_id number) return memo is  -- возвращает должность
+sp_job memo;
+job memo;
+n integer:=0;
+dat string;
+begin
+	--Берем с клиента
+	for dp in ::[WORK_BOOK] all where dp%collection = job_id
+								order by dp.[START_DATE] desc
+	loop
+		n:=n+1;
+				
+		job:='['||to_char(dp.[START_DATE], 'dd.mm.yyyy')||' - '||nvl(to_char(dp.[END_DATE],'dd.mm.yyyy'), 'по н.в.')||'] Организация: '||dp.[CORP]||'. Должность: '||dp.[RANGE];
+		
+		if n = 1 then
+			sp_job:=job;
+		else sp_job:=sp_job||chr(10)||job;
+		end if;
+		
+	end loop;
+	
+	--Берем с заявки
+	/** /
+	--Башкиров В.Г. 08.07.2019 Отключил API DECL_ON_GET_CRED
+	for dp in ::[DECL_ON_GET_CRED] all where dp.[CLIENT] = cl_id
+	loop
+		n:=n+1;
+				
+	  --job:='Организация: '||dp.[PSB_WORK_CORP]||'. Должность: '||dp.[PSB_T_D].[NAME]||'. Стаж: '||dp.[PSB_WORK_TIME]||'мес.' ;
+	  	job:='Организация: '||null||'. Должность: '||null||'. Стаж: '||null||'мес.' ;
+		
+		if n = 1 then
+			sp_job:=job;
+		else sp_job:=sp_job||chr(10)||job;
+		end if;
+		
+	end loop;
+	/**/
+	
+	return sp_job;
+end;
+
+public function cl_job_path(job_id number, cl_id number, pr number) return string is  --возвращает дату/организацию/должность
+sp_job memo;
+job memo;
+dat string;
+begin
+	--Берем с клиента
+	for dp in ::[WORK_BOOK] all where dp%collection = job_id
+								order by dp.[START_DATE] desc
+	loop
+						
+		--job:='['||to_char(dp.[START_DATE], 'dd.mm.yyyy')||' - '||nvl(to_char(dp.[END_DATE],'dd.mm.yyyy'), 'по н.в.')||'] Организация: '||dp.[CORP]||'. Должность: '||dp.[RANGE];
+		
+		case pr of
+		:1: sp_job:=to_char(dp.[START_DATE], 'dd.mm.yyyy');
+		:2: sp_job:=nvl(to_char(dp.[END_DATE],'dd.mm.yyyy'), 'по н.в.');
+		:3: sp_job:=dp.[CORP];
+		:4: sp_job:=dp.[RANGE];
+		end;
+		
+		exit;
+	end loop;
+	
+	return sp_job;
+end;
+
+/** /
+--Башкиров В.Г. 08.07.2019 Отключил API DECL_ON_GET_CRED
+function cl_mon(cl_id number) return number is
+rez number;
+begin
+	
+	for dp in ::[DECL_ON_GET_CRED] all where dp.[CLIENT] = cl_id
+	loop
+		rez:=dp.[PSB_INCOME];
+	end loop;		
+		
+	return	rez;	
+end;
+/**/
+
+--function cl_mon(cl_id number) return number; -- возвращает доход
+public function cl_fam(cl_fam number) return memo is  -- возвращает родственников
+fam memo;
+rez_fam memo;
+n integer:=0;
+begin
+	
+	for dp in ::[RELATIVES] all where dp%collection = cl_fam
+	loop
+		n:=n+1;
+		fam:=dp.[NAME]||' ('||dp.[COGNATE_STATUS].[VALUE]||')';
+		
+		if n = 1 then
+			rez_fam:=fam;
+		else rez_fam:=rez_fam||chr(10)||fam;
+		end if;
+		
+	end loop;		
+		
+	return	rez_fam;	
+end;
+
+public function cl_email(cl_con number) return memo is  -- возвращает email
+mail memo;
+rez_mail memo;
+n integer:=0;
+begin
+	
+	for dp in ::[CONTACTS] all where dp%collection = cl_con AND dp.[TYPE].[CODE]='MAIL'
+	loop
+		n:=n+1;
+		mail:=dp.[NUMB];
+		
+		if n = 1 then
+			rez_mail:=mail;
+		else rez_mail:=rez_mail||chr(10)||mail;
+		end if;
+		
+	end loop;		
+		
+	return	rez_mail;	
+end;
+
+public function cl_phone(cl_con number) return memo is  -- возвращает телефон
+ph memo;
+rez_ph memo;
+n integer:=0;
+begin
+	
+	for dp in ::[CONTACTS] all where dp%collection = cl_con AND (dp.[TYPE].[CODE]='MOBILEPHONE' OR dp.[TYPE].[CODE]='PHONE')
+	loop
+		n:=n+1;
+		ph:=dp.[NUMB];
+		
+		if n = 1 then
+			rez_ph:=ph;
+		else rez_ph:=rez_ph||chr(10)||ph;
+		end if;
+		
+	end loop;		
+		
+	return	rez_ph;	
+end;
+
+public function cl_phone_10(cl_con number) return memo is  -- возвращает телефон (формат 10)
+ph memo;
+rez_ph memo;
+n integer:=0;
+fn varchar2;
+
+begin
+	
+	for dp in ::[CONTACTS] all where dp%collection = cl_con AND (dp.[TYPE].[CODE]='MOBILEPHONE' OR dp.[TYPE].[CODE]='PHONE')
+	loop
+		n:=n+1;
+		ph:=dp.[NUMB];
+		
+		
+	ph:=trim(replace(replace(ph,' ',''),chr(9),''));
+	ph:=replace(ph,'(','');
+	ph:=replace(ph,')','');
+	ph:=replace(ph,'-','');
+	ph:=replace(ph,'+','');
+	
+	
+	fn:=length(ph);
+	if fn = 11 then ph:=substr(ph, 2); end if;
+	
+	if n = 1 then
+			rez_ph:=ph;
+	else rez_ph:=rez_ph||chr(10)||ph;
+	end if;
+	
+	end loop;
+		
+	return	rez_ph;	
+end;
+
+public function cl_phone_sms(cl_con number) return memo is  -- возвращает телефон для смс рассылки(формат 10)
+ph memo;
+rez_ph memo;
+n integer:=0;
+fn varchar2;
+
+begin
+	
+	for dp in ::[CONTACTS] all where dp%collection = cl_con AND dp.[PRIVATE].[CODE] = 'SMS'
+	loop
+		n:=n+1;
+		ph:=dp.[NUMB];
+		
+		
+	ph:=trim(replace(replace(ph,' ',''),chr(9),''));
+	ph:=replace(ph,'(','');
+	ph:=replace(ph,')','');
+	ph:=replace(ph,'-','');
+	ph:=replace(ph,'+','');
+	
+	
+	fn:=length(ph);
+	if fn = 11 then ph:=substr(ph, 2); end if;
+	
+	if n = 1 then
+			rez_ph:=ph;
+	else rez_ph:=rez_ph||chr(10)||ph;
+	end if;
+	
+	end loop;
+		
+	return	rez_ph;	
+end;
+
+public function cl_phone_private(cl_con number) return memo is 
+ph memo;
+rez_ph memo;
+n integer:=0;
+fn varchar2;
+
+begin
+	
+	for dp in ::[CONTACTS] all where dp%collection = cl_con AND (dp.[TYPE].[CODE]='MOBILEPHONE' OR dp.[TYPE].[CODE]='PHONE')
+	loop
+		n:=n+1;
+		ph:=dp.[PRIVATE].[VALUE];
+	
+	if n = 1 then
+			rez_ph:=ph;
+	else rez_ph:=rez_ph||chr(10)||ph;
+	end if;
+	
+	end loop;
+		
+	return	rez_ph;	
+end;
+
+public function cl_bank(cl_id varchar2) return string is  -- возвращает сотрудник/не сотрудник банка
+begin
+
+	for u in ::[USER] all where u.[CL_PRIV_REF]=cl_id
+	loop
+		for t in ::[WORK_BOOK] all where t%collection=u.[CL_PRIV_REF].[WORK_ACTIVITY] AND t.[END_DATE] is null
+		loop
+			if ((upper(t.[CORP]) like '%ЭКСПЕРТ БАНК%') OR (upper(t.[CORP]) like '%СИБКУПБАНК%')) then
+				return 'Сотрудник';
+			else
+				return 'Не сотрудник';				
+			end if;
+		end loop;
+	end loop;
+
+   return 'Не сотрудник';
+	
+end;
+
+public function cod_prod(cl_id varchar2, dog_num varchar2, dog_id varchar2, class_id string) return string is  -- код подразделения (из продукта)
+rez_vid string;	
+begin
+	--debug_pipe(cl_id||' '||nvl(dog_num,0)||' '||nvl(dog_id,0)||' '||class_id,0);
+	if class_id = 'KRED_PERS' then
+		 for dp in ::[PR_CRED] all where dp.[CLIENT]=cl_id AND dp.[NUM_DOG]=dog_num AND dp%Id=dog_id
+			loop	
+				rez_vid:= dp.[FILIAL].[CODE];
+			end loop;
+	elsif class_id = 'DEPOSIT_PRIV' then
+		 for dp in ::[DEPN] all where dp.[CLIENT]=cl_id AND dp%id=dog_id
+			loop	
+			  rez_vid:=dp.[FILIAL].[CODE];
+			end loop;
+	elsif class_id = 'IND_SAFE_LEASE' then
+		for pr in ::[PRODUCT] all where pr.[NUM_DOG]=dog_num
+			loop
+		 		for dp in ::[IND_SAFE_LEASE] all where dp.[WHO_PAY]=cl_id AND dp%id=pr%id
+					loop	
+			  			rez_vid:=dp.[FILIAL].[CODE]||'(Аренда индивидуальных сейфовых ячеек)';
+					end loop;		
+			end loop;
+	elsif class_id = 'ZALOG' then
+		for pr in ::[PRODUCT] all where pr.[NUM_DOG]=dog_num
+			loop
+		 		for dp in ::[ZALOG] all where dp.[USER_ZALOG]=cl_id AND dp%id=pr%id
+					loop	
+			  			rez_vid:=dp.[FILIAL].[CODE]||'(Обеспечение)';
+					end loop;		
+			end loop;		
+	end if;
+	return rez_vid;	
+end;
+end;

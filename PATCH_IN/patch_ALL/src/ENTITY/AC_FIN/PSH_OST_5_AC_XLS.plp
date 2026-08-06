@@ -1,0 +1,214 @@
+class AC_FIN;
+
+@name('[ПСБ] 118ф Остатки за период')
+@tag('COPIED')
+static method PSH_OST_5_AC_XLS is
+
+@name('V_DEST')    public V_DEST [MEMO_32767];
+@name('В тысячах') public P_TIS  [BOOLEAN];
+public vUserFilial ref [BRANCH] 	:= ::[SYSTEM].[VARIABLES].OurBranch;
+PSH_OST_5_AC_XLS (
+	@name('Дата начала') P_DATE     in [DATE],
+	@name('Филиал')      P_FILIAL   in [BRANCH_REF],
+	@name('Дата конца')  P_DATE_END in [DATE]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATE := [SYSTEM]::[OP_DATE];
+	P_DATE_END := [SYSTEM]::[OP_DATE];
+
+end if;
+-- End initialization of parameters and variables
+declare
+pragma include( ::[PR_CRED].[LIB_MACRO] );
+
+i 			number;
+j 			number;
+--itogo		number;
+vColCount 	number; -- колво колонок в отчете
+vLineCount 	number; -- первая строка в Excel
+vFileName 	varchar2(250); -- имя Excel-шаблона
+formula varchar2(100); -- для суммы в Экселе
+--j number;
+poditog varchar2(5);
+--poditog_kli ref [CLIENT];
+name_acc varchar2(300);
+k 			number;
+
+begin
+  if P_MESSAGE = 'DEFAULT' then -- первый запуск процедуры
+		[EXCEL].Init_Xls;
+		P_FILIAL := STDLIB.USERID.FILIAL;
+					
+  elsif P_MESSAGE = 'VALIDATE' then -- переход между полями
+
+		if p_info = 'OK' then
+  			
+  			if P_DATE is null or P_DATE_END is null then
+  				pragma error('Дата начала и конца обязательно для заполнения!');
+  			end if;
+			if P_FILIAL is null then
+  				pragma error('Поле "Филиал" обязательно для заполнения!');
+  			end if;
+  			
+  			vFileName := null;
+  			P_DATE:=P_DATE-1;
+  			P_DATE_END:=P_DATE_END-1;
+  			  			  	
+			if [EXCEL].F_Click then
+				[EXCEL].F_Click := False;
+
+				vColCount := P_DATE_END-P_DATE+2; -- всего колонок в отчете
+				vLineCount := 5; -- первая строка в Excel
+				i:=vLineCount;
+				
+				-- обнуляем переменные
+
+				
+				-- запуск Excel
+				[EXCEL].open_file(vFileName,false,true);
+
+				[EXCEL].Write(1, 1, 'Отчет по 5 счетам для формы 118 за по филиалу: ' || P_FILIAL.[BANK].[NAME]);
+				[EXCEL].Write(2, 1, 'Входящие остатки за период с '||to_char(P_DATE+1,'DD.MM.YYYY')||' по '||to_char(P_DATE_END+1,'DD.MM.YYYY'));
+				if P_TIS then [EXCEL].Write(1, 2, 'в тыс.');
+				else [EXCEL].Write(1, 2, 'с десятыми');
+				end if;
+				[EXCEL].Write(vLineCount, 1, 'Счёт');
+				[EXCEL].Set_Column_Width(1,1,95);
+				[EXCEL].Set_Column_Width(2,vColCount,14);
+				
+				for j in 2 .. P_DATE_END-P_DATE+2 loop
+					[EXCEL].Write(vLineCount, j, to_char(P_DATE+j-1,'DD.MM.YYYY'),null,null,null,null,'C');
+				end loop;
+				
+				[EXCEL].Write(vLineCount,P_DATE_END-P_DATE+3,'ИТОГИ');
+				
+				i := i + 1;
+				j := i;
+												
+				-- цикл по договорам
+				for ACC in ::[AC_FIN] where acc.[MAIN_V_ID] like ('5%') and (substr(acc.[MAIN_V_ID],14,2) in ('01','02') or substr(acc.[MAIN_V_ID],4,2) in ('20','21'))
+											and acc.[FILIAL]=P_FILIAL
+											and (abs(::[RUNTIME].[F_5].A('И'||ACC%id||'С'||'Н',P_DATE+1))>0
+												or ::[RUNTIME].[F_5].A('И'||ACC%id||'Д'||'Н',P_DATE,P_DATE_END)>0
+												or ::[RUNTIME].[F_5].A('И'||ACC%id||'К'||'Н',P_DATE,P_DATE_END)>0)
+									--order by substr(acc.[MAIN_V_ID],1,5)||substr(acc.[MAIN_V_ID],14)
+									order by substr(acc.[MAIN_V_ID],16)
+				 loop
+					-- вывод в Ексель
+					
+				if substr(acc.[MAIN_V_ID],16)!=poditog and i>6 then
+					poditog:=substr(acc.[MAIN_V_ID],16);
+					[EXCEL].Write(i, 1, name_acc,true,null,null,null,'R');
+					formula:='=SUM(R[-'||(i-j)||']C:R[-1]C)';
+					[EXCEL].Formula(i,2,formula,vColCount-2);
+					[EXCEL].Write(i,vColCount+1,'1');
+					i:=i+1;
+					j := i;
+				else poditog:=substr(acc.[MAIN_V_ID],16);
+				end if;	
+				
+				if substr(acc.[MAIN_V_ID],14,2)='01' then name_acc:=acc.[NAME]; end if;
+				
+				[EXCEL].Write(i, 1,''''||ACC.[MAIN_V_ID]);
+				
+					for j in 2 .. P_DATE_END-P_DATE+2 loop
+						if substr(acc.[MAIN_V_ID],4,2) in ('20') then if P_TIS then [EXCEL].Write(i, j, abs(::[RUNTIME].[F_5].A('И'||ACC%id||'С'||'Н',P_DATE+j-1))/1000*-1);
+																		else [EXCEL].Write(i, j, abs(::[RUNTIME].[F_5].A('И'||ACC%id||'С'||'Н',P_DATE+j-1))*-1);
+																		end if;		
+						else if P_TIS then [EXCEL].Write(i, j, abs(::[RUNTIME].[F_5].A('И'||ACC%id||'С'||'Н',P_DATE+j-1))/1000);
+								else [EXCEL].Write(i, j, abs(::[RUNTIME].[F_5].A('И'||ACC%id||'С'||'Н',P_DATE+j-1)));
+								end if;
+						end if;
+					end loop;
+				
+				i := i + 1;
+				end loop;
+				
+				[EXCEL].Write(i, 1, name_acc,true,null,null,null,'R');
+				
+				
+				/*[EXCEL].Write(i, 1, 'Итого:',true,null,null,null,'R');				
+				formula:='=SUM(R[-'||(i-vLineCount-1)||']C:R[-1]C)';*/
+				formula:='=SUM(R[-'||(i-j)||']C:R[-1]C)';
+				[EXCEL].Formula(i,2,formula,vColCount-1);
+				[EXCEL].Set_number_Format(vLineCount+1,2,i,vColCount,2);
+				[EXCEL].Write(i,vColCount+1,'1');
+				i:=i+1;
+				k:=i;
+				j :=i;
+				-- цикл по договорам
+				for ACC in ::[AC_FIN] where substr(acc.[MAIN_V_ID],1,5) in ('30424','47404','32202','32203')
+											and acc.[FILIAL]=P_FILIAL
+											and (abs(::[RUNTIME].[F_5].A('И'||ACC%id||'С'||'Н',P_DATE+1))>0
+												or ::[RUNTIME].[F_5].A('И'||ACC%id||'Д'||'Н',P_DATE,P_DATE_END)>0
+												or ::[RUNTIME].[F_5].A('И'||ACC%id||'К'||'Н',P_DATE,P_DATE_END)>0)
+									--order by substr(acc.[MAIN_V_ID],1,5)||substr(acc.[MAIN_V_ID],14)
+									order by acc.[MAIN_V_ID]desc
+				 loop
+					-- вывод в Ексель
+					
+				if  substr(acc.[MAIN_V_ID],1,5)!=poditog and i>k then
+					--poditog_kli:=nvl(acc.[CLIENT_R],acc.[CLIENT_V]);
+					poditog:=substr(acc.[MAIN_V_ID],1,5);
+					[EXCEL].Write(i, 1, name_acc,true,null,null,null,'R');
+					formula:='=SUM(R[-'||(i-j)||']C:R[-1]C)';
+					[EXCEL].Formula(i,2,formula,vColCount-2);
+					[EXCEL].Write(i,vColCount+1,'1');
+					i:=i+1;
+					j := i;
+				else --poditog_kli:=nvl(acc.[CLIENT_R],acc.[CLIENT_V]);
+					poditog:=substr(acc.[MAIN_V_ID],1,5);
+				end if;	
+				
+				--if substr(acc.[MAIN_V_ID],14,2)='01' then name_acc:=acc.[NAME]; end if;
+				
+				[EXCEL].Write(i, 1,''''||ACC.[MAIN_V_ID]);
+				
+					for j in 2 .. P_DATE_END-P_DATE+2 loop
+						/*if substr(acc.[MAIN_V_ID],4,2) in ('20') then if P_TIS then [EXCEL].Write(i, j, abs(::[RUNTIME].[F_5].A('И'||ACC%id||'С'||'Н',P_DATE+j-1))/1000*-1);
+																		else [EXCEL].Write(i, j, abs(::[RUNTIME].[F_5].A('И'||ACC%id||'С'||'Н',P_DATE+j-1))*-1);
+																		end if;		
+						else if P_TIS then [EXCEL].Write(i, j, abs(::[RUNTIME].[F_5].A('И'||ACC%id||'С'||'Н',P_DATE+j-1))/1000);
+								else [EXCEL].Write(i, j, abs(::[RUNTIME].[F_5].A('И'||ACC%id||'С'||'Н',P_DATE+j-1)));
+								end if;
+						end if;*/
+						if P_TIS then [EXCEL].Write(i, j, abs(::[RUNTIME].[F_5].A('И'||ACC%id||'С'||'Н',P_DATE+j-1))/1000);
+						else [EXCEL].Write(i, j, abs(::[RUNTIME].[F_5].A('И'||ACC%id||'С'||'Н',P_DATE+j-1)));
+						end if;
+					end loop;
+				
+				i := i + 1;
+				--name_acc:=nvl(acc.[CLIENT_R].[NAME],acc.[CLIENT_V].[NAME]);
+				name_acc:=substr(acc.[MAIN_V_ID],1,5);
+				end loop;
+				
+				[EXCEL].Write(i, 1, name_acc,true,null,null,null,'R');
+				
+				
+				/*[EXCEL].Write(i, 1, 'Итого:',true,null,null,null,'R');				
+				formula:='=SUM(R[-'||(i-vLineCount-1)||']C:R[-1]C)';*/
+				formula:='=SUM(R[-'||(i-j)||']C:R[-1]C)';
+				[EXCEL].Formula(i,2,formula,vColCount-1);
+				[EXCEL].Set_number_Format(vLineCount+1,2,i,vColCount,2);
+				[EXCEL].Write(i,vColCount+1,'1');				
+				
+				
+				[EXCEL].Borders(vLineCount, 1, i, vColCount, 'RLBTVH'); 		-- границы всюду
+				
+--				[EXCEL].Merge(i+1,1,i+1,vColCount); -- объединяем ячейки
+				[EXCEL].Visible;
+				[EXCEL].Release;
+				
+			end if;
+			
+			[EXCEL].Exec_Script(V_DEST);	
+		end if;	
+  end if;
+end;
+end;
+end;
+end;

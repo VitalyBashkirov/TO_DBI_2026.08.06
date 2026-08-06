@@ -1,0 +1,252 @@
+class PSH_EXP_TRA;
+
+@generate_ansi_joins(true)
+@name('[ПСБ] Библиотека')
+@tag('EXP_SWIFT')
+library PSH_L is
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+
+cn_dp constant number :=0; --уровень отладки
+cn_dp2 constant number :=0;
+cn_dp3 constant number :=0;
+
+type t_cashed_dic_rec is record
+/* Тип таблицы для кэша справочника "[ПСБ]. Адрес. Словарь для перевода типов адресных объектов" */
+	(
+	typeObj [SHORT1],
+	/* Тип адресного объекта (0-ул./ЭПС/НП 1-корп.2-кв./офис 3-регион/р-н/г. 4-проч.) */
+	prort [NUM10],
+	/* Приоритет */
+	nameRus [NAME],
+	/* Наименование или часть наименования (рус.) */
+	nameEng [NAME],
+	/* Полное наименование (англ.) */
+	shNameEng [NAME]
+	/* Сокращенное наименование (англ.) */
+	);
+	
+type t_cashed_dic_tab is table of t_cashed_dic_rec index by string(64); -- Индекс <typeObj>#<prort>#ID
+
+v_cashed_dic t_cashed_dic_tab;
+/* Кэш справочника EXP_TRANS_TAO-"[ПСБ]. Адрес. Словарь для перевода типов адресных объектов" */
+
+public procedure dbg
+/* Вывод отладки в монитор коммуникационного канала. 
+Вынесено отдельно т.к. IDE 2.0 иногда компилирует &debug с ошибками
+Управление через настройку
+EXP_ON_DBG_TRNSL_SWIFT - [ПСБ]. Включить вывод отладки перевода адресов док-в SWIFT */
+	(p_msg in string(32767)
+	/* строка для вывода в монитор коммуникационного канала */
+	,p_lvl number
+	/* уровень отладки */
+	) is
+begin
+	if nvl(::[FP_TUNE].[LIB].get_bool_value('EXP_ON_DBG_TRNSL_SWIFT', null, '0'),false) then
+		while p_msg is not null
+		loop
+			--debug_pipe(substr(p_msg,1,2000),0);
+			&debug(substr(p_msg,1,2000),p_lvl)
+			p_msg := substr(p_msg,2001);
+		end loop;
+	end if;
+end;
+
+public procedure del_cash
+/* Очистка кэш-таблицы v_cashed_dic */
+is
+begin
+	v_cashed_dic.delete;
+	dbg(TB$||'.del_cash -- Сброс кэша для EXP_TRANS_TAO v_cashed_dic.count='||v_cashed_dic.count,cn_dp);
+end;
+
+procedure cashed_check
+/* Загрузка справочника EXP_TRANS_TAO-"[ПСБ]. Адрес. Словарь для перевода типов адресных объектов" в кэш */
+is
+	sIdx string(64);
+begin
+	if v_cashed_dic.count=0 then
+		for (select e( e%id : C_ID
+						,e.[TYPE_OBJ] : C_TYPE_OBJ
+						,e.[PRIORITY] : C_PRIORITY
+						,e.[NAME_RUS] : C_NAME_RUS
+						,e.[NAME_ENG] : C_NAME_ENG
+						,e.[SH_NAME_ENG] : C_SH_NAME_ENG
+						)
+		in ::[PSH_EXP_TRA] -- updated CHANGE_QUALIFIER EXP_TRANS_TAO->PSH_EXP_TRANS_TA 08/10/25 -- updated CHANGE_QUALIFIER PSH_EXP_TRANS_TA->PSH_EXP_TRA 08/10/25
+		order by e.[TYPE_OBJ], e.[PRIORITY]
+		)loop
+			sIdx:=e.C_TYPE_OBJ||'#'||lpad(e.C_PRIORITY,7,'0')||'#'||e.C_ID;
+			v_cashed_dic(sIdx).typeObj  :=e.C_TYPE_OBJ;
+			v_cashed_dic(sIdx).prort    :=e.C_PRIORITY;
+			v_cashed_dic(sIdx).nameRus  :=e.C_NAME_RUS;
+			v_cashed_dic(sIdx).nameEng  :=e.C_NAME_ENG;
+			v_cashed_dic(sIdx).shNameEng:=e.C_SH_NAME_ENG;
+		end loop;
+		dbg(TB$||'.cashed_check -- Закэширован EXP_TRANS_TAO t_cashed_dic.count='||v_cashed_dic.count,cn_dp);
+	end if;
+end;
+
+public function GetIdxCashExpTransTao
+/* Вычислить индекс в кэше для наименования адресного объекта*/
+		(p_WordSwift in string(250)
+		/* наименование адресного объекта */
+		,p_TypeObj [SHORT1]
+		/* Тип адресного объекта
+			0-улица/ЭПС/Нас.Пункт
+			1-корпус
+			2-квартира/офис
+			3-регион/район/город
+			4-прочее*/
+		,p_flFullName boolean
+		/* что искать true-Полное наименование (англ.) false-Сокращенное наименование (англ.) */
+		)
+	/* возвращает индекс в кэше для наименования адресного объекта */
+	return integer is
+	
+	ret_exInt integer:=0;
+	lastWord string(250);
+	sIdx string(64);
+
+begin
+	cashed_check;
+	
+	sIdx := v_cashed_dic.first;
+	while sIdx is not null
+	loop
+		if v_cashed_dic(sIdx).typeObj=p_TypeObj 
+		then
+			while sIdx is not null
+			loop
+				if v_cashed_dic(sIdx).typeObj=p_TypeObj 
+				then
+					if p_flFullName then
+						if instr(p_WordSwift,' '||trim(v_cashed_dic(sIdx).nameEng))>0
+						then
+							ret_exInt:=1;
+							dbg(TB$||TB$||'[01]sIdx='||sIdx||' '
+							||p_WordSwift||' "'
+							||v_cashed_dic(sIdx).nameEng||'"'
+							,cn_dp2);
+							exit;
+						end if;
+					else
+						lastWord := ' '||trim(v_cashed_dic(sIdx).shNameEng,'.');
+						if instr(p_WordSwift,trim(v_cashed_dic(sIdx).shNameEng,'.')||'.')>0
+						or substr(p_WordSwift, -length(lastWord), length(lastWord))=lastWord
+						then
+							ret_exInt:=1;
+							dbg(TB$||TB$||'[02]sIdx='||sIdx||' '
+							||p_WordSwift||' "'
+							||v_cashed_dic(sIdx).shNameEng||'"'
+							,cn_dp2);
+							exit;
+						end if;
+					end if;
+					sIdx := v_cashed_dic.next(sIdx);
+				else
+					exit;
+				end if;
+			end loop;
+			exit;
+		end if;
+		if ret_exInt = 1 then
+			exit;
+		end if;
+		sIdx := v_cashed_dic.next(sIdx);
+	end loop;
+
+	dbg(TB$||'.GetIdxCashExpTransTao -< '||ret_exInt||' p_flFullName='||p_flFullName,cn_dp);
+	return ret_exInt;
+end;
+
+public function ReplEngWordDic
+/* Перевести адресный объект вместе с типом*/
+	(p_TypeObj [SHORT1]
+		/* Тип адресного объекта(АО)
+			0-улица/ЭПС/Нас.Пункт
+			1-корпус
+			2-квартира/офис
+			3-регион/район/город
+			4-прочее*/
+	,p_WordSwift in string(250)
+		/* наименование адресного объекта вместе с типом*/
+	,p_Sprtr string(1) default ''
+		/* символ-разделитель типа АО от наименования Пример: ул.Мира - разделитель "." */
+	,p_SeekEngStr boolean default false
+		/* true - поиска по переводу адресного объекта */
+	,p_AddSprtr boolean default true --25.06.2025
+		/*добавлять символ-разделитель*/
+	)
+	/* возвращает перевод адресного объекта вместе с типом*/
+	return string(250) is
+
+ret_WordSwift string(250);
+sWordSwift string(250);
+bShort boolean;
+sIdx string(64);
+
+begin
+	-- Настройка EXP_SHOR_ENG_WORD-[ПСБ]. SWIFT Поле 50. Исп-ть сокр. наим. для объектов адреса
+	bShort:=nvl(::[FP_TUNE].[LIB].get_bool_value('EXP_SHOR_ENG_WORD', null, '0'),false);
+
+	dbg(TB$||'.ReplEngWordDic -- > "'||p_WordSwift||'" ТАО:'||p_TypeObj||' p_Sprtr="'||p_Sprtr||'" p_SeekEngStr='||p_SeekEngStr||' bShort='||bShort||' p_AddSprtr='||p_AddSprtr,cn_dp);
+	if p_WordSwift is not null then
+		ret_WordSwift:=upper(p_WordSwift);
+		
+		cashed_check;
+		
+		sIdx := v_cashed_dic.first;
+		while sIdx is not null
+		loop
+			if v_cashed_dic(sIdx).typeObj=p_TypeObj 
+			then
+				while sIdx is not null
+				loop
+					if v_cashed_dic(sIdx).typeObj=p_TypeObj 
+					then
+						sWordSwift:=nvl(trim(ret_WordSwift,p_Sprtr),ret_WordSwift);
+						dbg(TB$||'[03]sIdx='||sIdx||' '||v_cashed_dic(sIdx).nameRus||'>'||v_cashed_dic(sIdx).nameEng||'>'||v_cashed_dic(sIdx).shNameEng||' sWordSwift='||sWordSwift||' ret_WordSwift='||ret_WordSwift,cn_dp3);
+						
+						ret_WordSwift:=::[HOOK_BANK].[EXP_GET_PR_ADDR].ReplEngWordShortOrFull(
+							sWordSwift --ret_WordSwift --14/07/2025
+							,v_cashed_dic(sIdx).nameRus
+							,v_cashed_dic(sIdx).nameEng
+							,v_cashed_dic(sIdx).shNameEng
+							,p_Sprtr
+							,p_SeekEngStr
+							,p_AddSprtr); --25/06/2025
+						ret_WordSwift:=nvl(trim(ret_WordSwift,p_Sprtr),ret_WordSwift);
+	
+						if sWordSwift<>ret_WordSwift
+						then
+							dbg(TB$||'[04]sIdx>'||sWordSwift,cn_dp2);
+							dbg(TB$||'[04]sIdx<'||ret_WordSwift,cn_dp2);
+						end if;
+	
+						sIdx := v_cashed_dic.next(sIdx);
+					else
+						exit;
+					end if;
+				end loop;
+				exit;
+			end if;
+			sIdx := v_cashed_dic.next(sIdx);
+		end loop;
+	
+		if not bShort then
+			ret_WordSwift:=replace(ret_WordSwift,' ');
+		end if;
+		
+		if p_Sprtr is not null and substr(ret_WordSwift,length(ret_WordSwift))=p_Sprtr then
+			ret_WordSwift:=replace(ret_WordSwift,'./','/');
+			ret_WordSwift:=nvl(rtrim(ret_WordSwift,p_Sprtr), ret_WordSwift);
+		end if;
+		
+		--ret_WordSwift:=ret_WordSwift||p_Sprtr;
+		::[HOOK_BANK].[EXP_GET_PR_ADDR].DelDublSpace(ret_WordSwift,p_Sprtr);
+	end if;
+	
+	dbg(TB$||'.ReplEngWordDic -- < "'||ret_WordSwift||'"',cn_dp);
+	return ret_WordSwift;
+end;
+end;

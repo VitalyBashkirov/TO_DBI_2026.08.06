@@ -1,0 +1,1256 @@
+class TURN_DATA;
+
+@import_plsql(true)
+@name('[ПСБ] Общие функции (с ИНН,ОГРН,ОКАТО,)')
+@tag('COPIED')
+library PSH_LIB_INN_REGN is
+--03.04.2019 добавлены поля f_inn и f_reg_num в rec_client и rec_account для вывода ИНН/КИО и ОГРН
+--28.03.2024 добавлено поле f_okato_code в rec_client и rec_account для вывода ОКАТО
+
+public type varr_str is varray(0) of long;
+
+public type rec_sum is record(
+	f_nat			number	:= 0
+,	f_cur			number	:= 0
+);
+public type rec_saldo is record(
+	f_in			rec_sum
+,	f_out			rec_sum
+);
+public type rec_turn is record(
+	f_dt			rec_sum
+,	f_kt			rec_sum
+);
+public type rec_client is record(
+	id					ref [CLIENT]
+,	f_corp				boolean
+,	f_status			ref [COM_STATUS_PRD]
+,	f_name				[SBRF_NAME]
+,	f_categories		::[CL_CATEGORIES]%collection%type
+,	f_category_result	boolean				--	реквизит заполняется в функции IsCategoryValid и служит для кэшироания результата этой функции
+,	f_category_name		[NAME]				--	реквизит заполняется в функции IsCategoryValid
+,	f_okveds			::[OKVED_PERIOD]%collection%type
+,	f_okved_result		boolean				--	реквизит заполняется в функции IsOkvedValid и служит для кэшироания результата этой функции
+,	f_okved_main_code	varchar2(32)		--	реквизит заполняется в функции IsOkvedValid
+,	f_group_result		boolean				--	реквизит заполняется в функции IsGroupValid и служит для кэшироания результата этой функции
+,	f_inn				[STRING_12]			--03.04.2019 ИНН	
+,	f_reg_num			[STRING_50]			--03.04.2019 ОГРН
+,	f_okato_code		[STRING_11]			--28.03.2024 ОКАТО
+,	f_id_client			ref [CLIENT]		--30.11.2024 ...ДР,Паспорта,ID Клиента
+);
+public type rec_bs is record(
+	f_plan			ref [DIC_VPL]
+,	f_num			[ACCNUM]
+,	f_pl_us			ref [PL_US]
+,	f_pl_us_name	varchar2(32767)
+,	f_cur			ref [FT_MONEY]
+,	f_cur_short		[STRING_3]
+,	f_cur_iso		[STRING_3]
+,	f_cur_name		varchar2(32767)
+,	f_chapter_num	[STRING_1]
+,	f_chapter_name	varchar2(32767)
+,	f_part_num		[STRING_3]
+,	f_part_name		varchar2(32767)
+);
+
+public type rec_data is record(
+	f_acc			ref [AC_FIN]
+,	f_num			[ACCNUM]
+,	f_name			[SBRF_NAME]
+,	f_summary		ref [AC_FIN]
+,	f_status		ref [COM_STATUS_PRD]
+,	f_move			::[RECORDS]%collection%type
+,	f_corr			::[ARH_COR_ACC]%collection%type
+,	f_vid			ref [TYPE_ACC]
+,	f_depart		varchar2(200)
+,	f_date			date
+,	f_otv_name		[NAME]
+,	f_okato_code		[STRING_11]			--28.03.2024 ОКАТО
+,	f_id_client			ref [CLIENT]		--30.11.2024 ...ДР,Паспорта,ID Клиента
+);
+
+public type rec_account is record(
+	b_cl_corp		boolean
+,	f_saldo			rec_saldo
+,	f_turn			rec_turn
+,	f_bs			rec_bs
+,	v_acc_num		[ACCNUM]
+,	d_date			date
+,	v_acc_name		varchar2(32767)
+,	f_group1		varchar2(32767)
+,	f_group2		varchar2(32767)
+,	f_group_val		varchar2(32767)
+,	f_inn				[STRING_12]			--03.04.2019 ИНН	
+,	f_reg_num			[STRING_50]			--03.04.2019 ОГРН
+,	f_okato_code		[STRING_11]			--28.03.2024 ОКАТО
+,	f_id_client			ref [CLIENT]		--30.11.2024 ...ДР,Паспорта,ID Клиента
+);
+public type map_accounts is table of rec_account index by varchar2(4000);	-- данные печатной формы
+
+pragma include(::[REPS_DATA].[LIB_FIX]);
+pragma include(::[REPS_DATA].[LIB_DEBUG]);
+type map_str is table of varchar2(4000) index by varchar2(4000);
+type map_varr_str is table of varr_str index by varchar2(4000);
+lmPatterns	map_varr_str;
+
+type rec_turns is record(
+	f_move			::[RECORDS]%collection%type
+,	f_d1			date
+,	f_d2			date
+
+,	f_turn	rec_turn
+,	f_saldo	rec_saldo
+
+,	f_date_last		date
+,	f_update_nt		number				-- корректировка нац. покрытия
+);
+lrecCacheArg	rec_turns;
+lrecTurnNull	rec_turns;
+
+/**	Процедура инициализации переменных операции, необходимсых для расчёта остатков и оборотов по счетам
+  */
+public procedure init_varg(	p_end		date			-- ВНИМАНИЕ! сначала д.б. окончание периода
+						,	p_beg		date			:= null
+						,	p_client	ref	[CLIENT]	:= null
+						)
+is
+begin
+	if p_end is null then
+		pragma error('Пожалуйста, выберите отчетную дату для инициализации истории наименований балансовых счетов.');
+	end if;
+	::[OPTIONAL_REP_INT].[PRX_REPS].RepsInfoDateInit(p_end);
+
+	lrecCacheArg		:= lrecTurnNull;
+
+	if p_beg is not null then
+		-- Инициализация контекстов для представления
+		executor.Set_Context('$REP$_ACC_D1', to_char( p_beg		, 'dd/mm/yyyy'));
+		executor.Set_Context('$REP$_ACC_D2', to_char( p_end+1	, 'dd/mm/yyyy'));
+	end if;
+
+	executor.Set_Context('$REP$_ACC_CL'	, null);
+	if P_CLIENT is not null then
+		executor.Set_Context('$REP$_ACC_CL'	, P_CLIENT%id);
+	end if;
+end;
+
+
+/**	Функция возвращает остатки, обороты или дату последней операции в валюте в зависимости от параметра
+  */
+function GetSought(p_par varchar2) return number is
+begin
+	case p_par of
+		:'ИН':	return lrecCacheArg.f_saldo.f_out.f_nat;
+		:'ВН':	return lrecCacheArg.f_saldo.f_in.f_nat;
+		:'ДН':	return lrecCacheArg.f_turn.f_dt.f_nat;
+		:'КН':	return lrecCacheArg.f_turn.f_kt.f_nat;
+		:'ИВ':	return lrecCacheArg.f_saldo.f_out.f_cur;
+		:'ДВ':	return lrecCacheArg.f_turn.f_dt.f_cur;
+		:'КВ':	return lrecCacheArg.f_turn.f_kt.f_cur;
+		:'ВВ':	return lrecCacheArg.f_saldo.f_in.f_cur;
+		:'НП':	return lrecCacheArg.f_update_nt;
+		:'Д':	return to_char(lrecCacheArg.f_date_last, 'yyyymmdd');
+	end;
+
+	return null;
+end;
+
+
+/**	Функция возвращает остатки или обороты по шифрованному счёту
+  */
+function GetShifrData(	p_par		varchar2
+					,	p_beg		date
+					,	p_end		date
+					,	p_acc		ref [AC_FIN]
+					,	p_summary	ref [AC_FIN]
+) return number is
+	nTmp1	number;
+	nTmp2	number;
+	nTmp3	number;
+	nTmp4	number;
+	nTmp5	number;
+	nTmp6	number;
+
+	dDate1	date;
+	dDate2	date;
+begin
+	---------------------------------------------------------------------------------------
+	-- по шифрованному счету
+	---------------------------------------------------------------------------------------
+
+	--	получаем дебетовые обороты
+	--	В запросе используются только агрегатные функции, исключение NO_DATA_FOUND возникнуть не может
+	select doc1(
+					sum(	decode(	greatest(	doc1.[DATE_PROV], p_beg)
+								,	doc1.[DATE_PROV],	doc1.[SUM]
+								,	0
+								)
+						)
+				,	sum(	decode(	greatest(	doc1.[DATE_PROV], p_beg)
+								,	doc1.[DATE_PROV],	doc1.[SUM_NT]
+								,	0
+								)
+						)
+				,	max(doc1.[DATE_PROV])
+				,	sum(doc1.[SUM])
+				,	sum(doc1.[SUM_NT])
+
+				-- Суммируем переоценку
+				,	sum(	decode(	doc1.[KOD_NAZN_PAY]
+								,	::[KOD_N_PAY]([KOD_NAZN]='RECONT'),		nvl(doc1.[SUM_NT], 0)
+								,	::[KOD_N_PAY]([KOD_NAZN]='RECONT+'),	nvl(doc1.[SUM_NT], 0)
+								,	0
+								)
+						)
+	)	in ::[MAIN_DOCUM]
+	where	upper(doc1%state) = 'PROV'
+		and doc1.[KL_DT].[1].[2] = p_acc
+		and	doc1.[ACC_DT]	= p_summary
+		and doc1.[DATE_PROV] < p_end + 1
+	into  lrecCacheArg.f_turn.f_dt.f_cur, lrecCacheArg.f_turn.f_dt.f_nat, dDate1, nTmp1, nTmp2, nTmp5;
+
+	--	получаем кредитовые обороты
+	--	В запросе используются только агрегатные функции, исключение NO_DATA_FOUND возникнуть не может
+	select doc2(
+					sum(	decode(	greatest(	doc2.[DATE_PROV], p_beg)
+								,	doc2.[DATE_PROV],	doc2.[SUM_PO]
+								,	0
+								)
+						)
+				,	sum(	decode(	greatest(	doc2.[DATE_PROV], p_beg)
+								,	doc2.[DATE_PROV],	doc2.[SUM_NT]
+								,	0
+								)
+						)
+				,	max(doc2.[DATE_PROV])
+				,	sum(doc2.[SUM_PO])
+				,	sum(doc2.[SUM_NT])
+
+				-- Суммируем переоценку
+				,	sum(	decode(	doc2.[KOD_NAZN_PAY]
+								,	::[KOD_N_PAY]([KOD_NAZN]='RECONT'),		nvl(doc2.[SUM_NT], 0)
+								,	::[KOD_N_PAY]([KOD_NAZN]='RECONT+'),	nvl(doc2.[SUM_NT], 0)
+								,	0
+								)
+						)
+	)	in ::[MAIN_DOCUM]
+	where	upper(doc2%state)='PROV'
+		and doc2.[KL_KT].[1].[2] = p_acc
+		and	doc2.[ACC_KT]	= p_summary
+		and doc2.[DATE_PROV] < p_end + 1
+	into  lrecCacheArg.f_turn.f_kt.f_cur, lrecCacheArg.f_turn.f_kt.f_nat, dDate2, nTmp3, nTmp4, nTmp6;
+
+	lrecCacheArg.f_date_last := greatest(nvl(dDate1 ,to_date('01/01/1900')), nvl(dDate2 ,to_date('01/01/1900')));
+
+	if lrecCacheArg.f_date_last = to_date('01/01/1900') then
+		lrecCacheArg.f_date_last := null;
+	end if;
+
+	lrecCacheArg.f_saldo.f_out.f_cur	:= nvl(nTmp3,0)						-	nvl(nTmp1,0);
+	lrecCacheArg.f_saldo.f_out.f_nat	:= nvl(nTmp4,0)						-	nvl(nTmp2,0);
+	lrecCacheArg.f_saldo.f_in.f_cur		:= lrecCacheArg.f_saldo.f_out.f_cur	-	nvl(lrecCacheArg.f_turn.f_kt.f_cur,0)	+nvl(lrecCacheArg.f_turn.f_dt.f_cur,0);
+	lrecCacheArg.f_saldo.f_in.f_nat		:= lrecCacheArg.f_saldo.f_out.f_nat	-	nvl(lrecCacheArg.f_turn.f_kt.f_nat,0)	+nvl(lrecCacheArg.f_turn.f_dt.f_nat,0);
+	lrecCacheArg.f_update_nt			:= nvl(nTmp5,0)						+	nvl(nTmp6,0);
+
+	return GetSought(p_par);
+end;
+
+
+/** Функция определяет последнее движение по счёту: из выписки; со счёта.
+  * @exception	rtl.NO_DATA_FOUND в случае если счёт с заданным экземпляром коллекции более не существует;
+  */
+function GetDateLast(	p_acc		ref [AC_FIN]
+					,	p_arc_move	::[records]%collection%type
+					,	p_beg		date
+					,	p_end		date
+) return date is
+	dTmp	date;
+begin
+	-- ВНИМАНИЕ!!! В ситуации, когда в запросе при вычислении nTurn оно было взято из переоценки
+	-- надо снова строить запрос с даты p_end + 1
+	&fix.beg('xA.1');
+	for	(
+		select z(	z%rowtype
+		) in
+				(
+					select x( x.[DATE] : dt )
+					in	P_ARC_MOVE
+					where	x.[DATE] <  p_end + 1
+						and	x.[SUMMA] > 0
+					order by	x.[DATE] desc
+							,	x.[STAMP] desc
+							,	x desc
+				)
+		where rownum < 2
+	) loop
+		&fix.fin('xA.1');
+		return z.dt;
+	end loop;
+	&fix.fin('xA.1');
+
+	if p_acc is null then
+		--	Здесь нельзя использовать цикл for, так как при отсутсвии счёта должно быть брошено исключение NO_DATA_FOUND
+		&fix.beg('xA.2');
+		select x (	x.[DATE_LAST]
+		) in ::[AC_FIN]
+		where x.[ARC_MOVE] = P_ARC_MOVE
+		into dTmp;
+		&fix.fin('xA.2');
+	else
+		&fix.beg('xA.3');
+		dTmp	:= p_acc.[DATE_LAST];
+		&fix.fin('xA.3');
+	end if;
+
+	if dTmp > p_beg then
+		return null;
+	end if;
+
+	return	dTmp;
+end;
+
+
+/**	Функция возвращает остатки или обороты по нешифрованному счёту
+  */
+function GetNormalData(	p_arc_move	::[RECORDS]%collection%type
+					,	p_par		varchar2
+					,	p_beg		date
+					,	p_end		date
+					,	p_acc		ref [AC_FIN]
+					,	p_storno	date
+					,	p_corr		::[ARH_COR_ACC]%collection%type
+) return number is
+	rOpType			ref	[ACC_OPER];
+	nTurn			number;
+
+	dDate			date;
+	bRecordsFound	boolean;
+
+	nTmpDt			number;			-- Сумма коррекций оборотов по дебету
+	nTmpDtNT		number;			-- Сумма коррекций оборотов по дебету в нац. валюте
+	nTmpKt			number;			-- Сумма коррекций оборотов по кредиту
+	nTmpKtNT		number;			-- Сумма коррекций оборотов по кредиту в нац. валюте
+	nIn				number;			-- Сумма коррекций входящих остатков
+	nInNT			number;			-- Сумма коррекций входящих остатков в нац. валюте
+	nOut			number;			-- Сумма коррекций исходящих остатков
+	nOutNT			number;			-- Сумма коррекций исходящих остатков в нац. валюте
+begin
+	---------------------------------------------------------------------------------------
+	-- по обычному счету
+	---------------------------------------------------------------------------------------
+	bRecordsFound := false;
+
+	&fix.beg('xB.1');
+	for(	--	сальдо
+			--	Запрос окружён подзапросом для того, чтобы Oracle не выполнял prefetching в 100 записей.
+		select x(	x%rowtype
+		) in
+				(
+					select
+							c(	c.[START_SUM]		+ decode(c.[DT], true, nvl(-c.[SUMMA], 0),		nvl(c.[SUMMA], 0)	)	:C_OUT_V
+							,	c.[START_SUM_NAT]	+ decode(c.[DT], true, nvl(-c.[SUMMA_NAT], 0),	nvl(c.[SUMMA_NAT], 0))	:C_OUT_NT
+							,	c.[DATE]																					:C_DAT
+							,	c.[TYPE_OPER]																				:C_TYPE_OPER
+							,	nvl(c.[SUMMA],0)																			:C_TURN
+					) in	P_ARC_MOVE
+					where	c.[DATE] <  p_end + 1
+					order by	c.[DATE] desc
+							,	c.[STAMP] desc
+							,	c desc
+				)
+		where	rownum < 2
+	) loop
+		bRecordsFound						:=	true;
+		lrecCacheArg.f_saldo.f_out.f_cur	:=	x.c_out_v;
+		lrecCacheArg.f_saldo.f_out.f_nat	:=	x.c_out_nt;
+		lrecCacheArg.f_date_last			:=	x.c_dat;
+		rOpType 							:=	x.c_type_oper;
+		nTurn								:=	x.c_turn;
+
+		exit;
+	end loop;
+	&fix.fin('xB.1');
+
+	if not bRecordsFound then
+		lrecCacheArg.f_date_last		:= null;
+		lrecCacheArg.f_turn.f_dt.f_cur	:= 0;
+		lrecCacheArg.f_turn.f_dt.f_nat	:= 0;
+		lrecCacheArg.f_turn.f_kt.f_cur	:= 0;
+		lrecCacheArg.f_turn.f_kt.f_nat	:= 0;
+		lrecCacheArg.f_update_nt := 0;
+
+		&fix.beg('xB.2');
+		for(
+				select x(x%rowtype
+				) in
+						(
+							select c(	c.[START_SUM]		:OUT_V
+									,	c.[START_SUM_NAT] 	:OUT_NT
+							)	in	P_ARC_MOVE
+							where	c.[DATE] > p_end
+							order by	c.[DATE]
+									,	c.[STAMP]
+									,	c
+						)
+				where rownum < 2
+		) loop
+			&fix.fin('xB.2');
+			lrecCacheArg.f_saldo.f_out.f_cur	:= x.out_v;
+			lrecCacheArg.f_saldo.f_out.f_nat	:= x.out_nt;
+			lrecCacheArg.f_saldo.f_in.f_cur		:= nvl(lrecCacheArg.f_saldo.f_out.f_cur,0);
+			lrecCacheArg.f_saldo.f_in.f_nat		:= nvl(lrecCacheArg.f_saldo.f_out.f_nat,0);
+
+			return GetSought(p_par);
+		end loop;
+		&fix.fin('xB.2');
+
+		-- Для случая, когда по л/с нет записей в массиве выписки
+		&fix.beg('xB.3');
+		select x(	x.[SALDO]
+				,	x.[SALDO_NT]
+				,	x.[DATE_LAST]
+		) in	::[AC_FIN]
+		where	x.[ARC_MOVE] = P_ARC_MOVE
+		into	lrecCacheArg.f_saldo.f_out.f_cur
+			,	lrecCacheArg.f_saldo.f_out.f_nat
+			,	lrecCacheArg.f_date_last
+		;
+		&fix.fin('xB.3');
+
+		if lrecCacheArg.f_date_last > p_end then
+			lrecCacheArg.f_date_last	:= null;
+		end if;
+
+		lrecCacheArg.f_saldo.f_in.f_cur	:= nvl(lrecCacheArg.f_saldo.f_out.f_cur,0);
+		lrecCacheArg.f_saldo.f_in.f_nat	:= nvl(lrecCacheArg.f_saldo.f_out.f_nat,0);
+
+		return GetSought(p_par);
+	end if;
+
+	if lrecCacheArg.f_date_last < p_beg then
+		lrecCacheArg.f_turn.f_dt.f_cur	:= 0;
+		lrecCacheArg.f_turn.f_kt.f_cur	:= 0;
+		lrecCacheArg.f_turn.f_dt.f_nat	:= 0;
+		lrecCacheArg.f_turn.f_kt.f_nat	:= 0;
+		lrecCacheArg.f_update_nt		:= 0;
+		lrecCacheArg.f_saldo.f_in.f_cur	:= nvl(lrecCacheArg.f_saldo.f_out.f_cur,0);
+		lrecCacheArg.f_saldo.f_in.f_nat	:= nvl(lrecCacheArg.f_saldo.f_out.f_nat,0);
+
+	else
+		&fix.beg('xB.4');
+		select c(	sum(decode(c.[DT],true ,nvl(c.[SUMMA_NAT],0)		,0))
+				,	sum(decode(c.[DT],true ,0	,nvl(c.[SUMMA_NAT]	,0)))
+				,	sum(decode(c.[DT],true ,nvl(c.[SUMMA],0)			,0))
+				,	sum(decode(c.[DT],true ,0	,nvl(c.[SUMMA]		,0)))
+
+				-- Суммируем переоценку /сумма в валюте=0/
+				,	sum(	decode(	nvl(c.[SUMMA], 0)
+								,	0, decode(	c.[DT]
+											,	true, nvl(-c.[SUMMA_NAT], 0)
+									 		,	nvl( c.[SUMMA_NAT], 0)
+									 	)
+								,	0
+							)
+					)
+		)	in P_ARC_MOVE
+		where	c.[DATE] >= p_beg
+			and	c.[DATE] <  p_end + 1
+		into	lrecCacheArg.f_turn.f_dt.f_nat
+			,	lrecCacheArg.f_turn.f_kt.f_nat
+			,	lrecCacheArg.f_turn.f_dt.f_cur
+			,	lrecCacheArg.f_turn.f_kt.f_cur
+			,	lrecCacheArg.f_update_nt
+		;
+		&fix.fin('xB.4');
+
+		lrecCacheArg.f_saldo.f_in.f_cur	:= nvl(lrecCacheArg.f_saldo.f_out.f_cur,0)	+ nvl(lrecCacheArg.f_turn.f_dt.f_cur,0)	- nvl(lrecCacheArg.f_turn.f_kt.f_cur,0);
+		lrecCacheArg.f_saldo.f_in.f_nat	:= nvl(lrecCacheArg.f_saldo.f_out.f_nat,0)	+ nvl(lrecCacheArg.f_turn.f_dt.f_nat,0)	- nvl(lrecCacheArg.f_turn.f_kt.f_nat,0);
+	end if;
+
+	if rOpType = ::[ACC_OPER]([CODE]='50') then
+		&fix.beg('xB.5');
+		if p_acc is null then
+			select x ( x.[DATE_LAST] ) in ::[AC_FIN] where x.[ARC_MOVE] = P_ARC_MOVE into dDate;
+		else
+			dDate	:= p_acc.[DATE_LAST];
+		end if;
+		&fix.fin('xB.5');
+
+		if dDate > p_end then
+			lrecCacheArg.f_date_last	:= null;
+		else
+			lrecCacheArg.f_date_last	:= dDate;
+		end if;
+
+	elsif nTurn=0 then
+		&fix.beg('xB.6');
+		lrecCacheArg.f_date_last := GetDateLast(	p_acc
+												,	p_arc_move
+												,	p_beg
+												,	p_end
+		);
+		&fix.fin('xB.6');
+	end if;
+
+	-- обработка исправительных документов
+	nTmpDt = nTmpDtNT =	nTmpKt = nTmpKtNT = nIn	= nInNT = nOut = nOutNT	:= 0;
+	if P_STORNO >= p_beg then
+		&fix.beg('xB.7');
+		&debug_output('Обработка исправительных документов. ID коллекции архива коррекций движений ['||p_corr||']', 10);
+		for (
+			-- Выбираются коррекции, у которых исправляющий документ или документ, отменяющий исправление, попадают в отчетный период
+			select c(	c.[SUMMA]										: C_SUMMA				-- Сумма коррекции в валюте
+					,	c.[SUMMA_NAT]									: C_SUMMA_NAT			-- Сумма коррекции в нац. валюте
+					, 	decode(nvl(c.[DT], false), true, 1, -1)			: C_DT					-- Признак дебетования (1 - по дебету, -1 - по кредиту)
+					, 	c.[DOC_1]										: C_DOC_1				-- Исходный документ
+					, 	c.[DOC_2]										: C_DOC_2				-- Исправляющий документ
+					, 	c.[DOC_3]										: C_DOC_3				-- Документ, отменяющий исправление
+					,	trunc(c.[DATE_DOC_1_OR_ZO])						: C_DATE_DOC_1			-- Дата исходного документа
+					,	trunc(c.[DATE_DOC_2])							: C_DATE_DOC_2			-- Дата исправляющего документа
+					,	trunc(c.[DATE_DOC_3_2])							: C_DATE_DOC_3			-- Дата документа, отменяющего исправлени
+					)
+				in p_corr
+				where ((		c.[DATE_DOC_2] > p_beg - 1
+							and	c.[DATE_DOC_2] < P_STORNO + 1)
+						or
+						(		c.[DATE_DOC_3_2] > p_beg - 1
+							and	c.[DATE_DOC_3_2] < P_STORNO + 1))
+						and	c.[DOC_1] is not null
+
+		)loop
+			&debug_output('Исходный документ ['||c.C_DOC_1||'] Исправительный документ ['||c.C_DOC_2||'] Документ отменяющий исправление ['||c.C_DOC_3||'] признак дебетования ['||c.C_DT||']', 10);
+			-- Если исправляющий документ и документ, отменяющий исправление больше даты окончания отчетного периода или исходный документ больше даты окончания отчетного периода, такая коррекция пропускается
+			if  (c.C_DATE_DOC_2 > p_end and c.C_DATE_DOC_2 <= P_STORNO) and ((c.C_DATE_DOC_1 > p_end and c.C_DATE_DOC_1 <= P_STORNO) or (c.C_DATE_DOC_3 > p_end and  c.C_DATE_DOC_3 <= P_STORNO)) then
+				&debug_output('Коррекция не учитывается, так как документы находятся после отчетного периода', 10);
+				continue;
+			end if;
+
+			--------- Коррекция оборотов --------
+			-- Если исправительный документ находится в отчетном периоде, необходимо корректировать обороты противоположные по направлению признаку дебетования
+			if c.C_DATE_DOC_2 >= p_beg and c.C_DATE_DOC_2 <= p_end then
+				-- Установлен признак дебетования
+				if c.C_DT = 1 then
+					-- Обороты по кредиту
+					nTmpKt := nTmpKt + c.C_SUMMA;
+					nTmpKtNT := nTmpKtNT + c.C_SUMMA_NAT;
+				-- Иначе
+				else
+					-- Обороты по дебету
+					nTmpDt := nTmpDt + c.C_SUMMA;
+					nTmpDtNT := nTmpDtNT + c.C_SUMMA_NAT;
+				end if;
+				&debug_output('Сумма коррекций оборотов (документ 2 в отчетном периоде)  ['||c.C_SUMMA||'('||c.C_SUMMA_NAT||')]', 10);
+			end if;
+
+			-- Если исходный документ находится в отчетном периоде и документ, отменяющий исправление отсутствует, либо находится после даты учета сторнирования
+			-- или документ, отменяющий исправление находится в отчетном периоде,
+			-- необходимо корректировать обороты по признаку дебетования
+			if 		((c.C_DATE_DOC_1 >= p_beg and c.C_DATE_DOC_1 <= p_end) and (c.C_DOC_3 is null or c.C_DATE_DOC_3 > P_STORNO))
+				or 	(c.C_DATE_DOC_3 >= p_beg and c.C_DATE_DOC_3 <= p_end)
+			then
+				-- Установлен признак дебетования
+				if c.C_DT = 1 then
+					-- Обороты по дебету
+					nTmpDt := nTmpDt + c.C_SUMMA;
+					nTmpDtNT := nTmpDtNT + c.C_SUMMA_NAT;
+				-- Иначе
+				else
+					-- Обороты по кредиту
+					nTmpKt := nTmpKt + c.C_SUMMA;
+					nTmpKtNT := nTmpKtNT + c.C_SUMMA_NAT;
+				end if;
+				&debug_output('Сумма коррекций оборотов (документ 1 или документ 3 в отчетном периоде)  ['||c.C_SUMMA||'('||c.C_SUMMA_NAT||')]', 10);
+			end if;
+
+			--------- Коррекция входящих остатков --------
+			-- Если документ, отменяющий исправление, находится до даты учета сторнирующих документов
+			if c.C_DATE_DOC_3 >= p_beg and c.C_DATE_DOC_3 <= P_STORNO then
+				-- Если исправляющий документ находится раньше отчетного периода, тогда входящий остаток уменьшается на сумму коррекции
+				if c.C_DATE_DOC_2 < p_beg then
+					nIn 	:= nIn + c.C_DT * c.C_SUMMA;
+					nInNT 	:= nInNT + c.C_DT * c.C_SUMMA_NAT;
+					&debug_output('Сумма коррекций входящего остатка  ['||c.C_DT * c.C_SUMMA||'('||c.C_DT * c.C_SUMMA_NAT||')]', 10);
+				end if;
+			else
+				-- Если исходный документ находится раньше отчетного периода, тогда входящий остаток увеличивается на сумму коррекции
+				if c.C_DATE_DOC_1 < p_beg then
+					nIn 	:= nIn + (-1) * c.C_DT * c.C_SUMMA;
+					nInNT 	:= nInNT + (-1) * c.C_DT * c.C_SUMMA_NAT;
+					&debug_output('Сумма коррекций входящего остатка  ['||-c.C_DT * c.C_SUMMA||'('||-c.C_DT * c.C_SUMMA_NAT||')]', 10);
+				end if;
+			end if;
+
+			--------- Коррекция исходящих остатков --------
+			-- Если документ, отменяющий исправление, находится после отчетного периода, но до даты учета сторнирующих документов,
+			-- тогда исходящий остаток уменьшается на сумму коррекции
+			if c.C_DATE_DOC_3 > p_end and c.C_DATE_DOC_3 <= P_STORNO then
+				nOut 	:= nOut + c.C_DT * c.C_SUMMA;
+				nOutNT 	:= nOutNT + c.C_DT * c.C_SUMMA_NAT;
+				&debug_output('Сумма коррекций исходящего остатка  ['||c.C_DT * c.C_SUMMA||'('||c.C_DT * c.C_SUMMA_NAT||')]', 10);
+			else
+				-- Если исправляющий документ, находится после отчетного периода, но до даты учета сторнирующих документов,
+				-- тогда исходящий остаток увеличивается на сумму коррекции
+				if c.C_DATE_DOC_2 > p_end and c.C_DATE_DOC_2 <= P_STORNO then
+					nOut 	:= nOut + (-1) * c.C_DT * c.C_SUMMA;
+					nOutNT 	:= nOutNT + (-1) * c.C_DT * c.C_SUMMA_NAT;
+					&debug_output('Сумма коррекций исходящего остатка  ['||-c.C_DT * c.C_SUMMA||'('||-c.C_DT * c.C_SUMMA_NAT||')]', 10);
+				end if;
+			end if;
+		end loop;
+
+		&fix.fin('xB.7');
+		lrecCacheArg.f_saldo.f_in.f_cur		:= lrecCacheArg.f_saldo.f_in.f_cur		- nvl(nIn,0);
+		lrecCacheArg.f_saldo.f_in.f_nat		:= lrecCacheArg.f_saldo.f_in.f_nat		- nvl(nInNT,0);
+		lrecCacheArg.f_saldo.f_out.f_cur	:= lrecCacheArg.f_saldo.f_out.f_cur		- nvl(nOut,0);
+		lrecCacheArg.f_saldo.f_out.f_nat	:= lrecCacheArg.f_saldo.f_out.f_nat		- nvl(nOutNT,0);
+		lrecCacheArg.f_turn.f_dt.f_cur		:= lrecCacheArg.f_turn.f_dt.f_cur		- nvl(nTmpDt,0);
+		lrecCacheArg.f_turn.f_dt.f_nat		:= lrecCacheArg.f_turn.f_dt.f_nat		- nvl(nTmpDtNT,0);
+		lrecCacheArg.f_turn.f_kt.f_cur		:= lrecCacheArg.f_turn.f_kt.f_cur		- nvl(nTmpKt,0);
+		lrecCacheArg.f_turn.f_kt.f_nat		:= lrecCacheArg.f_turn.f_kt.f_nat		- nvl(nTmpKtNT,0);
+	end if;
+
+	return GetSought(p_par);
+
+exception when NO_DATA_FOUND then
+	lrecCacheArg := lrecTurnNull;
+
+	for z in ::[AC_FIN] all where z.[ARC_MOVE] = P_ARC_MOVE loop
+		&debug_output('Ошибка определения счета! Значение ИД выписки (P_ARC_MOVE) = '||to_char(P_ARC_MOVE)||'. Произошла ошибка при определении данных по счету id= '||z%id||' .', 0);
+		return GetSought(p_par);
+	end loop;
+
+	&debug_output('Ошибка определения счета! Значение ИД выписки (P_ARC_MOVE) = '||to_char(P_ARC_MOVE)||'. Произошла ошибка при определении данных по счету, счет обнаружить не удалось!', 0);
+	return GetSought(p_par);
+end;
+
+/**	функция возвращает обороты и остатки в валюте счета и нац.покрытии
+  *	Параметр REF_ACC_SUMMARY добавлен 21/01/2005
+  *	для корректного отображения по шифрованным счетам доходов-расходов аналитических данных
+  *	(выполнения операции разбивки документов по счетам МФР)
+  */
+public function turn(	p_arc_move			::[RECORDS]%collection%type
+			,	p_param				varchar2
+			,	p_beg				date
+			,	p_end				date
+			,	p_acc				ref [AC_FIN]					:= null
+			,	p_summary			ref [AC_FIN]					:= null
+			,	p_status			ref [COM_STATUS_PRD]			:= null
+			,	p_storno			date							:= null
+			,	p_corr				::[ARH_COR_ACC]%collection%type	:= null
+) return number is
+	nRet	number;
+begin
+	if		lrecCacheArg.f_move	=	P_ARC_MOVE
+		and	lrecCacheArg.f_d1	=	p_beg
+		and	lrecCacheArg.f_d2	=	p_end
+	then
+		return GetSought(p_param);
+	end if;
+
+	&fix.inc('in_turn');
+
+	lrecCacheArg.f_move	:= P_ARC_MOVE;
+	lrecCacheArg.f_d1	:= p_beg;
+	lrecCacheArg.f_d2	:= p_end;
+
+
+	if (nvl(p_status%id,-1) = ::[COM_STATUS_PRD]([CODE]='SHIFR')%id) then
+		&fix.beg('xC');
+		nRet := GetShifrData(	p_param
+							,	p_beg
+							,	p_end
+							,	p_acc
+							,	p_summary
+		);
+		&fix.fin('xC');
+		return nRet;
+	end if;
+
+	return GetNormalData(	p_arc_move
+						,	p_param
+						,	p_beg
+						,	p_end
+						,	p_acc
+						,	p_storno
+						,	p_corr
+
+	);
+end;
+pragma restrict_references(turn, WNDS, trust);
+
+
+/**	Функция возвращает обороты и остатки в указанной валюте
+  *	Параметр p_summary добавлен 21/01/2005
+  *	для корректного отображения по шифрованным счетам доходов-расходов аналитических данных
+  *	(выполнения операции разбивки документов по счетам МФР)
+  */
+public function turnv(	p_arc_move			::[RECORDS]%collection%type
+			,	p_param				varchar2
+			,	p_beg				date
+			,	p_end				date
+			,	p_iso				varchar2
+			,	p_acc_curr_code		varchar2
+			,	p_acc				ref [AC_FIN]					:= null
+			,	p_summary			ref [AC_FIN]					:= null
+			,	p_status			ref [COM_STATUS_PRD]			:= null
+			,	p_storno			date							:= null
+			,	p_corr				::[ARH_COR_ACC]%collection%type	:= null
+) return number is
+	nTmp1		number;
+	nTmp2		number;
+	nTmp3		number;
+	nTmp4		number;
+
+	nIn			number;			-- Сумма коррекции входящих остатков
+	nOut		number;			-- Сумма коррекции исходящих остатков
+	nTmpDt		number;			-- Сумма коррекции оборотов по дебету
+	nTmpKt		number;			-- Сумма коррекций оборотов по кредиту
+	dDate1		date;
+	dDate2		date;
+
+	rOpType		ref	[ACC_OPER];
+	nTurn		number;
+
+	nRateISO	number;
+begin
+	pragma macro(rate, '::[REPS].[CUR_LIB].currate');
+
+	&fix.beg('xD');
+	lrecCacheArg := lrecTurnNull;
+
+	if		lrecCacheArg.f_move	= P_ARC_MOVE
+		and	lrecCacheArg.f_d1	= p_beg
+		and	lrecCacheArg.f_d2	= p_end
+	then
+		null;
+	else
+		lrecCacheArg.f_move	:= P_ARC_MOVE;
+		lrecCacheArg.f_d1	:= p_beg;
+		lrecCacheArg.f_d2	:= p_end;
+---------------------------------------------------------------------------
+		if (nvl(p_status%id,-1) <> ::[COM_STATUS_PRD]([CODE]='SHIFR')%id) then
+---------------------------------------------------------------------------
+			begin
+				select b(b.C_OUT_V, b.C_DAT, b.C_TYPE_OPER, b.C_TURN)
+				in	(	select c(	c.[START_SUM] + decode(c.[DT], true , -nvl(c.[SUMMA], 0), nvl(c.[SUMMA], 0))				:C_OUT_V
+								,	c.[DATE]																			:C_DAT
+								,	c.[TYPE_OPER]																		:C_TYPE_OPER
+								,	nvl(c.[SUMMA], 0)																	:C_TURN
+						)
+						in	P_ARC_MOVE
+						where	c.[DATE] < p_end + 1
+						order by	c.[DATE] desc
+								,	c.[STAMP] desc
+								,	c desc
+					)
+				where	rownum < 2
+				into	lrecCacheArg.f_saldo.f_out.f_cur
+					,	lrecCacheArg.f_date_last
+					,	rOpType
+					,	nTurn
+				;
+
+				if lrecCacheArg.f_date_last < p_beg then
+					lrecCacheArg.f_saldo.f_in.f_cur	:= lrecCacheArg.f_saldo.f_out.f_cur;
+					lrecCacheArg.f_turn.f_dt.f_cur	:= 0;
+					lrecCacheArg.f_turn.f_kt.f_cur	:= 0;
+				else
+					select c(
+						 sum(decode(c.[DT],true ,decode(nvl(c.[SUMMA],0),0,0,c.[SUMMA])
+							/ &rate(p_iso, c.[DATE]) * &rate(p_acc_curr_code, c.[DATE])
+						,0)																		)
+						,sum(decode(c.[DT],true , 0, decode(nvl(c.[SUMMA],0),0,0,c.[SUMMA])
+							/ &rate(p_iso, c.[DATE]) * &rate(p_acc_curr_code, c.[DATE])
+						)																		)
+						,sum(decode(c.[DT],true ,-nvl(c.[SUMMA],0)
+						,nvl(c.[SUMMA],0)														)
+						)
+					)
+					in P_ARC_MOVE
+					where	c.[DATE] >= p_beg
+						and	c.[DATE] < p_end + 1
+					into	lrecCacheArg.f_turn.f_dt.f_cur
+						,	lrecCacheArg.f_turn.f_kt.f_cur
+						,	nTmp1
+					;
+				end if;
+
+				lrecCacheArg.f_saldo.f_in.f_cur := lrecCacheArg.f_saldo.f_out.f_cur - nvl(nTmp1,0);
+
+				if rOpType = ::[ACC_OPER]([CODE]='50') then
+					lrecCacheArg.f_date_last := null;
+
+				elsif nTurn=0 then
+
+					lrecCacheArg.f_date_last := GetDateLast(p_acc, p_arc_move, p_beg, p_end);
+				end if;
+
+				---------------------------------------------------------------------------------------
+				-- обработка исправительных документов
+				---------------------------------------------------------------------------------------
+				nTmpDt = nTmpKt = nIn = nOut := 0;
+				if p_storno is not null and p_storno >= p_beg then
+					for (
+						-- Выбираются коррекции, у которых исправляющий документ или документ, отменяющий исправление, попадают в отчетный период
+						select c(	c.[SUMMA]										: C_SUMMA				-- Сумма коррекции в валюте
+								, 	decode(nvl(c.[DT], false), true, 1, -1)			: C_DT					-- Признак дебетования (1 - по дебету, -1 - по кредиту)
+								, 	c.[DOC_1]										: C_DOC_1				-- Исходный документ
+								, 	c.[DOC_2]										: C_DOC_2				-- Исправляющий документ
+								, 	c.[DOC_3]										: C_DOC_3				-- Документ, отменяющий исправление
+								,	trunc(c.[DATE_DOC_1_OR_ZO])						: C_DATE_DOC_1			-- Дата исходного документа
+								,	trunc(c.[DATE_DOC_2])							: C_DATE_DOC_2			-- Дата исправляющего документа
+								,	trunc(c.[DATE_DOC_3_2])							: C_DATE_DOC_3			-- Дата документа, отменяющего исправлени
+								)
+							in p_corr
+							where ((		c.[DATE_DOC_2] > p_beg - 1
+										and	c.[DATE_DOC_2] < P_STORNO + 1)
+									or
+									(		c.[DATE_DOC_3_2] > p_beg - 1
+										and	c.[DATE_DOC_3_2] < P_STORNO + 1))
+									and	c.[DOC_1] is not null
+
+					)loop
+						&debug_output('Исходный документ ['||c.C_DOC_1||'] Исправительный документ ['||c.C_DOC_2||'] Документ отменяющий исправление ['||c.C_DOC_3||'] признак дебетования ['||c.C_DT||']', 10);
+						-- Если исправляющий документ и документ, отменяющий исправление больше даты окончания отчетного периода или исходный документ больше даты окончания отчетного периода, такая коррекция пропускается
+						if  (c.C_DATE_DOC_2 > p_end and c.C_DATE_DOC_2 <= P_STORNO) and ((c.C_DATE_DOC_1 > p_end and c.C_DATE_DOC_1 <= P_STORNO) or (c.C_DATE_DOC_3 > p_end and  c.C_DATE_DOC_3 <= P_STORNO)) then
+							&debug_output('Коррекция не учитывается, так как документы находятся после отчетного периода', 10);
+							continue;
+						end if;
+
+						--------- Коррекция оборотов --------
+						-- Если исправительный документ находится в отчетном периоде, необходимо корректировать обороты противоположные по направлению признаку дебетования
+						if c.C_DATE_DOC_2 >= p_beg and c.C_DATE_DOC_2 <= p_end then
+							-- Установлен признак дебетования
+							if c.C_DT = 1 then
+								-- Обороты по кредиту
+								nTmpKt := nTmpKt + c.C_SUMMA / &rate(p_iso, c.C_DATE_DOC_1) * &rate(p_acc_curr_code, c.C_DATE_DOC_1);
+							-- Иначе
+							else
+								-- Обороты по дебету
+								nTmpDt := nTmpDt + c.C_SUMMA / &rate(p_iso, c.C_DATE_DOC_1) * &rate(p_acc_curr_code, c.C_DATE_DOC_1);
+							end if;
+							&debug_output('Сумма коррекций оборотов (документ 2 в отчетном периоде)  ['||c.C_SUMMA||']', 10);
+						end if;
+
+						-- Если исходный документ находится в отчетном периоде и документ, отменяющий исправление отсутствует, либо находится после даты учета сторнирования
+						-- или документ, отменяющий исправление находится в отчетном периоде,
+						-- необходимо корректировать обороты по признаку дебетования
+						if 		((c.C_DATE_DOC_1 >= p_beg and c.C_DATE_DOC_1 <= p_end) and (c.C_DOC_3 is null or c.C_DATE_DOC_3 > P_STORNO))
+							or 	(c.C_DATE_DOC_3 >= p_beg and c.C_DATE_DOC_3 <= p_end)
+						then
+							-- Установлен признак дебетования
+							if c.C_DT = 1 then
+								-- Обороты по дебету
+								nTmpDt := nTmpDt + c.C_SUMMA / &rate(p_iso, c.C_DATE_DOC_1) * &rate(p_acc_curr_code, c.C_DATE_DOC_1);
+							-- Иначе
+							else
+								-- Обороты по кредиту
+								nTmpKt := nTmpKt + c.C_SUMMA / &rate(p_iso, c.C_DATE_DOC_1) * &rate(p_acc_curr_code, c.C_DATE_DOC_1);
+							end if;
+							&debug_output('Сумма коррекций оборотов (документ 1 или документ 3 в отчетном периоде)  ['||c.C_SUMMA||']', 10);
+						end if;
+
+						--------- Коррекция входящих остатков --------
+						-- Если документ, отменяющий исправление, находится до даты учета сторнирующих документов
+						if c.C_DATE_DOC_3 >= p_beg and c.C_DATE_DOC_3 <= P_STORNO then
+							-- Если исправляющий документ находится раньше отчетного периода, тогда входящий остаток уменьшается на сумму коррекции
+							if c.C_DATE_DOC_2 < p_beg then
+								nIn 	:= nIn + c.C_DT * c.C_SUMMA;
+								&debug_output('Сумма коррекций входящего остатка  ['||c.C_DT * c.C_SUMMA||']', 10);
+							end if;
+						else
+							-- Если исходный документ находится раньше отчетного периода, тогда входящий остаток увеличивается на сумму коррекции
+							if c.C_DATE_DOC_1 < p_beg then
+								nIn 	:= nIn + (-1) * c.C_DT * c.C_SUMMA;
+								&debug_output('Сумма коррекций входящего остатка  ['||-c.C_DT * c.C_SUMMA||']', 10);
+							end if;
+						end if;
+
+						--------- Коррекция исходящих остатков --------
+						-- Если документ, отменяющий исправление, находится после отчетного периода, но до даты учета сторнирующих документов,
+						-- тогда исходящий остаток уменьшается на сумму коррекции
+						if c.C_DATE_DOC_3 > p_end and c.C_DATE_DOC_3 <= P_STORNO then
+							nOut 	:= nOut + c.C_DT * c.C_SUMMA;
+							&debug_output('Сумма коррекций исходящего остатка  ['||c.C_DT * c.C_SUMMA||']', 10);
+						else
+							-- Если исправляющий документ, находится после отчетного периода, но до даты учета сторнирующих документов,
+							-- тогда исходящий остаток увеличивается на сумму коррекции
+							if c.C_DATE_DOC_2 > p_end and c.C_DATE_DOC_2 <= P_STORNO then
+								nOut 	:= nOut + (-1) * c.C_DT * c.C_SUMMA;
+								&debug_output('Сумма коррекций исходящего остатка  ['||-c.C_DT * c.C_SUMMA||']', 10);
+							end if;
+						end if;
+					end loop;
+
+					lrecCacheArg.f_saldo.f_in.f_cur		:= lrecCacheArg.f_saldo.f_in.f_cur	- nvl(nIn, 0);
+					lrecCacheArg.f_saldo.f_out.f_cur	:= lrecCacheArg.f_saldo.f_out.f_cur	- nvl(nOut, 0);
+					lrecCacheArg.f_turn.f_dt.f_cur		:= lrecCacheArg.f_turn.f_dt.f_cur	- nvl(nTmpDt, 0);
+					lrecCacheArg.f_turn.f_kt.f_cur		:= lrecCacheArg.f_turn.f_kt.f_cur	- nvl(nTmpKt, 0);
+				end if;
+
+				lrecCacheArg.f_saldo.f_in.f_cur		:= lrecCacheArg.f_saldo.f_in.f_cur / &rate(p_iso, p_beg - 1)
+													* &rate(p_acc_curr_code, p_beg - 1);
+				lrecCacheArg.f_saldo.f_out.f_cur	:= lrecCacheArg.f_saldo.f_out.f_cur / &rate(p_iso, p_end)
+													* &rate(p_acc_curr_code, p_end);
+
+			---------------------------------------------------------------------------------------
+			exception when NO_DATA_FOUND then
+			---------------------------------------------------------------------------------------
+				lrecCacheArg.f_date_last := null;
+				lrecCacheArg.f_turn.f_dt.f_cur = lrecCacheArg.f_turn.f_kt.f_cur := 0;
+
+				begin
+					select b(b.C_OUT_V)
+					in	(	select c( c.[START_SUM_NAT]	:C_OUT_V)
+							in	P_ARC_MOVE
+							where	c.[DATE] > p_end
+							order by	c.[DATE]
+									,	c.[STAMP]
+									,	c
+					)
+					where	rownum < 2
+					into	lrecCacheArg.f_saldo.f_out.f_cur;
+
+				exception when NO_DATA_FOUND then			-- Для случая, когда по л/с нет записей в массиве выписки
+					select x(	x.[SALDO]
+							,	x.[DATE_LAST]
+					) in ::[AC_FIN]
+					where x.[ARC_MOVE] = P_ARC_MOVE
+					into lrecCacheArg.f_saldo.f_out.f_cur, lrecCacheArg.f_date_last;
+
+					if lrecCacheArg.f_date_last > p_end then
+						lrecCacheArg.f_date_last	:= null;
+					end if;
+				end;
+
+				nRateISO	:= &rate(p_iso, p_end);
+
+				if nRateISO = 0 then
+					pragma error('Курс "'||p_iso||'" за дату "'||to_char(p_end, 'dd/mm/yyyy')||'" нулевой!');
+				end if;
+
+				lrecCacheArg.f_saldo.f_out.f_cur	:= lrecCacheArg.f_saldo.f_out.f_cur / nRateISO * &rate(p_acc_curr_code, p_end);
+				lrecCacheArg.f_saldo.f_in.f_cur		:= lrecCacheArg.f_saldo.f_out.f_cur;
+			end;
+		else
+			---------------------------------------------------------------------------------------
+			-- по шифрованному счету (по документам - старый вариант)
+			---------------------------------------------------------------------------------------
+			begin
+				select doc1
+						( sum(decode(greatest(doc1.[DATE_PROV], p_beg),
+								doc1.[DATE_PROV],doc1.[SUM])
+							/ &rate(p_iso, doc1.[DATE_PROV]) * &rate(p_acc_curr_code, doc1.[DATE_PROV])
+								)
+						, sum(decode(greatest(doc1.[DATE_PROV], p_beg),
+								doc1.[DATE_PROV],doc1.[SUM],0))
+						, max(doc1.[DATE_PROV])
+						, sum(doc1.[SUM])
+				) in ::[MAIN_DOCUM]
+				where	upper(doc1%state) = 'PROV'
+					and doc1.[KL_DT].[1].[2] = p_acc
+					and	doc1.[ACC_DT]	= p_summary
+					and doc1.[DATE_PROV] < p_end + 1
+				into  lrecCacheArg.f_turn.f_dt.f_cur, nTmp3, dDate1, nTmp1;
+			exception
+				when NO_DATA_FOUND then
+					lrecCacheArg.f_turn.f_dt.f_cur	:= 0;
+			end;
+
+			begin
+				select doc2
+						( sum(decode(greatest(doc2.[DATE_PROV], p_beg),
+								doc2.[DATE_PROV] ,doc2.[SUM_PO]
+								/ &rate(p_iso, doc2.[DATE_PROV]) * &rate(p_acc_curr_code, doc2.[DATE_PROV])
+								,0)	)
+						, sum(decode(greatest(doc2.[DATE_PROV], p_beg),
+								doc2.[DATE_PROV],doc2.[SUM_PO], 0))
+						, max(doc2.[DATE_PROV])
+						, sum(doc2.[SUM_PO])
+				) in ::[MAIN_DOCUM]
+				where	upper(doc2%state)='PROV'
+					and doc2.[KL_KT].[1].[2] = p_acc
+					and	doc2.[ACC_KT]	= p_summary
+					and doc2.[DATE_PROV] < p_end + 1
+				into	lrecCacheArg.f_turn.f_kt.f_cur
+					,	nTmp4
+					,	dDate2
+					,	nTmp2
+				;
+			exception
+				when NO_DATA_FOUND then
+					lrecCacheArg.f_turn.f_kt.f_cur	:= 0;
+			end;
+
+			lrecCacheArg.f_date_last := greatest(nvl(dDate1,to_date('01/01/1900')), nvl(dDate2,to_date('01/01/1900')));
+
+			if lrecCacheArg.f_date_last = to_date('01/01/1900') then
+				lrecCacheArg.f_date_last := null;
+			end if;
+
+			lrecCacheArg.f_saldo.f_in.f_cur		:= (nvl(nTmp2,0) - nvl(nTmp1,0) - nvl(nTmp3,0) + nvl(nTmp4,0))
+					/ &rate(p_iso, p_beg - 1) * &rate(p_acc_curr_code, p_beg - 1);
+
+			lrecCacheArg.f_saldo.f_out.f_cur		:= (nvl(nTmp2,0) - nvl(nTmp1,0))
+					/ &rate(p_iso, p_end) * &rate(p_acc_curr_code, p_end);
+		end if;
+	end if;
+
+	lrecCacheArg.f_saldo.f_out.f_cur	:= round(lrecCacheArg.f_saldo.f_out.f_cur,	2);
+	lrecCacheArg.f_turn.f_dt.f_cur		:= round(lrecCacheArg.f_turn.f_dt.f_cur,	2);
+	lrecCacheArg.f_turn.f_kt.f_cur		:= round(lrecCacheArg.f_turn.f_kt.f_cur,	2);
+	lrecCacheArg.f_saldo.f_in.f_cur		:= round(lrecCacheArg.f_saldo.f_in.f_cur,	2);
+
+	&fix.fin('xD');
+	case p_param of
+		:'ИВ':	return lrecCacheArg.f_saldo.f_out.f_cur;
+		:'ДВ':	return lrecCacheArg.f_turn.f_dt.f_cur;
+		:'КВ':	return lrecCacheArg.f_turn.f_kt.f_cur;
+		:'ВВ':	return lrecCacheArg.f_saldo.f_in.f_cur;
+		:'Д':	return to_char(lrecCacheArg.f_date_last, 'yyyymmdd');
+	end;
+
+	return null;
+end;
+pragma restrict_references(turnv, WNDS, trust);
+
+
+/**	Вспомогательная процедура для функции, нормализующей ненормализованный шаблон в массив шаблонов.
+  *	Например, преобразует диапазон 408-410 в список значений через запятую 408,409,410
+  */
+procedure ConvertRange2List(	p_str					varchar2
+							,	p_map	in out nocopy	map_str
+) is
+	nBeg 			number;
+	nEnd 			number;
+	iHyphenPosition	integer;
+	vTmp			varchar2(4000);
+	iLength			integer;
+begin
+	iHyphenPosition := instr(p_str, '-');
+	iLength := greatest(iHyphenPosition-1, length(p_str)-iHyphenPosition);
+
+	nBeg := substr(p_str, 1, iHyphenPosition-1);
+	nEnd := substr(p_str, iHyphenPosition+1);
+
+	if nBeg > nEnd then
+		vTmp := lpad(to_char(nBeg), iLength, '0')||','||lpad(to_char(nEnd), iLength, '0');
+
+		p_map(vTmp) := vTmp;
+
+		return;
+	end if;
+
+	for i in nBeg .. nEnd	loop
+		vTmp := lpad(i, iLength, '0');
+		p_map(vTmp) := vTmp;
+	end loop;
+end;
+
+
+/**	Вспомогательная процедура для функции, нормализующей ненормализованный шаблон в массив шаблонов.
+  *	Обрабатывает ситуацию, когда задан диапазон значений
+  */
+procedure ProcessAccountRange(	p_group		varchar2
+							,	p_map in out nocopy map_str
+) is
+	iAccFlagSize	integer;
+	iHyphenPosition	integer;
+	vDataList		varchar2(4000);
+	vTail			varchar2(4000);
+	vTmp			varchar2(4000);
+begin
+	if length(p_group) < 12 then
+		--	максимум 11 символов - 5 на первый счёт, 1 на дефис, и 5 на второй счёт
+		--	нужно развернуть диапазон в числовую последовательность
+		ConvertRange2List(p_group, p_map);
+		return;
+	end if;
+
+	iHyphenPosition	:= instr(p_group, '-');
+
+	iAccFlagSize := 0;
+	if substr(p_group, -1) in ('А', 'П') then -- проверка на указатель Актива и Пассива
+		iAccFlagSize := 1;
+	end if;
+
+	vTail := substr(fd.getStrGroup(p_group, 1, '-', null), 6);-- определили добавляемое окончание к номеру счета
+
+	if vTail = substr(p_group, iHyphenPosition + 6, length(p_group) - iHyphenPosition - 5 - iAccFlagSize) then -- везде одинаковое окончание
+		if iAccFlagSize = 1 then
+			p_group := substr(p_group, 1, 5)||'-'||substr(p_group, iHyphenPosition + 1, 5)||substr(p_group, -1);
+		else
+			p_group := substr(p_group, 1, 5)||'-'||substr(p_group, iHyphenPosition + 1, 5);
+		end if;
+
+		vDataList := ltrim(::[RUNTIME].[R].STR2BS(p_group, ',', '-', '0'), ', ');
+
+	elsif vTail is null and substr(p_group, iHyphenPosition + 6, length(p_group) - iHyphenPosition - 5 - iAccFlagSize) is null then -- окончание всегда пусто
+		vDataList := ltrim(::[RUNTIME].[R].STR2BS(p_group, ',', '-', '0'), ', ');
+
+	else
+		vDataList := p_group;
+	end if;
+
+	while vDataList is not null loop
+		vTmp := fd.getStrGroup(vDataList, 1, ',', null);
+
+		p_map(vTmp||vTail) := vTmp||vTail;
+
+		vDataList := ltrim(substr(vDataList, length(vTmp) + 2), ', ');
+	end loop;
+end;
+
+
+/**	Вспомогательная процедура для функции, нормализующей ненормализованный шаблон в массив шаблонов.
+  *	Обрабатывает одну группу масок счетов
+  */
+procedure ProcessAccountMask(	p_group varchar2
+							,	p_map in out nocopy map_str
+) is
+	vDataList		varchar2(4000);
+	vTail			varchar2(200); -- хвост счета
+	vTmp			varchar2(4000);
+begin
+
+	if instr(p_group, '-') > 0 then -- подан диапазон
+		ProcessAccountRange(	p_group
+							,	p_map
+		);
+	else
+		if instr('АП',substr(p_group,-1)) > 0 and length(p_group) < 7 then -- не диапазон, но указание на Актив или Пассив
+			vDataList := ltrim([RUNTIME].[R].STR2BS(p_group,',','-', '0'),', ');
+
+		elsif instr('АП',substr(p_group,-1)) > 0 then -- Указание на Актив или Пассив есть. Отбрасываем букву.
+			vDataList := substr(p_group,1,length(p_group)-1);
+
+		else
+			vDataList := p_group;
+		end if;
+
+		--	В строке vDataList - перечисленные через запятую значения
+		while vDataList is not null loop
+			vTmp := fd.getStrGroup(vDataList, 1, ',', null);
+
+			p_map(vTmp||vTail) := vTmp||vTail;
+
+			vDataList := ltrim(substr(vDataList, length(vTmp)+2), ', ');
+		end loop;
+	end if;
+end;
+
+
+/**	Функция, нормализующая ненормализованный шаблон в массив шаблонов
+  */
+function ExplodePatternPart(p_pattern varchar2) return varr_str is
+	vaRet	varr_str;
+	mTmp	map_str;
+	vPatt	varchar2(4000);
+	vTmp	varchar2(4000);
+begin
+	vaRet%init;
+	if p_pattern is null then
+		return vaRet;
+	end if;
+
+	if lmPatterns.exists(p_pattern) then
+		return lmPatterns(p_pattern);
+	end if;
+
+	vPatt := p_pattern;
+
+	while vPatt is not null loop
+		vTmp := fd.getStrGroup(vPatt, 1, ',', null);
+		--	В vTmp - находится кусок строки до запятой (группа)
+
+		--	исключение переносов строк и табуляций
+		vTmp := translate(vTmp, LF$||CR$||TB$, '   ');
+
+		if regexp_like(vTmp, '[1234567890%_-]+')	then
+			-- цифровой диапазон или диапазон счетов, шаблонов счетов, число
+			ProcessAccountMask(replace(vTmp, ' ',''), mTmp);
+
+		elsif replace(vTmp, ' ', '') is not null then
+			mTmp(rtrim(ltrim(vTmp, ', '), ', ')) := rtrim(ltrim(vTmp, ', '), ', ');
+		end if;
+
+		--	вырезаем из шаблона обработанную группу
+		vPatt := ltrim(substr(vPatt, length(vTmp)+2),', ');
+	end loop;
+
+	vTmp := mTmp.first;
+	loop
+		exit when vTmp is null;
+		vaRet.extend;
+		vaRet(vaRet.count) := vTmp;
+		vTmp := mTmp.next(vTmp);
+	end loop;
+
+	lmPatterns(p_pattern) := vaRet;
+	return vaRet;
+end;
+
+/**	Функция, нормализующая ненормализованный шаблон в массив шаблонов включений.
+  *	Может быть использована в SQL-запросах  */
+public function ExplodePatternInc(p_patt_str varchar2) return varr_str
+is
+	vaRet					varr_str;
+	vPatt					varchar2(4000);
+	iExclamatoryPosition	integer;
+begin
+	vaRet%init;
+	vPatt := replace(p_patt_str, chr(13)||chr(10), '');
+	vPatt := replace(p_patt_str, ' ', '');
+
+	if vPatt is not null then
+		iExclamatoryPosition := nvl(instr(vPatt, '!'),0);
+
+		if iExclamatoryPosition = 0 then
+			iExclamatoryPosition := length(vPatt) + 1;
+		end if;
+
+		vaRet := ExplodePatternPart(substr(vPatt, 1, iExclamatoryPosition - 1));
+	end if;
+
+	if vaRet.count = 0 then
+		vaRet.extend;
+		vaRet(1) := '';
+	end if;
+
+	return vaRet;
+end;
+
+
+/**	Функция ExplodePatternExc нормализует ненормализованный шаблон в массив шаблонов исключений.
+  *	Может быть использована в SQL-запросах.
+  */
+public function ExplodePatternExc(p_patt_str varchar2) return varr_str is
+	vPatt					varchar2(4000);
+	iExclamatoryPosition	integer;
+	vaRet					varr_str;
+begin
+	vaRet%init;
+	if p_patt_str is null then
+		return vaRet;
+	end if;
+
+	vPatt := replace(p_patt_str, chr(13)||chr(10), '');
+	vPatt := replace(p_patt_str, ' ', '');
+	iExclamatoryPosition := nvl(instr(vPatt, '!'),0);
+
+	if iExclamatoryPosition = 0 then
+		iExclamatoryPosition := length(vPatt) + 1;
+	end if;
+
+	return ExplodePatternPart(substr(vPatt, iExclamatoryPosition + 1));
+end;
+
+
+/**	Процедура инициализации внутренних переменных операции
+  */
+public procedure InitData is
+begin
+	lmPatterns.delete;
+	lrecCacheArg := lrecTurnNull;
+end;
+end;

@@ -1,0 +1,1392 @@
+class TURN_DATA;
+
+@import_plsql(true)
+@name('[ПСБ] Расчёт по лицевым счетам с добавлением ИНН,ОГРН,ОКАТО')
+@tag('COPIED')
+library PSH_CLC_ACC_001 is
+pragma include(::[REPS_DATA].[LIB_FIX]);
+pragma include(::[REPS_DATA].[LIB_DEBUG]);
+
+pragma include(::[REPS_DATA].[LIB_TYPE]); --01.04.2024 ОКАТО
+pragma include(::[RUNTIME].[DEBUG_MACRO]);
+pragma macro (prx_client,		'::[REPS_INTERFACE].[PRX_CLIENT]'		);
+pragma macro (prx_subjrf,		'::[REPS_INTERFACE].[SQL_SUBJRF_001]'	);
+
+dp number :=null; --управление debug_pipe
+dp2 number:=null; --управление debug_pipe
+dp3 number:=null; --управление debug_pipe
+
+lcrARHIVE_STATUS	const ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'ARHIVE');
+type map_str is table of varchar2(4000) index by varchar2(64);
+
+type map_client is table of ::[TURN_DATA].[PSH_LIB_INN_REGN].rec_client index by varchar2(4000); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+lmClient	map_client;
+
+type map_bs is table of ::[TURN_DATA].[PSH_LIB_INN_REGN].rec_bs index by varchar2(64); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+lmBS	map_bs;
+
+lmData	::[TURN_DATA].[PSH_LIB_INN_REGN].map_accounts; -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+
+lbCacheAccountsInit	boolean;
+lmAccounts		map_str;
+lmDepartInfo	map_str;
+
+
+function GetAddress
+		(
+			P_ADDRESSES		[ADDRESSES]
+		,	P_DATE			date
+		)
+	return ref [PERSONAL_ADDRESS]
+is
+	-- Ссылка на адрес клиента
+	rAddress			ref [PERSONAL_ADDRESS];
+	-- Типы адресов для определения ОКАТО
+	vAddressType		varchar2(32767);
+begin
+	if P_ADDRESSES is null then
+		return null;
+	end if;
+
+	-- Важно!
+	-- Приоритеты выбора адреса прописываются в обратном порядке от меньшего к большему слева направо,
+	-- с обеих сторон ограниченные символом "#".
+	-- Последним в списке будет идентификатор типа адреса с наибольшим приоритетом,
+	-- первый в списке с наименьшим приоритетом.
+	vAddressType	:=		'#' ||	'CORP'				-- Наименьший приоритет
+						||	'#' ||	'CORP_CHARTER'
+						||	'#' ||	'REGISTRATION'
+						||	'#' ||	'TEMPORARY_REG'
+						||	'#' ||	'FACT'
+						||	'#' ||	'REAL_LIVE'			-- Наибольший приоритет
+						||	'#'
+						;
+
+	-- Получение ссылки на адрес исходя из приоритета
+	for	x
+		in		P_ADDRESSES
+		where	coalesce(x.[REG_DATE],		P_DATE - 1) < P_DATE
+			and coalesce(x.[REG_END_DATE],	P_DATE	) >= P_DATE
+		order by
+				instr(vAddressType, '#' || x.[TYPE]%id || '#') desc	--	по приоритетам
+			,	x.[REG_DATE] desc nulls last						--	по дате регистрации адреса
+			,	x%id desc											--	по идентификатору
+		fetch	1
+	loop
+		rAddress := x;
+	end loop;
+
+	return rAddress;
+end;
+function GetClientAddress(
+			P_CLIENT		ref [CLIENT]
+		,	P_DATE			date
+		,	P_CHECK_HISTORY	boolean
+		)
+	return ref [PERSONAL_ADDRESS]
+is
+	rAddress			ref [PERSONAL_ADDRESS];	-- Ссылка на адрес клиента
+	colClientAddresses	[ADDRESSES];			-- Коллекция адресов клиента
+begin
+	-- Получение массива адресов на заданную дату из истории изменений реквизитов клиента
+	if P_CHECK_HISTORY then
+		for	(
+				select	ch	( ch.[ADDRESSES]	: C_ADDRESSES )
+				in		::[CL_HIST] all
+				where	ch.[CLIENT_REF] = P_CLIENT
+					and	ch.[QUAL] = 'ADDRESSES'
+					and	ch.[DATE_EDIT]	>= P_DATE --при поиске адреса на дату необходимо учесть изменения, прошедшие в отчетную дату
+					and	exists (select x ( 1 )	in ch.[ADDRESSES])
+				order by
+						ch.[DATE_EDIT]
+				fetch	1
+			)
+		loop
+			colClientAddresses := ch.C_ADDRESSES;
+			&debug(TB$|| 'Определение адреса клиента из истории на дату [' || to_char(P_DATE, 'dd.mm.yyyy') || ']', 10)
+		end loop;
+	end if;
+
+	-- Если в истории адрес отсутствует и проверка истории вовсе не требовалась, то массив адресов берётся с клиента
+	if colClientAddresses is null then
+		--&debug(TB$||bool_char(P_CHECK_HISTORY, 'В истории нет информации. ', '', '')|| 'Определение адреса с клиента',dp3)
+		for	(
+				select	c	( c.[ADDRESSES]		: C_ADDRESSES)
+				in		::[CLIENT] all
+				where	c = P_CLIENT
+			)
+		loop
+			colClientAddresses := c.C_ADDRESSES;
+		end loop;
+	end if;
+
+	-- Получение ссылки на адрес из коллекции адресов
+	rAddress	:= GetAddress(colClientAddresses, P_DATE);
+	return rAddress;
+end;
+
+
+/**
+ *	Функция возвращает из P_STR_ADDRESS значение, указанное после P_SEARCH_STR
+ *
+ *	@param	P_STR_ADDRESS	- Строка для поиска
+ *	@param	P_SEARCH_STR	- Строка, которую необходимо найти (ОКАТО)
+ *	@return	Искомое значение из строки P_STR_ADDRESS
+ */
+function SubStrAddr
+		(
+			P_STR_ADDRESS	varchar(32767)
+		,	P_SEARCH_STR	varchar(10)
+		)
+	return varchar(32767)
+is
+	-- Найденная подстрока
+	vRefactAdr		varchar(32767);
+	-- Номер первого символа значения vRefactAddr в строке P_STR_ADDRESS
+	nBeg			number;
+	-- Номер последнего символа значения vRefactAddr в строке P_STR_ADDRESS
+	nEnd			number;
+begin
+	--	Если в строке для поиска отсутствует искомое выражение
+	if instr(P_STR_ADDRESS, P_SEARCH_STR) = 0 then
+		return vRefactAdr;
+	end if;
+
+	--	Удаление пробелов из строки
+	P_STR_ADDRESS	:=	replace(P_STR_ADDRESS, ' ', '');
+	--	Порядковый номер первого символа искомой строки
+	nBeg			:=	instr(P_STR_ADDRESS, P_SEARCH_STR) + length(P_SEARCH_STR);
+	--	Строка, начинающаяся на искомую строку
+	vRefactAdr		:=	substr(P_STR_ADDRESS, nBeg);
+	--	Порядковый символ последнего символа в строке
+	--	Если запятая не найдена после ОКАТО, берётся конец строки
+	nEnd			:=	case
+							when instr(vRefactAdr, ',') = 0
+							then length(vRefactAdr)
+							else instr(vRefactAdr, ',')
+						end;
+	--	Получение искомой строки
+	vRefactAdr		:=	substr(vRefactAdr, 1, nEnd);
+	--	Удаление лишних символов (должны остаться только цифры)
+	vRefactAdr		:=	regexp_replace(vRefactAdr, '[^0-9]');
+
+	return vRefactAdr;
+end;
+
+function GetOkatoByAddress
+		(
+			P_ADDRESS		ref [PERSONAL_ADDRESS]
+		,	P_DATE			date
+		)
+	return varchar2(32767)
+is
+	--	Массив адресов для передачи в интерфейс
+	aAddr				&prx_client.arr_IDAddresses;
+	--	Результирующий массив интерфейса
+	aFullAddress		&prx_client.arr_FullAddresses;
+	--	Запись с информацией об адресе местонахождения в структурированном виде
+	recFullAddress		&prx_client.rec_FullAddress_rec;
+	--	Код ОКАТО
+	vOkato				varchar2(32767);
+	--	Ссылка на ОКАТО
+	rOkato				ref [TERRITORY];
+begin
+	if P_ADDRESS is null then
+		return null;
+	end if;
+
+	aAddr(aAddr.count + 1) := P_ADDRESS;
+
+	--	Получение информации об адресе местонахождения в структурированном виде
+	aFullAddress := &prx_client.GetFullAddressOnDate
+						(
+							P_ARR_ID_ADDRESS	== aAddr
+						,	P_DATE				== P_DATE + 1
+						);
+
+	--	Массив результирующих данных пуст, выход из функции
+	if aFullAddress.count = 0 then
+		return null;
+	end if;
+
+	--	Структура с данными об адресе
+	recFullAddress	:= aFullAddress(aFullAddress.first);
+
+	--	Заполнение ОКАТО, исходя из ОКСМ
+	if	recFullAddress.v_OKSM is not null	then
+		--	Для РФ (ОКСМ равен "643") ОКАТО берётся из параметра v_OKATO_Territory
+		--	"Код в соответствии с "Общероссийским классификатором административно-территориальных объектов" (ОКАТО) для субъекта РФ"
+		if	recFullAddress.v_OKSM = '643'	then
+			vOkato	:= recFullAddress.v_OKATO_Territory;
+
+		--	Для адресов, находящихся не в России (ОКСМ не равен "643"),
+		--	ОКАТО заполняется техническим кодом "00000"
+		else
+			vOkato	:= '00000';
+		end if;
+	end if;
+
+	--	Если ОКАТО не определён ранее по ОКСМ
+	--	и у адреса указан признак ручного ввода адреса строкой
+	if		vOkato is null
+		and	recFullAddress.b_isHand
+	then
+		&debug(TB$ || 'Определение ОКАТО из поля "Адрес в неструктурированном виде" ',dp3)
+
+		--	Получение кода ОКАТО из параметра "Адрес, в неструктурированном виде"
+		vOkato	:= SubStrAddr(recFullAddress.v_Non_Struct_Address, 'ОКАТО:');
+
+		--	Получение ссылки на ОКАТО по коду
+		for	x
+			in			::[TERRITORY] all
+			where		x.[CODE] like vOkato || '%'
+			order by	x.[CODE] asc
+			fetch		1
+		loop
+			rOkato := x;
+		end loop;
+
+		--	Если ссылка на ОКАТО определена
+		if rOkato is not null then
+			--	Получение ОКАТО верхнего уровня по справочнику "ОП Автономные территории субъектов РФ"
+			rOkato	:= &prx_subjrf.GetSubjectRF(rOkato, P_DATE, P_UPPER == true, P_USE_SUBJRF == true);
+			--	Получение кода ОКАТО верхнего уровня
+			vOkato	:= rOkato.[CODE]; --GetOkatoCode(rOkato);
+		end if;
+	end if;
+
+	--	Корректировка кода ОКАТО до формата, необходимого для отчёта
+	if vOkato is not null then
+		--	В графе отображается ОКАТО длиной 5 символов
+		vOkato	:= substr(vOkato, 1, 5);
+		--	Если ОКАТО меньше 5 символов, необходимо дополнить нулями до 5 знаков справа
+		vOkato	:= rpad(vOkato, 5, '0');
+	end if;
+
+	return vOkato;
+end;
+
+public function GetOkatoCode(p_client ref [CLIENT], P_DATE [DATE] default trunc(sysdate)) 
+--return [STRING_11]	--28.03.2024 ОКАТО
+return varchar2(32767) is			--01.04.2024 ОКАТО
+vOkato				varchar2(32767);--	Код ОКАТО
+Ex  varchar2(32767);				--[STRING_12];
+rAddress ref [PERSONAL_ADDRESS];
+begin
+	--Используем алгоритм Ф-265
+	rAddress	:= GetClientAddress(P_CLIENT, P_DATE, true);	--	Определение адреса клиента
+	vOkato		:= GetOkatoByAddress(rAddress, P_DATE);			--	Определение ОКАТО по адресу
+	if vOkato is null then
+		::[DOCUMENT_INT].[PRX_CLIENT].CL_HIST_GET_VALUE(p_client, 'OKATO_CODE', P_DATE, Ex);
+		if Ex is null then
+			Ex := p_client.[OKATO_CODE];
+		end if;
+	else
+		Ex:=vOkato;
+	end if;
+	return Ex;
+end;
+
+public function GetInnKio(p_client ref [CLIENT], opDate [DATE] default trunc(sysdate)) return [STRING_12] is	--03.04.2019 ИНН
+ClCorp ref [CL_CORP];
+Ex [STRING_12];
+
+begin
+	if p_client%class in ('CL_ORG','CL_BANK_N','CL_BANK_F','CL_PART') then
+		ClCorp:=p_client;
+						   ::[DOCUMENT_INT].[PRX_CLIENT].CL_HIST_GET_VALUE(ClCorp, 'INN', opDate, Ex);
+		if Ex is null then ::[DOCUMENT_INT].[PRX_CLIENT].CL_HIST_GET_VALUE(ClCorp, 'KIO', opDate, Ex); end if;
+		
+		if Ex is null then
+			Ex := nvl(ClCorp.[INN],ClCorp.[KIO]);
+		end if;
+	else
+		::[DOCUMENT_INT].[PRX_CLIENT].CL_HIST_GET_VALUE(p_client, 'INN', opDate, Ex);
+		if Ex is null then
+			Ex := p_client.[INN];
+		end if;
+	end if;
+	return Ex;
+end;
+
+public function GetRegNum(p_client ref [CLIENT], opDate [DATE] default trunc(sysdate)) return [STRING_50] is	--03.04.2019 ОГРН
+ClCorp ref [CL_CORP];
+Ex [STRING_50];
+chp_type integer;
+begin
+	if p_client%class in ('CL_ORG','CL_BANK_N','CL_BANK_F','CL_PART') then
+		ClCorp:=p_client;
+		if not nvl(ClCorp.[IS_RESIDENT],false) then	-- Для нерезидента - массив "Документы и изображения".
+			Ex := null;
+			for	( select n (
+						  n : doc
+						, n.[DOC_NUM] : doc_num
+						, n.[DOC_DATE] : doc_date
+						, n.[END_DATE] : end_date
+						, ( select p ( trim(p.[VALUE]) ) in n.[ADD_PARAMS] where p.[CODE] = 'REG_NUM' and rownum = 1 ) : reg_num -- Запись с кодом "REG_NUM" должна быть ровно одна
+						)
+				in ClCorp.[DOCS]
+				where n.[DOC_TYPE].[CODE] in ('REG_FOREIGN_BRANCH')
+				--and n.[DOC_DATE] <= v_date_f -- Пустую дату не учитываем, считая такой документ недействительным
+				--and ( v_date_f <= n.[END_DATE] or n.[END_DATE] is null )
+				order by n.[DOC_DATE] desc
+			)
+			loop
+				Ex := n.reg_num;
+				exit;
+			end loop;
+		end if;
+		
+		if Ex is null then
+			Ex := coalesce(ClCorp.[REGISTER].[GOS_REG_NUM_REC],ClCorp.[REGISTER].[NUM_SERT],ClCorp.[REGISTER].[NUM_REESTR]);
+
+			if Ex is null then
+				chp_type:=::[DOCUMENT_INT].[PRX_CLIENT].getCHPType(ClCorp, opDate); -- Функция возвращает типа индивидуального предпринимателя: 1-Нотариус,2-Адвокат,3-Глава крестьянского (фермерского) хозяйства,4-Индивидуальный предприниматель,0-Клиент не является индивидуальным предпринимателем,
+				if chp_type > 0 then
+					if chp_type in (1,2) then-- Нотариус, Адвокат
+						--Смотрим лицензии
+						for (select l(l.[NUM_LICENCE] :C_NUM_LICENCE) in ClCorp.[LICENCES] where l.[NUM_LICENCE] is not null and (nvl(l.[DATE_BEGIN],opDate)<=opDate and opDate<=nvl(l.[DATE_END],opDate)))
+						loop
+							Ex:=Substr(trim(l.C_NUM_LICENCE),1,Ex%size);
+							exit;
+						end loop;
+					end if;
+				end if;
+			end if;
+		end if;
+	end if;
+	return Ex;
+end;
+
+
+/**	Функция преобразует строку, заполненную кодами ИСО, короткими именами валюты и т.п. в список идентификаторов этих валют строкой, через #
+  */
+function GetCurList(	p_cur_list	varchar2
+)	return varchar2 is
+	vRet	varchar2(4000);
+begin
+	if p_cur_list is null then
+		return null;
+	end if;
+
+	for	(	select a( a%id	: id )
+			in ::[FT_MONEY]
+			where	instr( p_cur_list, a.[CODE_ACC])	> 0
+				or	instr( p_cur_list, a.[CODE_ISO])	> 0
+				or	instr( p_cur_list, a.[CUR_SHORT])	> 0
+	) loop
+		vRet	:= vRet || a.id || '#';
+	end loop;
+
+	if vRet is null then
+		debug(&METHOD$||'.GetCurList:'
+			||LF$||'ВНИМАНИЕ! Валюты, указанные в строке "'||p_cur_list||'", не найдены.'
+			||LF$||lpad('-', length('-'||p_cur_list)+51, '-')
+			||LF$||LF$||LF$, 0);
+	else
+		vRet	:= '#' || vRet;
+	end if;
+
+	return vRet;
+end;
+
+/**	Функция возвращает информацию по балансовому счёту
+  */
+function GetBSInfo(p_bs ref [PL_USV]) return ::[TURN_DATA].[PSH_LIB_INN_REGN].rec_bs is -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+	recBS	::[TURN_DATA].[PSH_LIB_INN_REGN].rec_bs; -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+begin
+	if p_bs is null then
+		return recBS;
+	end if;
+
+	if lmBS.exists(p_bs%id) then
+		return lmBS(p_bs%id);
+	end if;
+
+	for(
+		--	Учетные счета в валютах
+			select p(
+						p.[VID_P]													:c_plan
+					,	p.[NUM]														:C_NUM
+
+					,	p.[FINTOOL]													:C_CUR
+					,	p.[FINTOOL].[CUR_SHORT]										:C_CUR_SHORT
+					,	p.[FINTOOL].[CODE_ISO]										:C_CUR_ISO
+					,	p.[FINTOOL].[NAME]											:C_CUR_NAME
+
+					,	ch.[CHAPTER]												:C_CHAPTER
+					,	ch.[NAME]													:C_CH_NAME
+					,	p.[USV_US].[NEW_BS1].[RASD].[NUM]							:C_PART_NUM
+
+					,	p.[USV_US].[NEW_BS1].[RASD].[HISTORY]						:C_PART_HISTORY
+					,	p.[USV_US].[NEW_BS1].[RASD].[NAME]							:C_PART_NAME
+
+					,	p.[USV_US]													:C_USV_US
+
+					,	p.[USV_US].[HISTORY]										:C_HISTORY_US
+					,	p.[USV_US].[NAME]											:C_NAME_US
+			)	in	::[PL_USV]
+			,	(	::[CHAPTERS] all	:ch)
+								all
+			where	p = p_bs
+				and	ch = p.[USV_US]->(false)[NEW_BS1]->(false)[RASD]->(false)[CHAPTER]
+	) loop
+		recBS.f_plan		:= p.c_plan;
+		recBS.f_num			:= p.c_num;
+		recBS.f_pl_us		:= p.C_USV_US;
+		recBS.f_pl_us_name	:= ::[OPTIONAL_REP_INT].[PRX_REPS].GetBSName( p.C_HISTORY_US, p.C_NAME_US);
+		recBS.f_cur			:= p.c_cur;
+		recBS.f_cur_short	:= p.c_cur_short;
+		recBS.f_cur_iso		:= p.c_cur_iso;
+		recBS.f_cur_name	:= p.c_cur_name;
+		recBS.f_chapter_num	:= p.c_chapter;
+		recBS.f_chapter_name:= p.c_ch_name;
+		recBS.f_part_num	:= p.c_part_num;
+		recBS.f_part_name	:= ::[OPTIONAL_REP_INT].[PRX_REPS].GetBSName( p.C_PART_HISTORY, p.C_PART_NAME);
+	end loop;
+
+	lmBS(p_bs%id) := recBS;
+	return recBS;
+end;
+
+
+/**	Функция возвращает информацию по клиенту
+  */
+function GetClientInfo(p_client ref [CLIENT], opDate [DATE] default trunc(sysdate))
+	return ::[TURN_DATA].[PSH_LIB_INN_REGN].rec_client -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+is
+	recClient	::[TURN_DATA].[PSH_LIB_INN_REGN].rec_client; -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+begin
+	if p_client is null then
+		return recClient;
+	end if;
+
+	if lmClient.exists(p_client%id) then
+		return lmClient(p_client%id);
+	end if;
+
+	recClient.id := p_client;
+
+	for(
+		select u(	u.[VIDS_CL]			:c_cat
+				,	u.[COM_STATUS]		:c_status
+				,	u.[OKVED_IN_PERIOD]	:c_okveds
+				,	decode(	u%class
+						,	::[CL_CORP]%class,		true
+						,	::[CL_ORG]%class,		true
+						,	::[CL_BANK]%class,		true
+						,	::[CL_BANK_N]%class,	true
+						,	::[CL_BANK_F]%class,	true
+						,	::[CL_PART]%class,		true
+						,	false
+					)					:c_corp
+				,	u.[NAME]			:c_name
+		) in ::[CLIENT]
+		where	u = p_client
+	) loop
+		recClient.f_categories	:= u.c_cat;
+		recClient.f_okveds		:= u.c_okveds;
+		recClient.f_status		:= u.c_status;
+		recClient.f_corp		:= char_bool(u.c_corp);
+		recClient.f_name		:= u.c_name;
+		recClient.f_inn			:= GetInnKio(p_client, opDate);		--03.04.2019 ИНН
+		recClient.f_reg_num		:= GetRegNum(p_client, opDate);		--03.04.2019 ОГРН
+		recClient.f_okato_code	:= GetOkatoCode(p_client, opDate);	--28.03.2024 ОКАТО
+		recClient.f_id_client	:= p_client;						--30.11.2024 ...ДР,Паспорта,ID Клиента
+	end loop;
+
+	lmClient(p_client%id) := recClient;
+	return recClient;
+end;
+
+
+/**	Функция фильтрации: проверка соответствия клиента заданной категории.
+  */
+function IsCategoryValid(	p_client	in out nocopy ::[TURN_DATA].[PSH_LIB_INN_REGN].rec_client -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+						,	p_cat		varchar2
+						,	p_group1	integer
+						,	p_group2	integer
+						,	p_end		date
+						)
+	return boolean
+is
+begin
+	if p_cat is null then
+		return true;
+	end if;
+
+	if p_client.f_category_result is not null then
+		return p_client.f_category_result;
+	end if;
+
+	if p_cat is not null then
+		if p_client.f_status = lcrARHIVE_STATUS then
+			return false;
+		end if;
+
+		for(
+				select x(	nvl(g.[name], ' Прочие')	:c_name
+				)	in	p_client.f_categories
+				,	(	::[CL_GROUP]: g)
+				where	x.[CATEGORY] = g
+					and	x.[DATE_BEGIN] <= p_end
+					and	nvl(x.[DATE_END], p_end) >= p_end
+					and	g.[CODE] like p_cat || '%'
+		) loop
+			p_client.f_category_result := true;
+			p_client.f_category_name := x.c_name;
+			return p_client.f_category_result;
+		end loop;
+
+		p_client.f_category_result := false;
+		return p_client.f_category_result;
+	end if;
+
+	if p_group1 = 12 or p_group2 = 12 then
+		if p_client.f_status = lcrARHIVE_STATUS then
+			return false;
+		end if;
+
+		for(
+				select x(	nvl(g.[name], ' Прочие')	:c_name
+				)	in	p_client.f_categories
+				,	(	::[CL_GROUP]: g)
+				where	x.[CATEGORY] = g
+					and	x.[DATE_BEGIN] <= p_end
+					and	nvl(x.[DATE_END], p_end) >= p_end
+		) loop
+			p_client.f_category_name := x.c_name;
+			p_client.f_category_result := true;
+			return p_client.f_category_result;
+		end loop;
+
+		for(
+				select x(	nvl(g.[name],' Прочие')	:c_name
+				)	in	p_client.f_categories
+				,	(	::[CL_GROUP]: g)
+				where	x.[CATEGORY] = g
+					and	x.[DATE_BEGIN] is null
+					and	nvl(x.[DATE_END], p_end) >= p_end
+		) loop
+			p_client.f_category_name := x.c_name;
+			p_client.f_category_result := true;
+			return p_client.f_category_result;
+		end loop;
+
+		for(
+				select x(	1
+				)	in	p_client.f_categories
+				,	(	::[CL_GROUP]: g)
+				where	x.[CATEGORY] = g
+					and rownum < 2
+		) loop
+			p_client.f_category_result := false;
+			return p_client.f_category_result;
+		end loop;
+	end if;
+
+	p_client.f_category_result := true;
+	p_client.f_category_name := ' Прочие';
+	return p_client.f_category_result;
+end;
+
+
+/**	Функция фильтрации: проверка соответствия клиента заданному коду ОКВЭД
+  */
+function IsOkvedValid(	p_client	in out nocopy ::[TURN_DATA].[PSH_LIB_INN_REGN].rec_client -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+					,	p_code		varchar2
+					,	p_end		date
+) return boolean is
+begin
+	--	Если p_code is null, нельзя сразу возвращать результат, так как ниже по алгоритму ещё заполняется признак main
+
+	if p_client.f_status = lcrARHIVE_STATUS then
+		debug_pipe(TB$||'.IsOkvedValid -<0< '||false,dp2);
+		return false;
+	end if;
+
+	if p_client.f_okved_result is not null then
+		debug_pipe(TB$||'.IsOkvedValid -<1< p_client.f_okved_result='||p_client.f_okved_result,dp2);
+		return p_client.f_okved_result;
+	end if;
+
+	for	(
+			select u(	u.[MAIN]			:C_MAIN
+					,	u.[OKVED].[CODE]	:C_CODE
+			) in p_client.f_okveds
+			where	nvl(u.[DATE_BEGIN], p_end-1) < p_end
+			 	and	nvl(u.[DATE_END], p_end) >= p_end-1
+			 	and	u.[OKVED].[CODE] like p_code || '%'
+	) loop
+		p_client.f_okved_result := true;
+
+		if char_bool(u.c_main) then
+			p_client.f_okved_main_code := nvl(u.c_code, 'Основной код ОКВЭД не указан');
+			debug_pipe(TB$||'.IsOkvedValid -<2< p_client.f_okved_result='||p_client.f_okved_result,dp2);
+			return p_client.f_okved_result;
+		end if;
+
+		for(	select x(	x.[OKVED].[CODE]			:C_CODE
+				) in p_client.f_okveds
+				where	nvl(x.[DATE_BEGIN], p_end-1) < p_end
+				 	and	nvl(x.[DATE_END], p_end) >= p_end-1
+				 	and	x.[MAIN]
+		) loop
+			p_client.f_okved_main_code := x.c_code;
+			exit;
+		end loop;
+
+		p_client.f_okved_main_code := nvl(p_client.f_okved_main_code, 'Основной код ОКВЭД не указан');
+		debug_pipe(TB$||'.IsOkvedValid -<3< p_client.f_okved_result='||p_client.f_okved_result,dp2);
+		return p_client.f_okved_result;
+	end loop;
+
+	p_client.f_okved_result := false or p_code is null;
+	debug_pipe(TB$||'.IsOkvedValid -<4< p_client.f_okved_result='||p_client.f_okved_result,dp2);
+	return p_client.f_okved_result;
+end;
+
+
+/**	Функция фильтрации: проверка вхождения клиента в заданную группу
+  */
+function IsOkatoValid(	p_client	in out nocopy ::[TURN_DATA].[PSH_LIB_INN_REGN].rec_client -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+					,	p_group		::[CLIENT_PERIOD]%collection%type
+					,	p_end		date
+) return boolean is
+begin
+	--28.03.2024 ОКАТО
+	var cl ref [CLIENT];
+	cl:=p_client.id;
+	debug_pipe(TB$||'.IsOkatoValid -> '||rpad(cl.[NAME],70)||' ОКАТО:'||rpad(p_client.f_okato_code,11)||' p_client.f_group_result='||p_client.f_group_result,dp2);
+	if p_group is null then
+		debug_pipe(TB$||'.IsOkatoValid -< '||true,dp2);
+		return true;
+	end if;
+
+	if p_client.f_group_result is not null then
+		debug_pipe(TB$||'.IsOkatoValid -< p_client.f_group_result='||p_client.f_group_result,dp2);
+		return p_client.f_group_result;
+	end if;
+
+	for(
+			select x(	1
+			) in p_group all
+			where	x.[CLIENT] = p_client.id
+				and	nvl(x.[DATE_BEG],p_end-1) < p_end
+				and	nvl(x.[DATE_END],p_end) >= p_end
+	) loop
+		p_client.f_group_result := true;
+		debug_pipe(TB$||'.IsOkatoValid -<< p_client.f_group_result='||p_client.f_group_result,dp2);
+		return p_client.f_group_result;
+	end loop;
+
+	p_client.f_group_result := false;
+	debug_pipe(TB$||'.IsOkatoValid -<<< p_client.f_group_result='||p_client.f_group_result,dp2);
+
+	return p_client.f_group_result;
+end;
+
+function IsGroupValid(	p_client	in out nocopy ::[TURN_DATA].[PSH_LIB_INN_REGN].rec_client -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+					,	p_group		::[CLIENT_PERIOD]%collection%type
+					,	p_end		date
+) return boolean is
+begin
+	if p_group is null then
+		return true;
+	end if;
+
+	if p_client.f_group_result is not null then
+		return p_client.f_group_result;
+	end if;
+
+	for(
+			select x(	1
+			) in p_group all
+			where	x.[CLIENT] = p_client.id
+				and	nvl(x.[DATE_BEG],p_end-1) < p_end
+				and	nvl(x.[DATE_END],p_end) >= p_end
+	) loop
+		p_client.f_group_result := true;
+		return p_client.f_group_result;
+	end loop;
+
+	p_client.f_group_result := false;
+
+	return p_client.f_group_result;
+end;
+
+
+/**	Функция возвращает код подразделения
+  */
+function GetDepartCode(p_depart ref [DEPART]) return varchar2 is
+begin
+	if p_depart is null then
+		return null;
+	end if;
+
+	if not lmDepartInfo.exists(p_depart%id) then
+		lmDepartInfo(p_depart%id) := rpad(p_depart.[CODE], 20) ||' '||p_depart.[NAME];
+	end if;
+
+	return lmDepartInfo(p_depart%id);
+end;
+
+
+/**	Функция возвращает остатки и обороты по счёту
+  */
+procedure FillAccountInfo(	p_saldo		in out nocopy ::[TURN_DATA].[PSH_LIB_INN_REGN].rec_saldo -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+						,	p_turn		in out nocopy ::[TURN_DATA].[PSH_LIB_INN_REGN].rec_turn -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+						,	p_data		in out nocopy ::[TURN_DATA].[PSH_LIB_INN_REGN].rec_data -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+						,	p_res_type	integer
+						,	p_sd		date
+						,	p_ed		date
+						,	p_storno	date
+						,	p_iso		varchar2
+) is
+begin
+	&fix.inc('accounts_info');
+
+	if p_res_type = 1 then		--	в валюте счёта
+		p_saldo.f_in.f_nat		:= null;
+		p_saldo.f_in.f_cur		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'ВВ', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+		p_saldo.f_out.f_nat		:= null;
+		p_saldo.f_out.f_cur		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'ИВ', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+
+		p_turn.f_dt.f_nat		:= null;
+		p_turn.f_dt.f_cur		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'ДВ', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+		p_turn.f_kt.f_nat		:= null;
+		p_turn.f_kt.f_cur		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'КВ', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+
+		p_data.f_date			:= to_date(::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'Д', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr), 'yyyymmdd'); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+
+	elsif p_res_type = 2 then	-- в нац.покрытии
+		p_saldo.f_in.f_nat		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'ВН', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+		p_saldo.f_in.f_cur		:= null;
+		p_saldo.f_out.f_nat		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'ИН', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+		p_saldo.f_out.f_cur		:= null;
+
+		p_turn.f_dt.f_nat		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'ДН', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+		p_turn.f_dt.f_cur		:= null;
+		p_turn.f_kt.f_nat		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'КН', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+		p_turn.f_kt.f_cur		:= null;
+
+		p_data.f_date			:= to_date(::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'Д', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr), 'yyyymmdd'); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+
+	elsif p_res_type = 3 then	--	в указанной валюте
+		p_saldo.f_in.f_nat		:= null;
+		p_saldo.f_in.f_cur		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turnv( p_data.f_move, 'ВВ',P_SD,P_ED-1,p_iso,substr(p_data.f_num,6,3), p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+		p_saldo.f_out.f_nat		:= null;
+		p_saldo.f_out.f_cur		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turnv( p_data.f_move, 'ИВ',P_SD,P_ED-1,p_iso,substr(p_data.f_num,6,3), p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+
+		p_turn.f_dt.f_nat		:= null;
+		p_turn.f_dt.f_cur		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turnv( p_data.f_move, 'ДВ',P_SD,P_ED-1,p_iso,substr(p_data.f_num,6,3), p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+		p_turn.f_kt.f_nat		:= null;
+		p_turn.f_kt.f_cur		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turnv( p_data.f_move, 'КВ',P_SD,P_ED-1,p_iso,substr(p_data.f_num,6,3), p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+
+		p_data.f_date			:= to_date(::[TURN_DATA].[PSH_LIB_INN_REGN].turnv( p_data.f_move, 'Д',P_SD,P_ED-1,p_iso,substr(p_data.f_num,6,3), p_storno == P_STORNO, p_corr == p_data.f_corr), 'yyyymmdd'); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+
+	elsif p_res_type = 4 then	--	в валюте счёта и нац.покрытии
+		p_saldo.f_in.f_nat		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'ВН', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+		p_saldo.f_in.f_cur		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'ВВ', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+		p_saldo.f_out.f_nat		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'ИН', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+		p_saldo.f_out.f_cur		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'ИВ', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+
+		p_turn.f_dt.f_nat		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'ДН', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+		p_turn.f_dt.f_cur		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'ДВ', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+		p_turn.f_kt.f_nat		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'КН', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+		p_turn.f_kt.f_cur		:= ::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'КВ', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+
+		p_data.f_date			:= to_date(::[TURN_DATA].[PSH_LIB_INN_REGN].turn(p_data.f_move, 'Д', P_SD, P_ED-1, p_storno == P_STORNO, p_corr == p_data.f_corr), 'yyyymmdd'); -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+
+	else
+		pragma error('Внимание! Неверный параметр P_RES_TYPE = '||p_res_type);
+	end if;
+end;
+
+
+/**	Процедура для размещения информации по счёту в массиве lmData
+  */
+procedure AddAccount(	p_client	in out nocopy	::[TURN_DATA].[PSH_LIB_INN_REGN].rec_client -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+					,	p_saldo		in out nocopy	::[TURN_DATA].[PSH_LIB_INN_REGN].rec_saldo -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+					,	p_turn		in out nocopy	::[TURN_DATA].[PSH_LIB_INN_REGN].rec_turn -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+					,	p_bs		in out nocopy	::[TURN_DATA].[PSH_LIB_INN_REGN].rec_bs -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+					,	p_data		in out nocopy	::[TURN_DATA].[PSH_LIB_INN_REGN].rec_data -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+					,	p_group1					integer
+					,	p_group2					integer
+					,	p_total_only				boolean
+					,	p_cl_group					boolean
+					,	P_GROUP_VAL					boolean
+) is
+	vIdx	varchar2(4000);
+	recAcc	::[TURN_DATA].[PSH_LIB_INN_REGN].rec_account; -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+	
+	/*	В зависимости от p_num функция возвращает строку для пользовательской группировки  */
+	function GetGroupingData( p_num	integer ) return varchar2(4000)
+	is
+	outVar2 varchar2(4000);
+	begin
+		if p_num = 1 then
+			outVar2:= null;
+	
+		elsif p_num = 2 then
+			outVar2:= recAcc.f_bs.f_num || ' ' || bool_char(p_data.f_vid = ::[TYPE_ACC]([CODE] = 'П'), '(Пассивный)','(Активный)') || ' ' || recAcc.f_bs.f_pl_us_name;
+	
+		elsif p_num = 3 then
+			outVar2:= p_data.f_otv_name;
+	
+		elsif p_num = 4 then
+			outVar2:= p_client.f_name;
+	
+		elsif p_num = 5 then
+			outVar2:= recAcc.f_bs.f_cur_iso || '(' || recAcc.f_bs.f_cur_short || ')' || recAcc.f_bs.f_cur_name;
+	
+		elsif p_num = 6 then
+			outVar2:= bool_char(p_data.f_vid = ::[TYPE_ACC]([CODE] = 'П'), 'Пассив','Актив');
+	
+		elsif p_num = 7 then
+			outVar2:= substr(p_data.f_num, 10) || ' ';
+	
+		elsif p_num = 8 then
+			outVar2:= substr(p_data.f_num, 14, 7) ||' ';
+	
+		elsif p_num = 9 then
+			outVar2:= substr(p_data.f_num, 17, 4) ||' ';
+	
+		elsif p_num = 10 then
+			outVar2:= p_data.f_depart;
+	
+		elsif p_num = 11 then
+			outVar2:= substr(p_data.f_num, 14, 5) ||' ';
+	
+		elsif p_num = 12 then
+			outVar2:= p_client.f_category_name;
+	
+		elsif p_num = 13 then
+			outVar2:= p_client.f_okved_main_code;
+	
+		elsif p_num = 14 then
+			outVar2:= substr(p_data.f_num, 21) ||' ';
+	
+		elsif p_num = 15 then --28.03.2024 ОКАТО
+			outVar2:= p_client.f_okato_code;
+		end if;
+		
+		if 1<=p_num and p_num<=15 then
+			debug_pipe('.GetGroupingData -- p_num='||p_num||' <"'||outVar2||'"',dp3);
+			return outVar2;
+		end if;
+		
+		pragma error('unknown number of grouping: '||p_num);
+	end;
+		
+begin
+	recAcc.b_cl_corp	:= p_client.f_corp;
+	recAcc.f_saldo		:= p_saldo;
+	recAcc.f_turn		:= p_turn;
+	recAcc.f_bs			:= p_bs;
+	recAcc.v_acc_num	:= p_data.f_num;
+	recAcc.d_date		:= p_data.f_date;
+	recAcc.v_acc_name	:= p_data.f_name;
+
+	recAcc.f_inn		:= p_client.f_inn;			--03.04.2019 ИНН
+	recAcc.f_reg_num	:= p_client.f_reg_num;		--03.04.2019 ОГРН
+	recAcc.f_okato_code	:= p_client.f_okato_code;	--28.03.2024 ОКАТО
+	recAcc.f_id_client	:= p_client.f_id_client;	--30.11.2024 ...ДР,Паспорта,ID Клиента
+
+	recAcc.f_group1 := GetGroupingData(p_group1);
+	recAcc.f_group2 := GetGroupingData(p_group2);
+	if P_GROUP_VAL then	--	если установлен флаг "Групировать по валюте счета"
+		recAcc.f_group_val := GetGroupingData(5);
+	else
+		recAcc.f_group_val := null;
+	end if;
+
+	--	Обязательная группировка - по главам.
+	vIdx := p_bs.f_chapter_num || '#';
+
+	if p_cl_group then
+		--	Группировка по принаделжности клиента юр.лицам регулируется флагом
+		vIdx := vIdx || bool_char(p_client.f_corp) || '#';
+	end if;
+
+	if not p_total_only then
+		--	группировка по разделам выполняется только если выводятся не только итоги
+		vIdx := vIdx || p_bs.f_part_num || '#';
+	end if;
+
+	if p_group1 <> 1 then
+		-- группировка пользовательская 1 регулируется выбором значения из списка. 1 - нет группировки
+		vIdx := vIdx || recAcc.f_group1 || '#';
+	end if;
+
+	if p_group2 <> 1 then
+		-- группировка пользовательская 2 регулируется выбором значения из списка. 1 - нет группировки
+		vIdx := vIdx || recAcc.f_group2 || '#';
+	end if;
+
+	if P_GROUP_VAL then	--	если установлен флаг "Групировать по валюте счета"
+		vIdx := vIdx || GetGroupingData(5) || '#';
+	end if;
+
+	recAcc.f_okato_code	:= p_client.f_okato_code;	--28.03.2024 ОКАТО
+
+	--	сортировка по номеру счёта
+	vIdx :=	vIdx
+		||	substr(p_data.f_num, 1, 8)
+		||	substr(p_data.f_num, 10)	--	исключаем 9-й символ (ключ) из лицевого счёта, чтобы счета были отсортированы без учёта "ключа"
+	 --	и уникальный хвост
+		||	'#'||lmData.count;
+
+	lmData(vIdx) := recAcc;
+	debug_pipe('.AddAccount -- recAcc.f_okato_code='||recAcc.f_okato_code||' vIdx='||vIdx,dp);
+end;
+
+
+lrAnTmp	ref [ANALYTIC_CODE];
+
+pragma macro(set_context, '
+executor.set_context([1],[2]);
+&debug_output([3] || '' ['' || [1] || ''] = '' || [2], 1)', substitute);
+
+/**	Функция создаёт аналитический признак по шаблону p_patterns
+  */
+function CreatePattern(	p_patterns	varchar2 )
+	return ref [ANALYTIC_CODE]
+is
+	rProduct ref [PATTERN_PRODUCT] := ::[PATTERN_PRODUCT]([CODE] = 'AC_FIN');
+	rAn	ref [ANALYTIC_CODE];
+	recAn	[ANALYTIC_CODE];
+	recPatt	[ACC_PATTERN];
+begin
+	recAn.[USE] := true;
+	rAn := ::[ANALYTIC_CODE]%insert(recAn);
+	recPatt.[PRODUCT] := rProduct;
+	recPatt.[PATTERN] := p_patterns;
+	recPatt.[OR_DOWN] := true;
+	rAn.[ACC_PATTERN]%insert(recPatt);
+
+	::[ANALYTIC_CODE].ANALYTIC_NORMAL(p_analytic == rAn);
+
+	return rAn;
+end;
+
+procedure InitData(p_pattern varchar2) is
+begin
+	&fix.clear(p_level == 1);
+	::[TURN_DATA].[PSH_LIB_INN_REGN].InitData; -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+	&fix.set_name('x1', 'Инициализация');
+	&fix.set_name('x2', 'Получение данных по счетам');
+	&fix.set_name('x3', 'Получение данных по пользователю');
+	&fix.set_name('x4', 'Получение данных по б/с');
+	&fix.set_name('x5', 'Получение данных по клиентам');
+	&fix.set_name('x6', 'Получение данных по счёту');
+	&fix.set_name('x7', 'Получение данных по подразделению');
+
+	&fix.set_name('x8', 'Фильтрация данных по счетам, всего');
+	&fix.set_name('x8.01', 'Фильтрация сводных счетов');
+	&fix.set_name('x8.02', 'Фильтрация данных по подразделениям');
+	&fix.set_name('x8.03', 'Фильтрация данных по б/с');
+	&fix.set_name('x8.04', 'Фильтрация данных по главам');
+	&fix.set_name('x8.05', 'Фильтрация данных по валютам');
+	&fix.set_name('x8.06', 'Фильтрация данных по клиентам');
+	&fix.set_name('x8.07', 'Фильтрация данных по категориям');
+	&fix.set_name('x8.08', 'Фильтрация данных по ОКВЭД');
+	&fix.set_name('x8.09', 'Фильтрация данных по группам клиентов');
+	&fix.set_name('x8.10', 'Фильтрация данных по суммам');
+	&fix.set_name('x8.11', 'Фильтрация данных по ОКАТО');
+
+	&fix.set_name('x9', 'Включение обработанных данных по счетам');
+
+	&fix.set_name('xA.1', 'последнее движение по счёту. Поиск ненулевой выписки');
+	&fix.set_name('xA.2', 'последнее движение по счёту. Данные из счёта по выписке');
+	&fix.set_name('xA.3', 'последнее движение по счёту. Данные из счёта по интерфейсу');
+
+	&fix.set_name('xB.1', 'Данные по норм.счёту: сальдо из прошлого');
+	&fix.set_name('xB.2', 'Данные по норм.счёту: сальдо из будущего');
+	&fix.set_name('xB.3', 'Данные по норм.счёту: сальдо со счёта');
+	&fix.set_name('xB.4', 'Данные по норм.счёту: обороты');
+	&fix.set_name('xB.5', 'Данные по норм.счёту: дата со счёта');
+	&fix.set_name('xB.6', 'Данные по норм.счёту: дата GetDateLast');
+	&fix.set_name('xB.7', 'Данные по норм.счёту: учёт исправительных проводок');
+	&fix.set_name('xD', 'Работа функции turnv');
+
+	&fix.set_count_name('in_turn', 'Количество вычислений данных в функции turn');
+	&fix.set_count_name('accounts_info',	'Количество запусков функции FillAccountInfo');
+
+	lmBS.delete;
+	lmData.delete;
+	lmClient.delete;
+	lmAccounts.delete;
+	lmDepartInfo.delete;
+
+	lbCacheAccountsInit		:= null;
+
+	lrAnTmp := CreatePattern(nvl(p_pattern,'%'));
+	&set_context('REP$AT$PATT_INC',	to_char(lrAnTmp.[PATT_NORMAL]),		'Шаблон на включение');
+	&set_context('REP$AT$PATT_EXC',	to_char(lrAnTmp.[ACC_PATT_EXCLUDE]),'Шаблон на исключение');
+end;
+
+
+/**	Функция для получения счетов, попадающих в отчёт.
+  */
+public function run(	p_beg							date				--	Дата начала периода расчёта
+			,	p_end							date				--	Дата конца периода расчёта
+			,	p_storno						date				--	дата вычисления корректировок
+			,	p_cur_out						ref [FT_MONEY]		--	Валюта эквивалента
+			,	p_chapter_list					varchar2			--	Глава
+			,	p_bs_num						varchar2			--	Балансовый счет
+
+			,	p_depart						ref [DEPART]		--	Подразделение
+			,	p_dep_with_child				boolean				--	включать дочерние подразделения
+			,	p_select_depart_from_otv		boolean				--	определять подразделение по ответственному пользователю
+			,	p_pattern						varchar2			--	строка с ненормализованным шаблоном лицевых счетов
+
+			,	p_analytic						ref	[ANALYTIC_CODE]	--	аналитический признак с шаблонами счетов
+
+			,	p_cur_list						varchar2			--	Список кодов валют
+			,	p_exclude_cur					boolean				--	Исключить указанные валюты
+
+			,	p_branch						ref		[BRANCH]	--	Филиал
+			,	p_bank							ref		[CL_BANK]	--	Банк
+			,	p_client						ref		[CLIENT]	--	Клиент
+			,	p_client_r						boolean				--	Клиент, для расчетов с которым
+			,	p_client_v						boolean				--	Клиент-владелец
+
+			,	p_otv							ref		[USER]		--	Операционист
+
+			,	p_client_group					::[CLIENT_PERIOD]%collection%type	-- Группа клиентов
+			,	p_client_category				varchar2			--	Категория клиента
+			,	p_okved							varchar2			--	код ОКВЭД
+
+			,	p_group1						integer				--	пользовательская группировка 1
+			,	p_group2						integer				--	пользовательская группировка 2
+			,	P_GROUP_VAL						boolean				--  Групировать по валюте счета
+			,	p_res_type						integer				--	Тип результата (Выбор из 4-х)
+			,	p_show_zero						integer				--	Отображение счетов (Выбор из 4-х)
+
+			,	p_max_turn						number				--	Максимальные обороты
+			,	p_min_turn						number				--	Минимальные обороты
+			,	p_total_only					boolean				--	Выводить только итоги
+			,	p_cl_group						boolean				--	Группировать по физ/юр лицам
+			,	p_depart_list					varchar2(4000)		--	список ID подразделений, разделенных символом '#'
+
+			,	p_okato	STRING_1000	--28.03.2024 ОКАТО
+			)
+	return ::[TURN_DATA].[PSH_LIB_INN_REGN].map_accounts is -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+	collPattInc			::[ACC_PATTERN]%collection%type;	--	коллекция нормализованных шаблонов счетов для включения
+	collPattExc			::[ACC_PATTERN]%collection%type;	--	коллекция нормализованных шаблонов счетов для исключения*/
+
+	type main is
+		select a(	a%rowtype
+		--28.03.2024 ОКАТО
+	  --) in VW_RPT_TURN_DATA_ACC%rowtype
+		) in VW_RPT_PSH_TURN_DATA_ACC%rowtype
+	;
+
+	recSaldo			::[TURN_DATA].[PSH_LIB_INN_REGN].rec_saldo; -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+	recTurn				::[TURN_DATA].[PSH_LIB_INN_REGN].rec_turn; -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+	recBS				::[TURN_DATA].[PSH_LIB_INN_REGN].rec_bs; -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+
+	nTurn				number;
+	nSaldo				number;
+
+	recClient			::[TURN_DATA].[PSH_LIB_INN_REGN].rec_client; -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+
+	iTmp				integer;
+	recData				::[TURN_DATA].[PSH_LIB_INN_REGN].rec_data; -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+	iAccountsCount		integer;
+	vCurList			varchar2(4000);
+	vIso				varchar2(3);
+
+	rd					main;
+	cMain				utils.Ref_Cursor;
+	
+	vListBranch			varchar2(4000);
+begin
+	
+	--	инициализация
+	InitData(p_pattern);
+	::[TURN_DATA].[PSH_LIB_INN_REGN].init_varg( p_end - 1, p_beg, P_CLIENT );		-- сначала д.б. окончание периода -- updated CHANGE_SHORT_NAME SLIB_INN_REG_NUM->PSH_LIB_INN_REGN 15/10/25
+
+	&fix.beg('x1');
+	iAccountsCount	:= 0;
+	vCurList := GetCurList( upper(trim(p_cur_list)) );
+
+	if p_analytic is not null then
+		select u(	u.[PATT_NORMAL]
+				,	u.[ACC_PATT_EXCLUDE]
+		)	in	::[ANALYTIC_CODE] all
+		where	u = p_analytic
+		into	collPattInc, collPattExc;
+	end if;
+
+	if p_res_type = 3 then
+		::[REPS].[CUR_LIB].INIT_RATES(p_beg, p_end);
+		if p_cur_out is null then
+			pragma error('Внимание! Не выбрана выходная валюта.');
+		end if;
+
+		select a( nvl(a.[CODE_ACC], a.[CODE_ISO]))
+		in ::[FT_MONEY]
+		where	a = p_cur_out
+		into vIso;
+	end if;
+
+	&fix.fin('x1');
+
+	--	расчёт
+	&debug_output('стартовал расчёт '||to_char(p_beg,'dd.mm.yyyy')||', '||to_char(p_end-1, 'dd.mm.yyyy'), 0);
+	
+	-- Если конкретный филиал для расчета не указан, то подразумевается, что указан банк, по которому будет сформирован свод
+	if P_BRANCH is null then
+		-- Получаем список филиалов для банка, установленного на реализации
+		vListBranch := nvl(::[REPS_DATA].[LIB_CLIENT].GetBranchByBank(P_BANK), '#');
+	else
+		vListBranch := '#'||to_char(P_BRANCH)||'#';
+	end if;
+	
+	for b in ::[BRANCH] where instr(vListBranch, '#'||to_char(b)||'#') > 0 loop
+		&debug_output('Обрабатывается филиал '||b.[SHORTLABEL], 0);
+		--	Запрос на счета + ограничения:
+		--	- по текстовому шаблону P_PATTERN на номер счёта
+		--	- по шаблонам ACC_PATTERN на номер счёта
+		--	- по обобщённому статусу счёта TO_OPEN
+		--	- по датам открытия/закрытия
+		--	- по филиалу
+
+		&set_context('REP$AT$BR',		b%id,							'Филиал');
+		&set_context('REP$AT$BS',		p_bs_num,						'Балансовый счёт');
+		&set_context('REP$AT$PI',		to_char(collPattInc),			'Шаблон группы на включение');
+		&set_context('REP$AT$PE',		to_char(collPattExc),			'Шаблон группы на исключение');
+		&set_context('REP$AT$OTV',		p_otv%id,						'Признак ответственного');
+		&set_context('REP$AT$END',		to_char(p_end,'yyyymmdd'),		'Конец периода');
+		&set_context('REP$AT$BEG',		to_char(p_beg,'yyyymmdd'),		'Начало периода');
+		&set_context('REP$AT$DFO',		bool_char(p_select_depart_from_otv),	'Признак подразделения из ответственного');
+		&set_context('REP$AT$DEP',		p_depart%id,					'Подразделение');
+		&set_context('REP$AT$DEPWC',	bool_char(p_dep_with_child),	'признак подразделений с дочерними');
+		&set_context('REP$AT$LIST_DEP',	p_depart_list,					'Список подразделений');
+		
+		--28.03.2024 ОКАТО
+		debug_pipe('Филиал                                 '||b%id									,dp);
+		debug_pipe('Балансовый счёт                        '||p_bs_num								,dp);
+		debug_pipe('Шаблон группы на включение             '||to_char(collPattInc)					,dp);
+		debug_pipe('Шаблон группы на исключение            '||to_char(collPattExc)					,dp);
+		debug_pipe('Признак ответственного                 '||p_otv%id								,dp);
+		debug_pipe('Конец периода                          '||to_char(p_end,'yyyymmdd')				,dp);
+		debug_pipe('Начало периода                         '||to_char(p_beg,'yyyymmdd')				,dp);
+		debug_pipe('Признак подразделения из ответственного'||bool_char(p_select_depart_from_otv)	,dp);
+		debug_pipe('Подразделение                          '||p_depart%id							,dp);
+		debug_pipe('признак подразделений с дочерними      '||bool_char(p_dep_with_child)			,dp);
+		debug_pipe('Список подразделений                   '||p_depart_list							,dp);
+		
+		cMain.open(rd);
+		loop
+			--28.03.2024 ОКАТО
+			var cl ref [CLIENT];
+			cl:=nvl(rd.C_CLIENT_R,rd.C_CLIENT_V);
+			debug_pipe(lPad(iAccountsCount,7)||'>'||rd.C_ACC_NUM||' '||rpad(cl.NAME,100)||' ОКАТО:'||rd.C_OKATO_CODE,dp);
+			
+			&fix.beg('x2');
+			cMain.fetch(rd);
+			&fix.fin('x2');
+			exit when cMain%notfound;
+
+			&fix.beg('x8');
+			if mod(iAccountsCount, 1000) = 0 then
+				&debug_output('обработано '||iAccountsCount||' счетов' ,0);
+			end if;
+			iAccountsCount		:= iAccountsCount + 1;		-- кол-во счетов
+
+			&fix.beg('x4');
+			recBS := GetBSInfo(rd.C_USV);
+			&fix.fin('x4');
+
+			&fix.beg('x8.03');
+			--	Если план счетов у счёта не задан, или счёт не из основного плана счетов, то такой счёт в отчёт не включается.
+			if recBS.f_plan is null or recBS.f_plan <> ::[SYSTEM].[SYS_MAIN_PLAN] then
+				--	ограничение по плану счетов
+				&fix_list2('x2', 'x8', 'x8.03');
+				continue;
+			end if;
+			&fix.fin('x8.03');
+
+			--	ограничение на главу
+			&fix.beg('x8.04');
+			if instr(p_chapter_list, recBS.f_chapter_num) = 0 then
+				--	заметим, что instr('','#') даст null и в условие мы не зайдём
+				&fix_list2('x2', 'x8', 'x8.04');
+				continue;
+			end if;
+			&fix.fin('x8.04');
+
+			--	ограничение на валюты
+			&fix.beg('x8.05');
+			iTmp := instr(vCurList, '#'||recBS.f_cur%id||'#');
+			if p_exclude_cur and iTmp > 0 then
+				&fix_list2('x2', 'x8', 'x8.05');
+				continue;
+
+			elsif not p_exclude_cur and iTmp = 0 then
+				&fix_list2('x2', 'x8', 'x8.05');
+				continue;
+			end if;
+			&fix.fin('x8.05');
+
+			--	на клиента
+			&fix.beg('x8.06');
+			if p_client_r and p_client_v then
+				if p_client%id <> coalesce(rd.[C_CLIENT_R], rd.[C_CLIENT_V], 0) then
+					&fix_list2('x2', 'x8', 'x8.06');
+					continue;
+				end if;
+
+			elsif p_client_r then
+				if p_client%id <> nvl(rd.[C_CLIENT_R], 0) then
+					&fix_list2('x2', 'x8', 'x8.06');
+					continue;
+				end if;
+
+			--	вариант not p_client_r and not p_client_v обрабатывается аналогично p_client_v, поэтому проверки на эти условия нет
+			elsif p_client%id <> nvl(rd.[C_CLIENT_V], 0) then
+				&fix_list2('x2', 'x8', 'x8.06');
+				continue;
+			end if;
+			&fix.fin('x8.06');
+
+			&fix.beg('x5');
+			recClient := GetClientInfo(nvl(rd.C_CLIENT_R, rd.C_CLIENT_V), nvl(p_beg,p_end)); --03.04.2019 ИНН и ОГРН вычисляем на дату отчета - nvl(p_beg,p_end)
+			&fix.fin('x5');
+
+			--	на категорию клиента
+			&fix.beg('x8.07');
+			if not IsCategoryValid(recClient, p_client_category, p_group1, p_group2, p_end) then
+				&fix_list2('x2', 'x8', 'x8.07');
+				continue;
+			end if;
+			&fix.fin('x8.07');
+
+			-- на код ОКВЭД
+			&fix.beg('x8.08');
+			if not IsOkvedValid(recClient, p_okved, p_end) then
+				&fix_list2('x2', 'x8', 'x8.08');
+				continue;
+			end if;
+			&fix.fin('x8.08');
+
+			--	на группу клиентов
+			&fix.beg('x8.09');
+			if not IsGroupValid(recClient, p_client_group, p_end) then
+				&fix_list2('x2', 'x8', 'x8.09');
+				continue;
+			end if;
+			&fix.fin('x8.09');
+
+			&fix.beg('x6');
+			recData.f_num		:= rd.c_acc_num;
+			recData.f_acc%id	:= rd.acc_id;
+			recData.f_name		:= rd.C_ACC_NAME;
+			recData.f_summary%id:= rd.C_ACC_SUMMARY;
+			recData.f_status%id	:= rd.C_COM_STATUS;
+			recData.f_move		:= rd.C_ARC_MOVE;
+			recData.f_corr		:= rd.C_ARC_CORR;
+			recData.f_vid%id	:= rd.C_VID;
+			recData.f_otv_name	:= rd.c_otv_name;
+			&fix.fin('x6');
+
+			&fix.beg('x7');
+			recData.f_depart	:= GetDepartCode(rd.c_depart);
+			&fix.fin('x7');
+
+			&fix.beg('x6');
+			FillAccountInfo(	recSaldo	--	out-параметр
+							,	recTurn		--	out-параметр
+							,	recData
+							,	p_res_type
+							,	p_beg
+							,	p_end
+							,	p_storno
+							,	vIso
+			);
+			&fix.fin('x6');
+
+			--	ограничение по сумме
+			&fix.beg('x8.10');
+			if		p_res_type = 2
+				and (	recTurn.f_dt.f_nat > p_max_turn
+					 or	recTurn.f_dt.f_nat < p_min_turn	)
+				and
+					(	recTurn.f_kt.f_nat > p_max_turn
+					 or	recTurn.f_kt.f_nat < p_min_turn	)
+
+			then
+				&fix_list2('x2', 'x8', 'x8.10');
+				continue;
+
+			elsif	(	recTurn.f_dt.f_cur > p_max_turn
+					or	recTurn.f_dt.f_cur < p_min_turn	)
+				and
+					(	recTurn.f_kt.f_cur > p_max_turn
+					or	recTurn.f_kt.f_cur < p_min_turn	)
+
+			then
+				&fix_list2('x2', 'x8', 'x8.10');
+				continue;
+			end if;
+
+			nTurn	:=	abs(nvl(recTurn.f_dt.f_cur, 0)) + abs(nvl(recTurn.f_kt.f_cur, 0)) + abs(nvl(recTurn.f_dt.f_nat, 0)) + abs(nvl(recTurn.f_kt.f_nat, 0));
+			nSaldo	:=	abs(nvl(recSaldo.f_in.f_cur, 0)) + abs(nvl(recSaldo.f_out.f_cur, 0)) + abs(nvl(recSaldo.f_in.f_nat, 0)) + abs(nvl(recSaldo.f_out.f_nat, 0));
+
+--			1 - не скрывать
+--			2 - скрывать, если обороты нулевые
+--			3 - скрывать, если остатки нулевые
+--			4 - скрывать, если нулевые и то и другое
+
+			if p_show_zero = '2' and nTurn = 0 then
+				&fix_list2('x2', 'x8', 'x8.10');
+				continue;
+
+			elsif p_show_zero = '3' and nSaldo = 0 then
+				&fix_list2('x2', 'x8', 'x8.10');
+				continue;
+
+			elsif p_show_zero = '4' and nTurn = 0 and nSaldo = 0 then
+				&fix_list2('x2', 'x8', 'x8.10');
+				continue;
+
+			end if;
+			&fix.fin('x8.10');
+
+			-- на код ОКАТО
+			&fix.beg('x8.11');
+			if not IsOkatoValid(recClient, p_okato, p_end) then
+				&fix_list2('x2', 'x8', 'x8.11');
+				continue;
+			end if;
+			&fix.fin('x8.11');
+
+			--	Проверки прошли успешно.
+			&fix.fin('x8');
+
+			--	Включаем счёт в массив
+			&fix.beg('x9');
+			AddAccount(recClient, recSaldo, recTurn, recBS, recData, p_group1, p_group2, p_total_only, p_cl_group, P_GROUP_VAL);
+			&fix.fin('x9');
+			&fix.beg('x2');
+		end loop;
+		&fix.fin('x2');
+	
+		cMain.close;
+	end loop;
+
+	&fix.show;
+
+	&fix.show_count;
+
+	&debug_output('обработано '||iAccountsCount||' счетов' ,0);
+	&debug_output('для вывода подготовлено '||lmData.count||' счетов' ,0);
+
+	delete d in ::[ANALYTIC_CODE] all where d = lrAnTmp;
+
+	return lmData;
+end;
+end;

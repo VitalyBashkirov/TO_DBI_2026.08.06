@@ -1,0 +1,1495 @@
+class DOCUM_RC;
+
+@name('[ПСБ] Преобразование SberFinLine в SWIFT MX')
+@tag('COPIED')
+method PSH_TRANSF_SB_MX is
+
+@name('Документ SWIFT-RUR')                            public V_IS_SW_RUR_DOC   [BOOLEAN];
+@name('Текст SWIFT-RUR')                               public V_SW_RUR_TEXT     [STRING_500];
+@name('Тип сообщения MX (1-pacs.008, 2-pacs.009)')     public V_ISO_DOC_TYPE    [CASE_BETWEEN_TWO];
+@name('Реквизиты текущего документа')                  public V_THIS_DOC        [DOCUM_RC];
+@name('Признак - текущий документ это документ MX')    public V_IS_ISO_DOC      [BOOLEAN];
+@name('Признак - текущий документ это документ SWIFT') public V_IS_SWIFT_DOC    [BOOLEAN];
+@name('Созданный документ РЦ')                         public V_REF_NEW_RC_DOC  [DOCUM_RC_REF];
+@name('Созданное сообщение ISO_FIN')                   public V_REF_NEW_ISO_FIN [ISO_FIN_REF];
+@name('Платёжный документ')                            public V_REF_MAIN_DOC    [MAIN_DOCUM_REF];
+@name('Успешность PLPCALL вызова')                     public V_PLPCALL_RESULT  [BOOLEAN];
+
+pragma include([DEBUG_TRIGGER].[MACRO_LIB]);
+pragma include(::[RUNTIME].[MACRO_LIB]);
+pragma include(::[DOCUM_RC].[SQL_MACRO]);
+pragma include(::[DOCUM_RC].[MACRO_LIB]);
+
+pragma macro (del_symb, '::[DOCUM_RC].[VCHK_NEW].DEL_SYMBOLS([1], null, true)', substitute);
+pragma macro (transl_symb,'::[ISO_MSG].[CHK_SYMB].transleterate([1])', substitute);
+
+procedure ClearVariables is 
+begin
+	V_SW_RUR_TEXT = V_IS_SW_RUR_DOC = V_ISO_DOC_TYPE = V_REF_NEW_RC_DOC := null;
+	V_REF_NEW_ISO_FIN = V_IS_ISO_DOC = V_IS_SWIFT_DOC = V_REF_MAIN_DOC = V_PLPCALL_RESULT := null;
+	V_THIS_DOC := null;
+end;
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+-->> VRI
+public function get_inn(v_text_in varchar2(300), name_field string(10)) return varchar2(300) is
+v_text_out varchar2(300);
+v_len	integer;
+begin
+	v_len := length(name_field);
+	if name_field like '%INN%' or name_field like '%ИНН%' then   
+		if regexp_instr(substr(v_text_in, instr(v_text_in, name_field) + v_len,12),'[^[[:digit:]]]*') = 0 then
+			v_text_out := substr(v_text_in, instr(v_text_in, name_field) + v_len,12);
+		else
+			v_text_out := substr(v_text_in, instr(v_text_in, name_field) + v_len,10);
+		end if;
+	elsif name_field like '%KPP%' or name_field like '%КПП%' then
+		v_text_out := substr(v_text_in, instr(v_text_in, name_field) + v_len,9);
+	end if;
+	return nvl(v_text_out, '');
+end;
+
+public function get_val_from_50swift(v_text varchar2(300), name_field string(10)) return varchar2(300) is
+v_text_out varchar2(300);
+begin
+	v_text_out := replace(v_text,' ');
+	if name_field in ('INN', 'ИНН') then
+		v_text_out := get_inn(v_text_out, name_field);
+
+	elsif name_field in ('KPP', 'КПП') then
+		v_text_out := get_inn(v_text_out, name_field);
+
+	elsif name_field = 'NAME' then
+		if v_text like '/%' then
+			v_text := substr(v_text, 22);
+		elsif v_text like '30%' or v_text like '40%' then
+			v_text := substr(v_text, 21);
+		end if;
+
+		if v_text like '%INN %' then
+			v_text := replace(v_text, 'INN '|| get_inn(v_text, 'INN '));
+		elsif v_text like '%ИНН %' then
+			v_text := replace(v_text, 'ИНН '|| get_inn(v_text, 'ИНН '));
+		elsif v_text like '%INN%' then
+			v_text := replace(v_text, 'INN' || get_inn(v_text, 'INN'));
+		elsif v_text like '%ИНН%' then
+			v_text := replace(v_text, 'ИНН' || get_inn(v_text, 'ИНН'));
+		end if;
+
+		if v_text like '%.KPP %'then
+			v_text := replace(v_text, '.KPP ' || get_inn(v_text, '.KPP '));
+		elsif v_text like '%.КПП %' then
+			v_text := replace(v_text, '.КПП ' || get_inn(v_text, '.КПП '));
+		elsif v_text like '%.KPP%' then
+			v_text := replace(v_text, '.KPP' || get_inn(v_text, '.KPP'));
+		elsif v_text like '%.КПП%' then
+			v_text := replace(v_text, '.КПП' || get_inn(v_text, '.КПП'));
+		elsif v_text like '%KPP %' then
+			v_text := replace(v_text, 'KPP ' || get_inn(v_text, 'KPP '));
+		elsif v_text like '%КПП %' then
+			v_text := replace(v_text, 'КПП ' || get_inn(v_text, 'КПП '));
+		elsif v_text like '%KPP%' then
+			v_text := replace(v_text, 'KPP' || get_inn(v_text, 'KPP'));
+		elsif v_text like '%КПП%' then
+			v_text := replace(v_text, 'КПП' || get_inn(v_text, 'КПП'));
+		end if;
+		if v_text like '%р/с%' then
+			v_text := replace(v_text, 'р/с');
+		end if;
+		if v_text like '%r/s%' then
+			v_text := replace(v_text, 'r/s');
+		end if;
+
+		if v_text like '%407%' or v_text like '%408%' then
+			if regexp_instr(substr(v_text, instr(v_text, '407'), 20), '^\d{20}$') = 1 then
+				v_text := replace(v_text, substr(v_text, instr(v_text, '407'), 20));
+			elsif regexp_instr(substr(v_text, instr(v_text, '408'), 20), '^\d{20}$') = 1 then
+				v_text := replace(v_text, substr(v_text, instr(v_text, '408'), 20));
+			end if; 
+		end if;
+		v_text_out := v_text;
+	end if;
+
+	return trim(::[RUNTIME].[STR].CharOne(::[RUNTIME].[STR].swift_to_str(v_text_out)));
+end;
+--<< VRI
+
+/*Формирует заготовку документ РЦ - сообщения ISO, используя реквизиты с целевого документа */
+public function next_doc(P_DOC ref [DOCUM_RC]) return [DOCUM_RC]
+is
+	new_doc [DOCUM_RC];
+	old_doc [DOCUM_RC];
+	docNum	::[MAIN_DOCUM].[DOCUMENT_NUM];
+begin
+	old_doc := P_DOC;
+	new_doc%init;
+	new_doc.[FILIAL] := old_doc.[FILIAL];
+	if old_doc.[MT103] is null then
+		docNum := ::[DOCUM_RC].[LIB_NEW].str2number(substr(old_doc.[ELDOCNUM],4,6));
+	end if;
+	docNum := coalesce(docNum,to_number(old_doc.[NUMBER_DOC]),1);
+	new_doc.[NUMBER_DOC] := substr(to_char(docNum), 1, new_doc.[NUMBER_DOC]%size);
+	--new_doc.[CRDATE] := old_doc.[CRDATE];
+	new_doc.[CRDATE] := ::[SYSTEM].[VARIABLES].OpDate; -- VRI
+	new_doc.[TYPE_DOC] := 'ISO';
+	new_doc.[DOG_SD] := old_doc.[DOG_SD];
+	new_doc.[DOG_RC] := old_doc.[DOG_RC]; 
+	new_doc.[OLD_UNICUM_CODE] :=  ::[DOCUM_RC].[T_LIB].get_null_unic_code;
+	new_doc.[UNICUM_CODE] := old_doc.[UNICUM_CODE];
+	new_doc.[ISO] := old_doc.[ISO];
+	new_doc.[BEGDATE] := old_doc.[BEGDATE];
+	new_doc.[AUDIT].[CREATE]  := ::[TRC].[INI].CUR_USER;
+	new_doc.[AUDIT].[OP_DATE] := ::[TRC].[INI].TODAY;
+	new_doc.[AUDIT].[DATE_CREATE] := SYSDATE;
+	new_doc.[AUDIT].[FROM_ROUT] := old_doc.[AUDIT].[FROM_ROUT];
+	new_doc.[AUDIT].[RCV_FILE] := old_doc.[AUDIT].[RCV_FILE];
+	new_doc.[AUDIT].[CREATE] := ::[TRC].[INI].CUR_USER;
+	new_doc.[AUDIT].[KEY_VALID]	:= true;
+	new_doc.[BLOCK_DATA] := old_doc.[BLOCK_DATA];
+	new_doc.[RRC] := old_doc.[RRC];
+	new_doc.[FIRST_REF] := P_DOC;
+	return new_doc;
+end;
+
+/*Формирует и возвращает структуру ISO_FIN на основе реквизитов документа РЦ (как РФ, так и MT)*/
+public function FormRec_IsoFinByDocumRc(p_drc [DOCUM_RC], p_type ref [ISO_MSG_TYPE]) return [ISO_FIN]
+is
+	BizSvc			string;
+	MsgDefIdr		string;
+	oIsoFin			[ISO_FIN];
+	IntrBkSttlmAmt 	[CUR_SUMMA];
+	PmtId			[ISO_PMT_ID];
+	ndval			string;
+	isoCashAcct 	[ISO_CASH_ACC];
+	iso_pi			[ISO_PARTY_IDENT];
+	iso_fi			[ISO_FI_IDENT];
+	org_id 			[ISO_ORG_ID];
+	inn				string;
+	prvt_id			[ISO_PRVT_ID];
+	dbAcc 		ref [AC_FIN];
+	cdAcc 		ref [AC_FIN];
+	innIsoCode	ref [ISO_CODE_VALUE] := ::[ISO_CODE_VALUE]([CODE_SET] = 'ExternalOrganisationIdentification1Code' and [CODE_VALUE] = 'TXID');
+	sform			string;
+	isSwift			boolean;
+	sBlockData		[MEMO];
+	is008			boolean := (p_type in (::[ISO_MSG_TYPE].[LIB].type_pacs008,::[ISO_MSG_TYPE].[LIB].type_pacs008stp));
+	is009			boolean := (p_type = ::[ISO_MSG_TYPE].[LIB].type_pacs009);
+	
+	
+	function FormFiAGT(p_doc [DOCUM_RC], p_req_type string, p_var integer) return [ISO_FI_IDENT] is 
+		clBank 		ref [CL_BANK];
+		clBankN 	ref [CL_BANK_N];
+		clBankF 	ref [CL_BANK_F];
+		bankName		varchar2(500);
+		isoFiAGT 		[ISO_FI_IDENT];
+		req 			[REQ_PART];
+		ben				[REQ_BEN];
+		isBen			boolean := false;		
+	begin
+		if p_req_type = 'PAYER' then
+			req := p_doc.[PAYER];
+		elsif p_req_type = 'RECEIVER' then
+			req := p_doc.[RECEIVER];
+		elsif p_req_type = 'BEN' then
+			ben := p_doc.[BEN];
+			isBen := true;
+		elsif p_req_type = 'INT' then
+			ben := p_doc.[INT];
+			isBen := true;
+		end if;
+		
+		clBank := nvl(ben.[BANK],req.[BANK_REF]);
+		if clBank is not null then
+			case clBank%class of	
+				:'CL_BANK_F': clBankF := clBank;
+				:'CL_BANK_N': clBankN := clBank;
+			end;
+		end if;
+			
+		if p_var = 1 then
+			/* - в приоритете - поиск участника SWIFT и заполнение BICFI
+			 * - если пусто, то заполнение (из реквизитов банка) наименования + адрес + бик*/
+			if clBankF is not null then
+				null;
+			elsif clBank.[SWIFT_C] is not null then
+				clBank = clBankF := ::[DOCUM_RC].[LIB].get_bank(clBank.[SWIFT_C], null, bankName);
+			elsif nvl(ben.[CODE],req.[BCODE]) is not null then
+				clBank := ::[DOCUM_RC].[LIB].get_bank(nvl(ben.[CODE],req.[BCODE]), null, bankName);
+				if clBank is not null then
+					case clBank%class of	
+						:'CL_BANK_F': clBankF := clBank;
+						:'CL_BANK_N': clBankN := clBank; clBank = clBankF := ::[DOCUM_RC].[LIB].get_bank(clBank.[SWIFT_C], null, bankName);
+					end;
+				end if;
+			end if;
+			
+			if clBankF is not null then
+				isoFiAGT.[BICFI] := clBankF.[SWIFT_C];
+				isoFiAGT.[BICFI_] := clBankF;
+			elsif isSwift then
+				isoFiAGT.[BICFI] := nvl(ben.[CODE],req.[BCODE]);
+				isoFiAGT.[BICFI_] := ::[DOCUM_RC].[LIB].get_bank(nvl(ben.[CODE],req.[BCODE]), null, bankName);
+			elsif coalesce(req.[BCODE],clBankN.[BIC]) is not null then
+				isoFiAGT.[CLR_SYS_CODE] := ::[ISO_CODE_VALUE]([CODE_SET] = 'ExternalClearingSystemIdentification1Code' and [CODE_VALUE] = 'RUCBC');
+				isoFiAGT.[CLR_SYS_MMB_ID] := coalesce(ben.[CODE],req.[BCODE],clBankN.[BIC]);
+			end if;
+			
+			if isoFiAGT.[BICFI] is null then --ветка для преобразования в РФ, наименование и адрес нац. банка
+				--пока вариант наименования по ссылке - предпочтительный
+				isoFiAGT.[NAME] := 
+						case when isSwift then
+							trim(::[RUNTIME].[STR].CharOne(::[RUNTIME].[STR].swift_to_str(nvl(clBankN.[NAME],clBankN.[I_NAME]))))
+						else
+							&del_symb(nvl(clBankN.[NAME],clBankN.[I_NAME]))
+						end;
+				
+				isoFiAGT.[PSTL_ADR] := ::[ISO_FIN].[CONS_LIB].GetIsoPstlAdrByClient(clBankN, clBankN%class);
+			end if;
+		elsif p_var = 2 then
+			 /* - в приоритете - поиск нац. банка и заполнение (из реквизитов банка) наименования + адрес + бик
+			 *  - если пусто, то заполнение BICFI*/
+			 if clBankN is not null then
+			 	null;
+			 elsif clBank.[SWIFT_C] is not null then
+			 	clBank = clBankN := ::[DOCUM_RC].[LIB].getBankNOnSwiftCode(clBank.[SWIFT_C],false);
+			 elsif nvl(ben.[CODE],req.[BCODE]) is not null then
+			 	clBank := ::[DOCUM_RC].[LIB].get_bank(nvl(ben.[CODE],req.[BCODE]), null, bankName);
+			 	if clBank is not null then
+					case clBank%class of	
+						:'CL_BANK_F': clBankF := clBank; clBank = clBankN := ::[DOCUM_RC].[LIB].getBankNOnSwiftCode(clBank.[SWIFT_C], false);
+						:'CL_BANK_N': clBankN := clBank; 
+					end;
+				end if;
+			 end if;
+			 
+			 if clBankN is not null then
+			 	isoFiAGT.[CLR_SYS_CODE] := ::[ISO_CODE_VALUE]([CODE_SET] = 'ExternalClearingSystemIdentification1Code' and [CODE_VALUE] = 'RUCBC');
+				isoFiAGT.[CLR_SYS_MMB_ID] := clBankN.[BIC];
+				isoFiAGT.[NAME] := 	&del_symb(nvl(req.[BANK],::[DOCUM_RC].[LIB].get_bank_name(clBankN)));
+				isoFiAGT.[PSTL_ADR] := ::[ISO_FIN].[CONS_LIB].GetIsoPstlAdrByClient(clBankN, clBankN%class);
+			 else	
+				isoFiAGT.[BICFI_] := clBankF;
+				isoFiAGT.[BICFI] := clBankF.[SWIFT_C];
+			 end if;
+		else
+			--заполнение только наименования из соответствующего реквизита
+			isoFiAGT.[NAME] := case 
+									when isSwift then 
+										trim(::[RUNTIME].[STR].CharOne(::[RUNTIME].[STR].swift_to_str(nvl(ben.[NAME],req.[NAME])))) 
+									else 
+										&del_symb(req.[NAME]) 
+									end;
+		end if;
+		
+		if isoFiAGT.[NAME] = 'NONREF' then
+			isoFiAGT.[NAME] := null;
+		end if;
+		return isoFiAGT;
+	end;
+	
+	function try_acc(p_str string) return string is
+		acc 	varchar2(35);
+		bic 	varchar2(9);
+	begin
+		P_STR := replace(replace(P_STR, ' '), '*', '0');
+		if P_STR is NULL then
+			return NULL;
+		end if;
+		if substr(P_STR, 1, 3) = '/RU' or substr(P_STR, 1, 2) = 'RU' then
+			::[VAL_IBAN].[LIB].get_values_IBAN(P_STR, bic, acc);
+		else
+			if substr(p_str,1,1) = '/' then
+				if substr(p_str,2,1) = '/' then
+					--значение, начинающееся с // не будем считать счетом
+					return null;
+				else
+					acc := substr(p_str,2);
+				end if;
+			else
+				acc := p_str;
+			end if;
+		end if;
+		return acc;
+	end;
+	
+	procedure SetPatyIdent_By_5x(p_rec in out [ISO_PARTY_IDENT], p_val varchar2, p_opt varchar2) is
+		name 		varchar2(500);
+		clBank	ref [CL_BANK_F];
+	begin
+		if p_opt = 'F' then
+			if p_val like '1/%' then
+				name := substr(trim(substr(p_val,1,35)),3);
+				if substr(p_val,36) like '1/%' then
+					name := name || ' ' || substr(trim(substr(p_val,36,35)),3);
+					if substr(p_val,71) like '1/%' then
+						name := name || ' ' || substr(trim(substr(p_val,71,35)),3);
+						if substr(p_val,106) like '1/%' then
+							name := name || ' ' || substr(trim(substr(p_val,106,35)),3);
+							if substr(p_val,141) like '1/%' then
+								name := name || ' ' || substr(trim(substr(p_val,141,35)),3);
+							end if;
+						end if;
+					end if;
+				end if;
+				name := substr(name,1,::[ISO_PARTY_IDENT].[NAME]%size);
+			else
+				name := substr(p_val,1,::[ISO_PARTY_IDENT].[NAME]%size);
+			end if;
+		elsif p_opt = 'A' then
+			clBank:= ::[DOCUM_RC].[LIB].get_bank(p_val, null, name);
+		end if;
+		p_rec.[NAME] := name;
+		if clBank is not null then
+			p_rec.[IDENTIFICATION].[ORG_ID].[ANY_BIC] := clBank.[SWIFT_C];
+			p_rec.[IDENTIFICATION].[ORG_ID].[ANY_BIC_] := clBank;
+			p_rec.[IDENTIFICATION].[0] := 1;
+			p_rec.[NAME] := '';
+		end if;			
+	end;
+	
+	
+begin
+	&debug('FormRec_IsoFinByDocumRc - start',0)
+	sform := ::[DOCUM_RC].[LIB_VIEW].GetVidProv(null, p_drc.[TYPE_DOC], p_drc.[SUB_TYPE], 5);
+
+	--isSwift := p_drc.[MT103] is not null;
+	isSwift := true;
+	&debug('isSwift = ' || isSwift,0)
+	
+	oIsoFin%init(true,true);
+
+	oIsoFin.[ISO_MSG_TYPE] := p_type;
+	
+	if true then--isSwift then
+		::[RUNTIME].[STR].SET_PAR(sBlockData, 'ORIGINAL_SWIFT_MT', p_drc%id);
+		oIsoFin.[BLOCK_DATA] := sBlockData;
+	end if;
+	
+	--узкий момент - референс
+	if oIsoFin.[BIZ_MSG_IDR] is null then
+		oIsoFin.[BIZ_MSG_IDR] := substr(::[DOCUM_RC].[SWIFT_DOC_LIB].get_rel_trn(p_drc%id),1,oIsoFin.[BIZ_MSG_IDR]%size);
+		&debug('(1) BIZ_MSG_IDR = ' || oIsoFin.[BIZ_MSG_IDR],0)
+	end if;
+	if oIsoFin.[BIZ_MSG_IDR] is null then
+		for (select x(x.[TRN] : trn) in ::[DOC_UETR] all where x.[DOC_RC_REF] = p_drc%id and x.[TRN] is not null fetch 1) 
+		loop
+			oIsoFin.[BIZ_MSG_IDR] := x.trn;
+			&debug('(2) BIZ_MSG_IDR = ' || oIsoFin.[BIZ_MSG_IDR],0)		
+		end loop;
+	end if;
+	if oIsoFin.[BIZ_MSG_IDR] is null then
+		oIsoFin.[BIZ_MSG_IDR] := ::[DOCUM_RC].[BUX_LIB].unicum_code(null, false, ::[TRC].[INI].SWIFT_FORMAT);
+		&debug('(3) BIZ_MSG_IDR = ' || oIsoFin.[BIZ_MSG_IDR],0)
+	end if;
+	
+	oIsoFin.[PMT_ID].[INSTR_ID] := nvl(oIsoFin.[PMT_ID].[INSTR_ID],oIsoFin.[BIZ_MSG_IDR]);
+	oIsoFin.[CRE_DT_TM] := to_char(p_drc.[AUDIT].[DATE_CREATE],'YYYY-MM-DD')||'T'||to_char(p_drc.[AUDIT].[DATE_CREATE],'HH24:MI:SS')||to_char(systimestamp,'TZH:TZM');
+	
+	::[ISO_MSG_TYPE].[LIB].GetMsgTypeLastVer(oIsoFin.[ISO_MSG_TYPE],MsgDefIdr,BizSvc);
+	oIsoFin.[MSG_DEF_IDR] := MsgDefIdr;
+	
+	--по аналогии с LIB_EXP.SaaEnvelope
+	declare
+		suffix			string(10);
+	begin
+		suffix := ::[TRC].[VPS_LIB].NEXT_NUM_OUT(NULL, ::[TRC].[VPS_LIB].VPS_SWIFT, 99999);
+		--узкий момент
+		oIsoFin.[SND_REF] := ::[DOCUM_RC].[SWIFT_LIB].OUR_SWIFT_CODE
+			||substr(MsgDefIdr,5,3) -- Message identifier из Message Definition Identifier
+			||'$'||to_char(to_date(substr(oIsoFin.[CRE_DT_TM],1,10),'YYYY-MM-DD'),'YYMMDD')
+			||suffix;
+	end;
+	
+	oIsoFin.[PMT_TP_INF].[INSTR_PRTY].[0] := 1; --пока что всегда приоритет=NORM
+	oIsoFin.[STTLM_PRTY].[0] := 1;
+	--if oIsoFin.[PMT_ID].[UETR] is null then
+		--oIsoFin.[PMT_ID].[UETR] := ::[DOCUM_RC].[GPI_LIB].get_doc_UETR(p_drc%id);
+	--end if;
+	
+	-- VRI
+	oIsoFin.[BIZ_MSG_IDR] = oIsoFin.[PMT_ID].[INSTR_ID] := ::[DOCUM_RC].[BUX_LIB].unicum_code(null, false, ::[TRC].[INI].SWIFT_FORMAT);
+	oIsoFin.[PMT_ID].[UETR] := ::[DOCUM_RC].[GPI_LIB].GetDocUetrByIsoFin(oIsoFin).[UETR]; -- генерируем номер и запись DOC_UETR, номер сохраняем, а ссылка привяжется при создании ДРЦ
+	-- VRI     
+
+	--берем из исходного документа 
+	oIsoFin.[DOG_SD] := p_drc.[DOG_SD];
+	oIsoFin.[DOG_RC] := p_drc.[DOG_RC];
+	oIsoFin.[PART_SD] := nvl(p_drc.[PAYER].[PART_REF],oIsoFin.[DOG_SD].[CLIENT]);
+	oIsoFin.[PART_RC] := nvl(p_drc.[RECEIVER].[PART_REF],oIsoFin.[DOG_RC].[CLIENT]);
+	
+	oIsoFin.[RATE] := 1;
+	oIsoFin.[BACK_RATE] := true;
+	if isSwift then
+		oIsoFin.[RATE] := nvl(::[RUNTIME].[STR].GET_NUM_PAR(p_drc.[BLOCK_DATA], 'p_rate'),1);
+		oIsoFin.[BACK_RATE] := nvl(::[RUNTIME].[STR].get_str_par(p_drc.[BLOCK_DATA], 'p_back_rate'), true);
+	end if;
+	--oIsoFin.[INTR_BK_STTL_DT] := ::[TRC].[INI].TODAY;
+	oIsoFin.[INTR_BK_STTL_DT] := ::[SYSTEM].[VARIABLES].OpDate;
+	
+	-->> VRI
+	if p_drc.[CRCLCODE] = 'LK_SBANK' then
+		oIsoFin.[INTR_BK_STTL_AMT].[SUMMA] := 0;
+		oIsoFin.[INSTD_AMT].[SUMMA] := p_drc.[SUMMA];
+		oIsoFin.[INSTD_AMT].[CURRENCY] := ::[DOCUM_RC].[BUX_LIB].Get_ISO(p_drc.[ISO]);
+	else
+		--IntrBkSttlmAmt.[SUMMA] := p_drc.[SUMMA];
+		--IntrBkSttlmAmt.[CURRENCY] := ::[DOCUM_RC].[BUX_LIB].Get_ISO(p_drc.[ISO]);
+		oIsoFin.[INTR_BK_STTL_AMT].[SUMMA] := p_drc.[SUMMA];
+		oIsoFin.[INTR_BK_STTL_AMT].[CURRENCY] := ::[FT_MONEY]([CUR_SHORT] = p_drc.[ISO]);
+		oIsoFin.[INSTD_AMT].[SUMMA] := p_drc.[SUMMA];
+		oIsoFin.[INSTD_AMT].[CURRENCY] := ::[FT_MONEY]([CUR_SHORT] = p_drc.[ISO]);
+	end if;
+	 
+	--oIsoFin.[INTR_BK_STTL_AMT] := IntrBkSttlmAmt;
+	
+	oIsoFin.[INTR_BK_STTL_DT] := ::[SYSTEM].[VARIABLES].OpDate;
+	--<< VRI
+	
+	oIsoFin.[CHRGBR]  := ::[CHARGES]([ISO_CODE] = 'DEBT');	
+	
+	if 1=0 then --на будущее на случай необходимости
+		ndval := bool_char(p_drc.[CONNTYPE] in (4,5), 'RTGS', 'MPNS');
+		oIsoFin.[PMT_TP_INF].[CLR_CHANL] := ndval;
+		ndval := bool_char(p_drc.[CONNTYPE] in (4,5), 'URGP', 'NURG');
+		if ndval is not null then
+			oIsoFin.[PMT_TP_INF].[SVC_LVL_1C] := ::[ISO_CODE_VALUE].[LIB].GetIsoCodeValue
+				( 'ExternalServiceLevel1Code'
+				, ndval
+				); 
+		end if;
+	end if;
+	
+	if 1=0 and is009 then --на будущее на случай необходимости
+		--Settlement Account
+		isoCashAcct := null;
+		if p_drc.[DOG_RC].[TYPE_DOG] = ::[CONTRACT_TYPE]([IDENT] = 'N') then
+			isoCashAcct.[ACC_ID] := p_drc.[DOG_RC].[ACC_N_OUT];
+		else
+			isoCashAcct.[ACC_REF] := p_drc.[DOG_RC].[ACCOUNT];
+			isoCashAcct.[ACC_ID] := p_drc.[DOG_RC].[ACCOUNT].[MAIN_V_ID];
+		end if;
+		&debug('Settlement Account = ' || isoCashAcct.[ACC_ID],0)
+		oIsoFin.[STTLM_ACCT] := isoCashAcct;		
+	end if;
+	
+	---------------------------------------------------------------------------------------------------
+	--Debtor Acc
+	isoCashAcct := null;
+	isoCashAcct.[ACC_ID] := substr(try_acc(p_drc.[PAYER].[ACC]),1,34);
+	if isoCashAcct.[ACC_ID] is not null then
+		begin
+			locate exact dbAcc in ::[AC_FIN] all where dbAcc.[MAIN_V_ID] = isoCashAcct.[ACC_ID] and dbAcc.[DATE_CLOSE] is null;
+			isoCashAcct.[ACC_REF] := dbAcc;
+		exception 
+			when no_data_found then
+				&debug('поиск счета ' || isoCashAcct.[ACC_ID] || ' - no_data_found',0)
+				dbAcc := null;
+			when too_many_rows then
+				&debug('поиск счета ' || isoCashAcct.[ACC_ID] || ' - too_many_rows',0)
+				dbAcc := null;
+		end;
+	end if;
+	if p_drc.[CRCLCODE] = 'LK_SBANK' then
+		isoCashAcct.[ACC_REF] := p_drc.[DOG_SD].[ACCOUNT]; -- VRI
+	else 
+		null;
+	end if;
+	oIsoFin.[DBTR_ACCT] := isoCashAcct;
+	---------------------------------------------------------------------------------------------------
+	
+	---------------------------------------------------------------------------------------------------
+	--Creditor Acc
+	if p_drc.[CRCLCODE] <> 'LK_SBANK' then
+		isoCashAcct := null;
+		if isSwift then
+			if is009 then
+				isoCashAcct.[ACC_ID] := substr(try_acc(p_drc.[BEN].[ACC]),1,34);
+			else
+				isoCashAcct.[ACC_ID] := substr(try_acc(p_drc.[RECEIVER].[ACC]),1,34);
+			end if;
+		else
+			isoCashAcct.[ACC_ID] := p_drc.[RECEIVER].[ACC];
+		end if;
+		if isoCashAcct.[ACC_ID] is not null then
+			begin
+				locate exact cdAcc in ::[AC_FIN] all where cdAcc.[MAIN_V_ID] = isoCashAcct.[ACC_ID] and cdAcc.[DATE_CLOSE] is null;
+				isoCashAcct.[ACC_REF] := cdAcc;
+			exception 
+				when no_data_found then
+					&debug('поиск счета ' || isoCashAcct.[ACC_ID] || ' - no_data_found',0)
+					cdAcc := null;
+				when too_many_rows then
+					&debug('поиск счета ' || isoCashAcct.[ACC_ID] || ' - too_many_rows',0)
+					cdAcc := null;
+			end;
+		end if; 
+		oIsoFin.[CDTR_ACCT] := isoCashAcct;
+	end if;
+	---------------------------------------------------------------------------------------------------
+	
+	---------------------------------------------------------------------------------------------------
+	--Debtor
+	iso_pi = org_id = prvt_id := null;
+	declare
+		name 	  string(500);
+	begin
+		if is009 then
+			if dbAcc is not null then
+				iso_fi := ::[ISO_FIN].[CONS_LIB].getFiOnAcc(dbAcc);
+			else
+				--пока заполняем только наименование, остальное используем в Debtor Agent
+				iso_fi := FormFiAGT(p_drc,'PAYER',3);
+			end if;
+			oIsoFin.[DBTR_FI] := iso_fi;
+		else
+			if dbAcc is not null then
+				iso_pi := ::[ISO_FIN].[CONS_LIB].getPartyOnAcc(dbAcc);
+				iso_pi.[NAME] := replace(iso_pi.[NAME], '"', ''''); -- VRI
+			else
+				name := p_drc.[PAYER].[NAME];
+				-->> Получение ИНН из 50 поля 
+				if trim(p_drc.[PAYER].[INN]) is not null then
+					inn := p_drc.[PAYER].[INN];
+				elsif upper(p_drc.[PAYER].[NAME]) like '%INN%' then
+					inn := get_val_from_50swift(p_drc.[PAYER].[NAME], 'INN');
+				elsif upper(p_drc.[PAYER].[NAME]) like '%ИНН%' then
+					inn := get_val_from_50swift(p_drc.[PAYER].[NAME], 'ИНН');
+				end if;
+				inn := trim(inn);
+				--<<
+					
+				iso_pi.[IDENTIFICATION].[0] := 1;
+				
+				if inn is not null then
+					if length(inn) = 12 then
+						iso_pi.[IDENTIFICATION].[0] := 2;
+						prvt_id.[OTHER_ID].[OTHER_ID] := inn;
+						prvt_id.[OTHER_ID].[OTHER_SCH_NM_CD] := innIsoCode;
+					elsif length(inn) = 10 then
+						org_id.[OTHER_ID].[OTHER_ID] := inn;
+						org_id.[OTHER_ID].[OTHER_SCH_NM_CD] := innIsoCode;	
+					end if;
+					iso_pi.[IDENTIFICATION].[ORG_ID] := org_id;
+					iso_pi.[IDENTIFICATION].[PRVT_ID] := prvt_id;
+				end if;
+				
+				if isSwift then
+					if p_drc.[PAYER].[OPTION_CL] in ('F','A') then
+						SetPatyIdent_By_5x(iso_pi,name,p_drc.[PAYER].[OPTION_CL]);
+					else
+						--iso_pi.[NAME] := trim(::[RUNTIME].[STR].CharOne(::[RUNTIME].[STR].swift_to_str(name)));	
+						name := substr(get_val_from_50swift(name, 'NAME'), 1, 140); -- Наименование плательщиа
+						name := ::[DOCUM_RC].[SWIFT_RUR].TRANSLETERATE(name, 6, true); -- Транслитерируем NAME в МТ eng-rus
+						name := ::[ISO_MSG].[CHK_SYMB].transleterate(name);	-- Транслитерируем NAME в МХ rus-eng
+						iso_pi.[NAME] := replace(name, '"', '''');							
+					end if;
+				else
+					iso_pi.[NAME] := &del_symb(name);
+				end if;
+
+			end if;
+			oIsoFin.[DBTR_PI] := iso_pi;	
+		end if;
+	end;
+	---------------------------------------------------------------------------------------------------
+	
+	---------------------------------------------------------------------------------------------------
+	--Creditor
+	if p_drc.[CRCLCODE] <> 'LK_SBANK' then
+		iso_pi = org_id = prvt_id := null;
+		declare
+			name 	  string(500);
+		begin
+			if is009 then
+				oIsoFin.[CDTR_FI] := FormFiAGT(p_drc,'BEN',1);
+				if oIsoFin.[CDTR_FI].[BICFI] is null then
+					oIsoFin.[CDTR_FI]:= FormFiAGT(p_drc,'BEN',3);
+				end if;
+			else
+				name := p_drc.[RECEIVER].[NAME];
+				inn := trim(p_drc.[RECEIVER].[INN]);
+				iso_pi.[IDENTIFICATION].[0] := 1; 
+				if inn is not null then
+					if length(inn) = 12 then
+						iso_pi.[IDENTIFICATION].[0] := 2;
+						prvt_id.[OTHER_ID].[OTHER_ID] := inn;
+						prvt_id.[OTHER_ID].[OTHER_SCH_NM_CD] := innIsoCode;
+					elsif length(inn) = 10 then
+						org_id.[OTHER_ID].[OTHER_ID] := inn;
+						org_id.[OTHER_ID].[OTHER_SCH_NM_CD] := innIsoCode;	
+					end if;
+					iso_pi.[IDENTIFICATION].[ORG_ID] := org_id;
+					iso_pi.[IDENTIFICATION].[PRVT_ID] := prvt_id;
+				end if;
+				if isSwift then
+					if p_drc.[RECEIVER].[OPTION_CL] in ('F','A') then
+						SetPatyIdent_By_5x(iso_pi,name,p_drc.[RECEIVER].[OPTION_CL]);
+					else
+						iso_pi.[NAME] := trim(::[RUNTIME].[STR].CharOne(::[RUNTIME].[STR].swift_to_str(name)));		
+					end if;
+				else
+					iso_pi.[NAME] := &del_symb(name);
+				end if;
+				
+				oIsoFin.[CDTR_PI] := iso_pi;
+			end if;	
+		end;
+	end if;
+	---------------------------------------------------------------------------------------------------
+		
+	---------------------------------------------------------------------------------------------------	
+	--Debtor Agent
+	-->> VRI
+	if p_drc.[CRCLCODE] = 'LK_SBANK' then
+		oIsoFin.[DBTR_AGT] := FormFiAGT(p_drc,'RECEIVER',1);
+		if isSwift then
+			if oIsoFin.[DBTR_AGT].[BICFI] is null then
+				oIsoFin.[DBTR_AGT] := FormFiAGT(p_drc,'RECEIVER',3); 
+				if oIsoFin.[DBTR_AGT].[NAME] is null then
+					oIsoFin.[DBTR_AGT].[NAME] := trim(::[RUNTIME].[STR].CharOne(::[RUNTIME].[STR].swift_to_str(p_drc.[RECEIVER].[BANK])));
+				end if;
+			end if; 
+		end if;
+	--<< VRI
+	else
+		-->> VRI
+		if p_drc.[PAYER].[BANK_REF] is null and p_drc.[MAIN_DOC]->(MAIN_DOCUM)[ACC_DT].[MAIN_V_ID] like '40%' then
+			p_drc.[PAYER].[BANK_REF] := ::[SYSTEM].[VARIABLES].OurBank;
+		end if;
+		--<< VRI
+		oIsoFin.[DBTR_AGT] := FormFiAGT(p_drc,'PAYER',1);
+		if isSwift then
+			if oIsoFin.[DBTR_AGT].[BICFI] is null then
+				oIsoFin.[DBTR_AGT].[NAME] := trim(::[RUNTIME].[STR].CharOne(::[RUNTIME].[STR].swift_to_str(p_drc.[PAYER].[BANK]))) ;
+				if is008 and oIsoFin.[DBTR_AGT].[NAME] is null then
+					--частный случай - используем банк УР-плательщика
+					oIsoFin.[DBTR_AGT].[BICFI_] := p_drc.[PAYER].[PART_REF].[BANK_F];
+					oIsoFin.[DBTR_AGT].[BICFI] := oIsoFin.[DBTR_AGT].[BICFI_].[SWIFT_C];
+					if oIsoFin.[DBTR_AGT].[BICFI_].[SWIFT_C] = oIsoFin.[DBTR_PI].[IDENTIFICATION].[ORG_ID].[ANY_BIC] then
+						oIsoFin.[DBTR_AGT].[BICFI_] = oIsoFin.[DBTR_AGT].[BICFI] := null;
+					end if;
+				end if;
+			end if;
+		end if;
+	end if;
+	---------------------------------------------------------------------------------------------------
+
+	---------------------------------------------------------------------------------------------------
+	--Creditor Agent
+	if p_drc.[CRCLCODE] <> 'LK_SBANK' then
+		oIsoFin.[CDTR_AGT] := FormFiAGT(p_drc,'RECEIVER',1);
+		if isSwift then
+			if oIsoFin.[CDTR_AGT].[BICFI] is null then
+				oIsoFin.[CDTR_AGT] := FormFiAGT(p_drc,'RECEIVER',3); 
+				if oIsoFin.[CDTR_AGT].[NAME] is null then
+					oIsoFin.[CDTR_AGT].[NAME] := trim(::[RUNTIME].[STR].CharOne(::[RUNTIME].[STR].swift_to_str(p_drc.[RECEIVER].[BANK])));
+				end if;
+			end if; 
+		end if;
+	end if;
+	---------------------------------------------------------------------------------------------------
+	
+	---------------------------------------------------------------------------------------------------
+	--Intermediary Agent 1 + Intermediary Agent 1 Account
+	if isSwift then
+		oIsoFin.[INTRMY_AGT1] := FormFiAGT(p_drc,'INT',1);
+		if oIsoFin.[INTRMY_AGT1].[BICFI] is null then
+			oIsoFin.[INTRMY_AGT1] := FormFiAGT(p_drc,'INT',3); 
+		end if;
+		
+		isoCashAcct := null;
+		isoCashAcct.[ACC_ID] := substr(try_acc(p_drc.[INT].[ACC]),1,34) ;
+		
+		if isoCashAcct.[ACC_ID] is not null then
+			begin
+				locate exact cdAcc in ::[AC_FIN] all where cdAcc.[MAIN_V_ID] = isoCashAcct.[ACC_ID] and cdAcc.[DATE_CLOSE] is null;
+				isoCashAcct.[ACC_REF] := cdAcc;
+			exception 
+				when no_data_found then
+					&debug('поиск счета ' || isoCashAcct.[ACC_ID] || ' - no_data_found',0)
+					cdAcc := null;
+				when too_many_rows then
+					&debug('поиск счета ' || isoCashAcct.[ACC_ID] || ' - too_many_rows',0)
+					cdAcc := null;
+			end;
+		end if; 
+		oIsoFin.[INTRMY_AGT1_ACCT] := isoCashAcct;
+	end if;
+	---------------------------------------------------------------------------------------------------
+
+	---------------------------------------------------------------------------------------------------
+	--Debtor Agent Account
+	if isSwift --для случая преобразования из РФ корр.счет не используем
+	then 
+		isoCashAcct := null;
+		isoCashAcct.[ACC_ID] := case 
+								when isSwift 
+									then substr(try_acc(p_drc.[PAYER].[BACC]),1,34) 
+								else 
+									p_drc.[PAYER].[BACC] 
+								end;
+		if isoCashAcct.[ACC_ID] is not null then
+			begin
+				locate exact cdAcc in ::[AC_FIN] all where cdAcc.[MAIN_V_ID] = isoCashAcct.[ACC_ID] and cdAcc.[DATE_CLOSE] is null;
+				isoCashAcct.[ACC_REF] := cdAcc;
+			exception 
+				when no_data_found then
+					&debug('поиск счета ' || isoCashAcct.[ACC_ID] || ' - no_data_found',0)
+					cdAcc := null;
+				when too_many_rows then
+					&debug('поиск счета ' || isoCashAcct.[ACC_ID] || ' - too_many_rows',0)
+					cdAcc := null;
+			end;
+		elsif p_drc.[PAYER].[BANK_REF] is not null and p_drc.[PAYER].[BANK_REF]%class = ::[CL_BANK_N]%class then
+			isoCashAcct.[ACC_ID] := ::[CL_BANK_N].[LIB].GetKS(p_drc.[PAYER].[BANK_REF], p_drc.[PAYER].[ACC]);
+		end if; 
+		-- oIsoFin.[DBTR_AGT_ACCT] := isoCashAcct; -- VRI
+	end if;
+	---------------------------------------------------------------------------------------------------
+	
+	---------------------------------------------------------------------------------------------------
+	--Creditor Agent Account
+	if p_drc.[CRCLCODE] <> 'LK_SBANK' then
+		if isSwift --для случая преобразования из РФ корр.счет не используем
+		then 
+			isoCashAcct := null;
+			isoCashAcct.[ACC_ID] := case 
+									when isSwift then substr(try_acc(p_drc.[RECEIVER].[BACC]),1,34)
+									else 
+										p_drc.[RECEIVER].[BACC] 
+									end;
+			
+			if isoCashAcct.[ACC_ID] is not null then
+				begin
+					locate exact cdAcc in ::[AC_FIN] all where cdAcc.[MAIN_V_ID] = isoCashAcct.[ACC_ID] and cdAcc.[DATE_CLOSE] is null;
+					isoCashAcct.[ACC_REF] := cdAcc;
+				exception 
+					when no_data_found then
+						&debug('поиск счета ' || isoCashAcct.[ACC_ID] || ' - no_data_found',0)
+						cdAcc := null;
+					when too_many_rows then
+						&debug('поиск счета ' || isoCashAcct.[ACC_ID] || ' - too_many_rows',0)
+						cdAcc := null;
+				end;
+			elsif p_drc.[RECEIVER].[BANK_REF] is not null and p_drc.[RECEIVER].[BANK_REF]%class = ::[CL_BANK_N]%class then
+				isoCashAcct.[ACC_ID] := ::[CL_BANK_N].[LIB].GetKS(p_drc.[RECEIVER].[BANK_REF], p_drc.[RECEIVER].[ACC]);
+			end if; 
+			oIsoFin.[CDTR_AGT_ACCT] := isoCashAcct;
+		end if;
+	end if;
+	---------------------------------------------------------------------------------------------------
+	
+	---------------------------------------------------------------------------------------------------
+	if is009 then --объединение Debtor и Debtor Agent
+		if oIsoFin.[DBTR_ACCT].[ACC_ID] is null and oIsoFin.[DBTR_FI].[BICFI] is null and oIsoFin.[DBTR_FI].[CLR_SYS_MMB_ID] is null and oIsoFin.[DBTR_FI].[NAME] is null then
+			oIsoFin.[DBTR_ACCT] := oIsoFin.[DBTR_AGT_ACCT];
+			oIsoFin.[DBTR_AGT_ACCT] := null;
+			oIsoFin.[DBTR_FI] := oIsoFin.[DBTR_AGT];
+			oIsoFin.[DBTR_AGT] := null;
+		end if;
+		if oIsoFin.[DBTR_FI].[BICFI] is null and oIsoFin.[DBTR_FI].[CLR_SYS_MMB_ID] is null and oIsoFin.[DBTR_FI].[NAME] is null then
+			oIsoFin.[DBTR_FI].[BICFI_] := p_drc.[PAYER].[PART_REF].[BANK_F];
+			oIsoFin.[DBTR_FI].[BICFI] := oIsoFin.[DBTR_FI].[BICFI_].[SWIFT_C];
+			oIsoFin.[DBTR_FI].[NAME] := coalesce(oIsoFin.[DBTR_FI].[BICFI_].[NAME],oIsoFin.[DBTR_FI].[BICFI_].[I_NAME]);
+		end if;
+	end if;
+	---------------------------------------------------------------------------------------------------
+	
+	---------------------------------------------------------------------------------------------------
+	--Назначение
+	if p_drc.[CRCLCODE] <> 'LK_SBANK' then 
+		declare
+			dest		[MEMO];
+			str_tmp 	::[DOCUM_RC].[DEST]%type;
+			str35		string;
+			strVidSend 	string;
+			docNum		[NUMBER_DOC];
+			needRpp		boolean := false;
+			inst4NxtAg	[MEMO];
+			nn			number:=1;
+		begin
+			if isSwift then
+				dest := trim(::[RUNTIME].[STR].CharOne(::[RUNTIME].[STR].swift_to_str(p_drc.[DEST])));
+				str_tmp := p_drc.[CLINFO];
+				while nn <= 176 loop
+					str35 := substr(str_tmp,nn,35);
+					nn := nn+35;
+					str35 := case when substr(str35,1,2) = '//' then '@@' ||substr(str35,3) else str35 end;
+					inst4NxtAg := inst4NxtAg || str35; 
+				end loop;
+				inst4NxtAg := replace(trim(::[RUNTIME].[STR].CharOne(::[RUNTIME].[STR].swift_to_str(inst4NxtAg))),'@@');
+			else
+				dest := &del_symb(p_drc.[DEST]);
+			end if;
+			
+			if isSwift = false and needRpp then -- на случай, если все-таки будет нужно
+				strVidSend := p_drc.[CONTYPE_REF].[VID_SEND];
+				if lower(strVidSend) = 'электронно' then
+					strVidSend := 'ELEK';
+				else
+					strVidSend := &del_symb(p_drc.[CONTYPE_REF].[VID_SEND]);
+				end if;	
+				docNum := nvl(nvl(to_number(::[DOCUM_RC].[LIB_NEW].str2number(substr(p_drc.[ELDOCNUM],4,6))), to_number(p_drc.[NUMBER_DOC])), 1);
+				docNum := bool_num(docNum = 0, 1, docNum);
+				dest := '{' || '/RPP/'|| docNum ||'.'||to_char(p_drc.[CRDATE], 'YYMMDD') ||'.'||p_drc.[PRIORITY] ||'.'||strVidSend||'}'
+						|| dest;
+			end if;
+			
+			if length(dest) > 140 then
+				stdio.put_line_buf('Длина назначения платежа '||NL$ ||'"'||dest||'"' || NL$ ||'превышает (' || length(dest) || ') максимально допустимую (140) и будет усечена до ' || NL$ ||'"'||substr(dest,1,140)||'"');
+			end if;
+			oIsoFin.[RMT_INF].[P_USTRD] := substr(dest,1,140);	
+			-- VRI Отключил заполение данных из поля :72: CLINFO 
+			/*if length(inst4NxtAg) > 210 then     /*6 полей по 35 символов*/ 
+		 		/*stdio.put_line_buf('Длина значения поля 72 '||NL$ ||'"'||inst4NxtAg||'"' || NL$ ||'превышает (' || length(inst4NxtAg) || ') максимально допустимую (210) и будет усечена до ' || NL$ ||'"'||substr(inst4NxtAg,1,210)||'"');
+			end if;
+			oIsoFin.[INSTR_NXT_AGT].[INSTR_FNA1] := substr(inst4NxtAg,1,35);
+			oIsoFin.[INSTR_NXT_AGT].[INSTR_FNA2] := substr(inst4NxtAg,36,35);
+			oIsoFin.[INSTR_NXT_AGT].[INSTR_FNA3] := substr(inst4NxtAg,71,35);
+			oIsoFin.[INSTR_NXT_AGT].[INSTR_FNA4] := substr(inst4NxtAg,106,35);
+			oIsoFin.[INSTR_NXT_AGT].[INSTR_FNA5] := substr(inst4NxtAg,141,35);
+			oIsoFin.[INSTR_NXT_AGT].[INSTR_FNA6] := substr(inst4NxtAg,176,35);*/	 
+		end;
+	end if;
+	---------------------------------------------------------------------------------------------------
+
+	&debug('FormRec_IsoFinByDocumRc - end',0)
+	return oIsoFin;
+end;
+
+
+/*Вычисление и запись в реквизиты договоров и участников */
+public procedure CalcPartAndDog(p_isofin ref [ISO_FIN], p_doc ref [DOCUM_RC]) is
+	ErrMsg				string(250);
+	Part			ref [CL_PART];
+	RedefinedPart	ref [CL_PART];
+begin
+	if p_isofin.[PART_SD] != ::[TRC].[INI].SWIFT_PART then
+		if p_isofin.[DOG_SD] is not null then
+			p_doc.[DOG_SD] := p_isofin.[DOG_SD];
+		else
+			&debug('Определяем договор отправителя',0)
+			p_isofin.[DOG_SD] = p_doc.[DOG_SD]  := ::[TRC].[LIB_NEW].get_dog( p_isofin.[PART_SD], ErrMsg, true, p_isofin.[INTR_BK_STTL_AMT].[CURRENCY], null, p_doc.[FILIAL]);
+			&debug('  [DOG_SD] (get_dog) = '||p_isofin.[DOG_SD].[CLIENT].[CODE] || p_isofin.[DOG_SD].[FINTOOL].[CUR_SHORT] || ', id '||p_isofin.[DOG_SD]%id || ', [TYPE_DOG] = ' || p_isofin.[DOG_SD].[TYPE_DOG].[IDENT] || ', CLIENT id ' || p_isofin.[DOG_SD].[CLIENT] || ', CLIENT SWIFT_C = ' || p_isofin.[DOG_SD].[CLIENT].[SWIFT_C], 0)
+		end if;
+	end if;
+	
+	if p_isofin.[PART_RC] is null then
+		RedefinedPart = Part := ::[ISO_FIN].[CONS_LIB].GetRcvPart(p_isofin, p_doc.[FILIAL], p_IsIn == true);
+		&debug('RedefinedPart: '||RedefinedPart || ', CODE = ' || RedefinedPart.[CODE] || ', NAME = ' || RedefinedPart.[NAME] || ', BANK = ' || RedefinedPart.[BANK] || ', BIC = ' || RedefinedPart.[BANK].[BIC] || ', BANK_F = ' || RedefinedPart.[BANK_F] ||', SWIFT = ' || RedefinedPart.[BANK_F].[SWIFT_C],0)
+		-- Если участник переопределится, то запишем ранее опреденного в предлагаемого участника
+		if ::[ISO_FIN].[CONS_LIB].RedefineRcvPartForCred(p_isofin, RedefinedPart) then
+			p_doc.[RRC] := Part;
+			&debug('  [RRC] (RedefineRcvPartForCred): '||Part || ', CODE = ' || Part.[CODE] || ', NAME = ' || Part.[NAME] || ', BANK = ' || Part.[BANK] || ', BIC = ' || Part.[BANK].[BIC] || ', BANK_F = ' || Part.[BANK_F] ||', SWIFT = ' || Part.[BANK_F].[SWIFT_C],0)
+		end if; 
+		p_isofin.[PART_RC] := RedefinedPart;
+		&debug('  [PART_RC] (RedefinedPart): '||RedefinedPart || ', CODE = ' || RedefinedPart.[CODE] || ', NAME = ' || RedefinedPart.[NAME] || ', BANK = ' || RedefinedPart.[BANK] || ', BIC = ' || RedefinedPart.[BANK].[BIC] || ', BANK_F = ' || RedefinedPart.[BANK_F] ||', SWIFT = ' || RedefinedPart.[BANK_F].[SWIFT_C],0)
+	end if;
+	
+	&debug('Определяем договор получателя',0)
+	p_isofin.[DOG_RC] = p_doc.[DOG_RC]  := ::[TRC].[LIB_NEW].get_dog( p_isofin.[PART_RC], ErrMsg, false, p_isofin.[INTR_BK_STTL_AMT].[CURRENCY], null, p_doc.[FILIAL]);
+	&debug('  [DOG_RC] (get_dog) = '||p_isofin.[DOG_RC].[CLIENT].[CODE] || p_isofin.[DOG_RC].[FINTOOL].[CUR_SHORT] || ', id '||p_isofin.[DOG_RC]%id || ', [TYPE_DOG] = ' || p_isofin.[DOG_RC].[TYPE_DOG].[IDENT] || ', CLIENT id ' || p_isofin.[DOG_RC].[CLIENT] || ', CLIENT SWIFT_C = ' || p_isofin.[DOG_RC].[CLIENT].[SWIFT_C], 0)
+end;
+
+/*Заполняет реквизиты документа РЦ на основе сообщения MX в рамках преобразования MX -> РФ */
+procedure SetReqRF_DocumRcByIsoFin(p_drc in ref [DOCUM_RC], p_current_drc ref [DOCUM_RC], p_iso_msg ref [ISO_MSG]) is
+	drc			ref [DOCUM_RC] := p_drc;
+	refSdPart	ref [CL_PART];					-- Ссылка на УР, откуда пришёл платёж
+	strSdPartName 	[CL_PART].[NAME]%type;		-- Наименование УР, откуда пришёл платёж
+	strSdPartINN	[CL_PART].[INN]%type;		-- ИНН УР, откуда пришёл платёж
+	strPayerName	varchar2(32000);
+	oIsoFin			[ISO_FIN];
+	bankN		ref [CL_BANK_N];
+	bankCl		ref [CL_BANK];
+	bankName		::[REQ_PART].[RB]%type;
+	dest			[MEMO];
+	sBlockData		[MEMO];
+	mxType			string := case when p_iso_msg.[ISO_MSG_TYPE] in (::[ISO_MSG_TYPE].[LIB].type_pacs008,
+																	::[ISO_MSG_TYPE].[LIB].type_pacs008stp)
+									 		then '008'
+								   when p_iso_msg.[ISO_MSG_TYPE] = ::[ISO_MSG_TYPE].[LIB].type_pacs009 
+								   			then '009'
+								   else null end;
+begin
+	locate oIsoFin in ::[ISO_FIN] where oIsoFin%id = p_iso_msg;
+					
+	drc.[TYPE_DOC] := '001';
+	drc.[SUB_TYPE] := NULL;
+	drc.[VID_OPER] := '01';
+	drc.[PRIORITY] := to_char(::[SYSTEM].[VARIABLES].DefPriority);
+	drc.[MSGTYPE] := ::[SBRF_TYPE_MESS]([CODE] = '132').[CODE]; --узкий момент
+	
+	-- Плательщик
+	drc.[PAYER].[BANK_REF] 	:= ::[SYSTEM].[VARIABLES].OurBank;
+	drc.[PAYER].[BANK] 		:= ::[DOCUM_RC].[LIB].get_bank_name(drc.[PAYER].[BANK_REF]);
+	drc.[PAYER].[BACC] 		:= ::[SYSTEM].[VARIABLES].OurBank.[KS];
+	drc.[PAYER].[BCODE] 	:= ::[SYSTEM].[VARIABLES].OurBank.[BIC];
+
+	--Дату списания со счета заполняем датой опердня
+	drc.[DATE_DT] :=::[SYSTEM].[VARIABLES].OpDate;
+	
+	--для использования в операциях редактирования и просмотра, чтобы получить текст исходного сообщения
+	sBlockData := drc.[BLOCK_DATA];
+	::[RUNTIME].[STR].SET_PAR(sBlockData, 'ORIGINAL_ISO_FIN', oIsoFin%id);
+	drc.[BLOCK_DATA] := sBlockData;
+	
+	drc.[VALDATE] := oIsoFin.[INTR_BK_STTL_DT];
+	drc.[SUMMA] := oIsoFin.[INTR_BK_STTL_AMT].[SUMMA];
+	
+	select p(p.[INN], p.[NAME], p) in ::[CL_PART] where p = p_iso_msg.[PART_SD] into strSdPartINN, strSdPartName, refSdPart;
+	drc.[PAYER].[INN] := strSdPartINN; 
+	
+	--счет отправителя - с руб. договора с УР получателем
+	declare
+		strAcc [AC_FIN].[MAIN_V_ID]%type;
+	begin
+		select dog(dog.[ACCOUNT].[MAIN_V_ID])
+		in ::[TRC]
+		where dog.[FILIAL] = p_current_drc.[FILIAL] and dog.[CLIENT] = refSdPart and dog.[FINTOOL] = ::[SYSTEM].[SYS_MAIN_VAL]
+		into strAcc;					
+		drc.[PAYER].[ACC] := strAcc;
+	exception
+		when NO_DATA_FOUND or TOO_MANY_ROWS then
+			pragma error('Ошибка. Не найден договор с участником '||p_iso_msg.[PART_SD].[CODE] ||' в рублях!');
+	end;
+	
+	drc.[RECEIVER].[BANK_REF] := NULL;
+	
+	--счет получателя
+	declare
+		bic	varchar2(9);
+		acc	varchar2(35);
+	begin
+		if oIsoFin.[CDTR_ACCT].[ACC_REF] is not null then
+			drc.[RECEIVER].[ACC] := oIsoFin.[CDTR_ACCT].[ACC_REF].[MAIN_V_ID];
+		else
+			if oIsoFin.[CDTR_ACCT].[IBAN] then
+				::[VAL_IBAN].[LIB].get_values_IBAN(oIsoFin.[CDTR_ACCT].[ACC_ID], bic, acc);
+				drc.[RECEIVER].[ACC] := acc;
+				drc.[RECEIVER].[BCODE] := bic;
+				drc.[RECEIVER].[BANK_REF] := ::[DOCUM_RC].[LIB].get_bank(bic, null, bankName);
+			else
+				drc.[RECEIVER].[ACC] := oIsoFin.[CDTR_ACCT].[ACC_ID];
+			end if;
+		end if;	
+	end;
+	
+	--бик, ссылка на нац.банк получателя
+	declare
+		bic 		string;
+		rucbc	ref [ISO_CODE_VALUE] := ::[ISO_CODE_VALUE]([CODE_SET] = 'ExternalClearingSystemIdentification1Code' and [CODE_VALUE] = 'RUCBC');
+	begin
+		if drc.[RECEIVER].[BCODE] is null then
+			bic := oIsoFin.[CDTR_AGT].[CLR_SYS_MMB_ID];
+			if bic is not null and oIsoFin.[CDTR_AGT].[CLR_SYS_CODE] = rucbc then
+				drc.[RECEIVER].[BCODE] := bic;
+				drc.[RECEIVER].[BANK_REF] := ::[DOCUM_RC].[LIB].get_bank(bic, null, bankName);
+			elsif oIsoFin.[CDTR_AGT].[BICFI_] is not null or oIsoFin.[CDTR_AGT].[BICFI] is not null then
+				bic := nvl(oIsoFin.[CDTR_AGT].[BICFI_].[SWIFT_C],oIsoFin.[CDTR_AGT].[BICFI]);
+				bankN := ::[DOCUM_RC].[LIB].getBankNOnSwiftCode(bic,false);
+				drc.[RECEIVER].[BANK_REF] := bankN;
+				drc.[RECEIVER].[BCODE] := bankN.[BIC];
+				bankName := ::[DOCUM_RC].[LIB].get_bank_name(bankN);
+			end if;
+			
+			if mxType = '009' and drc.[RECEIVER].[BANK_REF] is null then
+				bic := oIsoFin.[CDTR_FI].[CLR_SYS_MMB_ID];
+				if bic is not null and oIsoFin.[CDTR_FI].[CLR_SYS_CODE] = rucbc then
+					drc.[RECEIVER].[BCODE] := bic;
+					drc.[RECEIVER].[BANK_REF] := ::[DOCUM_RC].[LIB].get_bank(bic, null, bankName);
+				elsif oIsoFin.[CDTR_FI].[BICFI_] is not null or oIsoFin.[CDTR_FI].[BICFI] is not null then
+					bic := nvl(oIsoFin.[CDTR_FI].[BICFI_].[SWIFT_C],oIsoFin.[CDTR_FI].[BICFI]);
+					bankN := ::[DOCUM_RC].[LIB].getBankNOnSwiftCode(bic,false);
+					drc.[RECEIVER].[BANK_REF] := bankN;
+					drc.[RECEIVER].[BCODE] := bankN.[BIC];
+					bankName := ::[DOCUM_RC].[LIB].get_bank_name(bankN);
+				end if;
+			end if;
+		end if;
+		
+		if drc.[RECEIVER].[BANK_REF] is not null and drc.[RECEIVER].[BANK_REF]%class != ::[CL_BANK_N]%class then
+			bic := drc.[RECEIVER].[BANK_REF].[SWIFT_C];
+			bankN := ::[DOCUM_RC].[LIB].getBankNOnSwiftCode(bic,false);
+			drc.[RECEIVER].[BANK_REF] := bankN;
+			drc.[RECEIVER].[BCODE] := bankN.[BIC];
+			bankName := ::[DOCUM_RC].[LIB].get_bank_name(bankN);
+		end if;
+	end;
+	
+	if bankName is not null then
+		drc.[RECEIVER].[BANK] := bankName;
+	elsif drc.[RECEIVER].[BANK_REF] is not null then
+		drc.[RECEIVER].[BANK] := drc.[RECEIVER].[BANK_REF].[NAME];
+	else
+		drc.[RECEIVER].[BANK] := nvl(oIsoFin.[CDTR_AGT].[NAME],oIsoFin.[CDTR_FI].[NAME]);
+	end if;	
+	drc.[RECEIVER].[BACC] := ::[CL_BANK_N].[LIB].GetKS(drc.[RECEIVER].[BANK_REF], drc.[RECEIVER].[ACC]);
+	drc.[RECEIVER].[BACC] := coalesce(drc.[RECEIVER].[BACC], oIsoFin.[CDTR_AGT_ACCT].[ACC_REF].[MAIN_V_ID],oIsoFin.[CDTR_AGT_ACCT].[ACC_ID]);
+	
+	declare
+		doc_num 	number;
+	begin
+		doc_num := nvl(to_number(substr(to_char(p_current_drc.[NUMBER_DOC]),-3)),1);
+		doc_num := bool_num(doc_num = 0, 1, doc_num);
+		if p_current_drc.[MAIN_DOC] is not null then
+			p_current_drc.[MAIN_DOC].[DOCUMENT_NUM] := doc_num;
+		end if;
+		--узкий момент
+		--Внесистемный номер документа
+		drc.[ELDOCNUM] := '001'
+          					|| LPAD( NVL(to_char(doc_num), '1'), 6, '0')
+          					|| to_char( NVL(p_current_drc.[DATE_BANK_PL],::[TRC].[INI].TODAY), 'ddmmrr' )
+          					|| to_char(::[SYSTEM].[VARIABLES].DefPriority);
+	end;
+	
+	-- Дата поступления в банк плательщика
+	drc.[DATE_BANK_PL] := p_current_drc.[CRDATE];
+
+	if p_current_drc.[VALDATE] > ::[TRC].[INI].[TODAY] then
+		drc.[BEGDATE] := p_current_drc.[VALDATE];
+	else
+		drc.[BEGDATE] := null;
+	end if;
+	drc.[VALDATE] := NULL;
+	drc.[ENTDATE] := ::[TRC].[INI].[TODAY];
+	
+	drc.[RECEIVER].[NAME] := nvl(oIsoFin.[CDTR_FI].[NAME],oIsoFin.[CDTR_PI].[NAME]);
+	
+	if oIsoFin.[CDTR_PI].[IDENTIFICATION].[ORG_ID].[OTHER_ID].[OTHER_SCH_NM_CD].[CODE_VALUE] = 'TXID' then
+		drc.[RECEIVER].[INN] := substr(regexp_substr(oIsoFin.[CDTR_PI].[IDENTIFICATION].[ORG_ID].[OTHER_ID].[OTHER_ID],'[[:digit:]]+'), 1, ::[DOCUM_RC].[RECEIVER].[INN]%size);
+	elsif oIsoFin.[CDTR_PI].[IDENTIFICATION].[PRVT_ID].[OTHER_ID].[OTHER_SCH_NM_CD].[CODE_VALUE] = 'TXID' then	
+		drc.[RECEIVER].[INN] := substr(regexp_substr(oIsoFin.[CDTR_PI].[IDENTIFICATION].[PRVT_ID].[OTHER_ID].[OTHER_ID],'[[:digit:]]+'), 1, ::[DOCUM_RC].[RECEIVER].[INN]%size);
+	end if;
+	
+	--соберем наименование плательщика + счет + наименование банка
+	declare
+		bic			string;
+		acc			varchar2(35);
+		rucbc	ref [ISO_CODE_VALUE] := ::[ISO_CODE_VALUE]([CODE_SET] = 'ExternalClearingSystemIdentification1Code' and [CODE_VALUE] = 'RUCBC');
+	begin
+		if oIsoFin.[DBTR_ACCT].[ACC_REF] is not null then
+			acc := oIsoFin.[DBTR_ACCT].[ACC_REF].[MAIN_V_ID];
+		else
+			if oIsoFin.[DBTR_ACCT].[IBAN] then
+				::[VAL_IBAN].[LIB].get_values_IBAN(oIsoFin.[DBTR_ACCT].[ACC_ID], bic, acc);
+			else
+				acc := oIsoFin.[DBTR_ACCT].[ACC_ID];
+			end if;
+		end if;	
+		
+		bankName := '';
+		if mxType = '009' then
+			strPayerName := oIsoFin.[DBTR_FI].[NAME];
+			
+			if strPayerName is null then
+				bic := oIsoFin.[DBTR_FI].[CLR_SYS_MMB_ID];
+				if bic is not null and oIsoFin.[DBTR_FI].[CLR_SYS_CODE] = rucbc then
+					bankCl := ::[DOCUM_RC].[LIB].get_bank(bic, null, strPayerName);
+				elsif oIsoFin.[DBTR_FI].[BICFI_] is not null or oIsoFin.[DBTR_FI].[BICFI] is not null then
+					bic := nvl(oIsoFin.[DBTR_FI].[BICFI_].[SWIFT_C],oIsoFin.[DBTR_FI].[BICFI]);
+					bankN := ::[DOCUM_RC].[LIB].getBankNOnSwiftCode(bic,false);
+					strPayerName := ::[DOCUM_RC].[LIB].get_bank_name(bankN);
+				end if;
+			end if;
+			
+			bic := oIsoFin.[DBTR_AGT].[CLR_SYS_MMB_ID];
+			if bic is not null and oIsoFin.[DBTR_AGT].[CLR_SYS_CODE] = rucbc then
+				bankCl := ::[DOCUM_RC].[LIB].get_bank(bic, null, bankName);
+			elsif oIsoFin.[DBTR_AGT].[BICFI_] is not null or oIsoFin.[DBTR_AGT].[BICFI] is not null then
+				bic := nvl(oIsoFin.[DBTR_AGT].[BICFI_].[SWIFT_C],oIsoFin.[DBTR_AGT].[BICFI]);
+				bankN := ::[DOCUM_RC].[LIB].getBankNOnSwiftCode(bic,false);
+				bankName := ::[DOCUM_RC].[LIB].get_bank_name(bankN);
+			else
+				bankName := oIsoFin.[DBTR_AGT].[NAME];
+			end if;
+
+		else
+			strPayerName := oIsoFin.[DBTR_PI].[NAME];
+			
+			bic := oIsoFin.[DBTR_AGT].[CLR_SYS_MMB_ID];
+			if bic is not null and oIsoFin.[DBTR_AGT].[CLR_SYS_CODE] = rucbc then
+				bankCl := ::[DOCUM_RC].[LIB].get_bank(bic, null, bankName);
+			elsif oIsoFin.[DBTR_AGT].[BICFI_] is not null or oIsoFin.[DBTR_AGT].[BICFI] is not null then
+				bic := nvl(oIsoFin.[DBTR_AGT].[BICFI_].[SWIFT_C],oIsoFin.[DBTR_AGT].[BICFI]);
+				bankN := ::[DOCUM_RC].[LIB].getBankNOnSwiftCode(bic,false);
+				bankName := ::[DOCUM_RC].[LIB].get_bank_name(bankN);
+			else
+				bankName := oIsoFin.[DBTR_AGT].[NAME];
+			end if;
+		end if;
+		
+		if acc is not null then
+			strPayerName := strPayerName || ' ' || acc;
+		end if;
+		strPayerName := rtrim(strPayerName || ' ' || nvl(bankName,strSdPartName)); 
+	end;
+	
+	drc.[PAYER].[NAME] := substr(strPayerName, 1, 160);
+	strPayerName := substr(strPayerName, 161);		-- Что не поместилось в наименование плательщика, пишем в назначение платежа
+	
+	--назначение платежа
+	dest := strPayerName || ' ' || trim(oIsoFin.[RMT_INF].[P_USTRD] || ' ' || 
+		case when oIsoFin.[PURP].[CD] is not null then oIsoFin.[PURP].[CD].[CODE_VALUE] || ' (' || oIsoFin.[PURP].[CD].[CODE_NAME] || ')' else oIsoFin.[PURP].[PRTRY] end)
+		;
+	if length(dest) > 210 then
+		stdio.put_line_buf('Длина назначения платежа '||NL$ ||'"'||dest||'"' || NL$ ||'превышает (' || length(dest) || ') максимально допустимую (210) и будет усечена до ' || NL$ ||'"'||substr(dest,1,210)||'"');
+	end if;
+
+	drc.[DEST] := substr(dest,1,210);
+	drc.[CLINFO] := NULL;
+end;
+PSH_TRANSF_SB_MX is
+
+validate is
+	oDrc			[DOCUM_RC];
+	rDrc		ref [DOCUM_RC];
+	rIsoMsg 	ref [ISO_MSG];
+	rIsoFin		ref [ISO_FIN];
+	sform			string;
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		&debug('VALIDATE -> DEFAULT',0)
+		
+		ClearVariables();
+	
+		V_ISO_DOC_TYPE.[0] := 1;
+		V_THIS_DOC := this;
+		
+		V_IS_ISO_DOC 	:= this.[TYPE_DOC] = 'ISO';
+		V_IS_SWIFT_DOC  := true; -- VRI this.[MT103] is not null;
+		V_IS_SW_RUR_DOC := case when nvl(this.[PAYER].[RS_CODE], '*') = 'SWIFT-RUR' then true else false end;
+		V_REF_MAIN_DOC 	:= ::[DOCUM_RC].[LIB_VIEW].GetProv(this);
+
+		-- VRI
+		if this.[TYPE_DOC] || '.' || this.[SUB_TYPE] <> '001.B' then --or this.[CRCLCODE] <> 'LK_SBANK' then -- операция предназначена только для MT103
+			pragma error('Данная операция предназначена только для докумментов SWIFT MT103 от SberFinline');
+		end if;
+		-- VRI
+		
+		-- Проверки возможности выполнения преобразования документа
+		if this%state not in ('S_5', 'S_6', 'S_9', 'S_10') then
+			pragma error('Ошибка преобразования. Вызов операции возможен только на документе РЦ, который находится в очереди преобразования (5, 6, 9, 10)');
+		end if;
+		
+		if this%state = 'S_6' and this.[FLAG_UPDATE] = '3' and nvl(this.[CHK], '*') like '[XCHK]%' then
+			pragma error('Документ РЦ подозрителен по противодействию легализации. Вызов операции невозможен.');
+		end if;
+		
+		if this.[NEXT_REF] is not null then
+			pragma error('Ошибка преобразования. Есть порождённый документ');
+		end if;
+		
+		if V_IS_SW_RUR_DOC and not V_IS_ISO_DOC then
+			sform := ::[DOCUM_RC].[LIB_VIEW].GetVidProv(null, this.[TYPE_DOC], this.[SUB_TYPE], 5);
+			if sform is null and this.[SUB_TYPE] in (::[DOCUM_RC].[SWIFT_RUR].stype_pacs008,::[DOCUM_RC].[SWIFT_RUR].stype_pacs009) then
+				sform := bool_char(this.[SUB_TYPE] = ::[DOCUM_RC].[SWIFT_RUR].stype_pacs008,'103','202');
+				V_ISO_DOC_TYPE.[0] := bool_char(this.[SUB_TYPE] = ::[DOCUM_RC].[SWIFT_RUR].stype_pacs008,1,2);
+				V_SW_RUR_TEXT := 'Преобразуемый документ поступил в сообщении RUR.MX типа ' || bool_char(sform = '103','pacs.008','pacs.009') 
+					|| '. Рекомендуется не менять тип сообщения и значения основных реквизитов.';
+			end if;
+			
+			if sform is null then
+				pragma error('Ошибка преобразования. Не найден тип документа РЦ в справочнике "Тип документа РЦ" (Цифровой код '||this.[TYPE_DOC]|| ', Подтип ' ||this.[SUB_TYPE]); 
+			elsif sform not in ('103','103+','202') then
+				pragma error('Ошибка преобразования. Вызов операции возможен только на документе типа MT103 или MT202');
+			end if;
+		end if;
+		
+		-- вызов возможен только над транзитным документом
+		/*if (::[DOCUM_RC].[BUX_LIB].is_in(this) and 
+			(nvl(this.[DOG_SD].[AB].[FORMAT],rIsoMsg.[DOG_SD].[AB].[FORMAT]) = 'SWIFT' or nvl(this.[DOG_SD].[AB].[FORMAT],rIsoMsg.[DOG_SD].[AB].[FORMAT]) like 'SWIFT-RUR%')
+		)
+		then
+			null;
+		else
+			pragma error('Вызов операции возможен только на транзитном документе РЦ');
+		end if;*/
+
+		------------------------------------------------------------------
+		--в целях отладки - расширенная информация по текущему документу
+		&debug('--текущий документ--',0)
+		::[DOCUM_RC].[TRANSF_MX_2RUR].DebugDoc(this,rIsoMsg);
+		------------------------------------------------------------------
+		-->> VRI
+		if this.[DOPINFO] not like '%TRANSLETERATE ENG to RUR%' then   
+			this.[DOPINFO] := this.[DOPINFO] || NL$ || 'TRANSLETERATE ENG to RUR' || NL$ || replace(::[DOCUM_RC].[SWIFT_RUR].TRANSLETERATE(this.[DOPINFO], 6, true), '''');
+		end if;
+		--<< VRI
+		
+		&debug('--конец валидации DEFAULT--',0)
+	elsif P_MESSAGE = 'VALIDATE' then
+		if P_INFO = 'OK' then
+			&debug('VALIDATE - OK',0)
+			
+			if not V_IS_ISO_DOC then 
+				--преобразование в MX
+				declare
+					oIsoFin 		[ISO_FIN];
+					msgType 	ref [ISO_MSG_TYPE];
+					ErrMsg			string(250);
+					oMainDoc	 	[MAIN_DOCUM];
+					rMainDoc	ref	[MAIN_DOCUM];
+					psh_rko		ref [RKO];		-- VRI
+					acc_o 		[HOZ_OP_ACC]; 	-- VRI
+				begin
+					msgType := case when V_ISO_DOC_TYPE.[0] = 1 then ::[ISO_MSG_TYPE].[LIB].type_pacs008
+									when V_ISO_DOC_TYPE.[0] = 2 then ::[ISO_MSG_TYPE].[LIB].type_pacs009
+									else null end;
+					
+					--формируем реквизиты MX на основе текущего документа РЦ
+					oIsoFin := FormRec_IsoFinByDocumRc(V_THIS_DOC,msgType);
+					
+					--заготовка платежного документа для работы конструктора ISO_FIN
+					oMainDoc%init;
+					oMainDoc.[DATE_DOC] := ::[SYSTEM].[VARIABLES].OpDate;
+					-->> PSH VRI 09/12/2025 CFT-3102 Трансформация МТ103, полученного от Клиентов по КБ в MX pacs.008
+					oMainDoc.[CURR_OPER] := this.[MAIN_DOC]->(MAIN_DOCUM)[CURR_OPER];
+					oMainDoc.[DEAL_PASP] := this.[MAIN_DOC]->(MAIN_DOCUM)[DEAL_PASP];
+					if this.[MAIN_DOC]->(MAIN_DOCUM)[ACC_DT].[TO_PRODUCT].[CODE] in ('RKO', 'RKO_CUR', 'RKO_CUR_LOCK') then
+						psh_rko := ::[RKO].[LIB_RKO].get_rko_on_acc(this.[MAIN_DOC]->(MAIN_DOCUM)[ACC_DT]);
+						for rec in psh_rko.[ARRAY_DOG_ACC] where rec.[NAME_ACCOUNT] = ::[TIP_ACC]([COD] = 'RKO_CHARGES_ACC') fetch 1
+						loop
+							acc_o%init;
+							acc_o.[ACCOUNT_DOG].[0] := 1;
+							acc_o.[ACCOUNT_DOG].[1].[2] := rec.[ACCOUNT_DOG].[1].[2];
+							acc_o.[NAME_ACCOUNT] :=  ::[TIP_ACC]([COD] = 'TRC_ACC_DT');
+							insert acc_o into oMainDoc.[ARRAY_DOG_ACC];
+						end loop;
+					end if;
+					-->> PSH VRI 09/12/2025 CFT-3102 Трансформация МТ103, полученного от Клиентов по КБ в MX pacs.008
+					rMainDoc := ::[MAIN_DOCUM]%insert(oMainDoc);
+					::[ISO_FIN].[NEW_ISO_FIN].initMainDoc(rMainDoc);
+					rMainDoc.[VID_DOC] := oIsoFin.[ISO_MSG_TYPE].[VID_DOC];
+					rMainDoc%state := 'TO_MBR';
+					
+					this.[UNICUM_CODE] := null; --!
+					this.[AUDIT].[DATE_EDIT] := SYSDATE;
+					this.[AUDIT].[EDIT] := ::[TRC].[INI].CUR_USER;
+					
+					-- создаем документ-копию
+					oDrc := ::[DOCUM_RC].[TRANSF_MX_2RUR].next_doc(this);
+					::[RUNTIME].[SP_CACHE_MGR].cache_flush();
+					rDrc := ::[DOCUM_RC]%insert(oDrc);
+					if rDrc is null then
+						pragma error('Ошибка преобразования. Документ РЦ не создан');
+					end if;
+					
+					rDrc.[FLAG_UPDATE] := '9';	-- документ скопирован
+					
+					
+					------------------------------------------------------------------
+					&debug('после копирования',0)
+					::[DOCUM_RC].[TRANSF_MX_2RUR].DebugDoc(rDrc,null);		
+					------------------------------------------------------------------
+					
+					--UETR
+					if oIsoFin.[PMT_ID].[UETR] is null then
+						declare
+							SrvCode		::[DOC_UETR].[SRV_CODE]%type;
+							docUetr		ref [DOC_UETR];
+						begin
+							if ::[TRC].[GET_FLAG]('SWIFT_USE_GPI') then
+								if oIsoFin.[ISO_MSG_TYPE] in (::[ISO_MSG_TYPE].[LIB].type_pacs008, ::[ISO_MSG_TYPE].[LIB].type_pacs008stp) then
+									SrvCode := '001';
+								elsif ::[TRC].[GET_FLAG]('SWIFT_USE_GFIT') and oIsoFin.[ISO_MSG_TYPE] = ::[ISO_MSG_TYPE].[LIB].type_pacs009 then
+									SrvCode := null;
+								end if;
+							else
+								SrvCode := null;
+							end if;
+							
+							docUetr := ::[DOCUM_RC].[GPI_LIB].gen_UETR(rDrc, SrvCode, oIsoFin.[PMT_ID].[INSTR_ID]);
+							docUetr.[DOC_RC_REF] := rDrc; --автономная транзакция в gen_UETR не увидела созданный документ
+							oIsoFin.[PMT_ID].[UETR] := docUetr.[UETR];
+						end;
+					end if;
+					
+					if oIsoFin.[PMT_ID].[UETR] is null then
+						pragma error('Не удалось вычислить UETR');
+					end if;
+					
+					rIsoFin := ::[ISO_FIN]%insert(oIsoFin);
+					
+					--при необходимости вычисляем договора и участников 
+					::[DOCUM_RC].[TRANSF_MX_2RUR].CalcPartAndDog(rIsoFin,rDrc);
+					
+					--связываем платежный документ, документ РЦ и запись в ISO_FIN
+					rDrc.[MAIN_DOC] 	:= rMainDoc;
+					rIsoFin.[MDOC] 		:= rMainDoc;
+					rIsoFin.[DOCUM_RC] 	:= rDrc;
+					
+					------------------------------------------------------------------
+					&debug('--преподготовленный документ и iso_fin--',0)
+					::[DOCUM_RC].[TRANSF_MX_2RUR].DebugDoc(rDrc,rIsoFin);
+					------------------------------------------------------------------
+				end;
+				
+				--конец ветки преобразования в MX
+			end if;	
+			
+			V_REF_NEW_RC_DOC  := rDrc;
+			V_REF_NEW_ISO_FIN := rIsoFin;
+			&debug('--конец валидации OK--',0)
+		end if;
+	end if;
+end;
+
+execute is
+	rNewRcDoc	ref [DOCUM_RC] := V_REF_NEW_RC_DOC;
+	rNewIsoFin	ref [ISO_FIN] := V_REF_NEW_ISO_FIN;
+	rDoc 		ref [DOCUMENT];
+	rMainDoc	ref [MAIN_DOCUM];
+	sBlockData		[MEMO];
+	rDogSd		ref [TRC];
+	
+	procedure rollbackNewDoc is
+		tmpFolder	ref [FOLDER_PAY];
+		tmpDoc		ref [MAIN_DOCUM];
+	begin
+		&debug('--rollbackNewDoc--',0)
+		
+		&debug('rNewRcDoc = ' || rNewRcDoc || '; [MAIN_DOC] = ' || rNewRcDoc.[MAIN_DOC] || '; QUIT_DOC = ' || rNewRcDoc.[QUIT_DOC],0)
+		&debug('rNewIsoFin = ' || rNewIsoFin || '; [MAIN_DOC] = ' || rNewIsoFin.[MDOC],0)
+		&debug('this = ' || this || '; [MAIN_DOC] = ' || this.[MAIN_DOC] || '; QUIT_DOC = ' || this.[QUIT_DOC],0)
+		
+		&debug('rNewRcDoc.[UNICUM_CODE] = ' || rNewRcDoc.[UNICUM_CODE],0)
+		&debug('this.[UNICUM_CODE] = ' || this.[UNICUM_CODE],0)
+		&debug('-->',0)
+		
+		rNewRcDoc.[UNICUM_CODE] := null;
+		this.[UNICUM_CODE] := V_THIS_DOC.[UNICUM_CODE];
+		
+		&debug('rNewRcDoc.[UNICUM_CODE] = ' || rNewRcDoc.[UNICUM_CODE],0)
+		&debug('this.[UNICUM_CODE] = ' || this.[UNICUM_CODE],0)
+		
+		this.[AUDIT].[DATE_EDIT] := V_THIS_DOC.[AUDIT].[DATE_EDIT];
+		this.[AUDIT].[EDIT] := V_THIS_DOC.[AUDIT].[EDIT];
+		
+		rMainDoc := nvl(rNewIsoFin.[MDOC],rNewRcDoc.[MAIN_DOC]);
+		rNewIsoFin.[MDOC] := null;
+		
+		tmpDoc := rMainDoc.[QUIT_DOC];
+		if tmpDoc is not null then
+			&debug('квитовка для ' || rMainDoc || ': ' || tmpDoc || '; IN_FOLDER = ' || tmpDoc.[IN_FOLDER],0)
+			rMainDoc.[QUIT_DOC] := null;
+			tmpFolder := tmpDoc.[IN_FOLDER];
+			if tmpFolder is not null then
+				tmpFolder.[DELETE#ALL];
+			else
+				tmpDoc.[DELETE#AUTO];
+			end if;
+			&debug('check_ref('||rMainDoc||') = ' || [OBJ].check_ref(::[MAIN_DOCUM]%class, rMainDoc),0)
+		end if;
+
+		if rMainDoc is not null and [OBJ].check_ref(::[MAIN_DOCUM]%class, rMainDoc) != 0 then
+			rNewRcDoc.[MAIN_DOC] := null;
+			tmpFolder := rMainDoc.[IN_FOLDER];
+			&debug('IN_FOLDER для ' || rMainDoc || ': ' || tmpFolder,0)
+			if tmpFolder is not null then
+				tmpFolder.[DELETE#ALL];
+			elsif rMainDoc is not null then
+				rMainDoc.[DELETE#AUTO];
+			end if;
+			&debug('check_ref('||rMainDoc||') = ' || [OBJ].check_ref(::[MAIN_DOCUM]%class, rMainDoc),0)
+		end if;
+		
+		&debug('удаляем rNewRcDoc ' || rNewRcDoc,0)
+		rNewRcDoc.[DELETE#AUTO];
+		
+		if rNewIsoFin is not null and [OBJ].check_ref(::[ISO_FIN]%class, rNewIsoFin) != 0 then -- если не удалилось при удалении rNewRcDoc
+			&debug('удаляем rNewIsoFin ' || rNewIsoFin,0)
+			rNewIsoFin%delete;
+		end if;
+		
+	end;
+begin
+	&debug('--секция Тело--',0)
+
+	&sp(run)
+	
+	--Статистика обработки
+	::[DOCUM_RC].[LIB_NEW].put_sla_event(&METHOD$CLASS, this);
+	
+	if V_PLPCALL_RESULT then
+		------------------------------------------------------------------
+		::[DOCUM_RC].[TRANSF_MX_2RUR].DebugDoc(rNewRcDoc,rNewIsoFin);
+		------------------------------------------------------------------
+	
+		this.[FLAG_UPDATE] := '2';
+		rNewIsoFin.[MDOC] := null;
+		
+		--связь исходный-порожденный для текущего и нового документа
+		this.[NEXT_REF] := rNewRcDoc;
+		rNewRcDoc.[FIRST_REF] := this;
+		
+		rNewRcDoc.[FLAG_UPDATE] := NULL;
+		
+		if this%state <> 'S_16' then
+			::[DOCUM_RC].[ADD_REC].COM := 'Документ преобразован операцией "[ПСБ] Преобразование SberFinLine в SWIFT MX"';
+			this%state := 'S_16';
+		end if;
+		
+		if this.[CRCLCODE] = 'LK_SBANK' then -- VRI оставил только для SberFinLine
+			-- перепривяжем платежку
+			rDoc := this.[MAIN_DOC];
+			if rDoc is not null then
+				this.[MAIN_DOC] := null;
+				pragma set_this;
+				if rNewRcDoc.[MAIN_DOC] is null then
+					rNewRcDoc.[MAIN_DOC] := rDoc;
+				else
+					if rDoc%state = 'PROV' then
+						rDoc%state('DEL_NOWORK') := 'DELETED';
+						if rDoc%state <> 'DELETED' then
+							pragma error ('Ошибка ликвидации документа с id='||rDoc%id);
+						end if;
+					end if;
+					if rDoc%class = ::[MAIN_DOCUM]%class then
+						rMainDoc := rDoc;
+						rMainDoc.[DELETE#AUTO];
+					else
+						rDoc%delete;
+					end if;
+				end if;
+			end if;
+		end if;
+		
+		rNewRcDoc.[DONE] := 'NEED_5;' || rNewRcDoc.[DONE];
+		
+		-- Помечаем, что это преобразованный документ
+		sBlockData := rNewRcDoc.[BLOCK_DATA];
+		::[RUNTIME].[STR].SET_PAR(sBlockData, 'TRANSFORMED_DOCUMENT', true);
+		rNewRcDoc.[BLOCK_DATA] := sBlockData;
+		rNewRcDoc.[ISO] := rNewIsoFin.[INTR_BK_STTL_AMT].[CURRENCY].[CUR_SHORT];  -- VRI
+		rNewRcDoc.[DOG_RC] := rNewIsoFin.[DOG_RC];  -- VRI
+		------------------------------------------------------------------
+		--в целях отладки - расширенная информация по созданному документу РЦ
+		&debug('--итого новый документ--',0)
+		::[DOCUM_RC].[TRANSF_MX_2RUR].DebugDoc(rNewRcDoc,null);
+		------------------------------------------------------------------
+		
+		stdio.put_line_buf('Создан документ РЦ с идентификатором ' || rNewRcDoc%id);
+		
+		-- Сохранение данных первичного документа
+		if (::[TRC].[GET_FLAG]('UFEBS_SIGN_COS') or ::[TRC].[GET_FLAG]('COS_CR_FDATA')) and not V_IS_ISO_DOC then
+			::[UFEBS_DATA_CONTR].[LIB].update_udc_fdoc(rNewRcDoc, p_rIso_fin == rNewIsoFin);
+		end if;
+		
+		--Статистика обработки
+		::[DOCUM_RC].[LIB_NEW].put_sla_event_f(&METHOD$CLASS, this);
+		
+		&debug('--конец--',0)
+	else
+		rollbackNewDoc();
+	end if;
+exception 
+when others then
+	/* 	Причина перехвата others: откат изменений и повторная генерация*/
+	&debug(::[RUNTIME].[UTILS].error_stack(true),0)
+	&rb(run)
+	rollbackNewDoc();
+	commit;
+	pragma error(::[RUNTIME].[PRINTFUN].Sqlerrm_inf);
+end;
+end;
+end;

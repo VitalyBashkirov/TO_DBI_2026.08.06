@@ -1,0 +1,13 @@
+class PSH_ON_OFF_SOFT;
+
+@name('[ПСБ] TRUNCATE TABLE')
+@tag('KUP_P')
+method PSH_TRUNCATE_TAB is
+PSH_TRUNCATE_TAB is
+
+execute is
+begin
+    execute_sql('truncate table Z#PSH_ON_OFF_SOFT');	
+end;
+end;
+end;

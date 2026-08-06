@@ -1,0 +1,54 @@
+class NORM_TEHN_DATA;
+
+@name('[ПСБ] Зачистить данные')
+static method PSH_DEL_DATA is
+PSH_DEL_DATA (
+	@name('С')  P_D1 in [DATE],
+	@name('По') P_D2 in [DATE]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_D1 := [SYSTEM]::[OP_DATE];
+	P_D2 := [SYSTEM]::[OP_DATE];
+end if;
+-- End initialization of parameters and variables
+begin
+	if p_message = 'DEFAULT' then
+		P_D1 := to_date('01012014','ddmmyyyy');
+		P_D2 := to_date('01012022','ddmmyyyy');
+	end if;
+
+end;
+end;
+
+execute is
+cnt number;
+c number := 0;
+begin
+	debug_pipe('Удаление - старт',0);
+	for (
+		select x(x%id :xid) 
+		in ::[REPS_PARAMS]
+		where x.[REPORT] = [REPS]([CODE]='NORM') 
+		and x.[DATE1] >= P_D1 
+		and x.[DATE1] < P_D2
+		)
+	loop
+--		debug_pipe('Удаление - реализация:'||x.xid,0);
+		select y(count(1)) in [NORM_TEHN_DATA] where y.[PARAM] = x.xid into cnt;
+		delete y in [NORM_TEHN_DATA] where y.[PARAM] = x.xid;
+		
+		c := c+cnt;
+--		if mod(c,10000)=0 then 
+			commit;
+			debug_pipe('Удалено строк: '||c,0);
+--		end if;
+	end loop;
+	commit;
+	debug_pipe('Удаление - финиш',0);
+end;
+end;
+end;

@@ -1,0 +1,195 @@
+class PSH_CUST_SCHEMA;
+
+@import_plsql(true)
+@name('[ПСБ] Библиотека')
+@tag('COPIED')
+library PSH_LIB is
+
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB_TC]);
+
+public function get_schema_path(p_type_code ::[PSH_CUST_DOC_TYP].[CODE]%type, p_version ::[PSH_CUST_SC_MAIN].[VERSION]%type default null) return varchar2(255) is -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+schema_path varchar2(255);
+begin
+	schema_path := substr(::[PSH_CUST_DOCS].[PSH_LIB_TC].XSDPath || p_type_code || '/v' || replace(p_version, '.') || '/', 1, schema_path%size);
+	return schema_path;
+end;
+
+public procedure register_xsd(p_schema_url varchar2(700), p_schema_text clob) is
+begin
+	::[XML_SCHEMAS].[LIB].register_xsd(p_schema_url, p_schema_text);
+end;
+
+public procedure delete_xsd_by_path(p_schema_path varchar2(700)) is
+begin
+	::[XML_SCHEMAS].[LIB].delete_xsd(p_schema_path);
+end;
+
+public function check_doc_by_xsd(
+	p_clob			in out nocopy CLOB,
+	p_doc_type		ref [PSH_CUST_DOC_TYP], -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+	p_version		varchar2(16) default null
+) return [MEMO_4000] is
+xsd_url		varchar2(700);
+xsd			clob;
+xsddoc		&xml.DOMDocument;
+data		clob;
+xdoc		XMLType;
+parser		&xml.Parser;
+doc			&xml.DOMDocument;
+elem		&xml.DOMElement;
+nodeMap		&xml.DOMNamedNodeMap;
+node		&xml.DOMNode;
+node1		&xml.DOMNode;
+attrname	varchar2;
+xmlns		varchar2;
+DocModeID	varchar2;
+targetns	varchar2;
+attr		varchar2;
+pos_beg		integer;
+pos_end		integer;
+v_err_text 	[MEMO_4000];
+begin
+	xsd_url := ::[PSH_CUST_SCHEMA].[PSH_LIB].get_schema_path(p_doc_type.[CODE], p_version) || 'schema.xsd';
+	&debug('url: '||xsd_url, 0)
+	
+	pragma if_def(JAVA);
+		for (select x(x.[SCHEMA_TEXT] : s) in ::[XML_SCHEMAS] all where x.[SCHEMA_URL] = xsd_url) loop
+			xsd := x.s;
+		end loop;
+	pragma end_if;
+	
+	pragma if_def(JAVA, false);
+		for (select x(x.SCHEMA : s) in ALL_XML_SCHEMAS%rowtype where x.SCHEMA_URL = xsd_url) loop
+			xsd := x.s.getClobVal();
+		end loop;
+	pragma end_if;
+
+	if xsd is null then
+		return 'XSD-схема для документа типа "' || p_doc_type.[CODE] || '" не зарегистрирована в Системе';
+	end if;
+	
+	declare
+		tmpclob clob;
+	begin
+		dbms_lob.createtemporary(tmpclob,true);
+		dbms_lob.copy(tmpclob, p_clob,  dbms_lob.getlength(p_clob));
+		&xml.set_xml_encoding(tmpclob, null);
+		dbms_lob.trim(p_clob, 0);
+		dbms_lob.copy(p_clob, tmpclob,  dbms_lob.getlength(tmpclob));
+		dbms_lob.freetemporary(tmpclob);
+	end;
+	
+	-- Для удаления лишних символов в тексте XML, которые не ловятся при разборе документа в dbms_xmldom,
+	-- пропустим текст документа через парсер. Актуально для ТЯ1.
+	pragma if_def(JAVA, false);
+		&xml.initialize;
+		parser := &xml.newParser;
+		&xml.parseCLOB(parser, p_clob);
+		doc := &xml.getDocument(parser);
+		dbms_lob.trim(p_clob, 0);
+		&xml.writeToCLOB(doc, p_clob); -- обновление CLOB по ссылке сразу в БД
+		&xml.freeParser(parser);
+	pragma end_if;
+	
+	xdoc := XMLType(p_clob);
+	
+	-- для BFN проверим отдельно наличие атрибута DocumentModeID, так как его отсутствие не ловится с помощью валидации по схеме
+	if p_doc_type = &libtc.typeBFN and xdoc.existsNode('/*:NoticeAccBalanceInfo/@DocumentModeID') = 0 then
+		return 'Отсутствует атрибут DocumentModeID';
+	end if;
+	
+	if not ::[XML_SCHEMAS].[LIB].validateXMLBySchemas(xsd_url, p_clob) then
+		-- ошибка, запускаем подробную проверку schemaValidate
+		
+		if p_doc_type = &libtc.typeBFN then
+			-- особая обработка для документа BFN
+			
+			-- для корректной проверки документа необходимо добавить пространства имен cat_ru с правильной версией (берем из XSD-схемы)
+			-- также получим значение targetns с XSD-схемы, на случай если в XML-документе отсутствует xmlns
+			xsddoc := &xml.newDOMDocument(xsd);
+			elem := &xml.getDocumentElement(xsddoc);
+			node := &xml.makeNode(elem);
+			nodeMap := &xml.getAttributes(node);
+			for i in 0..&xml.getLength(nodeMap)-1 loop
+				node1 := &xml.item(nodeMap, i);
+				attrname := &xml.getNodeName(node1);
+				if attrname = 'xmlns:cat_ru' then
+					attr := &xml.getNodeValue(node1);
+					if attr is not null then
+						attr := ' xmlns:cat_ru="'||attr||'"';
+					end if;
+				elsif attrname = 'targetNamespace' then
+					targetns := &xml.getNodeValue(node1);
+				end if;
+			end loop;
+			DocModeID := xdoc.extract('/*:NoticeAccBalanceInfo/@DocumentModeID').GetStringVal();
+			pos_beg := instr(p_clob, '<NoticeAccBalanceInfo');
+			pos_end := instr(p_clob, '>', pos_beg);
+			p_clob := substr(p_clob, 1, pos_beg + 20) || attr || ' DocumentModeID="' || DocModeID || '"' || substr(p_clob, pos_end);
+		end if;
+		
+		-- добавим дополнительные аттрибуты в проверяемый XML для корректного определения XSD-схемы
+		doc := &xml.NewDOMDocument(p_clob);
+		elem := &xml.getDocumentElement(doc);
+		node := &xml.makeNode(elem);
+		xmlns := &xml.getAttribute(elem, 'xmlns');
+		if xmlns is null and targetns is not null then
+			node1 := &libfun.addNode(doc, node, '@xmlns', targetns, true);
+			xmlns := targetns;
+		end if;
+		
+		if xmlns is null then
+			node1 := &libfun.addNode(doc, node, '@xsi:noNamespaceSchemaLocation', xsd_url, true);
+		else
+			node1 := &libfun.addNode(doc, node, '@xsi:schemaLocation', xmlns || ' ' || xsd_url, true);
+		end if;
+		node1 := &libfun.addNode(doc, node, '@xmlns:xsi', 'http://www.w3.org/2001/XMLSchema-instance', true);
+		
+		dbms_lob.createtemporary(data, true);
+		&xml.writeToCLOB(doc, data);
+		v_err_text := substr(::[XML_SCHEMAS].[LIB].getValidateError(xsd_url, data), 1, v_err_text%size);		
+		dbms_lob.freetemporary(data);
+		
+		if v_err_text is not null then
+			-- попробуем получить понятный текст ошибки при запуске в ТЯ1
+			pragma if_def(JAVA, false);
+				declare
+					v_err_code varchar2;
+				begin
+					v_err_code := regexp_substr(v_err_text, 'LSX-[[:digit:]]{5}');
+					
+					if v_err_code is null then
+						v_err_code := regexp_substr(v_err_text, 'LPX-[[:digit:]]{5}');
+						
+						if v_err_code is null then
+								v_err_code := regexp_substr(v_err_text, 'ORA-[[:digit:]]{5}');
+								
+								if v_err_code is not null then
+									v_err_text := substr(trim(regexp_replace(regexp_substr(v_err_text, 'ORA-[[:digit:]]{5}: (.*)'), 'ORA-[[:digit:]]{5}: ')), 1, v_err_text%size);
+								end if;
+									
+						else
+							v_err_text := substr(trim(regexp_replace(regexp_substr(v_err_text, 'LPX-[[:digit:]]{5}: (.*)'), 'LPX-[[:digit:]]{5}: ')), 1, v_err_text%size);
+						end if;
+					else
+						v_err_text := substr(trim(regexp_replace(regexp_substr(v_err_text, 'LSX-[[:digit:]]{5}: (.*)'), 'LSX-[[:digit:]]{5}: ')), 1, v_err_text%size);
+					end if;
+				end;
+				
+			pragma end_if;
+			
+			-- попробуем получить понятный текст ошибки при запуске в JAVA
+			pragma if_def(JAVA);
+				v_err_text := regexp_replace(v_err_text, '^.*SAXParseException[:;] *(lineNumber: *\d*[:;] *)?(columnNumber: *\d*[:;] *)?(cvc[^:]*: *)?');
+			pragma end_if;
+		end if;
+		
+	end if;
+	
+	&xml.freedocument(doc);
+
+	return v_err_text;
+		
+end;
+end;

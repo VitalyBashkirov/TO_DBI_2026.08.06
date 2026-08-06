@@ -1,0 +1,41 @@
+class PSH_OUT_CHECKOFF;
+
+@name('[ПСБ] Изменить')
+@tag('CREATED')
+method PSH_EDIT_AUTO uses PSH_NEW_AUTO is
+PSH_EDIT_AUTO (
+	@name('Организация')          P_ORGANIZATION in [CLIENT_REF],
+	@name('Наличие адреса SWIFT') P_HAS_SWIFT    in [BOOLEAN]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_ORGANIZATION := this.[ORGANIZATION];
+	P_HAS_SWIFT := this.[HAS_SWIFT];
+end if;
+-- End initialization of parameters and variables
+declare
+	v_this ref [PSH_OUT_CHECKOFF]; -- updated CHANGE_QUALIFIER OUT_CHECKOFFSHOR->PSH_OUT_CHECKOFF 25/09/25
+begin
+	if this is not null then
+		v_this := this;
+		&BASE$SETVARS;
+		&BASE$VALIDATE(v_this);
+		&BASE$GETVARS;
+	end if;
+end;
+end;
+
+execute is
+	v_this ref [PSH_OUT_CHECKOFF]; -- updated CHANGE_QUALIFIER OUT_CHECKOFFSHOR->PSH_OUT_CHECKOFF 25/09/25
+begin
+	if this is not null then
+		v_this := this;
+		&BASE$SETVARS;
+		v_this := &BASE$EXECUTE(v_this);
+	end if;
+end;
+end;
+end;

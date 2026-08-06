@@ -1,0 +1,395 @@
+class CLIENT;
+
+@name('[ПСБ] Сформировать файл выгрузки в АС ВКБ  (списком)')
+@tag('COPIED')
+batch method PSH_EX_TXT_ASVKB is
+
+@name('Клиент-скрипт') public V_VB           [STRING_32000];
+@name('Вариант даты')  public V_DATE_VARIANT [CASE_BETWEEN_TWO];
+public F_Payments	constant ::[BASE_VAL_EXPORT].[FILE_TYPE]%type := 'ASVKB_Payments';
+public F_Resident	constant ::[BASE_VAL_EXPORT].[FILE_TYPE]%type := 'ASVKB_Resident';
+
+public type clients_table_type is table of ref [CLIENT] index by varchar2(100);
+
+function iif(u boolean, v1 varchar2, v2 varchar2) return varchar2 is begin if u then return v1; end if; return v2; end;
+step1000 number:=1000;
+fmt string(10):='dd/mm/yyyy';
+
+function CheckClient(cl ref client) return boolean is
+ret_bool boolean:=true;
+begin
+	return ret_bool;
+end;
+
+function WriteStr(	  p_fields		::[BASE_VAL_EXPORT].[LIB].FieldTblType  -- Поля для расчета
+					, p_file		integer									-- Файл для записи
+					, p_val_op		ref [BASE_VAL_OP]						-- Валютная операция
+					, p_contr		ref [BASE_VAL_CONTR]					-- Инструкция 117-И. Контракты
+					, p_client		ref [CLIENT]
+					, p_date_end	date default null						-- Дата, по которую выполняется выгрузка
+				)
+return boolean
+is
+str			varchar2(32000);
+idx			integer;
+vFieldVal	varchar2(32000);
+vAdds		varchar2(32000);
+begin
+	if p_client is not null then
+		[STR].set_par(vAdds, 'CLIENT', p_client%id);
+	end if;	
+	if p_date_end is not null then
+		[STR].set_par(vAdds, 'DATE_END', p_date_end);
+	end if;
+	
+	idx := p_fields.first;
+	while idx is not null loop
+		vFieldVal := ::[BASE_VAL_EXPORT].[LIB].CalcField(p_fields(idx).code, p_fields(idx).meth, char_bool(p_fields(idx).requied), p_val_op, p_contr, vAdds);
+		str := str ||vFieldVal||'#' ;
+		idx := p_fields.next(idx);
+	end loop;
+
+	stdio.put_line(p_file, str||CR$, false, null, StdIO.WINTEXT);
+	return true;
+exception when message.app_exception then
+	debug_pipe('Запись ID = '||p_val_op%id||' пропущена. Причина: '||[PRINTFUN].SQLERRM_inf, 0);
+	return false;
+end;	
+
+
+public procedure export_clients(
+	p_clients_table	clients_table_type
+	, p_file_path 	varchar2
+	, p_file_name	varchar2
+	, p_date_end	date default null
+) is 
+	file		integer;
+	ResidentTbl	::[BASE_VAL_EXPORT].[LIB].FieldTblType;
+	idx			integer;
+	ind			varchar2(100);
+begin
+	debug_pipe('Формирование текстового файла с информацией о клиентах...', 0);
+	ResidentTbl	:= ::[BASE_VAL_EXPORT].[LIB].GetFields(F_Resident);
+	debug_pipe('Найдено '|| p_clients_table.count ||' Клиентов для обработки', 0);
+	
+	file := stdio.open(p_file_path, p_file_name, 'w');	
+	ind := p_clients_table.first;
+	idx := 0;
+	while ind is not null loop
+		WriteStr(ResidentTbl, file, null, null, p_clients_table(ind), p_date_end);
+		idx := idx + 1;
+		if mod(idx, step1000) = 0 then
+			debug_pipe('Обработано ' || idx || ' Клиентов ', 0);
+		end if;
+		ind	:= p_clients_table.next(ind);
+	end loop;	
+	debug_pipe('Итого Обработано ' || idx || ' Клиентов ', 0);
+	
+	stdio.close(file);
+	
+	debug_pipe('Формирование текстового файла с информацией о клиентах завершено', 0);
+end;
+
+/** /
+procedure main
+(
+	P_FILIAL		ref [BRANCH]
+	, P_DATEB		date
+	, P_DATEE		date
+	, P_FILE		[FILE$LOAD]
+	, P_FILE_CLIENT	[FILE$LOAD]
+	, P_CURR_SPISOK	varchar2(100)
+	, P_DT_MASK		varchar2(100)
+	, P_KT_MASK		varchar2(100)
+	, P_REGISTERED	varchar2(1)
+
+	, P_ORG			boolean
+	, P_PRIV		boolean
+	, P_CL_BANK_N	boolean
+	, P_CL_BANK_F	boolean
+)
+is
+	pragma macro(curr_code, '[1].[CURR_OPER].[HIGH].[CODE] || [1].[CURR_OPER].[CODE]', substitute);
+	
+	file		integer;
+	OplataTbl	::[BASE_VAL_EXPORT].[LIB].FieldTblType;
+	idx			integer;
+	
+	type RecSelect is record (	  D_ID	ref [BASE_VAL_OP]
+								, D_CT	ref [BASE_VAL_CONTR]
+								);
+	type	TSelectTable is table of RecSelect;
+	Str		RecSelect;
+	Tbl		TSelectTable;
+	
+	
+	ind		varchar2(100);
+	ClTbl clients_table_type;
+	
+	
+	v_client		ref [CLIENT];
+	v_payment_type	::[BASE_VAL_OP].[PAYMENT_TYPE]%type;
+	
+	user_obj reference;
+	
+	i_err integer:=0;
+begin
+	user_obj%id := stdlib.userid%id;
+
+	if P_FILIAL is null then
+		pragma error ('Необходимо указать филиал');
+	end if;
+	
+	P_CURR_SPISOK	:= trim(P_CURR_SPISOK);
+	P_DT_MASK		:= trim(P_DT_MASK);
+	P_KT_MASK		:= trim(P_KT_MASK);
+	
+	if P_CURR_SPISOK is not null and not regexp_like(P_CURR_SPISOK, '^(\d{5}(,|$))+$') then
+		pragma error('Список кодов валютных операций указан некорректно (можно указывать значения, состоящие из 5 цифр, разделенные запятыми)');
+	end if;
+	
+	if P_DT_MASK is not null and not regexp_like(P_DT_MASK, '^[-0-9_!%,]+$') then
+		pragma error('Маска счета Дт указана некорректно');
+	end if;
+	
+	if P_KT_MASK is not null and not regexp_like(P_KT_MASK, '^[-0-9_!%,]+$') then
+		pragma error('Маска счета Кт указана некорректно');
+	end if;
+
+	for idx in this.first .. this.last	loop
+		v_client := this(idx);
+		if CheckClient(v_client) then -- Если запись о платеже добавлена - запомним клиента
+			-- Запомним клиента для формирования файла по клиентам
+			ind := v_client%id;
+			if ind is null then
+				i_err:=i_err+1;
+				debug_pipe('ind='||ind||' '||acc.C_MAIN_V_ID||' Нет ни Владельца, ни Клиента для расчетов. Дата закрытия:'||to_char(acc.C_DATE_CLOSE,fmt)||' СчетовБезКлиентов:'||i_err||' '||v_client.[NAME],0);
+			else
+				if not ClTbl.exists(ind) then
+					ClTbl(ind) := v_client;
+					debug_pipe('ind='||rpad(ind,18)||' '||to_char(acc.C_DATE_OP,fmt)||' '||acc.C_MAIN_V_ID||' '||v_client%class||'.'||v_client.[NAME],10);
+				end if;	
+			end if;
+		end if;
+		
+		if mod(idx, step1000) = 0 then
+			debug_pipe('Обработано '||idx||' записей ', 0);
+		end if;
+	end loop;		
+	debug_pipe('ИТОГО Обработано '||idx||' записей. Уникальных Клиентов для выгрузки:'||ClTbl.count, 0);
+	export_clients(ClTbl, P_FILE_CLIENT.[SRC_PATH], P_FILE_CLIENT.[SRC_NAME], P_DATEE);
+	ClTbl.delete;
+	Tbl.delete;
+end;
+/**/
+PSH_EX_TXT_ASVKB (
+	@name('Филиал')                         P_FILIAL      in [BRANCH_REF],
+	@name('Дата с')                         P_DATEB       in [DATE],
+	@name('Дата по')                        P_DATEE       in [DATE],
+	@name('Файл с информацией о платежах')  P_FILE        in [FILE$LOAD],
+	@name('Файл с информацией о клиентах')  P_FILE_CLIENT in [FILE$LOAD],
+	@name('Список кодов валютных операций') P_CURR_SPISOK in [STRING_100],
+	@name('Маска счета Дт')                 P_DT_MASK     in [STRING_100],
+	@name('Маска счета Кт')                 P_KT_MASK     in [STRING_100],
+	@name('На учете')                       P_REGISTERED  in [BOOLEAN]    default null,
+	@name('Организации')                    P_ORG         in [BOOLEAN]    default null,
+	@name('Физические лица')                P_PRIV        in [BOOLEAN]    default null,
+	@name('Клиенты Банка России')           P_CL_BANK_N   in [BOOLEAN]    default null,
+	@name('Участники SWIFT')                P_CL_BANK_F   in [BOOLEAN]    default null
+) is
+
+validate is
+v_date date;
+v_local_path varchar(512) := 'C:\';
+user_obj reference;
+--- v
+	pragma macro(curr_code, '[1].[CURR_OPER].[HIGH].[CODE] || [1].[CURR_OPER].[CODE]', substitute);
+	
+	file		integer;
+	OplataTbl	::[BASE_VAL_EXPORT].[LIB].FieldTblType;
+	idx			integer;
+	
+	type RecSelect is record (	  D_ID	ref [BASE_VAL_OP]
+								, D_CT	ref [BASE_VAL_CONTR]
+								);
+	type	TSelectTable is table of RecSelect;
+	Str		RecSelect;
+	Tbl		TSelectTable;
+	
+	
+	ind		varchar2(100);
+	ClTbl clients_table_type;
+	
+	
+	v_client		ref [CLIENT];
+	v_payment_type	::[BASE_VAL_OP].[PAYMENT_TYPE]%type;
+	
+	--user_obj reference;
+	
+	i_err integer:=0;
+---^ main
+
+begin
+	if p_message = 'DEFAULT' then
+		csmd.Init_Form(V_VB, &METHOD$CLASS, &METHOD$SNAME);
+		
+		p_filial := ::[SYSTEM].[VARIABLES].OurBranch;
+		user_obj%id := stdlib.userid%id;
+		P_DATEB := ::[SYSTEM].[OP_DATE];
+		
+		-- Проверка наличия приложения "Валютные контракты".
+		--if nvl(::[FP_TUNE].[LIB].get_bool_value('1B050010', null, '0'), false) then
+		--	-- Если приложение есть, то видимость пункта варианта выбора даты "Дата привязки к валютному контракту" включена,
+		--	-- и есть возможность делать выборку не только по "Дате совершения операции"
+		--	csmd.Command(V_VB,'Variant2.Visible = true');
+		--	csmd.Command(V_VB,'Variant1.Value = 1');
+		--else
+		--	-- Если приложения нет, то пункт варианта выбора даты исключен, и остается только стандартный вариант обработки
+		--	csmd.Command(V_VB,'Variant2.Visible = false');
+		--	csmd.Command(V_VB,'Variant1.Value = 1');
+		--end if;
+		
+		--P_FILE.[SRC_TYPE]   := true;
+		--P_FILE.[DST_TYPE]   := false;
+		--P_FILE.[SRC_DELETE] := true;
+		--P_FILE.[DST_DELETE] := false;	
+		--P_FILE.[SRC_PATH]   := ::[SYSTEM_PARAMS].[GET]('PATH', null);		
+		--P_FILE.[DST_PATH]   := v_local_path;				
+		--P_FILE.[DST_MASK]	:= '*.d';
+		--P_FILE.[SRC_MASK]	:= '*.d';
+		--P_FILE.[DST_NAME]	:= 'oplata.d';
+		
+		
+		P_FILE_CLIENT.[SRC_TYPE]	:= true;
+		P_FILE_CLIENT.[DST_TYPE]	:= false;
+		P_FILE_CLIENT.[SRC_DELETE]	:= true;
+		P_FILE_CLIENT.[DST_DELETE]	:= false;	
+		P_FILE_CLIENT.[SRC_PATH]	:= ::[SYSTEM_PARAMS].[GET]('PATH', null);
+		P_FILE_CLIENT.[DST_PATH]	:= coalesce(::[DEFVALS].[SLIB].RestoreStr(stdlib.userid, &METHOD$CLASS, &METHOD$SNAME, 'P_FILE_CLIENT.[DST_PATH]'),v_local_path);
+		P_FILE_CLIENT.[DST_MASK]	:= '*.d';
+		P_FILE_CLIENT.[SRC_MASK]	:= '*.d';
+		P_FILE_CLIENT.[DST_NAME]	:= 'resident.d';
+		
+		
+		--v_date:= add_months(trunc(SYSDATE), -1);
+		--P_DATEB:= ::[RUNTIME].[DATEFUN].bom(v_date);
+		--P_DATEE:= ::[RUNTIME].[DATEFUN].eom(v_date);
+		
+		--P_CURR_SPISOK	:= ::[DEFVALS].[SLIB].RestoreStr(stdlib.userid, &METHOD$CLASS, &METHOD$SNAME, 'P_CURR_SPISOK');
+		--P_DT_MASK		:= ::[DEFVALS].[SLIB].RestoreStr(stdlib.userid, &METHOD$CLASS, &METHOD$SNAME, 'P_DT_MASK');
+		--P_KT_MASK		:= ::[DEFVALS].[SLIB].RestoreStr(stdlib.userid, &METHOD$CLASS, &METHOD$SNAME, 'P_KT_MASK');
+
+		P_ORG:=true;
+
+	elsif p_message = 'VALIDATE' then
+		if p_info = 'OK' then
+			if P_FILE_CLIENT.[DST_PATH] is not null then
+				user_obj%id 	:= stdlib.userid%id;
+				::[DEFVALS].[SLIB].SaveStr(user_obj, &METHOD$CLASS, &METHOD$SNAME, 'P_FILE_CLIENT.[DST_PATH]', P_FILE_CLIENT.[DST_PATH]);
+			end if;
+
+			if not (nvl(P_ORG,false) or nvl(P_PRIV,false) or nvl(P_CL_BANK_N,false) or nvl(P_CL_BANK_F,false)) then
+				pragma error ('Необходимо указать и/или "Организации", "Физические лица", "Клиенты Банка России", "Участники SWIFT"');
+			end if;
+
+			if P_DATEB>P_DATEE then
+				pragma error ('Уточните даты открытия для отбора счетов');
+			end if;
+
+			--if P_FILE.[DST_NAME] is null or P_FILE.[DST_PATH] is null then
+			--	pragma error ('Необходимо указать путь и наименование файла с информацией о платежах');
+			--end if;
+			if P_FILE_CLIENT.[DST_NAME] is null or P_FILE_CLIENT.[DST_PATH] is null then
+				pragma error ('Необходимо указать путь и наименование файла с информацией о клиентах');
+			end if;
+	
+			--P_FILE.[SRC_NAME] := P_FILE.[DST_NAME];
+			P_FILE_CLIENT.[SRC_NAME] := P_FILE_CLIENT.[DST_NAME];
+			
+			---main(
+			---	P_FILIAL		== P_FILIAL
+			---	, P_DATEB		== P_DATEB
+			---	, P_DATEE		== P_DATEE
+			---	, P_FILE		== P_FILE
+			---	, P_FILE_CLIENT	== P_FILE_CLIENT
+			---	, P_CURR_SPISOK	== P_CURR_SPISOK
+			---	, P_DT_MASK		== P_DT_MASK
+			---	, P_KT_MASK		== P_KT_MASK
+			---	, P_REGISTERED	== bool_char(P_REGISTERED, '1', '0', '0')
+			---	
+			---	, P_ORG == P_ORG
+			---	, P_PRIV == P_PRIV
+			---	, P_CL_BANK_N == P_CL_BANK_N
+			---	, P_CL_BANK_F == P_CL_BANK_F
+			---	);
+			---v main
+			user_obj%id := stdlib.userid%id;
+		
+			if P_FILIAL is null then
+				pragma error ('Необходимо указать филиал');
+			end if;
+			
+			P_CURR_SPISOK	:= trim(P_CURR_SPISOK);
+			P_DT_MASK		:= trim(P_DT_MASK);
+			P_KT_MASK		:= trim(P_KT_MASK);
+			
+			if P_CURR_SPISOK is not null and not regexp_like(P_CURR_SPISOK, '^(\d{5}(,|$))+$') then
+				pragma error('Список кодов валютных операций указан некорректно (можно указывать значения, состоящие из 5 цифр, разделенные запятыми)');
+			end if;
+			
+			if P_DT_MASK is not null and not regexp_like(P_DT_MASK, '^[-0-9_!%,]+$') then
+				pragma error('Маска счета Дт указана некорректно');
+			end if;
+			
+			if P_KT_MASK is not null and not regexp_like(P_KT_MASK, '^[-0-9_!%,]+$') then
+				pragma error('Маска счета Кт указана некорректно');
+			end if;
+		
+			for idx in this.first .. this.last	loop
+				v_client := this(idx);
+				if ::[BASE_VAL_OP].[PSH_EX_TXT_ASVKB].CheckClient(v_client)=1 then -- Если запись о платеже добавлена - запомним клиента -- updated CHANGE_SHORT_NAME PSB_EX_TXT_ASVKB->PSH_EX_TXT_ASVKB 14/10/25
+					-- Запомним клиента для формирования файла по клиентам
+					ind := v_client%id;
+					if ind is null then
+						i_err:=i_err+1;
+						--debug_pipe('ind='||ind||' '||acc.C_MAIN_V_ID||' Нет ни Владельца, ни Клиента для расчетов. Дата закрытия:'||to_char(acc.C_DATE_CLOSE,fmt)||' СчетовБезКлиентов:'||i_err||' '||v_client.[NAME],0);
+					else
+						if not ClTbl.exists(ind) then
+							ClTbl(ind) := v_client;
+							debug_pipe('ind='||rpad(ind,18)||' '||v_client%class||'.'||v_client.[NAME],10);
+						end if;	
+					end if;
+				end if;
+				
+				if mod(idx, step1000) = 0 then
+					debug_pipe('Обработано '||idx||' записей ', 0);
+				end if;
+			end loop;		
+			debug_pipe('ИТОГО Обработано '||idx||' записей. Уникальных Клиентов для выгрузки:'||ClTbl.count, 0);
+			export_clients(ClTbl, P_FILE_CLIENT.[SRC_PATH], P_FILE_CLIENT.[SRC_NAME], P_DATEE);
+			ClTbl.delete;
+			Tbl.delete;
+			---^ main
+
+		--elsif p_info = 'P_FILE.DST_TYPE' then
+		--	if P_FILE.[DST_TYPE] then -- Формировать файл на сервере
+		--		P_FILE.[DST_PATH] := ::[SYSTEM_PARAMS].[GET]('PATH', null);
+		--		csmd.Command(V_VB,'Button_dir.visible = false' );
+		--	else
+		--		P_FILE.[DST_PATH]   := v_local_path;				
+		--		csmd.Command(V_VB,'Button_dir.visible = true' );
+		--	end if;
+			
+		elsif p_info = 'P_FILE_CLIENT.DST_TYPE' then
+			if P_FILE_CLIENT.[DST_TYPE] then -- Формировать файл на сервере
+				P_FILE_CLIENT.[DST_PATH] := ::[SYSTEM_PARAMS].[GET]('PATH', null);
+				csmd.Command(V_VB,'Button4.visible = false' );
+			else
+				P_FILE_CLIENT.[DST_PATH]   := v_local_path;				
+				csmd.Command(V_VB,'Button4.visible = true' );
+			end if;	
+		end if;
+	end if;
+end;
+end;
+end;

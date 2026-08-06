@@ -1,0 +1,964 @@
+class PSH_IBANK2;
+
+@import_plsql(true)
+@this(plsql_lock:=false,create_on_start:=true)
+@name('[ПСБ] Библиотека депозит XML')
+@tag('COPIED')
+library PSH_LIB_DEP_XML is
+public pragma macro ('xml','[XML_DB]');
+	pragma include(::[RUNTIME].[MACRO_LIB]);
+	pragma include(::[EXECUTORY_PROCES].[LIB_MACRO]);
+	pragma macro(tab, '''    ''', substitute); 
+		
+public type value_tb is table of varchar2(2048) index by varchar2(50);	
+
+public procedure ins_result_row(QUERY_ID number, ROW_NUMBER number,f_name string(50), f_value string(2000),row_level number default 0) is 
+vstr varchar2(2000);
+begin
+	vstr:= 'begin INSERT INTO QUERY_RESULTS(QUERY_ID,LINE_NUMBER,ROW_NUMBER, FIELD_NAME,FIELD_VALUE) VALUES('||QUERY_ID||', '
+	||row_level||', '||ROW_NUMBER||', '''||f_name||''', '''||f_value||'''); commit; end;';
+	
+	execute immediate vstr;
+
+end;
+
+procedure addExceptionStatement(acc varchar, sum number, vDate varchar2, dep ref [DEPOSIT_ORG]) is
+vRec ref [RECORDS];
+vAcc  ref [AC_FIN];
+vEx   ref [PSH_DEP_SETTINGS];
+begin
+			
+	select x(x%id) in ::[AC_FIN] all where x.[MAIN_V_ID]=acc into vAcc;
+	if vAcc is not null then
+	    select x(x%id) in vAcc.[ARC_MOVE] where to_date(vDate, 'dd.mm.yyyy') = trunc(x.[DATE]) into vRec;
+	end if;    
+	if vRec is not null then    
+	    vEx:=::[PSH_DEP_SETTINGS].[PSH_NEW_AUTO](
+	'Не входит в выписку'		--Свойство
+	,sysdate		--Дата создания
+	,dep		--Депозит
+	,null		--Значение
+	,stdlib.UserId		--Пользователь
+	,vRec		--Значение нум
+	);
+	    
+	end if;		
+end;
+
+----добавляем запись в [ПСБ] Депозит. Настройка обслуживания с внешним DOC_ID
+procedure addDoc_Id_Extend(dep ref [DEPOSIT_ORG], doc_id number, v_status varchar) is
+vEx   ref [PSH_DEP_SETTINGS];
+begin
+  vEx:=::[PSH_DEP_SETTINGS].[PSH_NEW_AUTO](
+	'DOC_ID'		--Свойство
+	,sysdate		--Дата создания
+	,dep		--Депозит
+	,v_status		--Значение
+	,stdlib.UserId		--Пользователь
+	,doc_id		--Значение нум
+	);		
+end;
+
+----проверим, есть ли финансовые операции
+function check_fin_oper(d ref [DEPOSIT_ORG]) return boolean
+is
+flag    number;
+begin
+	select x(nvl(max(1), 0)) in ::[FACT_OPER] all where x%collection=d.[LIST_PAY] into flag;
+	if flag = 1 then
+		return false;
+	else
+	    return true;
+	end if;	
+end;
+
+function check_need_update(v_doc_id number) return number is
+rdep ref [DEPOSIT_ORG];
+tmp_stat varchar2;
+tmp_dep number;
+tmp_set ref [PSH_DEP_SETTINGS];
+begin
+	select x(x.[VALUE], x.[DEP_REF], x%id) in ::[PSH_DEP_SETTINGS] all where x.[VALUE_NUM]=v_doc_id into tmp_stat, tmp_dep, tmp_set;
+--	if tmp_stat = '2' then
+		   select x(x%id) in [DEPOSIT_ORG] all where x%id= tmp_dep into rdep;
+           if ((rdep.[COM_STATUS]=(::[COM_STATUS_PRD]([CODE] = 'WORK')) or rdep.[COM_STATUS]=(::[COM_STATUS_PRD]([CODE] = 'TO_CLOSE')))
+           	and tmp_stat != 5 and not check_fin_oper(rdep)
+           ) then
+           	    tmp_set.[VALUE] := 5; 
+           		return 5;
+           elsif 	((rdep.[COM_STATUS]=(::[COM_STATUS_PRD]([CODE] = 'CLOSE')) or rdep.[COM_STATUS]=(::[COM_STATUS_PRD]([CODE] = 'TO_CLOSE')))
+           	and tmp_stat != 6 and check_fin_oper(rdep)
+           ) then
+            	tmp_set.[VALUE] := 6; 
+           	    return 6;           
+           end if;
+           
+	--end if;
+	return 0;	
+exception when others then return 0;
+end;
+
+
+
+procedure addExceptionDelAcc(acc varchar, dep ref [DEPOSIT_ORG]) is
+vtmp varchar2(30);
+vEx   ref [PSH_DEP_SETTINGS];
+begin
+   if (acc is not null and dep is not null) then
+	 vEx:=::[PSH_DEP_SETTINGS].[PSH_NEW_AUTO](
+	'DELETED'		--Свойство
+	,sysdate		--Дата создания
+	,dep		--Депозит
+	,acc		--Значение
+	,stdlib.UserId		--Пользователь
+	,null		--Значение нум
+	);		
+   end if;
+end;	
+
+
+-------получение суммы начисления процентов
+public function get_interest_amount(lpp number) return number is
+vsum number;
+begin
+	select x(sum(x.[SUMMA])) in ::[PLAN_OPER] all where x%collection=lpp 
+	and x.[OPER] = ::[VID_OPER_DOG]([CODE]='ВЫПЛАТА_ПРОЦ_ДЕП')    into vsum;
+	return vsum;
+end;
+------------------------------------------
+
+public function checkStatement(vR ref [RECORDS]) return boolean is
+res number;
+begin
+	select x(nvl(max(1), 0)) in ::[PSH_DEP_SETTINGS] all where x.[VALUE_NUM]=vR into res;
+	if res=1 then
+		return false;
+	else
+	    return true;
+	end if;    	
+end;
+	  
+-- формирование заголовока файла
+public function makeXmlHeader return clob
+is
+xml clob;
+begin
+	xml := '<?xml version="1.0" encoding="windows-1251"?>' || NL$ 
+			||'<abs-response xmlns="http://abs-response.beans.rainbow.bifit.com">'|| NL$ ;
+    return xml;			
+end;
+
+public function addField(field_name varchar2, str_value varchar2) return clob
+is
+xml clob;
+begin
+	xml :='<field name="'||field_name||'">'||str_value||'</field>'|| NL$ ;	
+    return xml;			
+end;
+
+
+
+function get_acc(v_acc varchar2(30)) return ref [AC_FIN] is
+r_v_acc ref [AC_FIN];
+begin
+	select x(x%id) in ::[AC_FIN] where x.[MAIN_V_ID]=v_acc into r_v_acc;
+	return r_v_acc;
+	exception when others then return null;
+end;
+
+
+-----Проставляем значение свойства, чтобы отфильтровать уже отправленные в iBank депозиты
+-----Проставляем значение свойства отправленных счетов, чтобы отфильтровать уже отправленные счета в iBank
+
+procedure set_prop_takeatloaded ( p_Depn ref [DEPN], p_date_begin date, p_value boolean, prop_type varchar2)
+is
+	temp_bool_val		varchar(1);
+	temp_property_ref	ref [PROPERTY];
+	work_at_take_ref        ref [PROPERTY_TYPE] ;
+
+begin
+	if prop_type = 'acc' then 
+	   work_at_take_ref:=::[PROPERTY_TYPE]([CODE] = 'ACC_LOADED_TO_DBO');
+	elsif prop_type = 'dbo' then
+		work_at_take_ref:=::[PROPERTY_TYPE]([CODE] = 'LOADED_TO_DBO');
+	elsif prop_type = 'del_acc' then
+		work_at_take_ref:=::[PROPERTY_TYPE]([CODE] = 'DEL_ACC_LOADED_TO_DBO');	
+	end if;  
+	   
+	if 	p_value is not null  then
+		begin		
+			temp_bool_val := p_value; 			
+			select x(x) in p_Depn.[PROPERTY_ARR]
+			where x.[PROPERTY_TYPE]	= work_at_take_ref
+			into temp_property_ref;
+			
+			temp_property_ref.[STR_VALUE] := temp_bool_val;
+
+			
+		exception
+			when NO_DATA_FOUND then				
+				::[PROPERTY].[LIB].set_property(	
+		 				P_PROPERTY_TYPE		==	work_at_take_ref
+						,P_DATE_BEGIN		==	p_date_begin
+						,P_DATE_END			==	null
+						,P_USER				==	stdlib.user_id
+						,P_REF_VALUE		==	null
+						,P_NUM_VALUE		==	null
+						,P_STR_VALUE		==	temp_bool_val
+						,P_COLLECTION		==	p_Depn.[PROPERTY_ARR]
+						,p_delete_later		== 	null
+						,sys_date			==	sysdate
+						);
+				
+				
+		end;			
+	end if;	
+end;
+
+
+-------отправляем данные по счета с которого пополняем 40702... Уже не нужно, но оставим пока
+procedure send_acc_rest(dep ref [DEPOSIT_ORG], query_id number, line_number number) is
+  md       ref [MAIN_DOCUM];
+  fact_op  ref [FACT_OPER];
+  xml	clob;
+  xml_blob	blob;
+  bik varchar2(30);
+  bank ref [CL_BANK_N];
+  vtypeAcc  varchar2(5):='0'; -- Расчетный;
+  vAccount varchar2(30);
+  vCurrency  varchar2(20);
+  vCreateDate varchar2(50);
+  vClosingDate varchar2(50);
+  vReminder    number;
+  vInn         varchar2(20);
+
+begin
+ 	select x(x%id) in ::[FACT_OPER] all where x%collection=dep.[LIST_PAY] 
+	and x.[DOC].[IN_FOLDER].[BUSINESS_OP]=::[PATTERN_DOC](PATTERN_CODE='DEP_ADD') into fact_op;
+	---------------пишем exception	
+	select x(x.[ACC_DT].[MAIN_V_ID], x.[ACC_DT].[FINTOOL].[CUR_SHORT], to_char(x.[ACC_DT].[DATE_OP], 'dd.mm.yyyy'), 
+	to_char(x.[ACC_DT].[DATE_CLOSE], 'dd.mm.yyyy'),  x.[ACC_DT].[SALDO], x.[ACC_DT].[CLIENT_V].[INN] )
+	 in ::[MAIN_DOCUM] all where x%id=fact_op.[DOC] into vAccount, vCurrency, vCreateDate, vClosingDate, vReminder, vInn;
+	
+    bank := ::[SYSTEM].[VARIABLES].OurBank;
+    bik := ltrim( rtrim( bank.[BIC]));
+
+end;	
+
+
+
+
+
+public function addBeginData return clob
+is
+xml clob;
+begin
+	xml :='<data>'|| NL$ ;	
+    return xml;			
+end;
+
+public function addEndData return clob
+is
+xml clob;
+begin
+	xml :='</data>'|| NL$ ;	
+    return xml;			
+end;
+
+public function makeXmlFooter return clob
+is
+xml clob;
+begin
+	xml :='</abs-response>'|| NL$ ;	
+    return xml;			
+end;
+
+public function clob2blob(AClob CLOB) return BLOB is
+  Result BLOB;
+  o1 integer;
+  o2 integer;
+  c integer;
+  w integer;
+begin
+  o1 := 1;
+  o2 := 1;
+  c := 0;
+  w := 0;
+  DBMS_LOB.CreateTemporary(Result, true);
+  DBMS_LOB.ConvertToBlob(Result, AClob, length(AClob), o1, o2, 0, c, w);
+  return(Result);
+end;	
+
+
+
+
+public function get_num_dep(cl ref [CLIENT]) return varchar2 is
+res varchar2(1000);
+add_to_number   varchar2(50);
+begin
+	select x(to_char(count(1) + 1)) in ::[DEPN]
+    where x.[CLIENT]  =  cl into add_to_number;  
+
+	res:='ГСД/'||to_char(cl.[REGISTR_NUM])||'/'||to_char(trunc(sysdate),'YYYYMMDD')||'/'||add_to_number;
+		
+	return res;
+	exception
+	when others then return null;
+end;	
+
+------Загрузки информации о удаленных счетах корпоративных клиентов
+public procedure del_XML_acc_info(
+	 p_QUERY_ID number(19),
+	 p_ROW_NUMBER number,
+	p_LINE_NUMBER number(7)
+	)
+is
+bik varchar2(30);
+bank [CL_BANK_N];
+strerr      memo; 
+LINE_NUMBER  number;
+b_cl		ref [PSH_IBANK2]; 
+b_doc_type  ref [BC_DOC_TYPES];
+bc			ref [BC_MAP_DOC];
+
+type TdelAccInfo is record (
+	ID        ref   [DEPOSIT_ORG],      
+	BRANCH_BIC      varchar2(30),
+    ACCOUNT			varchar2(30)
+);
+
+type rAccInfo  is table of TdelAccInfo index by integer;
+delAccInfo	 rAccInfo;
+begin
+	bank := ::[SYSTEM].[VARIABLES].OurBank;
+    bik := ltrim( rtrim( bank.[BIC]));
+    delAccInfo.delete;
+    
+	select x(x%id, bik, x.[ACCOUNT].[MAIN_V_ID]) in ::[DEPOSIT_ORG] all where x.[ACCOUNT]=5303275382
+	and not exists (select t(1) in ::[DEPOSIT_ORG] all where t%id=x%id
+	and t.[PROPERTY_ARR].[PROPERTY_TYPE].[CODE] = 'DEL_ACC_LOADED_TO_DBO')   into delAccInfo;
+
+	
+	LINE_NUMBER:=p_LINE_NUMBER;
+	for idx in 1..delAccInfo.count loop
+
+	ins_result_row(p_QUERY_ID,LINE_NUMBER,'BRANCH_BIC',delAccInfo(idx).BRANCH_BIC);
+
+	ins_result_row(p_QUERY_ID,LINE_NUMBER,'ACCOUNT',delAccInfo(idx).ACCOUNT);
+	
+	
+	select x(x%id) in ::[PSH_IBANK2] where x.[CLIENT]=delAccInfo(idx).ID.[CLIENT] into b_cl;
+
+	
+	bc:=::[BANK_CLIENT].[LIB].insert_map_doc(b_cl, false, 'УдСчет', b_doc_type.[DOC_TYPE], null, null,'DEPOSIT_ORG', delAccInfo(idx).ID);
+ 	bc.[BCD_TYPE]:=b_doc_type;
+
+	set_prop_takeatloaded ( delAccInfo(idx).ID, sysdate, true, 'del_acc');
+	
+	LINE_NUMBER:=LINE_NUMBER + 1;
+	end loop;	 
+	exception   when others then
+       strerr:='Не удалось выгрузить удаление счета в iBank: '||sqlerrm;
+	   bc:=::[BANK_CLIENT].[LIB].insert_map_doc(b_cl, false, 'Не выгр.сч', b_doc_type.[DOC_TYPE], null, null,'DEPOSIT_ORG', null);
+	   bc.[ERR_DESC]:=strerr;
+end;	
+
+------Загрузка статусов документов
+public procedure  get_status_doc(p_QUERY_ID number, vDoc_id number) is
+LINE_NUMBER number:=0;
+is_need_update number;
+begin	
+	is_need_update := check_need_update(vDoc_id);	
+    if (is_need_update != 0) then   
+
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'DOC_ID', vDoc_id );	
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'STATE', is_need_update);	
+
+	end if;	
+end;	
+
+--------------------------------
+
+----Загрузка информации о счетах корпоративных клиентов
+public procedure get_XML_acc_info(
+	 p_QUERY_ID number(19),
+	 p_ROW_NUMBER number,
+	p_LINE_NUMBER number(7)
+	)
+is
+xml	clob;
+xml_blob	blob;
+bik varchar2(30);
+bank [CL_BANK_N];
+vtypeAcc  varchar2(5):='14'; -- Депозитный;
+b_cl		ref [PSH_IBANK2]; 
+b_doc_type  ref [BC_DOC_TYPES];
+bc			ref [BC_MAP_DOC];
+v_bc_doc    ref [BC_DOC];
+strerr      memo; 
+LINE_NUMBER  number;
+v_tmp   varchar2(2000);
+
+
+
+type TrecAccInfo is record (
+	ID        ref   [DEPOSIT_ORG],      
+	BRANCH_BIC      varchar2(30),
+    ACCOUNT			varchar2(30),
+    CURRENCY        varchar(10),
+    VTYPE            varchar(5),
+    CREATE_DATE     varchar2(50),
+    CLOSING_DATE    varchar2(50),
+    REMAINDER       number,
+    STATE           varchar2(10),
+    CLIENT_INN      varchar2(20)
+);
+
+type rAccInfo  is table of TrecAccInfo index by integer;
+recAccInfo	 rAccInfo;
+
+begin
+	recAccInfo.delete;
+    bank := ::[SYSTEM].[VARIABLES].OurBank;
+    bik := ltrim( rtrim( bank.[BIC]));
+
+	select x(x%id,bik, x.[ACCOUNT].[MAIN_V_ID], x.[FINTOOL].[CUR_SHORT], vtypeAcc, to_char(x.[ACCOUNT].[DATE_OP], 'dd.mm.yyyy'),
+		to_char(x.[ACCOUNT].[DATE_CLOSE], 'dd.mm.yyyy'), x.[ACCOUNT].[SALDO] ,'2', x.[CLIENT].[INN]
+	)
+	 in ::[DEPOSIT_ORG] all 
+	where x.[COM_STATUS] in (::[COM_STATUS_PRD]([CODE] = 'WORK'), ::[COM_STATUS_PRD]([CODE] = 'OPEN')) 
+	and exists(select y(1) in ::[PSH_IBANK2] all where y.[CLIENT]=x.[CLIENT])
+	and (x.[ACCOUNT].[DATE_CLOSE] is null or x.[ACCOUNT].[DATE_CLOSE] > sysdate)
+	and not exists (select t(1) in ::[DEPOSIT_ORG] all where t%id=x%id
+	 and t.[PROPERTY_ARR].[PROPERTY_TYPE].[CODE] = 'ACC_LOADED_TO_DBO') and x.[ACCOUNT].[SALDO] > 0 
+		 into recAccInfo;	
+
+	select x(x%id) in ::[BC_DOC_TYPES] all where x.[DOC_TYPE]='BCD_DEPN_INFO' into b_doc_type;	
+
+
+	LINE_NUMBER:=p_LINE_NUMBER;
+	for idx in 1..recAccInfo.count loop
+
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'BRANCH_BIC',recAccInfo(idx).BRANCH_BIC);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'ACCOUNT',recAccInfo(idx).ACCOUNT);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'CURRENCY',recAccInfo(idx).CURRENCY);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'TYPE',recAccInfo(idx).VTYPE);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'CREATE_DATE',recAccInfo(idx).CREATE_DATE);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'CLOSING_DATE',recAccInfo(idx).CLOSING_DATE);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'REMAINDER',recAccInfo(idx).REMAINDER);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'STATE',recAccInfo(idx).STATE);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'CLIENT_INN',recAccInfo(idx).CLIENT_INN);
+		
+
+	set_prop_takeatloaded ( recAccInfo(idx).ID, sysdate, true, 'acc');
+
+	
+	select x(x%id) in ::[PSH_IBANK2] where x.[CLIENT]=recAccInfo(idx).ID.[CLIENT] into b_cl;
+----логируем выгрузку счета	
+
+ 	bc:=::[BANK_CLIENT].[LIB].insert_map_doc(b_cl, false, 'Счет', b_doc_type.[DOC_TYPE], null, null,'DEPOSIT_ORG', recAccInfo(idx).ID);
+ 	bc.[BCD_TYPE]:=b_doc_type;
+ 	
+ 	addExceptionStatement(recAccInfo(idx).ACCOUNT, recAccInfo(idx).REMAINDER, recAccInfo(idx).CREATE_DATE, recAccInfo(idx).ID ); 
+ 	
+ 	LINE_NUMBER:=LINE_NUMBER + 1;
+	end loop;	 
+	-------проверим, не закрыли ли договора -----------------------------
+	recAccInfo.delete;
+    select x(x%id,bik, x.[ACCOUNT].[MAIN_V_ID], x.[FINTOOL].[CUR_SHORT], vtypeAcc, to_char(x.[ACCOUNT].[DATE_OP], 'dd.mm.yyyy'),
+		to_char(x.[ACCOUNT].[DATE_CLOSE], 'dd.mm.yyyy'), x.[ACCOUNT].[SALDO] ,'0', x.[CLIENT].[INN]) in ::[DEPOSIT_ORG] all
+		where x.[COM_STATUS] in (::[COM_STATUS_PRD]([CODE] = 'CLOSE'), ::[COM_STATUS_PRD]([CODE] = 'TO_CLOSE')) 
+		and not exists (select t(1) in ::[PSH_DEP_SETTINGS] where t.[VALUE]=x.[ACCOUNT].[MAIN_V_ID] 
+		and t.[WORK_NAME]='DELETED' and x%id = t.[DEP_REF])
+		and exists(select y(1) in ::[PSH_IBANK2] all where y.[CLIENT]=x.[CLIENT])
+		and substr(x.[ACCOUNT].[MAIN_V_ID], 1,3)='421' 
+		into recAccInfo; 
+
+	for idx in 1..recAccInfo.count loop	 
+   /*  begin
+   	select x(x%id) in ::[PSH_IBANK2] where x.[CLIENT]=recAccInfo(idx).ID.[CLIENT] into b_cl;
+   	exception when others then 
+   	 b_cl:=0;
+   end;	
+	
+
+	
+	if b_cl !=0 then */
+	ins_result_row(p_QUERY_ID,LINE_NUMBER,'BRANCH_BIC',recAccInfo(idx).BRANCH_BIC);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'ACCOUNT',recAccInfo(idx).ACCOUNT);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'CURRENCY',recAccInfo(idx).CURRENCY);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'TYPE',recAccInfo(idx).VTYPE);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'CREATE_DATE',recAccInfo(idx).CREATE_DATE);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'CLOSING_DATE',recAccInfo(idx).CLOSING_DATE);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'REMAINDER',recAccInfo(idx).REMAINDER);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'STATE',recAccInfo(idx).STATE);
+		ins_result_row(p_QUERY_ID,LINE_NUMBER,'CLIENT_INN',recAccInfo(idx).CLIENT_INN);
+		
+	v_tmp:=	recAccInfo(idx).ID.[CLIENT];
+	
+	--select x(x%id) in ::[PSH_IBANK2] where x.[CLIENT]=recAccInfo(idx).ID.[CLIENT] into b_cl;	
+	
+		
+		bc:=::[BANK_CLIENT].[LIB].insert_map_doc(b_cl, false, 'УдСчет', b_doc_type.[DOC_TYPE], null, null,'DEPOSIT_ORG', recAccInfo(idx).ID);
+ 	    bc.[BCD_TYPE]:=b_doc_type;
+		
+	    addExceptionDelAcc(recAccInfo(idx).ACCOUNT, recAccInfo(idx).ID); 
+	--    end if;
+	    LINE_NUMBER:=LINE_NUMBER + 1;
+	end loop;	
+	---------------------------------------------------------------------
+	
+	exception   when others then
+       strerr:='Не удалось выгрузить счет в iBank: '||sqlerrm;
+	   bc:=::[BANK_CLIENT].[LIB].insert_map_doc(b_cl, false, 'Не выгр.сч', b_doc_type.[DOC_TYPE], null, null,'DEPOSIT_ORG', null);
+	   bc.[ERR_DESC]:=strerr;
+end;	
+
+
+--Загрузка информации по депозитам в xml_results
+public procedure ins_XML_client_investment(
+	 p_QUERY_ID number(19),
+	 p_ROW_NUMBER number,
+	p_LINE_NUMBER number(7)
+	)
+is
+
+xml	clob;
+xml_blob	blob;
+bank [CL_BANK_N];
+bik varchar2(30);
+cDbg string(5):='[16]';
+tmp number;
+--prs   ref [PRC_SCHEME];
+rate  number; 
+term  number;
+dp	ref [DEPOSIT_ORG];	
+
+b_cl		ref [PSH_IBANK2]; 
+b_doc_type  ref [BC_DOC_TYPES];
+bc			ref [BC_MAP_DOC];
+v_bc_doc    ref [BC_DOC];
+strerr      memo;
+LINE_NUMBER number;
+interest_summ number;
+
+type TrecDepo is record (
+    EXT_ID     			   varchar2(20),
+    BEGIN_AMOUNT            number,
+    CHECKING_ACCOUNT_BIC    varchar2(20),
+    CHECKING_ACCOUNT       varchar2(30),
+    EXT_CLIENT_ID          varchar2(20),
+    BRANCH_BIC             varchar2(20),
+    ACCOUNT                varchar2(30),
+    CONTRACT_NUMBER        varchar2(25),
+    NAME                   varchar2(100),
+    BEGIN_DATE             varchar2(50),
+    CONTRACT_BEGIN_DATE    varchar2(50),
+    CONTRACT_END_DATE      varchar2(50),
+    INTEREST_PAYMENT_PERIOD   varchar2(200),
+    ALLOW_CAPITALIZATION   integer,
+    ALLOW_REPLENISHMENT    integer,
+    ALLOW_PARTIAL_WITHDRAWAL  integer,
+    ALLOW_PRETERM_RETURN      integer,
+    PROLONGATION              integer,
+    INTEREST_ACCOUNT       varchar2(30),
+    CLIENT                 ref [CLIENT],
+    plan                   number
+);
+
+type rDepo  is table of TrecDepo index by integer;
+recDepo	 rDepo;
+
+begin
+    recDepo.delete;
+    bank := ::[SYSTEM].[VARIABLES].OurBank;
+    bik := ltrim( rtrim( bank.[BIC]));
+ ---проверяем, есть ли что отправить в банк клиент 
+	 select x(x%id, x.[SUMMA_DOG], bik, x.[ACCOUNT].[MAIN_V_ID], x.[CLIENT], bik, x.[ACCOUNT].[MAIN_V_ID], x.[NUM_DOG], x.[VID_DOG].[NAME],
+    to_char(x.[DATE_BEGIN], 'dd.mm.yyyy'), to_char(x.[DATE_BEGINING], 'dd.mm.yyyy'), to_char(x.[DATE_ENDING], 'dd.mm.yyyy'),'в конце срока', 
+    0, 0, 0, 0, 0, x.[ACC_ENROL_PRC].[1].[2].[MAIN_V_ID], x.[CLIENT], x.[LIST_PLAN_PAY] )  in ::[DEPOSIT_ORG] all 
+	 where x.[VID_DOG].[CODE]='PSB_DBO' and x.[COM_STATUS] in (::[COM_STATUS_PRD]([CODE] = 'WORK'))
+	 and not exists (select t(1) in ::[DEPOSIT_ORG] all where t%id=x%id
+	 and t.[PROPERTY_ARR].[PROPERTY_TYPE].[CODE] = 'LOADED_TO_DBO')
+     and exists (select t(1) in ::[DEPOSIT_ORG] all where t%id=x%id
+	 and t.[PROPERTY_ARR].[PROPERTY_TYPE].[CODE] = 'ACC_LOADED_TO_DBO')
+	 and (x.[DATE_CLOSE] > ::[SYSTEM].[OP_DATE] or x.[DATE_CLOSE] is null) into recDepo;
+	 
+---	 если запись есть то отправляем
+	 if recDepo.count > 0 then
+	 
+	-- prs:=::[PRC_SCHEME]([COD] = '5302952948'); --PSB. Депозит срочный
+     select x(x%id) in ::[BC_DOC_TYPES] all where x.[DOC_TYPE]='BCD_DEPN_INFO' into b_doc_type; 
+	 LINE_NUMBER:=p_ROW_NUMBER;	
+	for idx in 1..recDepo.count loop	
+	  --  select x(x%id) in ::[DEPOSIT_ORG] where x%id=recDepo(idx).EXT_ID into dp;
+	    dp:=recDepo(idx).EXT_ID ;
+	    term:=dp.[DATE_ENDING] - dp.[DATE_BEGIN];
+	    --rate:=::[DEPN_INTERFACE].[PRX_PRC_SCHEMES].GetPrcRate(prs, ::[SYSTEM].[OP_DATE], dp.[SUMMA_DOG], term, false, true, 0, null); 
+	    
+	    rate:=::[PRC_SCHEME].[LIB].GetPrcRate(dp.[PRC_DOG],::[SYSTEM].[OP_DATE]);
+
+
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'EXT_ID',recDepo(idx).EXT_ID);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'CHECKING_ACCOUNT_BIC',recDepo(idx).CHECKING_ACCOUNT_BIC);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'CHECKING_ACCOUNT',recDepo(idx).CHECKING_ACCOUNT);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'EXT_CLIENT_ID',recDepo(idx).EXT_CLIENT_ID);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'BRANCH_BIC',recDepo(idx).BRANCH_BIC);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'ACCOUNT',recDepo(idx).ACCOUNT);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'CONTRACT_NUMBER',recDepo(idx).CONTRACT_NUMBER);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'NAME',recDepo(idx).NAME);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'RATE',rate);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'BEGIN_DATE',recDepo(idx).BEGIN_DATE);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'CONTRACT_BEGIN_DATE',recDepo(idx).CONTRACT_BEGIN_DATE);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'CONTRACT_END_DATE',recDepo(idx).CONTRACT_END_DATE);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'TERM',term);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'INTEREST_PAYMENT_PERIOD',recDepo(idx).INTEREST_PAYMENT_PERIOD);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'ALLOW_CAPITALIZATION',recDepo(idx).ALLOW_CAPITALIZATION);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'ALLOW_REPLENISHMENT',recDepo(idx).ALLOW_REPLENISHMENT);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'ALLOW_PARTIAL_WITHDRAWAL',recDepo(idx).ALLOW_PARTIAL_WITHDRAWAL);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'ALLOW_PRETERM_RETURN',recDepo(idx).ALLOW_PRETERM_RETURN);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'PROLONGATION',recDepo(idx).PROLONGATION);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'BEGIN_AMOUNT',recDepo(idx).BEGIN_AMOUNT);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'INTEREST_ACCOUNT',recDepo(idx).INTEREST_ACCOUNT);
+	    
+	    interest_summ:=get_interest_amount(recDepo(idx).plan);
+	    ins_result_row(p_QUERY_ID,LINE_NUMBER,'INTEREST_AMOUNT',interest_summ);
+
+	 	
+
+	 	set_prop_takeatloaded(dp,dp.[DATE_BEGIN], true, 'dbo');
+	
+	select x(x%id) in ::[PSH_IBANK2] where x.[CLIENT]=recDepo(idx).CLIENT into b_cl; 
+	bc:=::[BANK_CLIENT].[LIB].insert_map_doc(b_cl, false, 'Выгружен', b_doc_type.[DOC_TYPE], null, null,'DEPOSIT_ORG', dp);
+ 	bc.[BCD_TYPE]:=b_doc_type;	 
+ 	LINE_NUMBER:=LINE_NUMBER + 1;		
+	end loop;
+
+	end if;
+	exception when others then
+	strerr:='Не выгружен депозитный договор в iBank: '||sqlerrm;
+	bc:=::[BANK_CLIENT].[LIB].insert_map_doc(b_cl, false, 'Не выгружен', b_doc_type.[DOC_TYPE], null, null,'DEPOSIT_ORG', dp);
+	bc.[ERR_DESC]:=strerr;
+	
+end;
+
+---------Выгрузка в АБС данных по депозитам
+public procedure create_investment(query value_tb, v_query_id number)
+is
+dep ref [DEPN];
+v_vid_dog	ref [VID_DEPOSIT];
+v_filial	ref [BRANCH];
+v_depart	ref [DEPART];
+v_client	ref [CLIENT];
+v_date		Date;
+v_num_dog	varchar2(100);
+v_open_accs boolean default false; 
+v_sign_up   boolean default false;
+v_adds		varchar2(32000) default null;
+xml	clob;
+xml_blob	blob;
+err			boolean default false;
+v_inn		varchar2(20);
+v_kpp		varchar2(20);
+v_date_begin	Date;
+v_date_end  	Date;
+v_summa_dog     number;
+v_acc_prc       [REQ_CLIENT];
+v_prc_dog   ref [PRC_SCHEME]; 
+v_fintool   ref [FT_MONEY];
+v_val       varchar2(10);  
+v_doc_id    varchar2(50);
+v_status    varchar2(50);    
+v_date_doc  varchar2(50);
+v_interest_acc   ref [AC_FIN];   
+b_cl		ref [PSH_IBANK2]; 
+b_doc_type  ref [BC_DOC_TYPES];
+bc			ref [BC_MAP_DOC];
+v_bc_doc    ref [BC_DOC];
+strerr      memo;
+LINE_NUMBER   number:=0;
+PrcArr	[ARR_ARC_SCH_PRC];
+prc_scheme_name	varchar(500);
+v_interest_rate number;
+v_arc_sch_prc   ref [ARC_SCH_PRC];
+adress_dep ref [PSH_EMAIL_RASSIL];
+
+begin
+	v_interest_acc:= get_acc(query('INTEREST_ACC'));
+	v_vid_dog:=::[VID_DEPOSIT]([CODE] = 'PSB_DBO');
+	v_filial:=::[BRANCH]([CODE] = '001');
+	v_depart:=::[DEPART]([CODE] = '001');
+	v_date:= to_date(query('DATE_DOC'), 'dd.mm.yyyy');
+	v_inn:= query('CLIENT_INN'); 
+	---уберем КПП
+	--v_kpp:= query('CLIENT_KPP');
+    --v_num_dog:=query('CONTRACT_NUMBER');
+	v_date_begin:=to_date(query('ALLOCATION_DATE'), 'dd.mm.yyyy');
+	v_date_end:=to_date(query('RETURN_DATE'), 'dd.mm.yyyy');
+	v_summa_dog:=to_number(query('INVESTMENT_AMOUNT'));
+	v_acc_prc.[1].[2]:=v_interest_acc; 
+	
+	v_val:=query('INVESTMENT_CUR');
+	v_date_doc:=query('DATE_DOC');
+	v_doc_id:=query('DOC_ID');
+	v_status:=query('STATUS');
+	select x(x%id) in ::[CLIENT] all where x.[INN]=v_inn and x%class='CL_ORG' into v_client;
+	v_num_dog:= get_num_dep(v_client);
+	v_interest_rate := query('INTEREST_RATE');
+	-----вставляем схему начисления процентов "PSB. Пополняемый РУБЛЬ (91 день) 10000-100000"
+	---v_prc_dog := ::[PRC_SCHEME]([COD] = '5302952948');
+	--rate:=::[DEPN_INTERFACE].[PRX_PRC_SCHEMES].GetPrcRate(prs, ::[SYSTEM].[OP_DATE], dp.[SUMMA_DOG], term, false, true, 0, null); 
+	/*P_PRC_DOG	:= ::[DEPN_INTERFACE].[PRX_PRC_SCHEMES].NewSchemPrc	(	P#NAME == prc_scheme_name,
+																			P#P_PRIVATE == true,
+																			P#P_CREDIT == false,
+																			P#LIST_SCH_PRC == PrcArr,
+																			P#USER_CREATE == stdlib.UserId,
+																			P#DATE_CREATE == ::[SYSTEM].[OP_DATE],
+																			P#DATE_USE_BEG == P_DATE_BEGIN,
+																			P#DATE_USE_END == null,
+																			P#PRODUCT == this,
+																			P_COD == null,
+																			P_GROUP_CODE == vClassDep,
+																			P_VALUTA	 == P_FINTOOL
+																			);*/
+
+													
+		
+	prc_scheme_name:='Схема начисления %% по депозитному договору = '||v_num_dog;
+	
+	--PrcArr.[CALC_EVERY_DAY]:=true;
+	
+   	v_prc_dog:=::[DEPN_INTERFACE].[PRX_PRC_SCHEMES].NewSchemPrc(prc_scheme_name, false, false, PrcArr, stdlib.UserId, ::[SYSTEM].[OP_DATE], 
+		
+	v_date_begin, v_date_end, dep, null, dep%class); 
+	
+
+    ::[DEPN_INTERFACE].[PRX_PRC_SCHEMES].NewSimplPrc(v_date_begin, v_interest_rate, false, v_prc_dog);
+
+    
+for t in ::[ARC_SCH_PRC] all where t%collection=v_prc_dog.[LIST_SCH_PRC] loop
+	t.[CALC_EVERY_DAY]:=true;
+end loop;
+	
+---логируем в таблицу идентификаторов документов
+begin
+    select x(x%id) in ::[PSH_IBANK2] where x.[CLIENT]=v_client into b_cl; 	
+	select x(x%id) in ::[BC_DOC_TYPES] all where x.[DOC_TYPE]='BCD_DEPN_INFO' into b_doc_type;   
+ 	bc:=::[BANK_CLIENT].[LIB].insert_map_doc(b_cl, true, 'Загружен', b_doc_type.[DOC_TYPE], null, null,'DEPOSIT_ORG', dep);
+ 	bc.[BCD_TYPE]:=b_doc_type;
+exception
+when others then
+	strerr:='Не выгружен депозитный договор из iBank: '||sqlerrm;
+	bc:=::[BANK_CLIENT].[LIB].insert_map_doc(b_cl, true, 'Не загружен', b_doc_type.[DOC_TYPE], null, null,'DEPOSIT_ORG', dep);
+	bc.[ERR_DESC]:=strerr;
+end;
+   
+	---валюта
+	v_fintool:=::[FT_MONEY]([CUR_SHORT]= v_val);
+	---для лога
+
+	
+	begin
+		select x(x%id) in ::[CLIENT] all where x.[INN]=v_inn and x%class='CL_ORG' into v_client;
+	exception when others then
+		err:= true;
+	end;
+	
+	----------
+	---------открываем договор	
+	if not err then	
+		
+	dep:=::[DEPOSIT_ORG].[NEW#AUTO](
+						P_NUM_DOG			==	v_num_dog,					-- Номер договора
+						P_FRAME_CONTR		==	null,						-- Рамочный договор на вклады
+						P_NEXT_DOG			==	null,						-- Договор переоформления
+						P_PREV_DOG			==	null,						-- Переоформленный договор
+						P_FILIAL			==	v_filial,					-- Филиал
+						P_DEPART			==	v_depart,					-- Подразделение
+						P_CLIENT			==	v_client,					-- Клиент
+						P_PAYER				==	null,						-- Вноситель
+						P_DATE_BEGIN		==	v_date_begin,						-- Дата начала
+						P_DATE_ENDING		==	v_date_end,					-- Дата окончания
+						P_VID_DOG			==	v_vid_dog,					-- Вид  договора
+						P_LIMIT_OST			==	null,						-- Лимит остатка
+						P_SUMMA_DOG			==	v_summa_dog,				-- Сумма договора
+						P_FINTOOL			==	v_fintool,	-- Валюта
+						P_DEP_NO_KT			==	true,						-- Запрещены пополнения
+						P_DEP_NO_DT			==	true,						-- Запрещение снятия(кроме процентов)
+						P_DEP_NO_DT_FULL	==	true,						-- Запрешены снятия суммы договора
+						P_PRC_DOG			==	v_prc_dog,                  -- Процентная ставка по договору
+													
+						P_LAST_PRC			==	null,					-- Процентная ставка по истечении срока действия
+						P_PENALTY_PRC		==	null,					-- Штрафная процентная ставка
+						P_PRC_REG_RATE		==	null,						-- Процентная ставка начисления по ставке ЦБ
+						P_PRC_NALOG			==	null,						-- Процентная ставка начисления налога на доходы
+						P_PRC_WAY			==	null,						-- Процентная ставка за дорогу
+						P_BORD_PRC_SCH_NAT	==	null,						-- %% схема для разделения начисленных %% по депозитам в национальной валюте
+						P_BORD_PRC_SCH_CUR	==	null,						-- %% схема для разделения начисленных %% по депозитам в иностранной валюте
+						P_PERIOD_CALC_PRC	==	null,						-- Периодичность начисления %%			
+						P_STOP_INT_CALC		==	false,						-- Прекратить начисление процентов
+						P_DATE_UPD_J_PRC	==	null,						-- Дата начала пересчета журнала начисленных процентов
+						P_DATE_PRC			==	v_date,						-- Дата начала периода выплаты процентов
+						P_VID_DOG_PROL		==	null,						-- Вид договора для автоматического переоформления / пролонгации
+						P_NOT_USE_SUMM		==	null,						-- Неснижаемый остаток
+						P_NOT_USE_VAL		==	null,						-- Валюта неснижаемого остатка
+						P_ACC_RETURN		==	null,						-- Счет для возвратов по депозиту
+						P_ACC_ENROL_PRC		==	null,					-- Счет для зачисления процентов
+						P_NOTES				==	null,						-- Примечания
+						P_ACCOUNT			==	null,						-- Номер счета
+						P_SIGN_UP			==	v_sign_up,					-- Подписать договор
+						P_OPEN_ACCS			==	v_open_accs,				-- Открыть счета
+						P_PRINT_WRD			==	false,						-- Печать в WORD
+						P_GET_DEPOSIT		==	false,						-- Зачисление
+						P_OPEN_CUR			==	false,						-- Открыть договор текущего счета
+						P_REG_TRUST			==	false,						-- Регистрация доверенности
+						P_COURCE			==	null,						-- Курс конвертации
+						P_DEP_NO_DT_ALL		==	true);						-- Запрещение снятия(полное)
+						
+												
+------логируем в таблицу идентификаторов документов
+begin
+
+--	dep.[PRC_DOG].[LIST_SCH_PRC].[NEW_SIMPLE](v_date_begin, v_interest_rate, false);					
+	dep.[COM_STATUS]:= ::[COM_STATUS_PRD]([CODE] = 'WAIT_CONF');	
+	 
+	dep.[ACC_ENROL_PRC].[1].[2]:=v_interest_acc;	
+	dep.[ACC_ENROL_PRC].[1].[1]:=v_client;		
+	
+	addDoc_Id_Extend(dep, v_doc_id, v_status);
+
+		
+	select x(x%id) in ::[PSH_IBANK2] where x.[CLIENT]=v_client  into b_cl; 
+
+	select x(x%id) in ::[BC_DOC_TYPES] all where x.[DOC_TYPE]='BCD_DEPN_INFO' into b_doc_type; 
+	bc:=::[BANK_CLIENT].[LIB].insert_map_doc(b_cl, true, 'Создан', b_doc_type.[DOC_TYPE], null, null,'DEPOSIT_ORG', dep);
+	bc.[BCD_TYPE]:=b_doc_type;
+
+exception when others then
+	strerr:='Не удалось создать депозит при выгрузке из iBank: '||sqlerrm;
+	bc:=::[BANK_CLIENT].[LIB].insert_map_doc(b_cl, true, 'Не создан', b_doc_type.[DOC_TYPE], null, null,'DEPOSIT_ORG', dep);
+	bc.[ERR_DESC]:=strerr;
+end;	
+------отправление по почте пока закомментируем	
+/* 	::[FP_INTERFACE].[PRX_PCORE].Send_Mail(
+														 'maltsev@pshb.ru; mamchur@pshb.ru;'	-- Кому (E-Mail) Можно указать несколько адресов разделенных "точкой с запятой"
+														,'Заявление на открытие Депозита'	-- Тема	
+														,'Поступило  Заявление на открытие Депозита : '||v_num_dog	-- Сообщение
+														, 'IT@pshb.ru'					-- от кого (E-Mail, если пусто, то используется значение DEFAULT_FROM_EMAIL)
+														, false							-- если TRUE, то вылетит ERROR_ON_SEND
+														,null		);*/
+														
+begin
+adress_dep:=::[PSH_EMAIL_RASSIL]([PSH_EMAIL_COD] = 'OPEN_DEP_IBANK');
+
+ 	::[FP_INTERFACE].[PRX_PCORE].Send_Mail(
+														adress_dep.[PSH_EMAIL_ADRES]	-- Кому (E-Mail) Можно указать несколько адресов разделенных "точкой с запятой"
+														,'Заявление на открытие Депозита'	-- Тема	
+														,'Поступило  Заявление на открытие Депозита №: '||v_num_dog	-- Сообщение
+														, 'IT@pshb.ru'					-- от кого (E-Mail, если пусто, то используется значение DEFAULT_FROM_EMAIL)
+														, false							-- если TRUE, то вылетит ERROR_ON_SEND
+														,null		);
+exception when others then
+	strerr:='Не удалось отправить сообщение по email от открытии депозита: '||sqlerrm;
+	bc:=::[BANK_CLIENT].[LIB].insert_map_doc(b_cl, true, 'Не отправл.', b_doc_type.[DOC_TYPE], null, null,'DEPOSIT_ORG', dep);
+	bc.[ERR_DESC]:=strerr;														
+end;														
+		
+	end if;	
+end;
+
+public procedure create_letter_import(v_query_id number) 
+is
+LINE_NUMBER     number:=0;
+refClPriv	    ref CL_PRIV;
+subj            varchar2(256):='Истечение сроков полномочий';
+vBody           varchar2(2000):='Уважаемый Клиент, Настоящим ООО "Промсельхозбанк" (далее - Банк) информирует Вас о том, что истекает срок действия полномочий указанных ниже лиц:';
+reciver         varchar2(1000);
+rcpt_type		number:=0; -- 0 - для корпоративных клиентов, 1 - для частных клиентов
+date_doc        varchar2(100):=to_char(trunc(sysdate), 'dd.mm.yyyy');  
+bik             varchar2(30);   
+bank            ref [CL_BANK_N];
+prop            ref [PROPERTIES];
+prop_grp        ref [PROPERTY_GRP];
+
+type TrecLetterImport is record (
+	ID                           ref [CL_ORG],
+    NUM_DOGOV                    varchar2(25),
+    EXT_CLIENT_ID                varchar2(20)     
+    );
+
+type rTrecLetterImport is table of TrecLetterImport index by integer;
+recTrecLetterImport	 rTrecLetterImport;
+begin	
+    bank := ::[SYSTEM].[VARIABLES].OurBank;
+    bik := ltrim( rtrim( bank.[BIC]));
+
+	select distinct x(c%id, x.[NUM_DOG], x.[REG_NUMBER]) in ::[PSH_IBANK2], (::[CL_ORG] :c) where x.[COM_STATUS]=::[COM_STATUS_PRD](CODE='WORK')
+	and x.[CLIENT]=c%id --and c.[ALL_BOSS].[WORK_END] < trunc(add_months(sysdate, 1)) 
+	and (c.[ALL_BOSS].[WORK_END]=trunc(sysdate) + 30 or c.[ALL_BOSS].[WORK_END]=trunc(sysdate) + 15)
+	and exists (select y(1) in ::[RKO] where y.[ACCOUNT] is not null and y.[ACCOUNT].[COM_STATUS] is null 
+	and y.[CLIENT]=c%id)
+	and not exists (select t(1) in ::[CL_ORG] all where t%id=c%id and trunc(t.[ADD_PROP].[DATE_BEG])=trunc(sysdate) 
+		and t.[ADD_PROP].[GROUP_PROP].[NAME]='[ПСБ] Истечение сроков полномочий'
+	)
+	into recTrecLetterImport ;
+
+for idx in 1..recTrecLetterImport.count loop
+	select x(analytic(listagg(x.[ALL_BOSS].[FASE].[FAMILY_CL]||' '||x.[ALL_BOSS].[FASE].[NAME_CL]||' '
+	||x.[ALL_BOSS].[FASE].[SNAME_CL]||' '||to_char(x.[ALL_BOSS].[WORK_END], 'dd.mm.yyyy') , ', '), 'within group (order by [1])',
+	 x.[ALL_BOSS].[FASE].[FAMILY_CL]||' '||x.[ALL_BOSS].[FASE].[NAME_CL]||' '
+	||x.[ALL_BOSS].[FASE].[SNAME_CL]||' '||to_char(x.[ALL_BOSS].[WORK_END], 'dd.mm.yyyy'))) 
+	in ::[CL_CORP] where x%id=recTrecLetterImport(idx).ID and (x.[ALL_BOSS].[WORK_END]=trunc(sysdate) + 30 or x.[ALL_BOSS].[WORK_END]=trunc(sysdate) + 15)  into reciver;
+	
+	vBody:=vBody||chr(10)||chr(13)||reciver||chr(10)||chr(13)||'----------------------------------------------'||chr(10)||chr(13)||
+	'Для получения дополнительной информации просьба связаться с Вашим менеджером или по телефону: +7 (495) 665-15-62.'||chr(10)||chr(13)||'С Уважением , ООО "Промсельхозбанк".';
+	
+	ins_result_row(v_query_id, LINE_NUMBER, 'SUBJ_LETTER', subj);
+	ins_result_row(v_query_id, LINE_NUMBER, 'LETTER_BODY', vBody);
+	ins_result_row(v_query_id, LINE_NUMBER, 'NUM_DOGOV', recTrecLetterImport(idx).NUM_DOGOV);
+	ins_result_row(v_query_id, LINE_NUMBER, 'EXT_CLIENT_ID', recTrecLetterImport(idx).EXT_CLIENT_ID);
+	ins_result_row(v_query_id, LINE_NUMBER, 'RCPT_TYPE', rcpt_type);
+	ins_result_row(v_query_id, LINE_NUMBER, 'DATE_DOC ', date_doc);
+	ins_result_row(v_query_id, LINE_NUMBER, 'BRANCH_BIC ', bik);
+	
+	LINE_NUMBER:=LINE_NUMBER + 1;
+	 
+	begin
+	select x(x%id) in ::[PROPERTY_GRP] all where x.[CODE]='EXPIRATION_DATE' into prop_grp;	
+	/*prop_grp:=::[PROPERTY_GRP].[NEW#AUTO](
+	'[ПСБ] Истечение сроков полномочий'		--Наименование
+	,to_char(sysdate, 'ddmmyyyyhh24miss')		--Код
+	,false		--Контролировать наличие свойства
+	,null		--Список классов, к которым относится группа
+	,'STRING'	--Тип значения
+	,true		--Допускает пустые значения
+	,null		--Тип ссылки
+	,null	--Внешний реквизит
+	,false		--Признак синхронизации
+	,null		--Список видов кредитов, к которым относится группа
+	,null		--Установить по умолчанию
+	,null		--Множественный выбор
+	);	*/
+		
+    recTrecLetterImport(idx).ID.[ADD_PROP].[NEW#AUTO](
+	sysdate		--Дата начала действия
+	,null		--Дата окончания действия
+	,prop_grp		--Группа свойств
+	,null		--Свойство
+	,vBody		--Текстовое значение
+	,null		--Числовое значение
+	,null		--Значение Даты
+	,null		--Разрешать пустые значения
+	,null		--Логическое значение
+	,null		--Значение. Ссылка
+	,null		--Значение Даты и времени
+	);
+		
+	end; 
+	 
+
+
+end loop;	
+		
+end;
+end;

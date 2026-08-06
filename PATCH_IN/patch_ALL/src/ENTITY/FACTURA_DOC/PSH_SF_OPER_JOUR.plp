@@ -1,0 +1,29 @@
+class FACTURA_DOC;
+
+@name('[ПСБ] Редактировать код операции (списком)')
+method PSH_SF_OPER_JOUR is
+PSH_SF_OPER_JOUR (
+	@name('Счета-фактуры.Операция для журнала') P_SF_OPER_JOUR in [SF_OPER_JOUR_REF]
+) is
+
+execute is
+/*********************************************************************
+Назначение:
+
+BASHKIROV, последнее изменение 17 Июль 2020 г.
+*********************************************************************/
+begin
+	if this.[SERV_LIST]%size(0)<>1 then
+		pragma error('Сч.фактура №'||this.[NUM_FACT]||' в массиве "Тарифы и услуги" записей <> 1');
+	end if;
+	for sl in this.[SERV_LIST] loop
+		if sl.[OPER]=P_SF_OPER_JOUR then
+			debug_pipe(this.[NUM_FACT]||' Корректировка не требуется',0);
+		else
+			debug_pipe(this.[NUM_FACT]||' '||sl.[OPER].[CODE]||'->'||sl.[OPER].[CODE],0);
+			sl.[OPER]:=P_SF_OPER_JOUR;
+		end if;
+	end loop;
+end;
+end;
+end;

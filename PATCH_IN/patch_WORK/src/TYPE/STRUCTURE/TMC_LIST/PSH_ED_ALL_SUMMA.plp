@@ -1,0 +1,28 @@
+class TMC_LIST;
+
+@name('[ПСБ] Редактировать сумму операции (служебная)')
+method PSH_ED_ALL_SUMMA is
+PSH_ED_ALL_SUMMA (
+	@name('Сумма операции') P_ALL_SUMMA in [SUMMA]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_ALL_SUMMA := this.[ALL_SUMMA];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+/*********************************************************************
+Назначение:
+
+bashkirov, последнее изменение 25 Апрель 2019 г.
+*********************************************************************/
+begin
+	this.[ALL_SUMMA]:=P_ALL_SUMMA;
+end;
+end;
+end;

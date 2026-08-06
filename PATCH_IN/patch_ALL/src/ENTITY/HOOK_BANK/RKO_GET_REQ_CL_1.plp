@@ -1,0 +1,67 @@
+class HOOK_BANK;
+
+@this(create_on_start:=true)
+@name('РКО. Получение реквизитов клиента для бизнес-операции')
+@tag('COPIED')
+method RKO_GET_REQ_CL_1 is
+pragma INCLUDE(::[SYSTEM].[PRODUCTS_DBO]);
+PRAGMA INCLUDE(::[DEBUG_TRIGGER].[MACRO_LIB]);
+
+RKO_GET_REQ_CL_1 (
+	@name('Договор')                  P_RKO      in [RKO_CURR_REF],
+	@name('Тип счета')                P_TYPE_ACC in [TIP_ACC_REF],
+	@name('Дополнительные параметры') P_ADDS     in [STRING_32000] default null
+) return [REQ_CLIENT] is
+
+execute is
+v_type_acc_cod [TIP_ACC].[COD]%type;
+ret_req_cl [REQ_CLIENT];
+/* --29/01/2026
+v0 number; 
+v12 [ACCNUM]; 
+v11 varchar2;
+*/ --29/01/2026 
+begin
+	v_type_acc_cod:=P_TYPE_ACC.[COD];
+	&debug(P_RKO%class||'.'||P_RKO%id||' P_TYPE_ACC='||v_type_acc_cod||', P_ADDS = '||P_ADDS||' this='||this%class||'.'||this%id, 0)
+	
+	/* --29/01/2026
+	if v_type_acc_cod='СЧЕТ_КОМИССИИ_РКО' then --Башкиров В.Г. 10.04.2024 тянем с "Удержание разовой комиссии (расширение)"
+		&debug(utils.call_stack,dp2)
+		if InStr(utils.call_stack,'IBS.Z$MAIN_DOCUM_PSH_COMMIS_GT.PSH_COMMIS_GT_EXECUTE')>0 then -- 13-CR,10-LF
+			&debug('PSH_COMMIS_GT.gReqClient_0  ='||::[MAIN_DOCUM].[PSH_COMMIS_GT].gReqClient_0  ,dp2)
+			&debug('PSH_COMMIS_GT.gReqClient_1_1='||::[MAIN_DOCUM].[PSH_COMMIS_GT].gReqClient_1_1,dp2)
+			&debug('PSH_COMMIS_GT.gReqClient_1_2='||::[MAIN_DOCUM].[PSH_COMMIS_GT].gReqClient_1_2,dp2)
+			&debug('PSH_COMMIS_GT.gReqClient_2_1='||::[MAIN_DOCUM].[PSH_COMMIS_GT].gReqClient_2_1,dp2)
+			&debug('PSH_COMMIS_GT.gReqClient_2_2='||::[MAIN_DOCUM].[PSH_COMMIS_GT].gReqClient_2_2,dp2)
+
+			if ::[MAIN_DOCUM].[PSH_COMMIS_GT].gReqClient_1_2 is not null then
+				ret_req_cl:=null;
+				ret_req_cl.[0]     := ::[MAIN_DOCUM].[PSH_COMMIS_GT].gReqClient_0;
+				ret_req_cl.[1].[1] := ::[MAIN_DOCUM].[PSH_COMMIS_GT].gReqClient_1_1;
+				ret_req_cl.[1].[2] := ::[MAIN_DOCUM].[PSH_COMMIS_GT].gReqClient_1_2;
+				ret_req_cl.[2].[1] := ::[MAIN_DOCUM].[PSH_COMMIS_GT].gReqClient_2_1;
+				ret_req_cl.[2].[2] := ::[MAIN_DOCUM].[PSH_COMMIS_GT].gReqClient_2_2;
+			end if;
+		end if;
+	end if;*/ --29/01/2026
+		
+	-->> PSH VRI 18/12/2025 для Prepaid
+	if v_type_acc_cod='PSH_PREP_CL_ACC' then
+		ret_req_cl.[0] := 1; 
+		ret_req_cl.[1].[2] := [STR].get_num_par(P_ADDS, 'PSH_PREPAID_ACCOUNT');
+	elsif v_type_acc_cod='PSH_PREP_CL_ACC_NEW' then
+		ret_req_cl.[0] := 1; 
+		ret_req_cl.[1].[2] := [STR].get_num_par(P_ADDS, 'PSH_PREPAID_ACCOUNT_NEW');
+	-->> PSH VRI 18/12/2025 для Prepaid
+	end if;
+
+	/* --29/01/2026
+	v0:=ret_req_cl.[0]; 
+	v11:=ret_req_cl.[1].[1].[NAME]; 
+	v12:=ret_req_cl.[1].[2].[MAIN_V_ID]; 
+	&debug('<ret_req_cl.[0]='||v0||' Счет Клиента:'||v12||' Клиент:'||v11, 0)*/ --29/01/2026
+	return ret_req_cl;
+end;
+end;
+end;

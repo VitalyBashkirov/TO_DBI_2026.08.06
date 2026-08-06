@@ -1,0 +1,21 @@
+class TAX_PRIV_ORDER;
+
+@name('[ПСБ] Корректировка КПП получателя (служебная)')
+method PSH_EDIT_REC_KPP is
+PSH_EDIT_REC_KPP (
+	@name('КПП получателя') P_REC_KPP in [STRING_9]
+) is
+
+validate is
+begin
+	if p_message = 'DEFAULT' then
+	  P_REC_KPP := this.[RECIPIENT].[REQ].[2].[KPP];
+	end if;
+end;
+
+execute is
+begin
+	this.[RECIPIENT].[REQ].[2].[KPP]:= P_REC_KPP;
+end;
+end;
+end;

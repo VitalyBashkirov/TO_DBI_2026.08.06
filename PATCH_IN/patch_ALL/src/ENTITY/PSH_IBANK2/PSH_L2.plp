@@ -1,0 +1,1242 @@
+class PSH_IBANK2;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Библиотека СБП Новая')
+@tag('COPIED')
+library PSH_L2 is
+pragma macro (lj_lib,'::[PSH_LOCAL_JOB].[PSH_LIB]');
+
+VID_DOC_BO const ref [NAME_PAYDOC]:=::[NAME_PAYDOC]([CODE] = 'БЕЗН_БАНК_ОРД');
+VID_DOC_MO const ref [NAME_PAYDOC]:=::[NAME_PAYDOC]([CODE] = 'БЕЗН_МЕМО_ОРД');
+VID_DOC_PP const ref [NAME_PAYDOC]:=::[NAME_PAYDOC]([CODE] = 'БЕЗН_ПЛ_ПОРУЧ');
+
+l_VO99090 const ref [CURR_OPERATION]:=::[CURR_OPERATION]([FULL_CODE] = '99090');
+l_VO99010 const ref [CURR_OPERATION]:=::[CURR_OPERATION]([FULL_CODE] = '99010');
+
+--l_30233_B const ref [PL_USV]:=::[PL_USV]([NUM]='30233' and [FILIAL]=1985880 and [FINTOOL]=43353); 
+l_30233_B const ref [PL_USV]:=::[PL_USV]([NUM]='30233' and [FILIAL]= ::[BRANCH]([CODE] = '001') and [FINTOOL] = ::[SYSTEM].[SYS_MAIN_VAL]);
+--l_30232_B	const ref [PL_USV]:=::[PL_USV]([NUM] = '30232' and [FILIAL]=1985880 and [FINTOOL]=43353); 
+--l_30232_C	const ref [AC_FIN]:=::[AC_FIN]([MAIN_V_ID] = '30232810400000001104'); 
+--l_30233_C	const ref [AC_FIN]:=::[AC_FIN]([MAIN_V_ID] = '30233810700000001104');
+l_70601 const ref [AC_FIN]:=::[AC_FIN]([MAIN_V_ID] = '70601810801002740828');
+l_user_cr const ref [USER]:=::[USER]([USERNAME] = 'PAY_GATE2');
+
+function MAIN_DOCUM_CREATE(
+P_DOCUMENT_NUM string
+,P_DATE_DOC date
+,P_VID_DOC ref [NAME_PAYDOC]
+,P_SUM_DT number
+,P_NAZN [MEMO]
+,l_CL_DT [REQ_CLIENT]
+,P#VIB_DT [CASE_BETWEEN_TWO]
+,l_CL_KT [REQ_CLIENT]
+,P#VIB_KT [CASE_BETWEEN_TWO]
+,P_FILIAL ref [BRANCH]
+,P_DEPART ref [DEPART]
+,P_CUR_OP ref [CURR_OPERATION]
+,P_ORDER  number default null
+) 
+return ref [MAIN_DOCUM]
+is
+P_PRIORITET number:=5;
+P_DATE_VAL date:=P_DATE_DOC;
+begin
+ 	-->> Valishin 10/12/2024
+    if P_CUR_OP is not null then
+    	::[MAIN_DOCUM].[NEW#DOC].V_CURR_OPER := P_CUR_OP;
+    	P_NAZN:='{VO' || P_CUR_OP.[FULL_CODE] || '} ' ||P_NAZN;
+    end if;
+ 	--<< Valsihin 10/12/2024
+ 	return ::[MAIN_DOCUM].[NEW#DOC](
+ 	                                P_DOCUMENT_NUM --   -- P#DOCUMENT_NUM	--Номер
+					                ,P_DATE_DOC --      --P#DATE_DOC		--Дата документа
+					                ,P_VID_DOC --       --P#VID_DOC		    --Вид документа
+					                ,P_SUM_DT --        --P#SUM		        --Сумма в валюте платежа
+									,null --            --P#DATE_PL		    --Срок оплаты
+									,nvl(P_ORDER,P_PRIORITET) --     --P#PRIORITET		--Срочность платежа
+									,null --            --P#DOC_SEND_REF	--Почта/телеграф
+									,P_NAZN --          --P#NAZN		    --Назначение платежа
+									,null --            --P#SUM_CARD		--Сумма в картотеке
+									,null --            --NEW_STATE		    --Отправка документа
+									,null --            --CODE_DOC		    --Условное обозначение(шифр) пл.документа
+									,null --            --P#KOD_NAZN_PAY	--Код назначения платежа
+									,null --            --P#ACC_PROV		--Корсчет проводки
+									,null --            --P#SSS		        --Строка
+									,null --            --P_VID_OBOROTA		--Вид оборота
+									,null --            --P_BUDGET_PAYMENT	--Бюджетный платеж
+									,null --            --P#ACC_PROV_DT		--Корсчет проводки дебет
+									,null --            --P#SSS_DT		    --Строка дебет
+									,P_DATE_VAL --      --P#DATE_VAL		--Дата валютирования
+									,null --            --P#INNDt		    --ИНН для фильтра (плательщик)
+									,null --            --P#INNCt		    --ИНН для фильтра (получатель)
+									,null --            --P#BICDt		    --БИК для фильтра (плательщик)
+									,null --            --P#BICCt		    --БИК для фильтра  (получатель)
+									,l_CL_DT.[1] --     --P#CL_DT_1		    --Внутренние реквизиты ДТ
+									,l_CL_DT.[2] --     --P#CL_DT_2		    --Внешние реквизиты ДТ
+									,P#VIB_DT --        --P#VIB_DT		    --Выбор ДТ
+									,l_CL_KT.[1] --     --P#CL_KT_1		    --Внутренние реквизиты КТ
+									,l_CL_KT.[2] --     --P#CL_KT_2		    --Внешние реквизиты КТ
+									,P#VIB_KT --        --P#VIB_KT		    --Выбор КТ
+									,null --            --P#SUM_PO		    --Сумма зачисления	
+									,null --            --P#SUM_NT		    --Сумма нац.покрытия
+									,null --            --P#MULTICURR		--Свойство валютности
+									,null --            --P_PACHKA		    --Пачка
+									,null --            --P_BUD_REQS		--Дополнительные реквизиты бюджетного документа
+									,null --            --P_USER_TYPE		--Пользовательский тип
+									,null --            --P_NUMB_BASE_DOC	--Количество ПУД
+									,null --            --P_LIST_BASE_DOC	--Количество листов в ПУД
+									,null --            --P_PUD_APPLIED_TO  --Пуд приложен к
+									,null --            --P_REP_1ST_SIGN	--Представитель для первой подписи
+									,null --            --P_KL_BNK		    --Вид перевода
+									,null --            --P_ACC_COM		    --Счет для удержания комиссии по документу
+									,P_FILIAL --        --P_FILIAL	        --Филиал
+									,P_DEPART --        --P_DEPART		    --Подразделение
+									,null --            --P_CODE		    --Код
+									);
+end;
+
+procedure MAIN_DOCUM_TO_PROV_REPEAT(
+p_doc ref [MAIN_DOCUM]
+) 
+is
+l_MAX_PROV_ATTEMPTS number:=::[FP_TUNE].[LIB].get_num_value('PSB_MAX_ATTEMPTS_SBP');
+l_WAIT_TIME_BEFORE_PROV number:=::[FP_TUNE].[LIB].get_num_value('PSB_WAIT_BEFORE_REPEAT_SBP');
+EXPN_RESOURCE_LOCK exception;
+pragma exception_init(EXPN_RESOURCE_LOCK, -20500);  -- ORA-20500: LOCK-RESOURCE_BUSY: Экземпляр ... блокирован, тип [...]
+begin
+	p_doc.[DOC_TO_PROV]();
+	if p_doc%state = 'TO_RKO' then
+		p_doc.[DOC_TO_PROV]();
+	end if;
+exception
+	when RESOURCE_BUSY or EXPN_RESOURCE_LOCK then
+		for r in 1..l_MAX_PROV_ATTEMPTS loop
+			begin
+				Utils.Sleep(l_WAIT_TIME_BEFORE_PROV);
+				p_doc.[DOC_TO_PROV]();
+				if p_doc%state = 'TO_RKO' then
+					p_doc.[DOC_TO_PROV]();
+				end if;
+			exception
+				when RESOURCE_BUSY or EXPN_RESOURCE_LOCK then
+					null;
+			end;
+			if p_doc%state = 'PROV' then
+				exit;
+			end if;
+		end loop;
+end;
+
+public function EXECUTE_QUERY
+(
+P_DATE_DOC date --                      --Дата платежа 
+,P_INN varchar2(12) --                  --ИНН
+,P_MCC varchar2 --                      --МСС-код
+,P_ACCOUNT varchar2(20) --              --Номер счета (из АБС) 
+,P_OPER integer --                      --Тип операции
+--                                      --     1    -покупка
+--                                      --     2    -возврат-резерв
+--                                      --     3    -возврат-списание
+--                                      --     4    -выплата-резервирование
+--                                      --     5    -выплата-списание
+--                                      --     6    -отмена возврата
+--                                      --     7    -отмена выплаты
+--                                      --     8    -диспут 
+--                                      --     -1   -alive запрос
+--                                      --     -2   -запрос остатка по счету
+--                                      --     -999 -тип операции пустой (внутр. код)
+,P_AMOUNT IN OUT NOCOPY number --       --Сумма 
+,P_COMMISSION number --                 --Комиссия
+,P_OREDER varchar2 --                   --Номер документа в ПС
+,P_REQUEST_NUM integer DEFAULT 0 --     --Номер обрабатываемого запроса, в разрезе Номера документа в ПС 
+,P_TRANSACTION IN OUT NOCOPY varchar2   --Номер транзакции
+)
+return number
+--                                      --     0    -возникла ошибка при обработке запроса на создание/допроводку/ликвидацию платежного документа
+--                                      --     1    -найден проведенный платежный документ/непроведенный платежный документ с переданным P_TRANSACTION допровелся/создан платежный документ, документ проведен/ликвидирован
+--                                      --     -1   -не совпадает ИНН клиента по счету с переданным P_INN
+--                                      --     -2   -счет P_ACCOUNT:'||P_ACCOUNT||' закрыт
+--                                      --     -3   -счет P_ACCOUNT не найден в справочнике Финансовые счета
+--                                      --     -4   -не найден счет НЗР соответствующий клиенту владельцу счета P_ACCOUNT
+--                                      --     -5   -не найдено платежного документа для подтверждения соответствующего переданному P_TRANSACTION
+--                                      --     -7   -недостаточно средств на счёте плательщика
+--                                      --     -100 -найденный платежный документ не проведен/созданный платежный документ не проведен
+--                                      --     -101 -не найдено платежного документа для ликвидации соответствующего переданному P_TRANSACTION
+--                                      --     не возвращаются:
+--                                      --     -6   -не найден счет НЗР соответствующий клиенту владельцу счета P_ACCOUNT (проверка не выполняется)
+--                                      --     -102 -созданный комиссионный документ не проведен (внутр. код)
+is
+l_STR MEMO_BIG;
+l_TRANSACTION varchar2;
+l_DATE_DOC date;
+l_SUM_DT number; -- Сумма Дт.
+l_DOCUMENT_NUM string:='1'; -- Номер платежного документа
+l_ACC_KT ref [AC_FIN];
+l_CLIENT_V ref[CLIENT];
+l_30233	ref [AC_FIN];
+l_ACC ref [AC_FIN];
+P_NAZN [MEMO]; -- Назначение платежа
+P_VID_DOC ref [NAME_PAYDOC]; -- Вид документа
+P_FILIAL ref [BRANCH]; -- Филиал документа
+P_DEPART ref [DEPART]; -- Подразделение документа
+P#VIB_KT [CASE_BETWEEN_TWO];
+l_CL_KT	[REQ_CLIENT];
+P#VIB_DT [CASE_BETWEEN_TWO];
+l_CL_DT	[REQ_CLIENT];
+main_doc ref [MAIN_DOCUM];
+--l_30232 ref [AC_FIN];
+b_100 boolean:=false;
+--b_102 boolean:=false;
+/*
+l_acc_mvd_kt varchar2;
+l_main_doc ref [MAIN_DOCUM];
+l_folder ref [FOLDER_PAY];
+l_RCPT_NAME	varchar2;
+l_RCPT_LEGAL_NAME varchar2;
+*/
+begin
+    --::[SYSTEM].[VARIABLES].set_system_vars_by_user(32303141); 
+    --::[END_OD_INTERFACE].[PRX_DOCUMENT].trc_set_var_current;
+    --stdio.put_line_pipe('==================', 'SBP');  
+    /*формируем данные для отладки*/
+    l_STR:='P_OREDER=>'''||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'
+    ||''',P_OPER=>'''||nvl(P_OPER, -999)    
+    ||''',P_DATE_DOC=>'||to_char(P_DATE_DOC, 'DD.MM.YYYY HH24:MI:SS')    
+    ||''',P_INN=>'''||nvl(P_INN, ' ')
+    ||''',P_MCC=>'''||nvl(P_MCC , ' ')
+    ||''',P_ACCOUNT=>'''||nvl(P_ACCOUNT, ' ')
+    ||''',P_AMOUNT=>'''||nvl(P_AMOUNT, 0)
+    ||''',P_COMMISSION=>'''||nvl(P_COMMISSION, 0)
+    ||''',P_TRANSACTION=>'''||nvl(regexp_replace(P_TRANSACTION, '[^[[:digit:]]]*'), ' '||'''');
+    --stdio.put_line_pipe(to_char(sysdate, 'hh:mi:ss')||' '||l_str,'SBP');
+    --l_rec.[TEXT_LIST].[CFB_NEW](null, false, false, sysdate,rtrim(ltrim(l_str)));
+    --&lj_lib.write_log('EXEC_QUERY', substr(l_str, 1, 200));
+    &lj_lib.write_log('EXEC_QUERY', l_str);    
+    l_TRANSACTION:=regexp_replace(P_TRANSACTION,'[^[[:digit:]]]*'); --запоминаем переданный ID транзакции
+    P_TRANSACTION:=0; --обнуляем параметр ID транзакции
+    -- 1=покупка =============================================================================================================
+    if P_OPER = 1 then
+        begin    
+			--if nvl(P_COMMISSION,0)=0 then 
+			--   l_SUM_DT := P_AMOUNT/100-round(0.007*P_AMOUNT/100,2);
+			--else
+			l_SUM_DT:=(P_AMOUNT-nvl(P_COMMISSION,0))/100;
+			--end if;    
+	        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Сумма платежа='||l_SUM_DT);
+			--stdio.put_line_pipe(Сумма платежа='||l_SUM_DT, 'SBP');			
+			l_DATE_DOC:=trunc(P_DATE_DOC);
+			/*ищем уже проведенный документ по номеру документа в ПС на дату платежа*/            			
+            begin
+                locate main_doc in ::[MAIN_DOCUM] 
+                --where trunc(main_doc.[DATE_PROV]) = l_DATE_DOC
+				where main_doc.[DATE_DOC] = l_DATE_DOC   		-->> PSB VRI 28/07/2025 Заменил, чтобы находился и непроведённый документ с таким P_OREDER
+					and main_doc.[VID_DOC]  = VID_DOC_BO
+	                and main_doc.[DOCUMENT_UNO] = 'SBP-'||to_char(P_OREDER);
+	            if main_doc.[SUM] = l_SUM_DT
+	            	and trunc(main_doc.[DATE_PROV]) = l_DATE_DOC -->> PSB VRI 28/07/2025 Добавил, чтобы проверялась дата проводки
+	                and main_doc%state = 'PROV' then
+	                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Найден проведенный платежный документ: ID='||main_doc%id||' Возврат=1');
+	                --stdio.put_line_pipe('Найден проведенный платежный документ: ID='||main_doc%id||' Возврат=1', 'SBP');
+	                P_TRANSACTION:=main_doc%id;
+	                return 1;
+	            /*если передан P_TRANSACTION, проверяем что значение совпадает и пытаемся провести*/
+	            elsif main_doc.[SUM] = l_SUM_DT 
+	                and main_doc%state <> 'PROV'
+	                and main_doc%id = l_TRANSACTION then
+	                	
+	                -->> PSH VRI 27/03/2026 Перевод на проводку через PSH_EVENT 
+	                main_doc.[PSH_TO_EVENT](null);            
+            		&lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Непроведенный платежный документ с переданным P_TRANSACTION отправлен на проводку в PSH_EVENT: ID='||main_doc%id||' Возврат=1');
+                    P_TRANSACTION:=main_doc%id;
+                    return 1;			    
+	                
+	                /*MAIN_DOCUM_TO_PROV_REPEAT(main_doc);
+	                
+                    if main_doc%state = 'PROV' then
+	                    &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Непроведенный платежный документ с переданным P_TRANSACTION допровелся: ID='||main_doc%id||' Возврат=1');
+	                    --stdio.put_line_pipe('Непроведенный платежный документ с переданным P_TRANSACTION допровелся: ID='||main_doc%id||' Возврат=1', 'SBP');
+	                    P_TRANSACTION:=main_doc%id;
+	                    return 1;			    
+				    else 
+	                    &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Найденный платежный документ не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' Возврат=-100');
+	                    --stdio.put_line_pipe('Найденный платежный документ не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV],'')||' Возврат=-100', 'SBP');
+	                    P_TRANSACTION:=main_doc%id;
+	                    return -100;                    
+				    end if;*/
+				    --<< PSH VRI 27/03/2026
+				    
+	            end if;
+	        exception
+	            when no_data_found then
+                    null;
+	        end;
+	        /*ищем счет по переданному P_ACCOUNT*/
+	        begin
+                locate l_ACC_KT in ::[AC_FIN]
+                where l_ACC_KT.[MAIN_V_ID] = P_ACCOUNT;
+			    /*проверяем совпадение ИНН клиента по счету с переданным P_INN*/
+			    if nvl(l_ACC_KT.[CLIENT_V].[INN],0) != P_INN then
+			        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Не совпадает ИНН клиента по счету с переданным P_INN='||l_ACC_KT.[CLIENT_V].[INN]||'<>'||P_INN||' для платежа №'||P_OREDER||'. Возврат=-1');
+	                --stdio.put_line_pipe('Не совпадает ИНН клиента по счету с переданным P_INN='||l_ACC_KT.[CLIENT_V].[INN]||'<>'||P_INN||' для платежа №'||P_OREDER||'. Возврат=-1', 'SBP');
+			        return -1;
+			    end if;
+			    /*проверяем что счет не закрыт*/
+			    if l_ACC_KT.[DATE_CLOSE] is not null then 
+			        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Счет P_ACCOUNT='||P_ACCOUNT||' закрыт'||'. Возврат=-2');
+	                --stdio.put_line_pipe('Счет P_ACCOUNT='||P_ACCOUNT||' закрыт'||'. Возврат=-2', 'SBP');
+			        return -2;
+			    end if;
+			    l_CLIENT_V:=l_ACC_KT.[CLIENT_V];			    			    
+	        exception
+	            when no_data_found then
+	    			/*счет не найден*/       
+			        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Счет не найден P_ACCOUNT='||P_ACCOUNT||'. Возврат=-3'); 
+		            --stdio.put_line_pipe('Счет не найден P_ACCOUNT='||P_ACCOUNT||'. Возврат=-3', 'SBP');
+			        return -3;
+	        end;
+	        /*ищем счет НЗР соответствующий клиенту владельцу счета P_ACCOUNT*/	        
+	        begin
+                locate l_30233 in ::[AC_FIN]
+                where l_30233.[MAIN_USV] = l_30233_B
+	                and l_30233.[CLIENT_V] = l_CLIENT_V                
+	                --and substr(l_30233.[MAIN_V_ID],17,1) = '1'
+	                and l_30233.[TARGET].CODE = 'PSB_30233_SBP'
+	                and rownum = 1;
+                l_ACC:=l_30233;--l_30233_C;	                
+	        exception
+	            when no_data_found then
+		            &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Не найден счет НЗР соответствующий клиенту владельцу счета P_ACCOUNT='
+		            ||P_ACCOUNT||' и PL_USV.NUM='||l_30233_B.[NUM]||'. Возврат=-4');
+		            --stdio.put_line_pipe('Не найден счет НЗР соответствующий клиенту владельцу счета P_ACCOUNT='
+		            --||P_ACCOUNT||' и PL_USV.NUM='||l_30233_B.[NUM]||'. Возврат=-4', 'SBP');
+		            return -4;	            
+	        end;
+			P_NAZN:='Перечисление денежных средств по операции оплаты с использованием СБП за '||to_char(l_DATE_DOC, 'dd.mm.yy')
+			||substr(l_ACC.[NAME], instr(l_ACC.[NAME], ' по договору '), instr(l_ACC.[NAME], ' по операц') - instr(l_ACC.[NAME], ' по договору '));
+	        --stdio.put_line_pipe(substr(l_ACC.[NAME], instr(l_ACC.[NAME], ' по договору '), instr(l_ACC.[NAME],' по операц') - instr(l_ACC.[NAME],' по договору ')), 'SBP');
+			P_NAZN := P_NAZN||'. Комиссия '||to_char(nvl(P_COMMISSION / 100, 0), 'FM99,999,999,999,990.00')||' руб. НДС не облагается.';
+	        --::[FP_TUNE].[LIB].get_date_value('PSB_DATE_SBP', null, '0')		
+	        P_VID_DOC:=VID_DOC_BO;
+	   		P_FILIAL:=l_ACC.[FILIAL];
+			P_DEPART:=l_ACC.[DEPART]; --8935433
+			P#VIB_KT.[0]:=1;
+			l_CL_KT.[0]:=1;
+			l_CL_KT.[1].[1]:=l_CLIENT_V;
+			l_CL_KT.[1].[2]:=l_ACC_KT;		
+			P#VIB_DT.[0]:=1;		
+			l_CL_DT.[0]:=1;
+			l_CL_DT.[1].[1]:=l_CLIENT_V;
+			l_CL_DT.[1].[2]:=l_ACC;
+    		/*создаем платежный документ*/
+            &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Создаем платежный документ');
+            --savepoint A1_PSB_IBANK2_L2; 
+            --stdio.put_line_pipe('создаем платежный документ'||to_char(sysdate,'hh:mi:ss'), 'SBP');
+	        -->> Valishin 10/12/2024
+	        if substr(P_ACCOUNT,1,5) in ('40807') then
+                main_doc:=MAIN_DOCUM_CREATE(l_DOCUMENT_NUM, l_DATE_DOC, P_VID_DOC, l_SUM_DT, P_NAZN, l_CL_DT, P#VIB_DT, l_CL_KT, P#VIB_KT, P_FILIAL, P_DEPART, l_VO99090);
+            else
+                main_doc:=MAIN_DOCUM_CREATE(l_DOCUMENT_NUM, l_DATE_DOC, P_VID_DOC, l_SUM_DT, P_NAZN, l_CL_DT, P#VIB_DT, l_CL_KT, P#VIB_KT, P_FILIAL, P_DEPART, null);
+            end if;
+            main_doc.[DOCUMENT_USER] := l_user_cr;
+			--<< Valishin 10/12/2024
+		    &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' ID платежного документа ='||MAIN_DOC%id);
+            main_doc.[DOCUMENT_UNO]:='SBP-'||to_char(P_OREDER);
+            main_doc.[DATE_DOC]:=l_DATE_DOC;            
+			main_doc.[DATE_VAL]:=l_DATE_DOC;
+			--main_doc.[KL_KT].[2].[2] := l_RCPT_NAME;
+			--для финмона?
+			/*if doc.doc_type = 'sbp_payment_services' then
+				main_doc.[KL_KT].[2].[2]:=::[CFB_IBANK2].[L1].GET_ATTR(l_ref_msg, 'RCPT_LEGAL_NAME');
+			else
+				main_doc.[KL_KT].[2].[2]:=::[CFB_IBANK2].[L1].GET_ATTR(l_ref_msg, 'RCPT_LAST_NAME')||' '||::[CFB_IBANK2].[L1].GET_ATTR(l_ref_msg, 'RCPT_FIRST_NAME')||' '||::[CFB_IBANK2].[L1].GET_ATTR(l_ref_msg, 'RCPT_MIDDLE_NAME');
+			end if;*/
+			--папка?
+			/*if l_folder is not null then
+				l_ref_msg.[OBJ] := l_folder;
+			else
+				l_ref_msg.[OBJ] := main_doc;
+			end if;*/
+            P_TRANSACTION:=main_doc%id;
+            
+            -->> PSH VRI 27/03/2026 Перевод на проводку через PSH_EVENT 
+            main_doc.[PSH_TO_EVENT](null);            
+    		&lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Платежный документ отправлен на проводку в PSH_EVENT: ID='||main_doc%id);
+
+            /*MAIN_DOCUM_TO_PROV_REPEAT(main_doc);
+
+	        if main_doc%state <> 'PROV' then
+                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Платежный документ не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV],'')||' Возврат=-100');
+                --stdio.put_line_pipe('Платежный документ не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' Возврат=-100', 'SBP');
+                b_100:=true;
+            else
+                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Платежный документ проведен: ID='||main_doc%id);
+	        end if;*/
+	        --<< PSH VRI 27/03/2026
+			
+			-->> PSB VRI 31/07/2025 Случай если сумма комиссии ноль
+			if nvl(P_COMMISSION,0) > 0 then
+			    /*когда-то комиссия рассчитывалась таким образом, а не передавалась нам от ПС*/
+				--if nvl(P_COMMISSION,0)=0 then 
+				--  l_SUM_DT := round(0.007*P_AMOUNT/100,2);
+				--else 
+				l_SUM_DT:=P_COMMISSION/100;
+	            &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Комиссия='||l_SUM_DT);
+				--stdio.put_line_pipe('Комиссия='||l_SUM_DT, 'SBP');
+				--end if;
+	            l_ACC_KT:=l_70601;			
+	            --/*ищем счет НЗР соответствующий клиенту владельцу счета P_ACCOUNT*/            
+	            /*begin
+	                locate l_30232 in ::[AC_FIN]
+	                where l_30232.[MAIN_USV] = l_30232_В
+		                and l_30232.[CLIENT_V] = l_CLIENT_V
+		                --?and l_30232.[TARGET].CODE like 'PSB_30232%'
+		                and rownum = 1;
+	                l_ACC:=l_30232;--l_30232_C
+	            exception
+	                when no_data_found then
+			            &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Не найден счет НЗР соответствующий клиенту владельцу счета P_ACCOUNT='
+			            ||P_ACCOUNT||' и PL_USV.NUM='||l_30232_B.[NUM]||'. Возврат=-6');
+			            --stdio.put_line_pipe('Не найден счет НЗР соответствующий клиенту владельцу счета P_ACCOUNT='
+			            --||P_ACCOUNT||' и PL_USV.NUM='||l_30232_B.[NUM]||'. Возврат=-6', 'SBP');
+		                return -6;                
+	            end;*/            
+	            l_ACC:=l_30233;--lе_30233_C;
+	            P_NAZN:='Комиссия по операции с использованием СБП за '||to_char(l_DATE_DOC,'dd.mm.yy')
+	            ||substr(l_ACC.[NAME], instr(l_ACC.[NAME],' по договору '), instr(l_ACC.[NAME], ' по операц') - instr(l_ACC.[NAME], ' по договору '));
+	            --stdio.put_line_pipe(substr(l_ACC.[NAME], instr(l_ACC.[NAME],' по договору '), instr(l_ACC.[NAME], ' по операц') - instr(l_ACC.[NAME], ' по договору ')), 'SBP');            
+				P_VID_DOC:=VID_DOC_MO;
+				P_FILIAL:=l_ACC.[FILIAL];
+				P_DEPART:=l_ACC.[DEPART];
+				P#VIB_DT.[0]:=1;
+				l_CL_DT.[0]:=1;
+				l_CL_DT.[1].[1]:=l_CLIENT_V;
+				l_CL_DT.[1].[2]:=l_ACC;
+				P#VIB_KT.[0]:=1;
+				l_CL_KT.[0]:=1;
+				l_CL_KT.[1].[1]:=l_CLIENT_V;
+				l_CL_KT.[1].[2]:=l_ACC_KT;
+	    		/*создаем комиссионный документ*/
+	            &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Создаем комиссионный документ');
+	            --stdio.put_line_pipe('создаем комиссионный документ'||to_char(sysdate,'hh:mi:ss'), 'SBP');
+		        main_doc:=MAIN_DOCUM_CREATE(l_DOCUMENT_NUM, l_DATE_DOC, P_VID_DOC, l_SUM_DT, P_NAZN, l_CL_DT, P#VIB_DT, l_CL_KT, P#VIB_KT, P_FILIAL, P_DEPART, null);
+			    &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' ID комиссионного документа ='||main_doc%id);
+			    main_doc.[DOCUMENT_UNO]:='SBP-'||to_char(P_OREDER);
+			    main_doc.[DATE_VAL]:=l_DATE_DOC;
+				main_doc.[DATE_DOC]:=l_DATE_DOC;
+				main_doc.[DOCUMENT_USER] := l_user_cr;
+
+				
+				-->> PSH VRI 27/03/2026 Перевод на проводку через PSH_EVENT 
+	            main_doc.[PSH_TO_EVENT](null);            
+	    		&lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Комиссионный документ отправлен на проводку в PSH_EVENT: ID='||main_doc%id);
+				
+				/*main_doc.[DOC_TO_PROV]();
+				if main_doc%state = 'TO_RKO' then
+					main_doc.[DOC_TO_PROV]();
+				end if;
+				
+		        if main_doc%state <> 'PROV' then
+	                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Комиссионный документ не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' ==-102');
+	                --stdio.put_line_pipe('Комиссионный документ не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' ==-102', 'SBP');
+	                --b_102:=true;
+	            else
+	                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Комиссионный документ проведен: ID='||main_doc%id);
+		        end if;*/
+		        --<< PSH VRI 27/03/2026
+		        
+			else   
+			    &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Комиссионный документ не формируем т.к. сумма = 0');
+		    end if;		        
+	        
+	        if b_100 then
+	            return -100;
+	        --elsif b_102 then
+	            --return -102;
+	        end if;
+	        commit;	        
+	        return 1;
+        exception
+            when others then
+                --&lj_lib.write_log('EXEC_QUERY', substr(sqlerrm' Возврат=0', 1, 200));
+                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' '||sqlerrm||' Возврат=0');
+			    --stdio.put_line_pipe(sqlerrm||' Возврат=0', 'SBP');
+			    --rollback to A1_PSB_IBANK2_L2;
+    			P_TRANSACTION :=0;
+				return 0;
+		end;
+    -- 2=возрат-резерв/4=выплата-резервирование/8=диспут =====================================================================
+    elsif  P_OPER in (2, 4, 8)  then
+        begin
+	        l_SUM_DT:=P_AMOUNT/100;
+	        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Сумма платежа='||l_SUM_DT);
+			--stdio.put_line_pipe(Сумма платежа='||l_SUM_DT, 'SBP');
+			--l_DATE_DOC:=::[SYSTEM].[OP_DATE];--trunc(sysdate);
+			l_DATE_DOC:=P_DATE_DOC;
+			/*ищем уже проведенный документ по номеру документа в ПС на дату платежа*/            			
+            begin
+                locate main_doc in ::[MAIN_DOCUM] 
+                --where trunc(main_doc.[DATE_PROV]) = l_DATE_DOC
+				where main_doc.[DATE_DOC] = l_DATE_DOC   		-->> PSB VRI 28/07/2025 Заменил, чтобы находился и непроведённый документ с таким P_OREDER
+					and main_doc.[VID_DOC]  = VID_DOC_BO        
+	                and main_doc.[DOCUMENT_UNO] = 'SBP'||decode(P_OPER,2,'V',4,'W',8,'D','')||to_char(P_REQUEST_NUM)||'-'||to_char(P_OREDER);
+	            if main_doc.[SUM] = l_SUM_DT
+	            	and trunc(main_doc.[DATE_PROV]) = l_DATE_DOC -->> PSB VRI 28/07/2025 Добавил, чтобы проверялась дата проводки
+	                and main_doc%state = 'PROV' then
+	                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Найден проведенный платежный документ: ID='||main_doc%id||' Возврат=1');
+	                --stdio.put_line_pipe('Найден проведенный платежный документ: ID='||main_doc%id||' Возврат=1', 'SBP');
+	                P_TRANSACTION:=main_doc%id;
+	                return 1;
+	            /*если передан P_TRANSACTION, проверяем что значение совпадает и пытаемся провести*/
+	            elsif main_doc.[SUM] = l_SUM_DT
+	                and main_doc%state <> 'PROV'
+	                and main_doc%id = l_TRANSACTION then
+		            -->> VRI 03/03/2026 
+					if  main_doc.[ACC_DT].[PLAN_SALDO](P_DT==true) < (P_AMOUNT/100 + nvl(P_COMMISSION/100, 0)) then
+				        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Недостаточно средств в сумме ' || (-1)*((P_AMOUNT/100 + nvl(P_COMMISSION/100, 0))-main_doc.[ACC_DT].[PLAN_SALDO](P_DT==true)) ||' на счёте P_ACCOUNT = '||P_ACCOUNT||' для платежа №'||P_OREDER||'. Возврат=-7');
+				        return -7;
+					end if; 
+					--<< VRI 03/03/2026
+
+		            -->> PSH VRI 27/03/2026 Перевод на проводку через PSH_EVENT 
+		            main_doc.[PSH_TO_EVENT](null);            
+		    		&lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Найденный платежный документ отправлен на проводку в PSH_EVENT: ID='||main_doc%id||' Возврат=1');
+                    P_TRANSACTION:=main_doc%id;
+                    return 1;			    
+
+	                /*MAIN_DOCUM_TO_PROV_REPEAT(main_doc);
+					
+                    if main_doc%state = 'PROV' then
+	                    &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Непроведенный платежный документ с переданным P_TRANSACTION допровелся: ID='||main_doc%id||' Возврат=1');
+	                    --stdio.put_line_pipe('Непроведенный платежный документ с переданным P_TRANSACTION допровелся: ID='||main_doc%id||' Возврат=1', 'SBP');
+	                    P_TRANSACTION:=main_doc%id;
+	                    return 1;			    
+				    else 
+	                    &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Найденный платежный документ не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' Возврат=-100');
+	                    --stdio.put_line_pipe('Найденный платежный документ не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV],'')||' Возврат=-100', 'SBP');
+	                    P_TRANSACTION:=main_doc%id;
+	                    return -100;                    
+				    end if;*/
+				    --<< PSH VRI 27/03/2026
+				    
+	            end if;
+	        exception
+	            when no_data_found then
+                    null;
+	        end;
+	        /*ищем счет по переданному P_ACCOUNT*/
+	        begin
+                locate l_ACC in ::[AC_FIN]
+                where l_ACC.[MAIN_V_ID] = P_ACCOUNT;
+			    /*проверяем совпадение ИНН клиента по счету с переданным P_INN*/
+			    if nvl(l_ACC.[CLIENT_V].[INN],0) != P_INN then
+			        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Не совпадает ИНН клиента по счету с переданным P_INN='||l_ACC.[CLIENT_V].[INN]||'<>'||P_INN||' для платежа №'||P_OREDER||'. Возврат=-1');
+	                --stdio.put_line_pipe('Не совпадает ИНН клиента по счету с переданным P_INN='||l_ACC.[CLIENT_V].[INN]||'<>'||P_INN||' для платежа №'||P_OREDER||'. Возврат=-1', 'SBP');
+			        return -1;
+			    end if;
+			    /*проверяем что счет не закрыт*/
+			    if l_ACC.[DATE_CLOSE] is not null then 
+			        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Счет P_ACCOUNT='||P_ACCOUNT||' закрыт'||'. Возврат=-2');
+	                --stdio.put_line_pipe('Счет P_ACCOUNT='||P_ACCOUNT||' закрыт'||'. Возврат=-2', 'SBP');
+			        return -2;
+			    end if;
+			    l_CLIENT_V:=l_ACC.[CLIENT_V];			    			    
+	        exception
+	            when no_data_found then
+	    			/*счет не найден*/       
+			        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Счет не найден P_ACCOUNT='||P_ACCOUNT||'. Возврат=-3'); 
+		            --stdio.put_line_pipe('Счет не найден P_ACCOUNT='||P_ACCOUNT||'. Возврат=-3', 'SBP');
+			        return -3;
+	        end;
+
+            -->> VRI 03/03/2026 
+			if  l_ACC.[PLAN_SALDO](P_DT==true) < (P_AMOUNT/100 + nvl(P_COMMISSION/100, 0)) then
+		        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Недостаточно средств в сумме ' || (-1)*((P_AMOUNT/100 + nvl(P_COMMISSION/100, 0))-l_ACC.[PLAN_SALDO](P_DT==true)) ||' на счёте P_ACCOUNT = '||P_ACCOUNT||' для платежа №'||P_OREDER||'. Возврат=-7');
+		        return -7;
+			end if; 
+			--<< VRI 03/03/2026
+
+	        /*ищем счет НЗР соответствующий клиенту владельцу счета P_ACCOUNT*/	        
+	        begin
+                locate l_30233 in ::[AC_FIN]
+                where l_30233.[MAIN_USV] = l_30233_B
+	                and l_30233.[CLIENT_V] = l_CLIENT_V --29533218
+	                --and substr(l_30233.[MAIN_V_ID],17,1) = '1'
+	                and l_30233.[TARGET].CODE = 'PSB_30233_SBP'
+	                and rownum = 1;
+                l_ACC_KT:=l_30233;
+	        exception
+	            when no_data_found then
+		            &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Не найден счет НЗР соответствующий клиенту владельцу счета P_ACCOUNT='
+		            ||P_ACCOUNT||' и PL_USV.NUM='||l_30233_B.[NUM]||'. Возврат=-4');
+		            --stdio.put_line_pipe('Не найден счет НЗР соответствующий клиенту владельцу счета P_ACCOUNT='
+		            --||P_ACCOUNT||' и PL_USV.NUM='||l_30233_B.[NUM]||'. Возврат=-4', 'SBP');
+		            return -4;	            
+	        end;
+			
+			if P_OPER in (2, 4)  then
+			    P_NAZN:='Возврат средств по операциям отмена/возврат СБП за '||to_char(l_DATE_DOC, 'dd.mm.yy')
+			    ||substr(l_ACC_KT.[NAME], instr(l_ACC_KT.[NAME], ' по договору '), instr(l_ACC_KT.[NAME], ' по операц') - instr(l_ACC_KT.[NAME], ' по договору '));
+            elsif P_OPER = 8 then
+		        P_NAZN:='Списание средств по операциям диспута СБП за '||to_char(l_DATE_DOC,'dd.mm.yy')
+		        ||substr(l_ACC_KT.[NAME],instr(l_ACC_KT.[NAME], ' по договору '), instr(l_ACC_KT.[NAME], ' по операц') - instr(l_ACC_KT.[NAME], ' по договору '));
+			end if;
+	        --::[FP_TUNE].[LIB].get_date_value('PSB_DATE_SBP', null, '0')
+	        P_VID_DOC:=VID_DOC_BO;
+	   		P_FILIAL:=l_ACC.[FILIAL];
+			P_DEPART:=l_ACC.[DEPART]; --8935433
+			P#VIB_DT.[0]:=1;
+			l_CL_DT.[0]:=1;
+			l_CL_DT.[1].[1]:=l_ACC.[CLIENT_V];
+			l_CL_DT.[1].[2]:=l_ACC;
+            P#VIB_KT.[0]:=1;
+			l_CL_KT.[0]:=1;
+			l_CL_KT.[1].[1]:=l_ACC_KT.[CLIENT_V];
+			l_CL_KT.[1].[2]:=l_ACC_KT;
+    		/*создаем платежный документ*/
+            &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Создаем платежный документ');
+            --savepoint A2_PSB_IBANK2_L2; 
+            --stdio.put_line_pipe('создаем платежный документ'||to_char(sysdate,'hh:mi:ss'), 'SBP');
+			--<< Valishin 10/12/2024            
+	        if substr(P_ACCOUNT,1,5) in ('40807') then
+                main_doc:=MAIN_DOCUM_CREATE(l_DOCUMENT_NUM, l_DATE_DOC, P_VID_DOC, l_SUM_DT, P_NAZN, l_CL_DT, P#VIB_DT, l_CL_KT, P#VIB_KT, P_FILIAL, P_DEPART, l_VO99010);
+            else
+                main_doc:=MAIN_DOCUM_CREATE(l_DOCUMENT_NUM, l_DATE_DOC, P_VID_DOC, l_SUM_DT, P_NAZN, l_CL_DT, P#VIB_DT, l_CL_KT, P#VIB_KT, P_FILIAL, P_DEPART, null);
+            end if;
+            main_doc.[DOCUMENT_USER] := l_user_cr;
+			--<< Valishin 10/12/2024
+		    &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' ID платежного документа ='||MAIN_DOC%id);
+		    if P_OPER = 2 then 
+		        main_doc.[DOCUMENT_UNO]:='SBPV'||to_char(P_REQUEST_NUM)||'-'||to_char(P_OREDER);
+		    elsif P_OPER = 4 then 
+		        main_doc.[DOCUMENT_UNO]:='SBPW'||to_char(P_REQUEST_NUM)||'-'||to_char(P_OREDER); 
+		    elsif P_OPER = 8 then 
+	            main_doc.[DOCUMENT_UNO]:='SBPD'||to_char(P_REQUEST_NUM)||'-'||to_char(P_OREDER);
+	        end if;
+            main_doc.[DATE_DOC]:=l_DATE_DOC;            
+			main_doc.[DATE_VAL]:=l_DATE_DOC;
+            P_TRANSACTION:=main_doc%id;			
+
+            -->> PSH VRI 27/03/2026 Перевод на проводку через PSH_EVENT 
+            main_doc.[PSH_TO_EVENT](null);            
+    		&lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Платежный документ отправлен на проводку в PSH_EVENT: ID='||main_doc%id);
+
+            /*MAIN_DOCUM_TO_PROV_REPEAT(main_doc);
+            
+	        if main_doc%state <> 'PROV' then
+                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Платежный документ не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV],'')||' Возврат=-100');
+                --stdio.put_line_pipe('Платежный документ не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' Возврат=-100', 'SBP');
+                b_100:=true;
+            else
+                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Платежный документ проведен: ID='||main_doc%id);
+	        end if;*/
+	        --<< PSH VRI 27/03/2026
+	        
+	        -->> PSB VRI 31/07/2025 Случай если сумма комиссии ноль
+			if nvl(P_COMMISSION,0) > 0 then
+		        if P_OPER=4 then
+				    l_SUM_DT:=P_COMMISSION/100;
+	                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Комиссия1='||l_SUM_DT);
+				    --stdio.put_line_pipe('Комиссия1='||l_SUM_DT, 'SBP');
+	                --присвоили выше, убрал?--l_ACC:=l_ACC;
+	                l_ACC_KT:=l_30233;
+		            P_NAZN:='Комиссия по операции с использованием СБП за '||to_char(l_DATE_DOC, 'dd.mm.yy')
+		            ||substr(l_ACC_KT.[NAME], instr(l_ACC_KT.[NAME], ' по договору '), instr(l_ACC_KT.[NAME], ' по операц') - instr(l_ACC_KT.[NAME], ' по договору '));	        
+		            --stdio.put_line_pipe(substr(l_ACC_KT.[NAME], instr(l_ACC_KT.[NAME], ' по договору '), instr(l_ACC_KT.[NAME], ' по операц') - instr(l_ACC_KT.[NAME], ' по договору ')), 'SBP');
+					P_VID_DOC:=VID_DOC_MO;
+					P_FILIAL:=l_ACC.[FILIAL];
+					P_DEPART:=l_ACC.[DEPART];
+					P#VIB_DT.[0]:=1;
+					l_CL_DT.[0]:=1;
+					l_CL_DT.[1].[1]:=l_CLIENT_V;
+					l_CL_DT.[1].[2]:=l_ACC;
+					P#VIB_KT.[0]:=1;
+					l_CL_KT.[0]:=1;
+					l_CL_KT.[1].[1]:=l_CLIENT_V;
+					l_CL_KT.[1].[2]:=l_ACC_KT;
+					/*создаем комиссионный документ1*/
+			        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Создаем комиссионный документ1');
+			        --stdio.put_line_pipe('создаем комиссионный документ1'||to_char(sysdate,'hh:mi:ss'), 'SBP');
+					main_doc:=MAIN_DOCUM_CREATE(l_DOCUMENT_NUM, l_DATE_DOC, P_VID_DOC, l_SUM_DT, P_NAZN, l_CL_DT, P#VIB_DT, l_CL_KT, P#VIB_KT, P_FILIAL, P_DEPART, null);
+			        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' ID комиссионного документа1 ='||main_doc%id);
+					main_doc.[DOCUMENT_UNO]:='SBPW'||to_char(P_REQUEST_NUM)||'-'||to_char(P_OREDER);
+			    	main_doc.[DATE_VAL]:=l_DATE_DOC;
+					main_doc.[DATE_DOC]:=l_DATE_DOC;
+					main_doc.[DOCUMENT_USER] := l_user_cr;				
+	                
+				    main_doc.[DOC_TO_PROV]();
+					if main_doc%state = 'TO_RKO' then
+						main_doc.[DOC_TO_PROV]();
+					end if;			    
+					
+		            if main_doc%state <> 'PROV' then
+	                    &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Комиссионный документ1 не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' ==-102');
+	                    --stdio.put_line_pipe('Комиссионный документ не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' ==-102', 'SBP');
+	                    --b_102:=true;
+	                else
+	                    &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Комиссионный документ1 проведен: ID='||main_doc%id);
+		            end if;
+		        --end if;
+		        /*почему-то формируется только для типа операции Выплата-резервирование*/
+		        --if P_OPER=4 then 
+		            &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Комиссия2='||l_SUM_DT);
+		            l_ACC:=l_30233; 
+		            l_ACC_KT:=l_70601;
+		            P_NAZN:= 'Комиссия по операции с использованием СБП за '||to_char(l_DATE_DOC, 'dd.mm.yy')
+		            ||substr(l_ACC.[NAME], instr(l_ACC.[NAME], ' по договору '), instr(l_ACC.[NAME], ' по операц') - instr(l_ACC.[NAME], ' по договору '));
+		            --stdio.put_line_pipe(substr(l_ACC.[NAME], instr(l_ACC.[NAME],' по договору '), instr(l_ACC.[NAME], ' по операц') - instr(l_ACC.[NAME], ' по договору ')), 'SBP');                
+					P_VID_DOC:=VID_DOC_MO;
+					P_FILIAL:=l_ACC.[FILIAL];
+					P_DEPART:=l_ACC.[DEPART];
+				    P#VIB_DT.[0]:=1;
+					l_CL_DT.[0]:=1;
+					l_CL_DT.[1].[1]:=l_CLIENT_V;
+					l_CL_DT.[1].[2]:=l_ACC;
+					P#VIB_KT.[0]:=1;
+					l_CL_KT.[0]:=1;
+					l_CL_KT.[1].[1]:=l_CLIENT_V;
+					l_CL_KT.[1].[2]:=l_ACC_KT;
+					/*создаем комиссионный документ2*/
+			        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Создаем комиссионный документ2');
+			        --stdio.put_line_pipe('создаем комиссионный документ2'||to_char(sysdate,'hh:mi:ss'), 'SBP');
+					main_doc:=MAIN_DOCUM_CREATE(l_DOCUMENT_NUM, l_DATE_DOC, P_VID_DOC, l_SUM_DT, P_NAZN, l_CL_DT, P#VIB_DT, l_CL_KT, P#VIB_KT, P_FILIAL, P_DEPART, null);
+			        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' ID комиссионного документа2 ='||main_doc%id);
+				    /*почему-же, почему здесь это условие? по той-же причине...*/
+				    --if P_OPER = 4 then 
+				        main_doc.[DOCUMENT_UNO]:='SBPW'||to_char(P_REQUEST_NUM)||'-'||to_char(P_OREDER); 
+				    --else 
+				      --  main_doc.[DOCUMENT_UNO]:='SBPV'||to_char(P_REQUEST_NUM)||'-'||to_char(P_OREDER);
+				    --end if;
+				    main_doc.[DATE_VAL]:=l_DATE_DOC;
+					main_doc.[DATE_DOC]:=l_DATE_DOC;
+					main_doc.[DOCUMENT_USER] := l_user_cr;
+		            
+				    main_doc.[DOC_TO_PROV]();
+					if main_doc%state = 'TO_RKO' then
+						main_doc.[DOC_TO_PROV]();
+					end if;
+					
+		            if main_doc%state <> 'PROV' then
+		                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Комиссионный документ2 не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' ==-102');
+		                --stdio.put_line_pipe('Комиссионный документ2 не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' ==-102', 'SBP');
+		                --b_102:=true;
+		            else
+		                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Комиссионный документ2 проведен: ID='||main_doc%id);
+		            end if;
+		        end if;
+		    else
+		        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Комиссионный документ не формируем т.к. сумма = 0');
+		    end if;		        
+		    
+	        if b_100 then
+	            return -100;
+	        --elsif b_102 then
+	            --return -102;
+	        end if;
+	        commit;
+	        return 1;
+        exception
+            when others then
+                --&lj_lib.write_log('EXEC_QUERY', substr(sqlerrm' Возврат=0', 1, 200));
+                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' '||sqlerrm||' Возврат=0');
+			    --stdio.put_line_pipe(sqlerrm||' Возврат=0', 'SBP');
+			    --rollback to A2_PSB_IBANK2_L2;
+    			P_TRANSACTION :=0;
+				return 0;
+        end;
+    -- 3=возрат-списание/5=выплата-списание ==================================================================================
+    elsif P_OPER in (3, 5)  then        
+        begin
+			/*ищем подтверждаемый документ по номеру транзакции*/
+            locate main_doc in ::[MAIN_DOCUM] 
+            where main_doc%id = l_TRANSACTION;
+	        --savepoint A3_PSB_IBANK2_L2;
+            if main_doc%state = 'PROV' then
+                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Найден проведенный платежный документ: ID='||main_doc%id||' Возврат=1');
+	            --stdio.put_line_pipe('Найден проведенный платежный документ: ID='||main_doc%id||' Возврат=1', 'SBP');
+	            P_TRANSACTION:=main_doc%id;
+	            return 1;
+	            /*если передан P_TRANSACTION, проверяем что значение совпадает и пытаемся провести*/
+            else
+            	
+	            -->> PSH VRI 27/03/2026 Перевод на проводку через PSH_EVENT 
+	            main_doc.[PSH_TO_EVENT](null);            
+	    		&lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Непроведенный платежный документ отправлен на проводку в PSH_EVENT: ID='||main_doc%id||' Возврат=1');
+                P_TRANSACTION:=main_doc%id;
+                return 1;
+
+                /*MAIN_DOCUM_TO_PROV_REPEAT(main_doc);
+                
+			    if main_doc%state = 'PROV' then
+	                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Непроведенный платежный документ с переданным P_TRANSACTION допровелся: ID='||main_doc%id||' Возврат=1');
+	                --stdio.put_line_pipe('Непроведенный платежный документ с переданным P_TRANSACTION допровелся: ID='||main_doc%id||' Возврат=1', 'SBP');
+	                P_TRANSACTION:=main_doc%id;
+	                return 1;
+				else 
+	                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Найденный платежный документ не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' Возврат=-100');
+	                --stdio.put_line_pipe('Найденный платежный документ не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' Возврат=-100', 'SBP');
+	                P_TRANSACTION:=main_doc%id;
+	                return -100;
+				end if;*/
+				--<< PSH VRI 27/03/2026
+				
+	        end if;
+        exception
+            when no_data_found then
+                --&lj_lib.write_log('EXEC_QUERY', substr(sqlerrm' Возврат=-5', 1, 200));
+                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Не найдено платежного документа соответствующего переданному P_TRANSACTION: '||sqlerrm||' Возврат=-5');
+			    --stdio.put_line_pipe('Не найдено платежного документа соответствующего переданному P_TRANSACTION: '||sqlerrm||' Возврат=-5', 'SBP');
+    			P_TRANSACTION :=0;
+				return -5;        
+            when others then
+                --&lj_lib.write_log('EXEC_QUERY', substr(sqlerrm' Возврат=0', 1, 200));
+                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' '||sqlerrm||' Возврат=0');
+			    --stdio.put_line_pipe(sqlerrm||' Возврат=0', 'SBP');
+			    --rollback to A3_PSB_IBANK2_L2;
+    			P_TRANSACTION :=0;
+				return 0;
+        end;
+    -- 6=отмена возврата/7=отмена выплаты ====================================================================================
+    elsif  P_OPER in (6, 7) then         
+        begin
+			/*ищем ликвидируемый документ по номеру транзакции*/
+            locate main_doc in ::[MAIN_DOCUM] 
+            where main_doc%id = l_TRANSACTION;
+            --savepoint A4_PSB_IBANK2_L2;
+            if main_doc%state = 'PROV' then
+                main_doc%state:='DELETED';
+  		        if main_doc%state != 'DELETED'  then  
+	                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Найденный платежный документ не ликвидирован: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' Возврат=0');
+	                --stdio.put_line_pipe('Найденный платежный документ не ликвидирован: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' Возврат=0', 'SBP');
+	                P_TRANSACTION:=main_doc%id;
+	                return 0;
+  		        else
+                    &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Найденный платежный документ ликвидирован: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' Возврат=1');
+                    --stdio.put_line_pipe('Найденный платежный документ ликвидирован: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' Возврат=1', 'SBP');
+  		        end if;
+            elsif main_doc%state = 'DELETED' then
+                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Найденный платежный документ уже ликвидирован: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' Возврат=1');
+                --stdio.put_line_pipe('Найденный платежный документ уже ликвидирован: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' Возврат=1', 'SBP');
+	            return 1;
+            else
+                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Найденный платежный документ не проведен и не может быть ликвидирован: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' Возврат=0');
+                --stdio.put_line_pipe('Найденный платежный документ не проведен и не может быть ликвидирован: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' Возврат=0', 'SBP');
+                P_TRANSACTION:=main_doc%id;
+                return 0;            
+            end if;
+        exception            
+            when no_data_found then
+                --&lj_lib.write_log('EXEC_QUERY', substr(sqlerrm' Возврат=-101', 1, 200));
+                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Не найдено платежного документа для ликвидации соответствующего переданному P_TRANSACTION: '||sqlerrm||' Возврат=-101');
+			    --stdio.put_line_pipe('Не найдено платежного документа для ликвидации соответствующего переданному P_TRANSACTION: '||sqlerrm||' Возврат=-101', 'SBP');
+    			P_TRANSACTION :=0;
+				return -101;
+            when others then
+                --&lj_lib.write_log('EXEC_QUERY', substr(sqlerrm' Возврат=0', 1, 200));
+                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' '||sqlerrm||' Возврат=0');
+			    --stdio.put_line_pipe(sqlerrm||' Возврат=0', 'SBP');
+			    --rollback to A3_PSB_IBANK2_L2;
+    			P_TRANSACTION :=0;
+				return 0;
+        end;
+    -- -2=запрос остатка по счету ============================================================================================
+    elsif  P_OPER = -2 then                 
+        begin
+			l_DATE_DOC:=trunc(P_DATE_DOC)+1;
+            P_TRANSACTION :=0;
+	        /*ищем счет по переданному P_ACCOUNT*/
+            locate l_ACC in ::[AC_FIN]
+            where l_ACC.[MAIN_V_ID] = P_ACCOUNT;
+            /*проверяем совпадение ИНН клиента по счету с переданным P_INN*/
+			if nvl(l_ACC.[CLIENT_V].[INN],0) != P_INN then
+			    &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Не совпадает ИНН клиента по счету с переданным P_INN='||l_ACC.[CLIENT_V].[INN]||'<>'||P_INN||' для платежа №'||P_OREDER||'. Возврат=-1');  
+	            --stdio.put_line_pipe('Не совпадает ИНН клиента по счету с переданным P_INN='||l_ACC.[CLIENT_V].[INN]||'<>'||P_INN||' для платежа №'||P_OREDER||'. Возврат=-1', 'SBP');
+                P_AMOUNT:=null;
+			    return -1;
+			end if;
+			/*проверяем что счет не закрыт*/
+			if l_ACC.[DATE_CLOSE] is not null then 
+			    &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Счет P_ACCOUNT='||P_ACCOUNT||' закрыт'||'. Возврат=-2');
+	            --stdio.put_line_pipe('Счет P_ACCOUNT='||P_ACCOUNT||' закрыт'||'. Возврат=-2', 'SBP');
+                P_AMOUNT:=null;	            
+			    return -2;
+			end if;
+            P_AMOUNT:=nvl(abs(::[RUNTIME].[F_5].A('И'||l_ACC||'СН',l_DATE_DOC)),0)*100;
+        exception
+            when no_data_found then        
+			    /*счет не найден*/
+		        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' Счет не найден P_ACCOUNT='||P_ACCOUNT||'. Возврат=-3'); 
+	            --stdio.put_line_pipe('Счет не найден P_ACCOUNT='||P_ACCOUNT||'. Возврат=-3', 'SBP');
+                P_AMOUNT:=null;	            
+		        return -3;
+            when others then
+                --&lj_lib.write_log('EXEC_QUERY', substr(sqlerrm' Возврат=0', 1, 200));
+                &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' '||sqlerrm||' Возврат=0');
+			    --stdio.put_line_pipe(sqlerrm||' Возврат=0', 'SBP');
+			    --rollback to A3_PSB_IBANK2_L2;
+                P_AMOUNT:=null;			    
+    			P_TRANSACTION :=0;
+				return 0;
+        end;
+    end if;
+    return 1;
+exception
+	when others then
+    	--&lj_lib.write_log('EXEC_QUERY', substr(sqlerrm' Возврат=0', 1, 200));
+        &lj_lib.write_log('EXEC_QUERY', 'P_OREDER='||nvl(P_OREDER, ' ')||'('||P_REQUEST_NUM||')'||' '||sqlerrm||' Возврат=0');
+		--stdio.put_line_pipe(sqlerrm||' Возврат=0', 'SBP');
+		--rollback to A3_PSB_IBANK2_L2;
+        P_AMOUNT:=null;			    
+    	P_TRANSACTION :=0;
+		return 0;    
+end;
+
+-->> PSH VRI 13/10/2025 CFT-2614 Интеграция платежного метода Money transfer ------------------------------------------------------------------
+public function EXECUTE_QUERY_MTR
+(
+P_DATE_DOC  date_time                 --Дата платежа 
+,P_PAY_INN  varchar2(12) 	          --ИНН
+,P_PAY_KPP  varchar2(9) 	          --КПП плательщика
+,P_PAY_NAME varchar2(160)             --Наименование плательщика
+,P_PAY_ACC  varchar2(20)              --Номер счета плательщика 
+,P_PAY_BIC  varchar2(9)      	      --БИК банка плательщика
+,P_PAY_COR_ACC varchar2(20)           --Коррсчет банка плательщика
+,P_AMOUNT	number        			  --Сумма платежа (в рублях)
+,P_REC_BIC 	varchar2(9)				  --БИК банка получателя
+,P_REC_ACC  varchar2(20)			  --Номер счета в банке получателя
+,P_REC_BNK_NAME varchar2(160)		  --Наименование банка получателя
+,P_REC_COR_ACC varchar2(20)			  --Корр счет банка получателя
+,P_REC_NAME varchar2(160)             --Наименование получателя
+,P_REC_INN  varchar2(12) 			  --ИНН получателя физ лица при наличии
+,P_OPER 	integer                   --Тип операции: 1 - Money transfer
+,P_ORDER 	number					  --Очередность платежа в платежке (5 - все остальные платежи)
+,P_DETAIL 	memo					  --Назначение платежа "Перевод собственных средств"
+,P_ORDER_ID varchar2              	  --Идентификатор транзакций в ПС
+,P_VO		varchar2				  --Код валютной операции
+,P_TRANSACTION IN OUT NOCOPY varchar2 --ID созданного платежного документа
+)
+return number
+--                                      --     0    -возникла ошибка при обработке запроса на создание/допроводку/ликвидацию платежного документа
+--                                      --     1    -найден проведенный платежный документ/непроведенный платежный документ с переданным P_TRANSACTION допровелся/создан платежный документ, документ проведен/ликвидирован
+--                                      --     -1   -не совпадает ИНН клиента по счету с переданным P_INN
+--                                      --     -2   -счет P_ACCOUNT:'||P_ACCOUNT||' закрыт
+--                                      --     -3   -счет P_ACCOUNT не найден в справочнике Финансовые счета
+--                                      --     -4   -не найден банк получателя среди действующих банков
+--                                      --     -5   -переданный код VO не найден среди действующих кодов валютных операций
+--                                      --     -6   -счет получателя не принадлежит физ.лицу-резиденту
+--                                      --     -7   -недостаточно средств на счёте плательщика
+--                                      --     -8   -ошибка создания документа, некорректные данные в полях P_PAY_INN, P_PAY_KPP, P_PAY_BIC, P_REC_BIC, P_PAY_ACC, P_PAY_COR_ACC, P_REC_COR_ACC, P_REC_ACC, P_REC_INN
+--                                      --     -100 -найденный платежный документ не проведен/созданный платежный документ не проведен
+is
+l_STR MEMO_BIG;
+l_TRANSACTION varchar2;
+l_DATE_DOC date;
+l_SUM_DT number; -- Сумма Дт.
+l_DOCUMENT_NUM string:='1'; -- Номер платежного документа
+
+l_ACC_DT ref [AC_FIN];
+l_ACC_KT ref [AC_FIN];
+l_CLIENT_V_DT ref [CLIENT];
+l_CLIENT_V_KT ref [CLIENT];
+
+P_NAZN [MEMO]; -- Назначение платежа
+P_VID_DOC ref [NAME_PAYDOC]; -- Вид документа
+P_FILIAL ref [BRANCH]; -- Филиал документа
+P_DEPART ref [DEPART]; -- Подразделение документа
+l_bank_KT	ref [CL_BANK_N];
+P#VIB_KT [CASE_BETWEEN_TWO];
+l_CL_KT	[REQ_CLIENT];
+P#VIB_DT [CASE_BETWEEN_TWO];
+l_CL_DT	[REQ_CLIENT];
+main_doc ref [MAIN_DOCUM];
+b_100 boolean:=false;
+l_VO ref [CURR_OPERATION];
+begin
+    /*формируем данные для отладки*/
+     &lj_lib.write_log('EXEC_QUERY', '------------------- Начало обработки P_ORDER_ID='||nvl(P_ORDER_ID, ' '));
+    l_STR:='P_DATE_DOC=>'||to_char(P_DATE_DOC, 'DD.MM.YYYY HH24:MI:SS')
+    ||''',P_PAY_INN=>'''||nvl(P_PAY_INN, ' ')
+    ||''',P_PAY_KPP=>'''||nvl(P_PAY_KPP, ' ')
+    ||''',P_PAY_NAME=>'''||nvl(P_PAY_NAME, ' ')
+    ||''',P_PAY_ACC=>'''||nvl(P_PAY_ACC, ' ')
+    ||''',P_PAY_BIC=>'''||nvl(P_PAY_BIC, ' ')
+    ||''',P_PAY_COR_ACC=>'''||nvl(P_PAY_COR_ACC, ' ')
+    ||''',P_AMOUNT=>'''||nvl(P_AMOUNT, 0)
+    ||''',P_REC_BIC=>'''||nvl(P_REC_BIC, ' ')
+    ||''',P_REC_ACC=>'''||nvl(P_REC_ACC, ' ')
+    ||''',P_REC_BNK_NAME=>'''||nvl(P_REC_BNK_NAME, ' ')
+    ||''',P_REC_COR_ACC=>'''||nvl(P_REC_COR_ACC, ' ')
+    ||''',P_REC_NAME=>'''||nvl(P_REC_NAME, ' ')
+    ||''',P_REC_INN=>'''||nvl(P_REC_INN, ' ')
+    ||''',P_OPER=>'''||nvl(P_OPER, 0)
+    ||''',P_ORDER=>'''||nvl(P_ORDER, 0)
+    ||''',P_DETAIL=>'''||nvl(P_DETAIL, ' ')
+    ||''',P_ORDER_ID=>'''||nvl(P_ORDER_ID, 0)
+    ||''',P_VO=>'''||nvl(P_VO, ' ');
+
+    &lj_lib.write_log('EXEC_QUERY', l_str);    
+   
+    l_TRANSACTION:=regexp_replace(P_TRANSACTION,'[^[[:digit:]]]*'); --запоминаем переданный ID транзакции
+    P_TRANSACTION:=0; --обнуляем параметр ID транзакции
+    -- 1=перевод Money transfer =============================================================================================================
+    if P_OPER = 1 then
+        begin    
+			if  P_PAY_INN is null 
+				or (regexp_instr(P_PAY_INN, '^\d{10}$') = 0 and regexp_instr(P_PAY_INN, '^\d{12}$') = 0 and regexp_instr(P_PAY_INN, '^\d{5}$') = 0)
+				or (P_PAY_KPP is not null and regexp_instr(P_PAY_KPP,'^\d{9}$') = 0)
+				or regexp_instr(P_PAY_BIC, '^\d{9}$') = 0
+				or regexp_instr(P_REC_BIC, '^\d{9}$') = 0
+				or regexp_instr(P_PAY_ACC, '^\d{20}$') = 0
+				or regexp_instr(P_PAY_COR_ACC, '^\d{20}$') = 0
+				or regexp_instr(P_REC_COR_ACC, '^\d{20}$') = 0
+				or regexp_instr(P_REC_ACC, '^\d{20}$') = 0
+				or P_REC_INN is null
+				or (P_REC_INN <> '0' and regexp_instr(P_REC_INN, '^\d{10}$') = 0 and regexp_instr(P_REC_INN, '^\d{12}$') = 0)
+			then
+				&lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ') || ' Некорректные данные в полях P_PAY_INN, P_PAY_KPP, P_PAY_BIC, P_REC_BIC, P_PAY_ACC, P_PAY_COR_ACC, P_REC_COR_ACC, P_REC_ACC, P_REC_INN. Возврат=-8');
+			    return -8;               		
+			end if;
+			
+			l_SUM_DT:=P_AMOUNT/100;
+			l_DATE_DOC:=trunc(P_DATE_DOC);
+			/*ищем уже проведенный документ по номеру документа в ПС на дату платежа*/            			
+            begin
+                locate main_doc in ::[MAIN_DOCUM] 
+				where main_doc.[DATE_DOC] = l_DATE_DOC   		-->> PSB VRI 28/07/2025 Заменил, чтобы находился и непроведённый документ с таким P_OREDER
+					and main_doc.[VID_DOC]  = VID_DOC_PP
+	                and main_doc.[DOCUMENT_UNO] = 'MTR-'||to_char(P_ORDER_ID);
+	            if main_doc.[SUM] = l_SUM_DT
+	            	--and trunc(main_doc.[DATE_PROV]) = l_DATE_DOC -->> PSB VRI 28/07/2025 Добавил, чтобы проверялась дата проводки
+	                --and main_doc%state = 'PROV' 
+	            then
+	                &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Найден проведенный платежный документ: ID='||main_doc%id||' Возврат=1');
+	                P_TRANSACTION:=main_doc%id;
+	                return 1;
+	            /*если передан P_TRANSACTION, проверяем что значение совпадает и пытаемся провести*/
+	            /*elsif main_doc.[SUM] = l_SUM_DT 
+	                and main_doc%state <> 'PROV'
+	                and main_doc%id = l_TRANSACTION then
+	                	
+	                MAIN_DOCUM_TO_PROV_REPEAT(main_doc);
+	                
+                    if main_doc%state = 'PROV' then
+	                    &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Непроведенный платежный документ с переданным P_TRANSACTION допровелся: ID='||main_doc%id||' Возврат=1');
+	                    P_TRANSACTION:=main_doc%id;
+	                    return 1;			    
+				    else 
+	                    &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Найденный платежный документ не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV], '')||' Возврат=-100');
+	                    P_TRANSACTION:=main_doc%id;
+	                    return -100;                    
+				    end if;*/
+	            end if;
+	        exception
+	            when no_data_found then
+                    null;
+	        end;
+
+			-- Проверяем счет получателя на принадлежность физ.лицу-резиденту 
+			if substr(P_REC_ACC,1,8) not in ('40817810', '42301810', '42302810','42303810','42304810','42305810','42306810','42307810') then
+				&lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Счет P_REC_ACC='||P_REC_ACC|| ' не принадлежит физ.лицу-резиденту ' ||'. Возврат=-6');
+			    return -6;               		
+			end if;
+
+			-- Проверяем ключ для счета плательщика
+			if ::[PL_USV].[CHECK_KEY]( P_PAY_ACC,-- Номер счета
+	                              	   P_PAY_BIC,-- БИК
+	                              	   false	-- Генирировать ошибку
+	                             	) is not null then
+	              &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Счет P_PAY_ACC='||P_PAY_ACC||' имеет неправильный ключ для P_PAY_BIC '||P_PAY_BIC||'. Возврат=-3');
+			      return -3;               		
+	        end if;
+			-- Проверяем ключ для счета получателя
+			if ::[PL_USV].[CHECK_KEY]( P_REC_ACC,-- Номер счета
+	                              	   P_REC_BIC,-- БИК
+	                              	   false	-- Генирировать ошибку
+	                             	) is not null then
+	              &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Счет P_REC_ACC='||P_REC_ACC||' имеет неправильный ключ для P_REC_BIC '||P_REC_BIC||'. Возврат=-3');
+			      return -3;               		
+	        end if;
+
+	        /*ищем счет плательщика по переданному P_PAY_ACC*/
+	        begin
+                locate l_ACC_DT in ::[AC_FIN]
+                where l_ACC_DT.[MAIN_V_ID] = P_PAY_ACC;
+			    /*проверяем совпадение ИНН клиента по счету с переданным P_INN*/
+			    if nvl(l_ACC_DT.[CLIENT_V].[INN],0) != P_PAY_INN then
+			        &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Не совпадает ИНН плательщика по счету с переданным P_PAY_INN='||l_ACC_DT.[CLIENT_V].[INN]||'<>'||P_PAY_INN||' для платежа №'||P_ORDER_ID||'. Возврат=-1');
+			        return -1;
+			    end if;
+			    /*проверяем что счет не закрыт*/
+			    if l_ACC_DT.[DATE_CLOSE] is not null then 
+			        &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Счет P_PAY_ACC='||P_PAY_ACC||' закрыт'||'. Возврат=-2');
+			        return -2;
+			    end if;
+			    l_CLIENT_V_DT:=l_ACC_DT.[CLIENT_V];			    			    
+	        exception
+	            when no_data_found then
+	    			/*счет не найден*/       
+			        &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Счет не найден P_PAY_ACC='||P_PAY_ACC||'. Возврат=-3'); 
+			        return -3;
+	        end;
+	        
+            -->> VRI 03/03/2026 
+			if  l_ACC_DT.[PLAN_SALDO](P_DT==true) < P_AMOUNT/100 then
+		        &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Недостаточно средств в сумме ' || (-1)*(P_AMOUNT/100-l_ACC_DT.[PLAN_SALDO](P_DT==true)) ||' на счёте P_ACCOUNT = '||P_PAY_ACC||' для платежа №'||P_ORDER_ID||'. Возврат=-7');
+		        return -7;
+			end if; 
+			--<< VRI 03/03/2026
+	        
+			-- если счет получателя в нашем банке ищем счет
+			if P_REC_BIC = ::[SYSTEM].[VARIABLES].OurBank.[BIC] then	        
+		        begin
+	                locate l_ACC_KT in ::[AC_FIN]
+	                where l_ACC_KT.[MAIN_V_ID] = P_REC_ACC;
+				    /*проверяем совпадение ИНН клиента по счету с переданным P_INN*/
+				    if nvl(l_ACC_KT.[CLIENT_V].[INN],0) != P_REC_INN then
+				        &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Не совпадает ИНН плательщика по счету с переданным P_REC_INN='||l_ACC_KT.[CLIENT_V].[INN]||'<>'||P_REC_INN||' для платежа №'||P_ORDER_ID||'. Возврат=-1');
+				        return -1;
+				    end if;
+				    /*проверяем что счет не закрыт*/
+				    if l_ACC_KT.[DATE_CLOSE] is not null then 
+				        &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Счет P_PAY_ACC='||P_REC_ACC||' закрыт'||'. Возврат=-2');
+				        return -2;
+				    end if;
+				    l_CLIENT_V_KT:=l_ACC_KT.[CLIENT_V];			    			    
+		        exception
+		            when no_data_found then
+		    			/*счет не найден*/       
+				        &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Счет не найден P_REC_ACC='||P_REC_ACC||'. Возврат=-3'); 
+				        return -3;
+			    end;
+		    end if;
+			
+            begin
+	            locate l_bank_KT in ::[CL_BANK_N]
+	            where l_bank_KT.[BIC] = P_REC_BIC
+	            	and l_bank_KT.[ACTIVE];
+			exception
+				when others then
+			        &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' БИК банка получателя P_REC_BIC='||P_REC_BIC||' не найден среди действующих банков. Возврат=-4');
+			        return -4;
+			end;
+			
+			if P_VO is not null and P_VO <> ' ' then
+	            begin
+		            locate l_VO in ::[CURR_OPERATION] all
+		            where l_VO.[FULL_CODE] = trim(substr(P_VO, 3, 5))
+		            	and coalesce(l_VO.[DATE_END], ::[SYSTEM].[OP_DATE]) >= ::[SYSTEM].[OP_DATE];
+				exception
+					when others then
+				        &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' код валютной операции P_VO='||P_VO||' не найден среди действующих кодов валютных операций. Возврат=-5');
+				        return -5;
+				end;
+			else
+				if not nvl(l_CLIENT_V_DT.[IS_RESIDENT], false) or P_REC_ACC like '40820%' or substr(P_REC_ACC, 1, 3) = '426' then
+					if P_DETAIL like '%заработ%' then
+						l_VO := ::[CURR_OPERATION]([FULL_CODE] = '70050');
+    				else
+    					l_VO := ::[CURR_OPERATION]([FULL_CODE] = '99090');
+					end if;
+				end if;
+			end if;
+			
+			P_NAZN := nvl(P_DETAIL, 'Перевод собственных средств по поручению (Реестр от ДД.ММ.ГГГГ)');
+			
+	        P_VID_DOC := VID_DOC_PP;
+	   		P_FILIAL := l_ACC_DT.[FILIAL];
+			P_DEPART := l_ACC_DT.[DEPART];
+
+			P#VIB_DT.[0] := 1;		
+			l_CL_DT.[1].[1] := l_CLIENT_V_DT;
+			l_CL_DT.[1].[2] := l_ACC_DT;
+
+			if l_ACC_KT is not null then
+				P#VIB_KT.[0] := 1;
+				l_CL_KT.[1].[1] := l_CLIENT_V_KT;
+				l_CL_KT.[1].[2] := l_ACC_KT;
+			else
+				P#VIB_KT.[0] := 2;
+				l_CL_KT.[2].[1] := P_REC_ACC;
+				l_CL_KT.[2].[INN] := P_REC_INN;
+				l_CL_KT.[2].[2] := P_REC_NAME;
+				l_CL_KT.[2].[3] := l_bank_KT;
+			end if;		
+    		/*создаем платежный документ*/
+            &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Все проверки пройдены создаем платежный документ' || ' на сумму платежа ='||l_SUM_DT);
+	        if l_VO is not null then
+                main_doc := MAIN_DOCUM_CREATE(l_DOCUMENT_NUM, l_DATE_DOC, P_VID_DOC, l_SUM_DT, P_NAZN, l_CL_DT, P#VIB_DT, l_CL_KT, P#VIB_KT, P_FILIAL, P_DEPART, l_VO, P_ORDER);
+            else
+                main_doc := MAIN_DOCUM_CREATE(l_DOCUMENT_NUM, l_DATE_DOC, P_VID_DOC, l_SUM_DT, P_NAZN, l_CL_DT, P#VIB_DT, l_CL_KT, P#VIB_KT, P_FILIAL, P_DEPART, null, P_ORDER);
+            end if;
+            main_doc.[DOCUMENT_USER] := l_user_cr;
+		    &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' ID созданного платежного документа ='||MAIN_DOC%id);
+            main_doc.[DOCUMENT_UNO] := 'MTR-'||to_char(P_ORDER_ID);
+            main_doc.[DATE_DOC] := l_DATE_DOC;            
+			main_doc.[DATE_INP] := sysdate;
+			main_doc.[REP_1ST_SIGN] := ::[MAIN_DOCUM].[EDIT_DOC].GetOneDl(l_CLIENT_V_DT, ::[MARK_PERS_G]([CODE] = 'SIGN_1_BEZNAL'));
+
+			main_doc.[KL_DT].[2].[INN] := P_PAY_INN;
+			main_doc.[KL_DT].[2].[2] := l_ACC_DT.[CLIENT_V].[NAME]; --P_PAY_NAME;
+			main_doc.[KL_DT].[2].[KPP] := P_PAY_KPP;
+			main_doc.[KL_KT].[2].[INN] := P_REC_INN;
+			main_doc.[KL_KT].[2].[2] := P_REC_NAME;
+			main_doc.[KOD_NAZN_PAY] := ::[KOD_N_PAY]([KOD_NAZN] = 'PSH_MTR');
+
+			-->> Изменение даты валютирования на следующий опер.день по настройке COT
+			if main_doc.[DATE_REC] is null then
+				main_doc.[DATE_VAL] := l_DATE_DOC;
+			elsif CALENDAR.Check_Date('HOLIDAYS', main_doc.[DATE_REC]) = '1' -- Дата создания выходной день, устанавливаем дату валютирования на след.раб.день
+			then  
+				main_doc.[DATE_VAL] := CALENDAR.Next_Date('HOLIDAYS', '0', main_doc.[DATE_REC], 1);
+				&lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Поменяли дату валютирования на '|| to_char(main_doc.[DATE_VAL], 'DD/MM/YYYY'));
+			elsif to_number(to_char(main_doc.[DATE_REC],'sssss')) > ::[MAIN_DOCUM].[PSH_L].cut_off(main_doc) -- Время создания документа > времени окончания операционного дня (для рабочего дня) -- updated CHANGE_SHORT_NAME PSB_L->PSH_L 14/10/25
+			then
+				main_doc.[DATE_VAL] := CALENDAR.Next_Date('HOLIDAYS', '0', main_doc.[DATE_REC], 2);
+				&lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Поменяли дату валютирования на '|| to_char(main_doc.[DATE_VAL], 'DD/MM/YYYY'));
+			else main_doc.[DATE_VAL] := l_DATE_DOC;
+			end if; 
+			--<< Изменение даты валютирования на следующий опер.день по настройке COT
+
+			if l_VO.[FULL_CODE] = '70050' then
+				main_doc.[PRIORITET] := 3;
+			end if; 
+			
+			--Контроль корректности заполнения реквизитов
+			main_doc.[CHECK_REQS](null, null, false, P_GMP_AUTO == false);
+
+            P_TRANSACTION := main_doc%id;
+            
+			main_doc.[PSH_TO_EVENT](null);            
+            &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Платежный документ отправлен на проводку в PSH_EVENT: ID='||main_doc%id);
+            
+           --MAIN_DOCUM_TO_PROV_REPEAT(main_doc);
+           -- main_doc%state := 'PODTV';
+
+	        /*if main_doc%state <> 'PODTV' then
+                &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Платежный документ не проведен: ID='||main_doc%id||' '||nvl(main_doc.[TEXT_VOZV],'')||' Возврат=-100');
+                b_100:=true;
+            else
+                &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' Платежный документ проведен: ID='||main_doc%id);
+	        end if;*/
+			
+			--&lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID=>'''||nvl(P_ORDER_ID, 0) ||''',P_TRANSACTION=>'''||nvl(regexp_replace(P_TRANSACTION, '[^[[:digit:]]]*'), ' '||'''') );
+	        if b_100 then
+	            return -100;
+	        end if;
+	        return 1;
+        exception
+            when others then
+                &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' '||sqlerrm||' Возврат=0');
+    			P_TRANSACTION :=0;
+				return 0;
+		end;
+    end if;
+    return 1;
+exception
+	when others then
+        &lj_lib.write_log('EXEC_QUERY', 'P_ORDER_ID='||nvl(P_ORDER_ID, ' ')||' '||sqlerrm||' Возврат=0');
+        P_AMOUNT:=null;			    
+    	P_TRANSACTION :=0;
+		return 0;    
+end;
+end;

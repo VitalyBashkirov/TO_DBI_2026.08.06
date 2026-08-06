@@ -1,0 +1,724 @@
+class MAIN_DOCUM;
+
+@this(create_on_start:=true)
+@name('ПСХ. Печать многострочного банковского ордера')
+@tag('COPIED')
+@speciality('print')
+method PSH_PRINT_SV is
+
+@name('Доп.информация')                      public V_INFO      [MEMO];
+@name('Без документа (только распоряжение)') public WITHOUT_DOC [BOOLEAN];
+@name('ESC-последовательность')              public V_ESC       [STRING];
+@name('Назначение')                          public V_NAZN      [MEMO];
+@name('Очередность')                         public V_PRIOR     [STRING];
+@name('Вид')                                 public V_VID       [STRING];
+@name('Номер формы')                         public V_FORM_NUM  [STRING];
+@name('Наименование документа')              public V_DOC_NAME  [STRING_32];
+@name('V_MEMO1')                             public V_MEMO1     [MEMO_32767];
+@name('V_MEMO2')                             public V_MEMO2     [MEMO_32767];
+@name('V_MEMO3')                             public V_MEMO3     [MEMO_32767];
+@name('V_MEMO4')                             public V_MEMO4     [MEMO_32767];
+@name('V_MEMO')                              public V_MEMO      [MEMO_32767];
+public V_TYPES varchar2;
+public V_NAZNS [MEMO];
+public V_PRIORS varchar2;
+public V_VIDS varchar2;
+public V_GROUP natural;
+type memo_tbl_type is table of varchar2(200);	--Таблица с текстом для печати
+
+function LongName(cName varchar2, len_str integer, numb_str integer) return varchar2
+is
+	str varchar2 := '';
+begin
+	if length(cName) >= (len_str*(numb_str-1)+1) then
+		str := ''||rpad(nvl(substr(cName,len_str*(numb_str-1)+1,len_str*numb_str),' '),len_str)||'|      | '||NL$;
+	end if;
+	return str;
+end;
+
+
+function NaznRoll(str [MAIN_DOCUM].[NAZN]%type) return [MEMO_BIG] is
+ret [MEMO_BIG];
+buf [MAIN_DOCUM].[NAZN]%type;
+beg integer;
+kol const integer := 84;
+len integer;
+begin
+	if str is null then
+		return ' ';
+	end if;
+	beg := 1;
+	len := length(str);
+	if len > beg then
+		ret := 'Назначение платежа:'||NL$;
+		buf := [MAIN_DOCUM].[PRINT_SRV].formating(str,beg,kol,beg);
+		ret := ret || buf ||NL$;
+	end if;
+	-- Уложимся в четыре строки
+	if len > beg then
+		buf := [MAIN_DOCUM].[PRINT_SRV].formating(str,beg,kol,beg);
+		ret := ret || buf ||NL$;
+	end if;
+	if len > beg then
+		buf := [MAIN_DOCUM].[PRINT_SRV].formating(str,beg,kol,beg);
+		ret := ret || buf ||NL$;
+	end if;
+	if len > beg then
+		buf := [MAIN_DOCUM].[PRINT_SRV].formating(str,beg,kol,beg);
+		ret := ret || buf ||NL$;
+	end if;
+	if ret is not null then
+		ret := ret||'------------------------------------------------------------------------------------------'||NL$;
+	end if;
+	return ret;
+	--return formating(str,beg,kol,pos_);
+	--return rpad(nvl(formating(str,beg,kol,pos_),' '),kol);
+end;
+
+procedure StampToTable(v_stamp varchar2(2000), v_StampTbl in out memo_tbl_type, v_RowLen number default 20 )  is
+i integer;
+k integer;
+c char;
+row	varchar2(200);
+pos integer;
+begin
+	k = i := 0;
+	row := '';
+	for i in 1..length(v_stamp) loop
+		c := substr(v_stamp,i,1);
+		if c=chr(10) then
+			v_StampTbl(k) := ::[MAIN_DOCUM].[PRINT_SRV].formating(row, 1, v_RowLen, pos);
+			k := k + 1;
+			while pos < length(row)	loop
+				v_StampTbl(k) := ::[MAIN_DOCUM].[PRINT_SRV].formating(row, pos, v_RowLen, pos);
+		 		k := k + 1;
+			end loop;
+			row := '';
+		else
+			row := row || c;
+		end if;
+	end loop;
+	if c<>chr(10) then
+		v_StampTbl(k) := ::[MAIN_DOCUM].[PRINT_SRV].formating(row, 1, v_RowLen, pos);
+		k := k + 1;
+		while pos < length(row)	loop
+			v_StampTbl(k) := ::[MAIN_DOCUM].[PRINT_SRV].formating(row, pos, v_RowLen, pos);
+	 		k := k + 1;
+		end loop;
+	end if;
+end;
+
+function GetStampRow(v_StampTbl memo_tbl_type, v_row in out number) return varchar2(64)
+is
+begin
+	if v_row < 0 then
+		return null;
+	end if;
+	
+	if v_row < v_StampTbl.count then
+		v_row := v_row + 1;
+		return v_StampTbl(v_row-1) ;
+	end if;
+	
+	return null;
+end;
+
+
+-- Вывод текста по центру
+function center_pad(p_text varchar2 (100), p_len integer, p_fill varchar2 (20) default ' ')
+return varchar2 (2000)
+is
+	ret  varchar2 (2000);
+	len  integer;
+begin
+	len := length (p_text);
+	ret := rpad(lpad(p_text, trunc((p_len - len)/2)+len, p_fill), p_len, p_fill);
+	return ret;
+end;
+PSH_PRINT_SV (
+	@name('Корреспондент по Дт')  P_DT         in [MEMO_BIG],
+	@name('Заголовок')            P_HEAD       in [MEMO_BIG],
+	@name('Дата опердня')         P_DAT        in [STRING],
+	@name('Номер первого')        P_NUM        in [STRING],
+	@name('Сумма прописью')       P_SUM_STR    in [STRING_2000],
+	@name('Сумма прописью')       P_SUM_STR_NT in [STRING],
+	@name('Заголовок2')           P_HEAD2      in [MEMO_BIG],
+	@name('Полный выход')         P_FULL_EXIT  in [BOOLEAN],
+	@name('Корреспондент по Дт1') P_DT1        in [MEMO_BIG],
+	@name('Корреспондент по Дт2') P_DT2        in [MEMO_BIG],
+	@name('Корреспондент по Дт3') P_DT3        in [MEMO_BIG],
+	@name('Корреспондент по Дт4') P_DT4        in [MEMO_BIG]
+) is
+
+validate is
+kol natural;
+acc_dt ref [AC_FIN];
+acc_kt ref [AC_FIN];
+doc ref [MAIN_DOCUM];
+dif_dt boolean := false; -- разница по Дт
+dif_kt boolean := false; -- разница по Кт
+dif_val boolean := false; -- разница по валютам
+sum_dt [SUMMA] := 0;
+sum_kt [SUMMA] := 0;
+sum_nt [SUMMA] := 0;
+val_nt ref [FT_MONEY] := ::[SYSTEM].[VARIABLES].NatCur;
+num natural;
+sum_dt1 varchar2;
+sum_dt2 varchar2;
+sum_kt1 varchar2;
+sum_kt2 varchar2;
+type tbl_doc1 is table of ref [MAIN_DOCUM];  -- табличный тип
+docs1 tbl_doc1; -- массив документов
+num_beg natural;
+end_num natural;
+ix natural;
+kol_ix natural;
+nm varchar2;
+nm2 varchar2;
+V_TYPE 		boolean;
+bank1 		varchar2;
+v_paydoc	Ref [NAME_PAYDOC];
+DT_TMP		[MEMO_BIG];
+
+vNaznMemo	[Memo_32767];
+vNazn		varchar2(1024);
+
+--
+DtSum number;
+CtSum number;
+NaSum number;
+DtRate [SUMMA_16_6];
+KtRate [SUMMA_16_6];
+name_p	varchar2(1024);
+pos		integer;
+rDepart	ref [depart];
+nPrioritet	number;
+nPrioritet1	number;
+sVidDoc		varchar2(8);
+v_adds		varchar2(2000);
+v_stamp 	varchar2(2000);
+v_StampTbl  memo_tbl_type;
+v_stampRow	number;
+
+procedure SaveMemo is
+	dt_tmp_len  integer;
+	memo_len  integer;
+begin
+	if DT_TMP is null then
+		return;
+	end if;
+	dt_tmp_len := length(DT_TMP);
+	if dt_tmp_len = 0 then
+		return;
+	end if;
+	memo_len   := P_DT%size - 100;
+	if P_DT is null or (P_DT1 is null and (length(P_DT) + dt_tmp_len < memo_len)) then
+		P_DT := P_DT || DT_TMP;
+	elsif P_DT1 is null or (P_DT2 is null and (length(P_DT1) + dt_tmp_len < memo_len)) then
+		P_DT1 := P_DT1 || DT_TMP;
+	elsif P_DT2 is null or (P_DT3 is null and (length(P_DT2) + dt_tmp_len < memo_len)) then
+		P_DT2 := P_DT2 || DT_TMP;
+	elsif P_DT3 is null or (P_DT4 is null and (length(P_DT3) + dt_tmp_len < memo_len)) then
+		P_DT3 := P_DT3 || DT_TMP;
+	elsif P_DT4 is null or length(P_DT4) + dt_tmp_len < memo_len then
+		P_DT4 := P_DT4 || DT_TMP;
+	else
+		-- по честному
+		pragma error ('Недостаточный объем текстовых буферов для печати такого Мемориального ордера.');
+	end if;
+	DT_TMP := '';
+end;
+
+
+
+procedure SaveNazn is
+	vNaznMemo_len  integer;
+	memo_len  integer;
+begin
+	if vNaznMemo is null then
+		return;
+	end if;
+	vNaznMemo_len := length(vNaznMemo);
+	if vNaznMemo_len = 0 then
+		return;
+	end if;
+	memo_len   := V_MEMO%size - 100;
+	if V_MEMO is null or (V_MEMO1 is null and (length(V_MEMO) + vNaznMemo_len < memo_len)) then
+		V_MEMO := V_MEMO || vNaznMemo;
+	elsif V_MEMO1 is null or (V_MEMO2 is null and (length(V_MEMO1) + vNaznMemo_len < memo_len)) then
+		V_MEMO1 := V_MEMO1 || vNaznMemo;
+	elsif V_MEMO2 is null or (V_MEMO3 is null and (length(V_MEMO2) + vNaznMemo_len < memo_len)) then
+		V_MEMO2 := V_MEMO2 || vNaznMemo;
+	elsif V_MEMO3 is null or (V_MEMO4 is null and (length(V_MEMO3) + vNaznMemo_len < memo_len)) then
+		V_MEMO3 := V_MEMO3 || vNaznMemo;
+	elsif V_MEMO4 is null or length(V_MEMO4) + vNaznMemo_len < memo_len then
+		V_MEMO4 := V_MEMO4 || vNaznMemo;
+	else
+		-- по честному
+		pragma error ('Недостаточный объем текстовых буферов для печати такого Мемориального ордера.');
+	end if;
+	vNaznMemo := '';
+end;
+
+
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		-- Чистим мемо поля
+		P_DT  := null;
+		P_DT1 := null;
+		P_DT2 := null;
+		P_DT3 := null;
+		P_DT4 := null;
+
+		V_VID := V_VIDS;
+		V_NAZN := V_NAZNS;
+
+		begin
+			locate v_paydoc
+			in ::[NAME_PAYDOC]
+			where v_paydoc->[CODE] = 'БЕЗН_СВОДНЫЙ_ДОК';
+			V_FORM_NUM := v_paydoc->[FORM];
+		exception
+			when NO_DATA_FOUND then
+				V_FORM_NUM := Null;
+		end;
+		
+		if ::[MAIN_DOCUM].[PSH_PRINT_SVBANK].docs.count > 0 then -- для переоценки
+			P_DAT := to_char(::[MAIN_DOCUM].[PSH_PRINT_SVBANK].docs(1).[DATE_PROV],'dd.mm.yyyy');
+		else
+			if this.[FILIAL] is null then
+				pragma error ('Не указан филиал документа '|| this.[DOCUMENT_NUM] || ' от '|| to_char (this.[DOCUMENT_DATE], 'DD.MM.YYYY'));
+			end if;
+
+			P_DAT := to_char(::[SYSTEM].[VARIABLES].Br2Bank(this.[FILIAL]) ,'dd.mm.yyyy');
+		end if;
+		if P_DAT is null then
+			P_DAT := to_char(::[MAIN_DOCUM].[PSH_PRINT_SVBANK].docs(1).[DATE_DOC],'dd.mm.yyyy');
+		end if;
+		
+		kol := ::[MAIN_DOCUM].[PSH_PRINT_SVBANK].docs.count; -- кол-во документов
+		if V_TYPES = '1' then -- корсчета
+			V_TYPE := true;
+		else
+			V_TYPE := false;
+		end if;
+
+		if nvl(kol,0) = 0 then
+			-- печатаем текущий
+			docs1(1) := this;
+		else
+			-- печатаем по условию
+			docs1 := ::[MAIN_DOCUM].[PSH_PRINT_SVBANK].docs;
+		end if;
+
+		-- посмотрим, разные счета или нет
+		ix := [PSH_PRINT_SVBANK].tab_num.first;  -- выбор первого элемента таблицы
+		kol_ix := [PSH_PRINT_SVBANK].tab_num.count;  -- кол-во циклов
+
+		for ind in 1..kol_ix loop
+			if [PSH_PRINT_SVBANK].tab_num(ind).yes then
+				null;
+			else
+				num_beg := [PSH_PRINT_SVBANK].tab_num(ind).p1;
+				end_num := [PSH_PRINT_SVBANK].tab_num(ind).p2;
+				V_GROUP := [PSH_PRINT_SVBANK].tab_num(ind).gr;
+				
+				V_DOC_NAME := 'Банковский ордер';
+
+				for idx in num_beg..end_num loop
+					doc := docs1(idx);
+
+					-- заполним для первого
+					if acc_dt is null then
+						acc_dt := doc.[ACC_DT];
+						num := doc.[DOCUMENT_NUM]; -- номер первого
+					end if;
+					if acc_kt is null then
+						acc_kt := doc.[ACC_KT];
+					end if;
+					
+					if acc_dt != doc.[ACC_DT] then
+						dif_dt := true;
+					end if;
+					if acc_kt != doc.[ACC_KT] then
+						dif_kt := true;
+					end if;
+					
+					if not dif_dt and not dif_kt then
+						if acc_dt.[MAIN_V_ID] like '30223%' and acc_kt.[MAIN_V_ID] like '301%' then
+							dif_kt := true;
+							dif_dt := false;
+						elsif acc_dt.[MAIN_V_ID] like '301%' and acc_kt.[MAIN_V_ID] like '30223%' then
+							dif_dt := false;
+							dif_kt := true;
+						elsif acc_dt.[MAIN_V_ID] like '614%' then
+							dif_kt := true;
+							dif_dt := false;
+						elsif acc_kt.[MAIN_V_ID] like '613%' then
+							dif_kt := false;
+							dif_dt := true;
+						else
+							dif_kt := true;
+							dif_dt := false;
+						end if;
+					end if;
+					
+					-- выбор приоритета
+					if V_PRIOR is null then
+						V_PRIOR := doc.[PRIORITET];
+					end if;
+
+
+					if doc.[ACC_DT].[FINTOOL] != doc.[ACC_KT].[FINTOOL]
+					or doc.[ACC_DT].[FINTOOL] != val_nt
+					or doc.[ACC_KT].[FINTOOL] != val_nt
+					then
+						-- есть валютные суммы
+						dif_val := true;
+					end if;
+
+					select d(d.[SUM],d.[SUM_PO],d.[SUM_NT],d.[RATE_DT],d.[RATE_KT])	in ::[MAIN_DOCUM]
+					where d%id = doc
+					into DtSum,	CtSum, NaSum, DtRate, KtRate;
+					-- вычисление реквизитов на дату валютирования
+					if (DtSum is null) or (CtSum is null) or (NaSum is null) then
+						doc.[CALCSUMM].Get_CalcSumm(DtSum,	         -- Сумма плательщика
+	                 	doc.[acc_dt].[FINTOOL],    -- Валюта плательщика
+	                 	DtRate,	         -- Курс валюты плательщика
+	                 	CtSum,	         -- Сумма получателя
+	                 	doc.[acc_kt].[FINTOOL], -- Валюта получателя
+	                 	KtRate,	         -- Курс валюты получателя
+	                 	NaSum,	         -- Сумма нац.покрытия
+	                 	doc.[MULTICURR], -- Валютное свойство
+	                 	nvl(doc.[DATE_PROV], doc.[DATE_VAL])      	 -- Дата
+	                	);
+					end if;
+					sum_dt := sum_dt + DtSum;
+					sum_kt := sum_kt + CtSum;
+					sum_nt := sum_nt + NaSum;
+				end loop;
+				
+				-- выбор группировки
+				if V_GROUP is null then
+					if not dif_dt and dif_kt then -- плат. один., пол. разн.
+						V_GROUP := 1;
+					elsif dif_dt and not dif_kt then -- плат. разн., пол. один.
+						V_GROUP := 2;
+					elsif dif_dt and dif_kt then -- плат. разн., пол. разн.
+						V_GROUP := 3;
+					end if;
+				end if;
+				
+				v_stamp := null;
+				if V_GROUP = 1 /*not dif_dt and dif_kt*/ then
+					-- совпал только счет плательщика
+					-- определимся с валютами
+					if acc_dt.[FINTOOL] != val_nt then
+						sum_dt1 := [PRINTFUN].PrintNumSumm(sum_nt);
+						sum_dt2 := [PRINTFUN].PrintNumSumm(sum_dt);
+					else
+						sum_dt1 := [PRINTFUN].PrintNumSumm(sum_dt);
+						sum_dt2 := ' ';
+					end if;
+
+					nPrioritet := 0;
+					vNaznMemo := 'Назначение платежа                                            |                           '||NL$||
+							     '--------------------------------------------------------------|---------------------------'||NL$;
+					SaveNazn; -- Сохраняем буфер
+
+
+					dt_tmp  :=  '------------------------------------------------------------------------------------------'||NL$||
+			   					'Плательщик                              |        Сч.№         |           Сумма           '||NL$||
+			   					'------------------------------------------------------------------------------------------'||NL$;
+				
+					-- Счета в дебете
+					name_p := acc_dt.[NAME];
+					DT_TMP := DT_TMP|| rpad(nvl(::[MAIN_DOCUM].[PRINT_SRV].formating(name_p,1,40,pos),' '),40)||'|'||rpad(acc_dt.[MAIN_V_ID], 21, ' ')||'|'||lpad(sum_dt1,13)||'|'||lpad(sum_dt2,13)||NL$;
+					while pos < length(name_p) loop
+						DT_TMP := DT_TMP|| rpad(nvl(::[MAIN_DOCUM].[PRINT_SRV].formating(name_p,pos,40,pos),' '),40)||'|'||rpad(' ',21,' ')||'|'||rpad(' ',13,' ')||'|'||rpad(' ',13,' ')||NL$;
+					end loop;
+					SaveMemo; -- Сохраняем буфер в параметры
+
+
+				
+					dt_tmp  :=  '--------------------------------------------------------------|             |'||NL$||
+			   					'Получатель                              |        Сч.№         |             |'||NL$||
+			   					'--------------------------------------------------------------|             |'||NL$;
+			   		SaveMemo;
+
+					for idx in num_beg..end_num loop
+						doc := docs1(idx);
+
+						select d(d.[SUM],d.[SUM_PO],d.[SUM_NT],d.[RATE_DT],d.[RATE_KT],d.[ACC_KT], d.[depart], d.[prioritet], d.[nazn], d.[vid_doc].[short_code])	in ::[MAIN_DOCUM]
+						where d%id = doc
+						into DtSum,	CtSum, NaSum, DtRate, KtRate,acc_kt, rDepart, nPrioritet1, vNazn, sVidDoc;
+						-- вычисление реквизитов на дату валютирования
+						if (DtSum is null) or (CtSum is null) or (NaSum is null) then
+							doc.[CALCSUMM].Get_CalcSumm(DtSum,	         -- Сумма плательщика
+	                 		doc.[acc_dt].[FINTOOL],    -- Валюта плательщика
+	                 		DtRate,	         -- Курс валюты плательщика
+	                 		CtSum,	         -- Сумма получателя
+	                 		doc.[acc_kt].[FINTOOL], -- Валюта получателя
+	                 		KtRate,	         -- Курс валюты получателя
+	                 		NaSum,	         -- Сумма нац.покрытия
+	                 		doc.[MULTICURR], -- Валютное свойство
+	                 		nvl(doc.[DATE_PROV], doc.[DATE_VAL])      	 -- Дата
+	                		);
+						end if;
+
+						if acc_kt.[FINTOOL] != val_nt then
+							sum_kt1 :=[PRINTFUN].PrintNumSumm(nvl(doc.[SUM_PO],CtSum));
+							sum_kt2 :=[PRINTFUN].PrintNumSumm(nvl(doc.[SUM_NT],NaSum));
+						else
+							sum_kt1 := [PRINTFUN].PrintNumSumm(nvl(doc.[SUM_PO],CtSum));
+							sum_kt2 := ' ';
+						end if;
+
+						if V_TYPE then -- корсчета
+							nm := acc_kt.[MAIN_V_ID];
+						else
+							nm := nvl(doc.[KL_KT].[2].[1],doc.[KL_KT].[1].[2].[MAIN_V_ID]);
+						end if;
+						if doc.[KL_KT].[0]=2 and doc.[KL_KT].[2].[3] is not null then
+							bank1 := rpad(substr(doc.[KL_KT].[2].[3].[NAME],1,38),38);
+						else
+							bank1 := rpad(' ',38);
+						end if;
+
+						-- Счета в дебете
+						name_p := nvl(doc.[KL_KT].[2].[2],acc_kt.[NAME]);
+						DT_TMP := DT_TMP|| rpad(nvl(::[MAIN_DOCUM].[PRINT_SRV].formating(name_p,1,40,pos),' '),40)||'|'||rpad(nm, 21, ' ')||'|'||lpad(sum_kt1,13)||'|'||lpad(sum_kt2,13)||NL$;
+						while pos < length(name_p) loop
+							DT_TMP := DT_TMP|| rpad(nvl(::[MAIN_DOCUM].[PRINT_SRV].formating(name_p,pos,40,pos),' '),40)||'|'||rpad(' ',21,' ')||'|'||rpad(' ',13,' ')||'|'||rpad(' ',13,' ')||NL$;
+						end loop;
+						SaveMemo;
+
+						-- Штамп банка
+						if v_stamp is null then
+							[STR].set_par(v_adds, 'STAMP_DATE', to_char(doc.[DATE_DOC], 'DD/MM/RRRR'));			
+							[STR].set_par(v_adds, 'STAMP_USER', stdlib.user_id.[name]);
+							v_stamp := ::[PRINT_ATTR_VALUE].[PRINT_LIB].get_field_by_code(doc, 'STAMP', null, v_adds);
+							v_stamp := 'Отметки банка'||chr(10)||chr(10)||v_stamp||chr(10)||chr(10)||'Подписи';
+							-- Преобразование Штампа в массив
+							StampToTable(v_stamp, v_StampTbl, 27);
+							v_stampRow := 0;
+						end if;							
+			
+						-- Назначение платежа каждого документа
+						if [PSH_PRINT_SVBANK].V_NAZN_EVERY_DOC then
+							vNaznMemo := rpad(nvl(::[MAIN_DOCUM].[PRINT_SRV].formating(vNazn,1,62,pos),' '),62) ||'|'||Center_Pad(GetStampRow(v_StampTbl, v_StampRow), 27)||NL$;
+							while pos < length(vNazn) loop
+								vNaznMemo := vNaznMemo|| rpad(nvl(::[MAIN_DOCUM].[PRINT_SRV].formating(vNazn,pos,62,pos),' '),62)||'|'||Center_Pad(GetStampRow(v_StampTbl, v_StampRow), 27)||NL$;
+							end loop;
+							SaveNazn; -- Сохраняем буфер
+						end if;
+					end loop;
+					
+					dt_tmp := '--------------------------------------------------------------|---------------------------';
+					SaveMemo;
+					
+					while v_StampRow < v_StampTbl.count loop
+						vNaznMemo := vNaznMemo|| rpad(' ',62)||'|'||center_pad(GetStampRow(v_StampTbl, v_StampRow), 27)||NL$;
+					end loop;
+					SaveNazn; -- Сохраняем буфер
+					
+					vNaznMemo := rpad('-',62, '-')||'|'||NL$;
+					SaveNazn;
+					
+-----------------------------------------------------------------------------------------------------------------------------------					
+				elsif V_GROUP = 2 /*dif_dt and not dif_kt*/ then
+
+					-- совпал только счет получателя
+					if acc_kt.[FINTOOL] != val_nt then
+						sum_kt1 := [PRINTFUN].PrintNumSumm(sum_nt);
+						sum_kt2 := [PRINTFUN].PrintNumSumm(sum_kt);
+					else
+						sum_kt1 := [PRINTFUN].PrintNumSumm(sum_kt);
+						sum_kt2 := ' ';
+					end if;
+					
+					nPrioritet := 0;
+					vNaznMemo := 'Назначение платежа                                            |                           '||NL$||
+							     '--------------------------------------------------------------|---------------------------'||NL$;
+					SaveNazn; -- Сохраняем буфер
+					dt_tmp  := '------------------------------------------------------------------------------------------'||NL$||
+							   'Плательщик                              |        Сч.№         |           Сумма           '||NL$||
+							   '------------------------------------------------------------------------------------------'||NL$;
+					for idx in num_beg..end_num loop
+						doc := docs1(idx);
+						select d(d.[SUM],d.[SUM_PO],d.[SUM_NT],d.[RATE_DT],d.[RATE_KT],d.[ACC_DT], d.[depart], d.[prioritet], d.[nazn], d.[vid_doc].[short_code])	in ::[MAIN_DOCUM]
+						where d%id = doc
+						into DtSum,	CtSum, NaSum, DtRate, KtRate,acc_dt, rDepart, nPrioritet1, vNazn, sVidDoc;
+						if nPrioritet < nPrioritet1 then
+							nPrioritet := nPrioritet1;
+						end if;
+						-- вычисление реквизитов на дату валютирования
+						if (DtSum is null) or (CtSum is null) or (NaSum is null) then
+							doc.[CALCSUMM].Get_CalcSumm(DtSum,	         -- Сумма плательщика
+	                 		doc.[acc_dt].[FINTOOL],    -- Валюта плательщика
+	                 		DtRate,	         -- Курс валюты плательщика
+	                 		CtSum,	         -- Сумма получателя
+	                 		doc.[acc_kt].[FINTOOL], -- Валюта получателя
+	                 		KtRate,	         -- Курс валюты получателя
+	                 		NaSum,	         -- Сумма нац.покрытия
+	                 		doc.[MULTICURR], -- Валютное свойство
+	                 		nvl(doc.[DATE_PROV], doc.[DATE_VAL])      	 -- Дата
+	                		);
+						end if;
+
+						if acc_dt.[FINTOOL] != val_nt then
+							sum_dt1 := [PRINTFUN].PrintNumSumm(nvl(doc.[SUM_NT],NaSum));
+							sum_dt2 := [PRINTFUN].PrintNumSumm(nvl(doc.[SUM],DtSum));
+						else
+							sum_dt1 := [PRINTFUN].PrintNumSumm(nvl(doc.[SUM],DtSum));
+							sum_dt2 := ' ';
+						end if;
+
+						if V_TYPE then -- корсчета
+							nm := acc_dt.[MAIN_V_ID];
+						else
+							nm := nvl(doc.[KL_DT].[2].[1],doc.[KL_DT].[1].[2].[MAIN_V_ID]);
+						end if;
+
+						-- Счета в дебете
+						name_p := nvl(doc.[KL_DT].[2].[2],acc_dt.[NAME]);
+						DT_TMP := DT_TMP|| rpad(nvl(::[MAIN_DOCUM].[PRINT_SRV].formating(name_p,1,40,pos),' '),40)||'|'||rpad(nm, 21, ' ')||'|'||lpad(sum_dt1,13)||'|'||lpad(sum_dt2,13)||NL$;
+						while pos < length(name_p) loop
+							DT_TMP := DT_TMP|| rpad(nvl(::[MAIN_DOCUM].[PRINT_SRV].formating(name_p,pos,40,pos),' '),40)||'|'||rpad(' ',21,' ')||'|'||rpad(' ',13,' ')||'|'||rpad(' ',13,' ')||NL$;
+						end loop;
+								
+						-- Штамп банка
+						if v_stamp is null then
+							[STR].set_par(v_adds, 'STAMP_DATE', to_char(doc.[DATE_DOC], 'DD/MM/RRRR'));			
+							[STR].set_par(v_adds, 'STAMP_USER', stdlib.user_id.[name]);
+							v_stamp := ::[PRINT_ATTR_VALUE].[PRINT_LIB].get_field_by_code(doc, 'STAMP', null, v_adds);
+							v_stamp := 'Отметки банка'||chr(10)||chr(10)||v_stamp||chr(10)||chr(10)||'Подписи';
+							-- Преобразование Штампа в массив
+							StampToTable(v_stamp, v_StampTbl, 27);
+							v_stampRow := 0;
+						end if;							
+
+						-- Назначение платежа каждого документа
+						if [PSH_PRINT_SVBANK].V_NAZN_EVERY_DOC then
+							vNaznMemo := rpad(nvl(::[MAIN_DOCUM].[PRINT_SRV].formating(vNazn,1,62,pos),' '),62) ||'|'||Center_Pad(GetStampRow(v_StampTbl, v_StampRow), 27)||NL$;
+							while pos < length(vNazn) loop
+								vNaznMemo := vNaznMemo|| rpad(nvl(::[MAIN_DOCUM].[PRINT_SRV].formating(vNazn,pos,62,pos),' '),62)||'|'||Center_Pad(GetStampRow(v_StampTbl, v_StampRow), 27)||NL$;
+							end loop;
+							SaveNazn; -- Сохраняем буфер
+						end if;
+						
+					end loop;
+
+					DT_TMP := DT_TMP||'--------------------------------------------------------------|             |'||NL$||
+							  		  'Получатель                              |        Сч.№         |             |'||NL$||
+							  		  '--------------------------------------------------------------|             |'||NL$;
+
+					-- Счета в дебете
+					name_p := acc_kt.[NAME];
+					DT_TMP := DT_TMP|| rpad(nvl(::[MAIN_DOCUM].[PRINT_SRV].formating(name_p,1,40,pos),' '),40)||'|'||rpad(acc_kt.[MAIN_V_ID], 21, ' ')||'|'||lpad(sum_kt1,13)||'|'||lpad(sum_kt2,13)||NL$;
+					while pos < length(name_p) loop
+						DT_TMP := DT_TMP|| rpad(nvl(::[MAIN_DOCUM].[PRINT_SRV].formating(name_p,pos,40,pos),' '),40)||'|'||rpad(' ',21,' ')||'|'||rpad(' ',13,' ')||'|'||rpad(' ',13,' ')||NL$;
+					end loop;
+					SaveMemo; -- Сохраняем буфер в параметры
+					DT_TMP := '--------------------------------------------------------------|---------------------------';
+					SaveMemo;
+					
+					while v_StampRow < v_StampTbl.count loop
+						vNaznMemo := vNaznMemo|| rpad(' ',62)||'|'||center_pad(GetStampRow(v_StampTbl, v_StampRow), 27)||NL$;
+					end loop;
+					SaveNazn; -- Сохраняем буфер
+					
+					vNaznMemo := rpad('-',62, '-')||'|'||NL$;
+					SaveNazn;
+					
+				elsif V_GROUP = 3 /*dif_dt and dif_kt*/ then
+					debug_pipe('V_GROUP 3!!!!', 0);
+					DT_TMP := DT_TMP || '                                            Плательщик/Получатель разные         '||NL$||
+									'------------------------------------------------------------------------------------'||NL$;
+
+					for idx in num_beg..end_num loop
+						doc := docs1(idx);
+--------------------------------------------------------------------------------
+						select d(d.[SUM],d.[SUM_PO],d.[SUM_NT],d.[RATE_DT],d.[RATE_KT],d.[ACC_DT],d.[ACC_KT])	in ::[MAIN_DOCUM]
+						where d%id = doc
+						into DtSum,	CtSum, NaSum, DtRate, KtRate,acc_dt,acc_kt;
+						-- вычисление реквизитов на дату валютирования
+						if (DtSum is null) or (CtSum is null) or (NaSum is null) then
+							doc.[CALCSUMM].Get_CalcSumm(DtSum,	         -- Сумма плательщика
+	                 		doc.[acc_dt].[FINTOOL],    -- Валюта плательщика
+	                 		DtRate,	         -- Курс валюты плательщика
+	                 		CtSum,	         -- Сумма получателя
+	                 		doc.[acc_kt].[FINTOOL], -- Валюта получателя
+	                 		KtRate,	         -- Курс валюты получателя
+	                 		NaSum,	         -- Сумма нац.покрытия
+	                 		doc.[MULTICURR], -- Валютное свойство
+	                 		nvl(doc.[DATE_PROV], doc.[DATE_VAL])      	 -- Дата
+	                		);
+						end if;
+-------------------------------------------------------------------------------
+
+
+						if acc_dt.[FINTOOL] != val_nt then
+							sum_dt1 := acc_dt.[FINTOOL].[CUR_SHORT]||' '||[PRINTFUN].PrintNumSumm(nvl(doc.[SUM],DtSum));
+							sum_dt2 := ::[FT_MONEY].[NAT_CUR].Nat_Code||' '||[PRINTFUN].PrintNumSumm(nvl(doc.[SUM_NT],NaSum));
+						else
+							sum_dt1 := [PRINTFUN].PrintNumSumm(nvl(doc.[SUM],DtSum));
+							sum_dt2 := ' ';
+						end if;
+						if acc_kt.[FINTOOL] != val_nt then
+							sum_kt1 := acc_kt.[FINTOOL].[CUR_SHORT]||' '||[PRINTFUN].PrintNumSumm(nvl(doc.[SUM_PO],CtSum));
+							sum_kt2 := ::[FT_MONEY].[NAT_CUR].Nat_Code||' '||[PRINTFUN].PrintNumSumm(nvl(doc.[SUM_NT],NaSum));
+						else
+							sum_kt1 := [PRINTFUN].PrintNumSumm(nvl(doc.[SUM_NT],NaSum));
+							sum_kt2 := ' ';
+						end if;
+
+						if V_TYPE then -- корсчета
+							nm := acc_dt.[MAIN_V_ID];
+							nm2 := acc_kt.[MAIN_V_ID];
+						else
+							nm := nvl(doc.[KL_DT].[2].[1],doc.[KL_DT].[1].[2].[MAIN_V_ID]);
+							nm2 := nvl(doc.[KL_KT].[2].[1],doc.[KL_KT].[1].[2].[MAIN_V_ID]);
+						end if;
+
+
+						DT_TMP := DT_TMP||
+								'Плательщик:                                       |Сумма | '||lpad(sum_dt1,20)||NL$||
+								'                                                  |      | '||lpad(sum_dt2,20)||NL$||
+								''||rpad(nvl(substr(acc_dt.[NAME], 1, 50),' '),50)||'|------|--------------------------'||NL$||
+								''||rpad(nvl(substr(acc_dt.[NAME],51,100),' '),50)||'|Счет№ | '||nm||NL$||
+								LongName(acc_dt.[NAME],50,3)||
+								LongName(acc_dt.[NAME],50,4)||
+								'------------------------------------------------------------------------------------'||NL$||
+								'Получатель:                                       |      | '||NL$||
+								''||rpad(nvl(substr(acc_kt.[NAME], 1, 50),' '),50)||'|      | '||lpad(sum_kt1/*sum_dt2*/,20)||NL$||
+								''||rpad(nvl(substr(acc_kt.[NAME],51,100),' '),50)||'|Счет№ | '||nm2||NL$||
+								LongName(acc_kt.[NAME],50,3)||
+								LongName(acc_kt.[NAME],50,4)||
+								'------------------------------------------------------------------------------------'||NL$;
+
+						-- Назначение платежа каждого документа
+						if [PSH_PRINT_SVBANK].V_NAZN_EVERY_DOC then
+							DT_TMP := DT_TMP || NaznRoll(doc.[NAZN]);
+						end if;
+						SaveMemo; -- Сохраняем буфер в параметры
+					end loop;
+
+					--end if;
+				end if;
+				P_SUM_STR := STDLIB.N2STR(sum_dt, acc_dt.[FINTOOL].[CUR_SHORT]);
+				[MD_OTHERS].SetCounter(::[NAME_PAYDOC]([code]='БЕЗН_СВОДНЫЙ_ДОК'), P_NUM, true, true, false, null, null, rDepart);
+				P_HEAD := '------------------------------------------------------------------------------------------'||NL$||
+						  'Сумма       |'||rpad(nvl(FIN.Get_Format(P_SUM_STR,    1, 60),' '),60)||'|  Вид оп  |'||sVidDoc||NL$||
+						  'прописью    |'||rpad(nvl(FIN.Get_Format(P_SUM_STR,   61,120),' '),60)||'|----------|'||NL$||
+						  '            |'||rpad(nvl(FIN.Get_Format(P_SUM_STR,  120,180),' '),60)||'|Очер.плат.|'||to_char(nPrioritet);
+							
+				[PSH_PRINT_SVBANK].tab_num(ind).yes := true;
+				exit;
+			end if;
+		end loop; -- врем.таблица
+	end if;
+end;
+
+end;
+end;

@@ -1,0 +1,161 @@
+class PSH_IBANK2;
+
+@import_plsql(true)
+@name('[ПСБ] Импортировать клиента из BIFIT')
+method PSH_IMP_KLI_BIF is
+-- Клиент по ИНН+КПП
+public function client_CFT (inn [CLIENT].[INN]%type, kpp [CLIENT].[KPP]%type) return ref [CLIENT] is 
+i number:=0;
+cl ref [CLIENT];
+begin
+
+for CLI in ::[CLIENT] where cli.[INN]=inn and (cli.[KPP]=kpp or kpp is null) and cli%class='CL_ORG'
+loop
+i:=i+1;
+cl:=cli;
+end loop;
+
+if i=1 then return(cl);
+elsif i=0 then return(0);
+else return(2);
+end if;
+
+end;
+
+-- Клиент по Фамилия+дата рождения+номер паспорта
+public function client_fiz_CFT (fam varchar2(100), dr date, num_passp [CL_PRIV].[DOC].[NUM]%type) return ref [CLIENT] is 
+i number:=0;
+cl ref [CLIENT];
+begin
+
+for CLI in ::[CL_PRIV] where upper(cli.[NAME]) like '%'||upper(fam)||'%' and trunc(cli.[DATE_PERS])=trunc(dr) and replace(cli.[DOC].[NUM],' ')=replace(num_passp,' ')
+loop
+i:=i+1;
+cl:=cli;
+end loop;
+
+if i=1 then return(cl);
+elsif i=0 then return(0);
+else return(2);
+end if;
+
+end;
+PSH_IMP_KLI_BIF (
+	@name('Внешний ID') P_EXT_ID in [STRING_20]
+) is
+
+validate is
+proverka number:=0;
+begin
+	if p_message = 'DEFAULT' then
+			null;
+	elsif p_message = 'VALIDATE' then
+		if p_info = 'OK' then
+
+		if P_EXT_ID is null then	
+			pragma error('Не указан внешний идентификатор клиента (ВИ)!');
+		end if;
+		
+		select x (count(x)) in ::[PSH_IBANK2] where x.[REG_NUMBER]=P_EXT_ID into proverka;
+		if proverka>0 then pragma error('Уже заведён договор с таким ВИ!');
+		end if;
+			
+		end if;	
+	end if;
+end;
+
+execute is
+KLI ref [CLIENT];
+err_ur varchar2(500):=NULL;
+err_fiz varchar2(500):=NULL;
+dog_ibank ref [PSH_IBANK2];
+kol_vo number:=0;
+adress_001 ref [PSH_EMAIL_RASSIL];
+text_001 varchar2(32000);
+
+begin
+	adress_001:=::[PSH_EMAIL_RASSIL]([PSH_EMAIL_COD] = 'IBANK2' and [PSH_EMAIL_FIL].[CODE]='001');
+	/*for (select x (	x.NAME_CLN  		:C_NAME_CLN
+					,x.INN_CLN  		:C_INN_CLN
+					,x.KPP      		:C_KPP
+					,x.lock_word 		:C_lock_word -- блок. слово
+					,x.phone_cln_sms 	:C_phone_cln_sms
+					,x.fio_cln			:C_fio_cln --отв. лицо
+					,x.num_dogov		:C_num_dogov
+					,x.reg_date			:C_reg_date --дата оговора
+					) in ibank2_clients%rowtype all where P_EXT_ID=x.ext_client_id and x.status=2) loop
+		KLI:=client_CFT(trim(x.C_INN_CLN),trim(x.C_KPP));
+		
+		if KLI=0 then err_ur:='Клиент не найден';
+		elsif KLI=2 then err_ur:='Клиентов с ИНН:'||x.C_INN_CLN||' и КПП:'||x.C_KPP||'найдено несколько';
+		else dog_ibank:= ::[PSH_IBANK2].[NEW_AUTO](
+													KLI --P_CLIENT_REF--		--Клиент
+													,KLI.[FILIAL]--P_FILIAL--		--Филиал
+													,x.C_num_dogov--P_NUM_DOG--		--Номер договора
+													,P_EXT_ID--P_REG_NUMBER--		--Идентификатор во внешней системе
+													,x.C_reg_date--P_DATE_OPEN--		--Дата открытия договора
+													,x.C_lock_word--P_PASSWORD--		--Блокировочное слово
+													,x.C_fio_cln--P_FIO_STR--		--Ответственное лицо
+													,x.C_phone_cln_sms--P_PHONE_STR--		--Телефон
+													);
+			dog_ibank.[COM_STATUS] := ::[COM_STATUS_PRD]([CODE] = 'WORK');	
+			kol_vo:=kol_vo+1;									
+		end if;											
+	end loop;
+	
+	if nvl(dog_ibank,0)=0 then
+	
+--	debug_pipe('Вошли в поиск физика',0);
+	
+	for (select x (	x.last_name  		:C_FAMIL
+					,x.first_name  		:C_IMYA
+					,x.middle_name      :C_OTCHE
+					,x.birthday			:C_birthday
+					,x.idcard_number    :C_idcard_number --номер паспорта
+					,x.lock_word 		:C_lock_word -- блок. слово
+					,x.phone_cell 		:C_phone_cell -- сотовый
+					,x.num_dogov		:C_num_dogov
+					,x.reg_date			:C_reg_date --дата оговора
+					) in ibank2_pclients%rowtype all where P_EXT_ID=x.ext_client_id and x.status=2) loop
+		KLI:=client_fiz_CFT(trim(x.C_FAMIL),to_date(x.C_birthday,'DD.MM.YYYY'),trim(x.C_idcard_number));
+		if KLI=0 then err_fiz:='Клиент не найден';
+		elsif KLI=2 then err_fiz:='Клиентов: '||x.C_FAMIL||' рождённых:'||to_char(x.C_birthday,'DD.MM.YYYY')||' с паспортом № '||x.C_idcard_number||'найдено несколько';
+		else dog_ibank:= ::[PSH_IBANK2].[NEW_AUTO](
+													KLI--P_CLIENT_REF--		--Клиент
+													,KLI.[FILIAL]--P_FILIAL--		--Филиал
+													,x.C_num_dogov--P_NUM_DOG--		--Номер договора
+													,P_EXT_ID--P_REG_NUMBER--		--Идентификатор во внешней системе
+													,x.C_reg_date--P_DATE_OPEN--		--Дата открытия договора
+													,x.C_lock_word--P_PASSWORD--		--Блокировочное слово
+													,null--P_FIO_STR--		--Ответственное лицо
+													,x.C_phone_cell--P_PHONE_STR--		--Телефон
+													);
+			dog_ibank.[COM_STATUS] := ::[COM_STATUS_PRD]([CODE] = 'WORK');
+			kol_vo:=kol_vo+1;										
+		end if;											
+	end loop;
+	
+	end if;
+	--*/
+if kol_vo=1 then stdio.put_line_buf('Клиент №'||KLI.[REGISTR_NUM]||', '||KLI.[NAME]||' успешно импортирован');
+elsif kol_vo=0 and KLI is null then stdio.put_line_buf('Клиент с внешним номером '||P_EXT_ID||' не найден в ibank в статусе "зарегистрирован"');
+elsif kol_vo=0 and KLI=0 then stdio.put_line_buf('Клиент с внешним номером '||P_EXT_ID||' не найден в ЦФТ');
+elsif kol_vo=0 and KLI=2 then stdio.put_line_buf('Клиентов с внешним номером '||P_EXT_ID||' найдено несколько. '||CHR(10)||err_ur||CHR(10)||err_fiz); 	
+elsif kol_vo>1 then stdio.put_line_buf('Клиентов с внешним номером '||P_EXT_ID||' импортировано несколько, а именно: '||kol_vo);
+end if;
+
+if kol_vo=1 and KLI.[FILIAL].[CODE]='001' then
+	text_001:= 'Заведён новый договор ДБО N '||dog_ibank.[NUM_DOG]||'. Клиент '||dog_ibank.[CLIENT].[NAME]||'. Идентификатор IBANK2 '||dog_ibank.[CLIENT_SYS_ID];
+	::[FP_INTERFACE].[PRX_PCORE].Send_Mail(  --Башкиров В.Г. 17.12.2023
+						  adress_001.[PSH_EMAIL_ADRES]	-- Кому (E-Mail) Можно указать несколько адресов разделенных "точкой с запятой"
+						, 'Новый договор ДБО'			-- Тема	
+						, text_001			 			-- Сообщение
+						, 'IT@pshb.ru'					-- от кого (E-Mail, если пусто, то используется значение DEFAULT_FROM_EMAIL)
+						, false							-- если TRUE, то вылетит ERROR_ON_SEND
+						,null
+						);
+end if;
+	
+end;
+end;
+end;

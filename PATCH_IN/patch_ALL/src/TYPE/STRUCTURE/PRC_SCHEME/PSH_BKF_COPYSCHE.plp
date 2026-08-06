@@ -1,0 +1,74 @@
+class PRC_SCHEME;
+
+@name('[ПСБ] Копировать схему на основе данной')
+@tag('COPIED')
+method PSH_BKF_COPYSCHE is
+
+@name('Копировать историю %%') public V_CP_HIST_PER [BOOLEAN];
+PSH_BKF_COPYSCHE (
+	@name('Наименование')  P_NAME         in [NAME],
+	@name('Код')           P_CODE         in [STRING_20],
+	@name('Базовая схема') P_SCHEME_BASE  in [REF_PRC_SCH],
+	@name('Дата')          P_DATE_USE_BEG in [DATE]
+) is
+
+validate is
+	tmp_date	date;
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		P_SCHEME_BASE := this;
+		P_NAME		  := P_SCHEME_BASE.[NAME];	
+		P_CODE		  := P_SCHEME_BASE.[COD];
+		P_DATE_USE_BEG:= P_SCHEME_BASE.[DATE_USE_BEG];
+	elsif P_MESSAGE = 'VALIDATE' then
+		if p_info='P_SCHEME_BASE' then
+			P_NAME		  := P_SCHEME_BASE.[NAME];	
+			P_CODE		  := P_SCHEME_BASE.[COD];
+			P_DATE_USE_BEG:= P_SCHEME_BASE.[DATE_USE_BEG];
+		end if;
+		
+		if p_info='OK' then
+			if P_DATE_USE_BEG is null then
+				pragma error('Не указана дата!');
+			end if;
+			if P_NAME is null then
+				pragma error('Не указано наименование!');
+			end if;
+			if P_CODE is null then
+				pragma error('Не указан код!');
+			end if;
+			if P_SCHEME_BASE is null then
+				pragma error('Не указана базовая схема!');
+			end if;
+		end if;
+	end if;
+end;
+
+execute is
+begin
+ 	::[PRC_SCHEME].[NEW#AUTO](
+	 P_NAME		--Наименование
+	,P_SCHEME_BASE.[P_PRIVATE]			--Признак индивидуального использования
+	,P_SCHEME_BASE.[P_CREDIT]			--Признак схемы по активному счету
+	,null--P_SCHEME_BASE.[LIST_SCH_PRC]		--История схемы начисления процентов
+	,P_SCHEME_BASE.[USER_CREATE]		--Создано пользователем
+	,P_SCHEME_BASE.[DATE_CREATE]		--Дата создания
+	,P_DATE_USE_BEG						--Дата начала использования
+	,P_SCHEME_BASE.[DATE_USE_END]		--Дата окончания использования
+	,P_SCHEME_BASE.[PRODUCT]			--Ссылка на использующий схему продукт
+	,P_CODE								--Код
+	,P_SCHEME_BASE.[GROUP_CODE]			--Группа
+	,P_SCHEME_BASE.[VALUTA]				--Валюта схемы
+	,P_SCHEME_BASE.[PROC_RECORDS]		--Способ обработки выписки
+	,P_SCHEME_BASE.[PROC_PRC_DATE]		--Способ выбора процентной ставки за дату
+	,P_SCHEME_BASE.[IGNORE_NEGATIVE]	--Игнорировать отрицательные остатки в выписке
+	,P_SCHEME_BASE.[ROUND_DEGREE]		--Степень округления процентной ставки
+	,P_SCHEME_BASE.[BASE_SCHEMA]		--Базовая схема
+	,P_SCHEME_BASE.[OPERATION]			--Операция от базовой схемы
+	,P_SCHEME_BASE.[CLASSIFIC]			--Классификация схемы
+	,P_SCHEME_BASE.[IND_RATE_NAME]		--Наименование индикативной ставки
+	,P_SCHEME_BASE.[IND_RATE_TIME]		--Срок индикативной ставки
+	);
+end;
+end;
+end;

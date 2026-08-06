@@ -1,0 +1,23 @@
+class TAX_IC_ORDERS;
+
+@name('[ПСБ] Корректировка КПП получателя (служебная)')
+method PSH_EDIT_REC_KPP is
+PSH_EDIT_REC_KPP (
+	@name('КПП получателя') P_RECEIVER_REQS_2_KPP in [STRING_9]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_RECEIVER_REQS_2_KPP := this.[RECEIVER_REQS].[2].[KPP];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+begin
+	this.[RECEIVER_REQS].[2].[KPP] := P_RECEIVER_REQS_2_KPP;
+end;
+end;
+end;

@@ -1,0 +1,21 @@
+class NOTRADE;
+
+@name('[ПСБ] Экспорт в Faktura курсов Банка')
+method PSH_EXP_FAKTURA is
+PSH_EXP_FAKTURA (
+	@name('Дата-время установки курсов')                              P_DATE            in [DATE_TIME],
+	@name('Касса')                                                    P_NOTRADE         in [S_NOTRADE] default null,
+	@name('Только добавить котировки в "Виды цен за единицу валюты"') P_ONLY_PRICE_LIST in [BOOLEAN]   default null
+) is
+
+execute is
+/*********************************************************************
+Назначение:
+
+bashkirov, последнее изменение 12 Декабрь 2019 г.
+*********************************************************************/
+begin
+	null;
+end;
+end;
+end;

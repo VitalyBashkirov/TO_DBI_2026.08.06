@@ -1,0 +1,221 @@
+class MAIN_DOCUM;
+
+@import_plsql(true)
+@name('[ПСБ] Отчет по физикам_валюта')
+@tag('COPIED')
+static method PSH_REP_LIM_FM is
+PSH_REP_LIM_FM (
+	@name('Дата начала периода')                P_BEGDATE in [DATE],
+	@name('Дата окончания периода')             P_ENDDATE in [DATE],
+	@name('Маска счётов')                       P_MASK    in [ACCNUM],
+	@name('Минимальное количество операций')    P_MIN_OP  in [NUM10],
+	@name('Минимальная общая сумма в руб.экв.') P_MIN_LIM in [SUMMA]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_BEGDATE := [SYSTEM]::[OP_DATE];
+	P_ENDDATE := [SYSTEM]::[OP_DATE];
+end if;
+-- End initialization of parameters and variables
+declare
+pragma macro(xl,'[OOXML]::[API_XL]');
+pragma macro(to_dt,'to_date([1],''dd/mm/yyyy'')', substitute);
+
+xl_out		blob:= empty_blob();
+vRepId		string;
+font 		integer;
+bord 		integer;
+format_text integer;
+format_num	integer;
+i 			number;
+v_sum number;
+v_num number;
+
+vColCount 	number; -- колво колонок в отчете
+
+begin
+
+  if P_MESSAGE = 'DEFAULT' then -- первый запуск процедуры
+		-- P_FIL := STDLIB.USERID.FILIAL;
+
+		P_MIN_OP := 2;		
+		P_MIN_LIM := 200000;		
+		/*P_BEGDATE := &to_dt('01/11/2020');
+		P_ENDDATE := P_BEGDATE;
+		P_ENDDATE := &to_dt('30/11/2020');*/
+							
+  elsif P_MESSAGE = 'VALIDATE' then -- переход между полями
+
+		if p_info = 'OK' then
+		
+  			if P_BEGDATE is null or P_ENDDATE is null then
+  				pragma error('Необходимо указать период!');
+  			end if;
+  			
+  			if P_BEGDATE < to_date('01.01.2013','DD.MM.YYYY') then
+  				pragma error('Начало не может быть ранее 01.01.2013!');
+  			end if;
+  		
+			[SHABLON_DOC]::[LIB_OOXML].load_blob('PSH_REP_LIM_FM',xl_out);
+ 			If not [OOXML]::[API_XL].open_file(xl_out) Then				
+				pragma error('Ошибка преобразования шаблона !');
+			End If;  			  			  	
+
+
+			vColCount := 6; -- всего колонок в отчете
+			i := 4; -- первая строка в Excel
+			font:=&xl.get_font(	p_name		== 'Times New Roman',p_fontsize	== 10);
+			bord:=&xl.get_border( p_top		== &xl.xl_b_thin, p_bottom	== &xl.xl_b_thin, p_left	== &xl.xl_b_thin, p_right	== &xl.xl_b_thin);
+			format_text:=&xl.get_numFmt('@');
+			format_num:=&xl.get_numFmt('###,###,###,###,##0.00');	
+
+			-- &xl.set_column_width(40,1,1);
+			
+			&xl.Put(1,1, 'Отчет за период с '||to_char(P_BEGDATE,'dd/mm/yyyy')||' по '||to_char(P_ENDDATE,'dd/mm/yyyy'));
+				
+			for (
+					select distinct x( -- x.[CLIENT] :cl_id
+										x.[NEW_CLIENT].[NAME] :cl_new
+										,x.[NEW_CLIENT].[BIRTHDAY] : cl_dr
+										)
+					in ::[KASSA_V]
+					where trunc(x.[DATE])>=P_BEGDATE and trunc(x.[DATE]) <=P_ENDDATE
+						and  x.[KOD_OPER].[KOD_OPER] in ('SEL_OP','BUY_OP','CON_OP','PPV_OP','PPR_OP','PNN_OP','PRR_OP','PRN_OP','PNR_OP')
+						and x%state!='DELETED'
+						and (x.[NEW_CLIENT].[NAME] is not null)
+					order by 1
+			) loop	
+
+				/*if ::[DOCUMENT_INT].PRX_CLIENT.get_client_int_type(x.cl_id) not in ('INT_CL_PRIV','INT_CL_CHP','INT_CL_PBUL') then
+						continue;
+				else */
+							
+					 debug_pipe('  NAME='||x.cl_new,0);		
+			
+			
+					v_sum = v_num:=0;
+					
+					select arh_val ( sum(decode(arh_val.[KOD_OPER].[KOD_OPER],'BUY_OP',arh_val.[REQ_OUTPUT].[AMOUNT]
+										,decode(arh_val.[KOD_OPER].[KOD_OPER],'SEL_OP',arh_val.[REQ_INPUT].[AMOUNT]
+										,decode(arh_val.[KOD_OPER].[KOD_OPER],'CON_OP',::[DOCUMENT].[LIB_CUR].CUR2CUR(arh_val.[REQ_OUTPUT].[AMOUNT], arh_val.[REQ_OUTPUT].[CURRENCY], ::[SYSTEM].[SYS_MAIN_VAL], arh_val.[DATE] )
+										,::[DOCUMENT].[LIB_CUR].CUR2CUR(arh_val.[REQ_INPUT].[AMOUNT], arh_val.[REQ_INPUT].[CURRENCY], ::[SYSTEM].[SYS_MAIN_VAL], arh_val.[DATE])))))
+								, count(1)
+							)
+					in ::[KASSA_V] all
+					where trunc(arh_val.[DATE])>=P_BEGDATE and trunc(arh_val.[DATE]) <=P_ENDDATE
+						and  arh_val.[KOD_OPER].[KOD_OPER] in ('SEL_OP','BUY_OP','CON_OP','PPV_OP','PPR_OP','PNN_OP','PRR_OP','PRN_OP','PNR_OP')
+						and arh_val%state!='DELETED'
+						and (arh_val.[NEW_CLIENT].[NAME] = x.cl_new)
+					into v_sum, v_num;	
+					
+					
+											
+
+					if v_num >= P_MIN_OP and v_sum >= P_MIN_LIM then
+																
+						for arh_val in ::[KASSA_V] where trunc(arh_val.[DATE])>=P_BEGDATE and trunc(arh_val.[DATE]) <=P_ENDDATE
+													and  arh_val.[KOD_OPER].[KOD_OPER] in ('SEL_OP','BUY_OP','CON_OP','PPV_OP','PPR_OP','PNN_OP','PRR_OP','PRN_OP','PNR_OP')
+													and arh_val%state!='DELETED'
+													and (arh_val.[NEW_CLIENT].[NAME] = x.cl_new)
+													order by arh_val.[DATE]
+						loop
+						
+							&xl.Put(i,1, arh_val.[NEW_CLIENT].[NAME]);
+							&xl.Put(i,2, to_char(arh_val.[DATE],'dd/mm/yyyy'));
+							if arh_val.[KOD_OPER].[KOD_OPER] in ('SEL_OP','BUY_OP','CON_OP'/*,'PPV_OP','PPR_OP','PPV_OP','PNN_OP','PRR_OP','PRN_OP','PNR_OP'*/) then
+								&xl.Put(i,3, 'ВОО');
+							else
+								&xl.Put(i,3, 'Переводы БОС');
+							end if;	
+							&xl.Put(i,4, arh_val.[KOD_OPER].[NAME]);
+							if arh_val.[KOD_OPER].[KOD_OPER]='BUY_OP' then
+								&xl.Put(i,5, arh_val.[REQ_OUTPUT].[AMOUNT]);
+							elsif arh_val.[KOD_OPER].[KOD_OPER]='SEL_OP' then
+								&xl.Put(i,5, arh_val.[REQ_INPUT].[AMOUNT]);
+							elsif arh_val.[KOD_OPER].[KOD_OPER] = 'CON_OP' then	
+								&xl.Put(i,5, ::[DOCUMENT].[LIB_CUR].CUR2CUR(arh_val.[REQ_OUTPUT].[AMOUNT], arh_val.[REQ_OUTPUT].[CURRENCY], ::[SYSTEM].[SYS_MAIN_VAL], arh_val.[DATE] ));
+							else
+								&xl.Put(i,5, ::[DOCUMENT].[LIB_CUR].CUR2CUR(arh_val.[REQ_INPUT].[AMOUNT], arh_val.[REQ_INPUT].[CURRENCY], ::[SYSTEM].[SYS_MAIN_VAL], arh_val.[DATE]));	
+							end if;	
+							
+							&xl.Put(i,6, v_sum);
+									
+							i := i+1;
+	
+						end loop;
+					end if;	
+				-- end if;
+					
+			end loop;
+				
+			/*
+			for (
+					select distinct x( x.[CLIENT] :cl_id )
+					in	::[SALE] all
+					where (x.[COM_STATUS] = ::[COM_STATUS_PRD]([CODE] = 'CLOSE') or x%state = 'PAY_OFF')
+					and x.[DATE] >= P_BEGDATE and x.[DATE] <= P_ENDDATE
+			) loop	
+
+				if ::[DOCUMENT_INT].PRX_CLIENT.get_client_int_type(x.cl_id) not in ('INT_CL_PRIV','INT_CL_CHP','INT_CL_PBUL') then
+						continue;
+				else
+					
+					v_sum = v_num:=0;
+					
+					select y ( sum(decode(y.[INPUT].[CURRENCY].[CUR_SHORT],'RUB',y.[INPUT].[AMOUNT],decode(y.[OUTPUT].[CURRENCY].[CUR_SHORT],'RUB',y.[OUTPUT].[AMOUNT],0)))
+								, count(1)
+							)
+					in ::[SALE] all
+					where (y.[COM_STATUS] = ::[COM_STATUS_PRD]([CODE] = 'CLOSE') or y%state = 'PAY_OFF')
+							and y.[DATE] >= P_BEGDATE and y.[DATE] <= P_ENDDATE
+							and y.[CLIENT] = x.cl_id
+					into v_sum, v_num;							
+					
+					debug_pipe(	'NAME='||x.cl_id.[NAME],0);
+					debug_pipe(	'v_sum='||v_sum,0);
+					debug_pipe(	'v_num='||v_num,0);
+					
+					if v_num > 1 and v_sum >= 200000 then
+						for sa in ::[SALE] all
+						where (sa.[COM_STATUS] = ::[COM_STATUS_PRD]([CODE] = 'CLOSE') or sa%state = 'PAY_OFF')
+								and sa.[DATE] >= P_BEGDATE and sa.[DATE] <= P_ENDDATE
+								and sa.[CLIENT] = x.cl_id
+						loop		
+						
+				
+								&xl.Put(i,1, sa.[CLIENT].[NAME]);
+								&xl.Put(i,2, to_char(sa.[DATE],'dd/mm/yyyy'));
+								&xl.Put(i,3, sa.[INPUT].[ACCOUNT].[1].[2].[MAIN_V_ID]);
+								&xl.Put(i,4, sa.[OUTPUT].[ACCOUNT].[1].[2].[MAIN_V_ID]);
+								if sa.[INPUT].[CURRENCY].[CUR_SHORT] = 'RUB' then
+									&xl.Put(i,5, sa.[INPUT].[AMOUNT]);
+								elsif sa.[OUTPUT].[CURRENCY].[CUR_SHORT] = 'RUB' then	
+									&xl.Put(i,5, sa.[OUTPUT].[AMOUNT]);
+								end if;	
+								
+								
+								i := i+1;
+			
+						end loop;
+					end if;	
+				end if;	
+			end loop;
+			*/
+
+
+			&xl.set_orientation(p_orientation==1);	
+			&xl.set_PaperSize(10);
+			&xl.fit_in_page_width;
+			&xl.finish(xl_out);		
+			-- Отправка файла отчёта пользователю на клиентскую машину
+			vRepId	:= [OOXML]::[API_ORSA].putReport2Run(xl_out,'xlsx','Выписку сформировал:'||STDLIB.USERID.NAME);
+
+		end if;	
+  end if;
+end;
+end;
+end;
+end;

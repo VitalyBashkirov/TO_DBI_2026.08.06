@@ -1,0 +1,916 @@
+class IFRS_FTOOL_GRP;
+
+@name('[ПСБ] Импорт ставок по базовым уровням доходности')
+static method PSH_IMP_BUDV is
+
+@name('Переменная валидации') public V_DEST_STR [STRING_32000];
+public PrevFile           [FILE$LOAD];        -- Предыдущее имя файла
+public PrevRegim          integer;            -- Предыдущий режим
+	
+public G_DP	boolean;	--управление трассировкой
+
+public GSystemParamGet 	string(25) :='BUDV_IN'; 	--каталог с входящими файлами "Базовые уровни доходности" budv_YYYY-MM.txt ЗАПОЛНЯЕТСЯ в "Настройки."
+public GSystemParamGetErr 	string(25) :='BUDV_IN_ERR'; --каталог для ошибок ЗАПОЛНЯЕТСЯ в "Настройки."
+public GSystemParamGetArch string(25) :='BUDV_IN_ARCH';--каталог для архива ЗАПОЛНЯЕТСЯ в "Настройки."
+public GvMask				string(200):='BUDV_IN_FMSK';--'doc_*.txt'; --маска файл-менеджера
+public GLikeMask			string(200):='BUDV_IN_LMSK';--'doc_%.txt'; --маска файлов
+public vMask				string(200);
+public LikeMask			string(200);
+
+public PathGetErr			string(200);
+public PathGetArch			string(200);
+public PathGet    			string(200);
+
+public vKOD				pls_integer := stdio.WINTEXT;
+--vKOD				pls_integer := stdio.DOSTEXT;
+--vKOD				pls_integer := stdio.UNXTEXT;
+--vKOD				pls_integer := stdio.KOITEXT;
+
+/** /
+procedure SeekMainDocum(kpib ref [KUP_RAP_IN], P_DATE [DATE] default null);
+function SeekOldWork(pFileSrcName [STRING], DelOld boolean default true) return boolean;
+function GetFirstStr(
+	fCurr integer default null
+	,TitleStr OUT varchar2(32767)
+	,ExRaising  boolean default true
+	,In_text_Code  number default stdio.DOSTEXT
+	,Out_text_Code number default null
+	,ErrStr in out varchar(32767)
+	,MessStr in out varchar(32767)
+) return ref [KUP_RAP_IN];
+procedure SeekPay(kpi_ref ref [KUP_RAP_IN], InSubStr varchar2(32767),
+		  ErrStr in out varchar(32767), MessStr in out varchar(32767), n_err in out integer);
+
+/**/
+
+-- Счетчики документов
+public n_total            integer;
+public n_doc              integer;
+public n_err              integer;
+public n_notImp           integer;
+public n_already          integer;
+public n_noseek           integer;
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma MACRO (LGW, '::[CL_PRIV].[KUP_EDIT_SEX]');
+
+dp	integer:=0;		--управление &debug
+dp2	integer:=0;	--управление &debug
+dp3	integer:=0;		--управление &debug
+dp5	integer:=0;	--управление &debug
+
+fmt string:='dd/mm/yyyy';
+fmt24 string:='dd/mm/yyyy hh24:mi:ss';
+fmtCardExpDate string:='mmyy';
+fmtYMD string:='yyyymmdd';
+fmtYMDH24  string:='yyyymmddhh24miss';
+fmtYMDH24R string:='yyyy-mm-dd hh24:mi:ss';
+fmtYMDH24L string:='dd-mm-yy hh24:mi:ss';
+fmtDMY string:='ddmmyy';
+fmt24Low string:='DDMMYYYY hh24:mi:ss';
+fmtLow string:='ddmmyyyy';
+
+Separator string(1):='#';
+
+fCurr              integer;   -- Обрабатываемый файл
+ExRaising          boolean;   -- Признак генерирации Exception в операциях пакета STDIO
+In_text_Code       number;    -- Кодировка конвертируемого текста
+Out_text_Code      number;    -- Кодировка результирующего текста
+MaxStrLen          integer := 32767; -- максимальная длина выходной строки
+
+ColFirstFields	   integer:=7; --количество полей реестра из RAPID в первой строке
+ColNextFields	   integer:=7; --количество полей реестра из RAPID со второй строки
+
+create_on_exception boolean;
+function iif(u boolean, v1 varchar2, v2 varchar2) return varchar2 is begin if u then return v1; end if; return v2; end;
+
+--Табличка для имен Файлы импорта ставок по базовым уровням доходности от ЦБ
+type R_NFile is record (nFile [NAME]);
+rNFile R_NFile;
+type T_NFile is table of R_NFile index by string(160);
+tNFile T_NFile;
+
+--Табличка с историей изменения ставок из файлов ЦБ
+type R_Rate is record (d [DATE],-- Ставки на дату
+	rub_NULL 	[NUMBER_7_4],   -- RUB до востребования;
+	rub_0_90 	[NUMBER_7_4],   -- RUB на срок до 90 дней;
+	rub_91_180 	[NUMBER_7_4], 	-- RUB на срок от 91 до 180 дней;
+	rub_181_365 [NUMBER_7_4],	-- RUB на срок от 181 дня до 1 года;
+	rub_366 	[NUMBER_7_4],   -- RUB на срок свыше 1 года;
+	
+	usd_NULL 	[NUMBER_7_4],   -- USD до востребования;
+	usd_0_90 	[NUMBER_7_4],   -- USD на срок до 90 дней;
+	usd_91_180 	[NUMBER_7_4], 	-- USD на срок от 91 до 180 дней;
+	usd_181_365 [NUMBER_7_4],	-- USD на срок от 181 дня до 1 года;
+	usd_366 	[NUMBER_7_4],   -- USD на срок свыше 1 года;
+	
+	eur_NULL 	[NUMBER_7_4],   -- EUR до востребования;
+	eur_0_90 	[NUMBER_7_4],   -- EUR на срок до 90 дней;
+	eur_91_180 	[NUMBER_7_4], 	-- EUR на срок от 91 до 180 дней;
+	eur_181_365 [NUMBER_7_4],	-- EUR на срок от 181 дня до 1 года;
+	eur_366 	[NUMBER_7_4]);  -- EUR на срок свыше 1 года;
+rRate R_Rate;
+type T_Rate is table of R_RATE index by string(8);
+tRate T_Rate;
+
+AllFile integer:=0;
+
+function ReplDublSpace(s in string(32000)) return string(32000) is
+l integer;
+begin
+	l:=length(s);
+	s:=replace(s,'  ',' ');
+	while l<>length(s) loop
+		l:=length(s);
+		s:=replace(s,'  ',' ');
+	end loop;
+	return trim(trim(trim(s,Chr(13)),chr(10)));
+end;
+-- Перенос файла в архив (или удаление, если P_ErrArchDel is null)
+public procedure FileToArchive(P_ErrArchDel boolean, P_PATH_FILE string, P_FILE_NAME string, P_PATH_OUT string default null) is 
+path_arch string;
+rc        integer;
+
+iTmp	integer;
+begin
+	if ::[DOCUM_RC].[T_LIB].ExistsFile(P_PATH_FILE, P_FILE_NAME) then
+		if P_PATH_OUT is not null then
+			rc:=stdio.f_copy(P_PATH_FILE || '/' ||P_FILE_NAME, P_PATH_OUT || '/' || P_FILE_NAME);
+			if rc < 0 then
+				pragma error('При отправке файла ' || P_PATH_FILE||'/'||P_FILE_NAME||'->'||P_PATH_OUT||'/'||P_FILE_NAME ||' Ошибка: '||rc);
+			end if;
+		end if;
+		if		  P_ErrArchDel then	path_arch := nvl(PathGetErr, trim([FP_TUNE]::[LIB].get_str_value(GSystemParamGetErr, null,throw_error==0),'/')); --P_PATH_FILE||'/error';
+		elsif not P_ErrArchDel then	path_arch := nvl(PathGetArch,trim([FP_TUNE]::[LIB].get_str_value(GSystemParamGetArch,null,throw_error==0),'/')); --P_PATH_FILE||'/archive';
+		else						path_arch := null;
+		end if;
+
+		if path_arch is not NULL then
+			begin
+				-- Перемещаем файл в архив
+				&debug('Перемещаем     '||P_PATH_FILE||'/'||P_FILE_NAME||' -> '||path_arch||'/'||P_FILE_NAME,0)
+				stdio.MOVE_FILE( P_PATH_FILE||'/'||P_FILE_NAME, path_arch||'/'||P_FILE_NAME );
+			exception when others then
+				::[DOCUM_RC].[T_LIB].WRITE_LOG( NULL, NULL, 0, TO_CHAR(SYSDATE,'HH24:MI:SS') || ' ' || 'При перемещении в архив ' || P_PATH_FILE||'/'||P_FILE_NAME||'->'||path_arch||'/'||P_FILE_NAME ||' Ошибка: '||SQLERRM||TB$||'Файл "'||P_PATH_FILE||'/'||P_FILE_NAME||'" удален...');
+				&debug('Ош.перемещения '||P_PATH_FILE||'/'||P_FILE_NAME||' -> '||path_arch||'/'||P_FILE_NAME,0)
+				stdio.DELETE_FILE( P_PATH_FILE||'/'||P_FILE_NAME );
+			end;
+		else
+			-- Удаляем файл
+			&debug('Удаляем        '||P_PATH_FILE||'/'||P_FILE_NAME||' -> '||path_arch||'/'||P_FILE_NAME,0)
+			stdio.DELETE_FILE( P_PATH_FILE||'/'||P_FILE_NAME );
+		end if;
+	end if;
+end;
+
+function InitTFile(pFileSrcName in out [STRING], file_list in out string(32767)) return integer is
+AllFile integer:=0;
+begin
+	tNFile.delete();
+	tRate.delete();
+	NextFile(pFileSrcName,file_list);
+	while pFileSrcName is not null loop
+		if(tNFile.exists(pFileSrcName))then
+			&debug('.InitTFile -- Повтор для : '||pFileSrcName,dp2)
+			null;
+		else
+			rNFile.nFile:=pFileSrcName;
+			tNFile(pFileSrcName):=rNFile;
+			AllFile:=AllFile+1;
+		end if;
+
+		NextFile(pFileSrcName,file_list);
+		--&debug('.InitTFile -- '||AllFile||' tNFile('||pFileSrcName||') = '||tNFile(pFileSrcName).nFile,dp2)
+	end loop;
+
+	&debug('.InitTFile -- Всего к загрузке файла(ов): '||AllFile,dp2)
+	return AllFile;
+end;
+
+public function NextFile(pFileSrcName in out [STRING], file_list in out string(32767)) return boolean is 
+ch		string(1);
+i_Beg	integer:=0;
+L		integer:=Length(file_list);
+begin
+	pFileSrcName:=null;
+	LikeMask:=nvl(LikeMask,trim([FP_TUNE]::[LIB].get_str_value(GLikeMask,          null,throw_error==0),'/')); --маска файлов МФР
+	
+	for i in 1..L loop
+		ch:=SubStr(file_list,i,1);
+		if ch<>CHR(10) then
+			if i_Beg=0 then
+				i_Beg:=i;
+			else
+				null; &debug('->'||ch,dp5)	
+			end if;
+		else
+			&debug('---> i_beg='||i_beg||' i='||i,dp5)	
+			if i_Beg>0 then
+				pFileSrcName:=Substr(file_list,i_beg,i-i_beg);
+				&debug('Проверяем '||pFileSrcName||' на like '||LikeMask,dp5)
+				if pFileSrcName like LikeMask and Instr(pFileSrcName,'_error')=0 and Instr(pFileSrcName,'_message')=0 then
+				   file_list:=SubStr(file_list,i);
+				   &debug(NL$||'---- Следующий файл:'||pFileSrcName,dp5)
+				   &debug(NL$||'---- Осталось в списке:'||file_list||NL$,dp5)			
+				   return true;
+				end if;
+			end if;
+			i_Beg:=0;
+		end if;
+		if i=L and i_Beg>0 then
+			pFileSrcName:=Substr(file_list,i_beg,i-i_beg);
+			&debug('Проверяем '||pFileSrcName||' на like '||LikeMask,dp5)
+			if pFileSrcName like LikeMask and Instr(pFileSrcName,'_error')=0 and Instr(pFileSrcName,'_message')=0 then
+			   i_beg:=0;
+			   file_list:=SubStr(file_list,i);
+			   &debug(NL$||'---- Следующий файл:'||pFileSrcName,dp5)
+			   &debug(NL$||'---- Осталось в списке:'||file_list||NL$,dp5)			
+			   return true;
+			end if;
+			i_Beg:=0;			
+		end if;
+	end loop;
+	&debug(NL$||'---- Конец списка',dp5)
+	return false;
+end;
+
+public function wMsg(msg string(32767)) return boolean is 
+begin
+	&debug(msg,dp)
+	stdio.put_line_buf(msg);
+end;
+
+
+
+--DEPN(RUB;10%;0;10%;true;false;USD;0.2;0;0.2;EUR;0.2;0;0.2)
+procedure TuneDeltaRate(OBJ_CLASS [METACLASS_REF], cCurShort [STRING_3], PsbIfrsGft string(32000),
+	l out [NUM_16_8],
+	c out [NUM_16_8],
+	r out [NUM_16_8],
+	bL out string(10),
+	bC out string(10),
+	bR out string(10),
+	n out boolean,
+	a out boolean) is
+s string(32000);
+i integer;
+msg string(2000):='Ош. вычисления дельта-значений для рыночных ставок из значения настройки '||PsbIfrsGft||' для '||OBJ_CLASS;
+
+wL string(32000);
+wC string(32000);
+wR string(32000);
+begin
+	cCurShort:=nvl(cCurShort,'RUB');
+	l=c=r=n=a:=null;
+	bL=bC=bR:=null;
+	s:=Replace(s,Chr(10));
+	s:=Replace(s,Chr(13));
+	i:=InStr(PsbIfrsGft,OBJ_CLASS||'(');
+	if i>0 then
+		s:=SubStr(PsbIfrsGft,i);
+		i:=InStr(s,'(');
+		s:=trim(SubStr(s,i));
+		&debug('.TuneDeltaRate -- (1)s='||s,dp3)
+		i:=nvl(InStr(s,cCurShort),1);
+		s:=trim(trim(trim(trim(trim(SubStr(s,i+4)),')'),';'),')'),';');
+		&debug('.TuneDeltaRate -- (2)s='||s,dp3)
+		
+	  --s:=trim(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,')',1,true),'(');
+		wL:=trim(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,';',1)     ,' ');
+		&debug('.TuneDeltaRate -- (2.1) wL='||wL,dp3)
+		
+		wC:=trim(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,';',2)     ,' ');
+		&debug('.TuneDeltaRate -- (2.2) wC='||wC,dp3)
+		
+		wR:=trim(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,';',3)     ,' ');
+		&debug('.TuneDeltaRate -- (2.3) wR='||wR,dp3)
+		
+		--bL:=iif(InStr(wL,'%')>0,true,false); 
+		--bC:=iif(InStr(wC,'%')>0,true,false); 
+		--bR:=iif(InStr(wR,'%')>0,true,false); 
+		if InStr(wL,'%')>0 then bL:='%'; end if; if InStr(wL,'+')>0 then bL:='+'; end if; if InStr(wL,'-')>0 then bL:='-'; end if;
+		if InStr(wC,'%')>0 then bC:='%'; end if; if InStr(wC,'+')>0 then bC:='+'; end if; if InStr(wC,'-')>0 then bC:='-'; end if;
+		if InStr(wR,'%')>0 then bR:='%'; end if; if InStr(wR,'+')>0 then bR:='+'; end if; if InStr(wR,'-')>0 then bR:='-'; end if;
+		l:=Replace(Replace(Replace(wL,'%'),'+'),'-');
+		c:=Replace(Replace(Replace(wC,'%'),'+'),'-');
+		r:=Replace(Replace(Replace(wR,'%'),'+'),'-');
+		n:=iif(Upper(trim(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,';',4),' '))='TRUE',true,false);
+		a:=iif(Upper(trim(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,';',5),' '))='TRUE',true,false);
+	else
+		pragma error(msg);
+	end if;
+  --&debug('.TuneDeltaRate -- Для '||OBJ_CLASS||' '||cCurShort||' l|c|r|bL|bC|bR|n|a='||l||'|'||c||'|'||r||'|'||iif(bL,'%','V')||'|'||iif(bC,'%','V')||'|'||iif(bR,'%','V')||'|'||n||'|'||a||' s='||s,dp3)
+	&debug('.TuneDeltaRate -- Для '||OBJ_CLASS||' '||cCurShort||' l|c|r|bL|bC|bR|n|a='||l||'|'||c||'|'||r||'|'||bL||'|'||bC||'|'||bR||'|'||n||'|'||a||' s='||s,dp3)
+end;
+
+--DEPN(RUB;10%;0;10%;true;false;USD;0.2;0;0.2;EUR;0.2;0;0.2)
+--31.08.2022 DEPOSIT_PRIV(RUB;5.5;0;25;true;false;USD;-2;0;+2;true;false;EUR;-2;0;+2;true;false);
+procedure AddRate(grRef ref [IFRS_GRP_RATES],
+	l_first in [NUM_16_8],
+	c_first in [NUM_16_8],
+	r_first in [NUM_16_8],
+	bL_first in string(10),
+	bC_first in string(10),
+	bR_first in string(10),
+	n in boolean,
+	a in boolean) is
+
+ l [NUM_16_8];
+ c [NUM_16_8];
+ r [NUM_16_8];
+bL string(10);
+bC string(10);
+bR string(10);
+
+Idx string(8);
+nnn_Rate integer:=0;
+old_Rate integer:=0;
+add_Rate integer:=0;
+
+rec_d [DATE];
+rec_l [NUM_16_8];
+rec_c [NUM_16_8];
+rec_r [NUM_16_8];
+rec_n boolean;
+rec_a boolean;
+flAdd boolean;
+
+cCurShort [STRING_3];
+ClProd string(32);
+CntDaysBeg number;
+CntDaysEnd number;
+begin
+	ClProd:=grRef.[FTOOL_GRP].[OBJ_CLASS];
+	
+	Idx := tRate.first();
+	while (not Idx is null) loop
+		 l:= l_first;
+		 c:= c_first;
+		 r:= r_first;
+		bL:=bL_first;
+		bC:=bC_first;
+		bR:=bR_first;
+
+		rec_d=rec_l=rec_c=rec_r=rec_n=rec_a:=null;
+		rRate:=tRate(Idx);
+		rec_d:=rRate.d;
+		
+		flAdd:=true;
+		for rts in grRef.[RATES] where rts.[RATE_DATE]=rec_d loop
+			/** /
+			flAdd:=false;
+			&debug('.AddRate -- '||ClProd||'     уже есть ставка за '||to_char(rec_d,fmt),dp3)
+			exit;
+			/**/
+			&debug('.AddRate -- '||ClProd||'     уже есть ставка за '||to_char(rec_d,fmt)||' удаляем rts%id='||rts%id,dp3)
+			rts.DELETE_AUTO;
+		end loop;
+		
+		if flAdd then
+			cCurShort:=nvl(grRef.[FTOOL_GRP].[CURRENCY].[CUR_SHORT],'RUB');
+			CntDaysBeg:=nvl(::[DEPN].[LIB_DBO_OPEN].get_days_cnt(grRef.[FTOOL_GRP].[PERIOD_LEFT] ,grRef.[FTOOL_GRP].[UN_PERIOD_LEFT]) ,0);
+			CntDaysEnd:=nvl(::[DEPN].[LIB_DBO_OPEN].get_days_cnt(grRef.[FTOOL_GRP].[PERIOD_RIGHT],grRef.[FTOOL_GRP].[UN_PERIOD_RIGHT]),0);
+			&debug('.AddRate -- '||cCurShort||'='||cCurShort||' CntDaysBeg='||CntDaysBeg||' CntDaysEnd='||CntDaysEnd,dp3)
+			&debug('.AddRate -- (1)'||ClProd||' '||cCurShort||' l|c|r|bL|bC|bR|n|a='||l||'|'||c||'|'||r||'|'||bL||'|'||bC||'|'||bR||'|'||n||'|'||a,dp)
+			if 	cCurShort='RUB' then
+				if    CntDaysBeg=0 and CntDaysEnd=0                     then rec_c:=rRate.rub_NULL    ; -- RUB до востребования;
+					&debug('.AddRate -- grRef.[FTOOL_GRP].[OBJ_CLASS].[NAME]='||grRef.[FTOOL_GRP].[OBJ_CLASS].[NAME],dp)
+					if grRef.[FTOOL_GRP].[OBJ_CLASS].[NAME]='Депозиты физических лиц' then
+						--l:=5.5; bL:=null;
+						--c:=0;   bC:=null;
+						--r:=6;   bR:='+';
+						null;
+					end if;
+				elsif CntDaysBeg>0 and CntDaysBeg<=90                   then rec_c:=rRate.rub_0_90    ; -- RUB на срок до 90 дней;
+				elsif CntDaysBeg>0 and CntDaysBeg<=180                  then rec_c:=rRate.rub_91_180  ; -- RUB на срок от 91 до 180 дней;
+				elsif CntDaysBeg>0 and CntDaysBeg<=365                  then rec_c:=rRate.rub_181_365 ; -- RUB на срок от 181 дня до 1 года;
+				elsif CntDaysBeg>0 and CntDaysBeg>=366                  then rec_c:=rRate.rub_366     ; -- RUB на срок свыше 1 года;
+					&debug('.AddRate -- grRef.[FTOOL_GRP].[OBJ_CLASS].[NAME]='||grRef.[FTOOL_GRP].[OBJ_CLASS].[NAME],dp)
+					if grRef.[FTOOL_GRP].[OBJ_CLASS].[NAME]='Депозиты физических лиц' then
+						--l:=2;    bL:='-'; 
+						--c:=0;    bC:=null;
+						--r:=2;    bR:='+'; 
+						null;
+					end if;
+				
+				elsif CntDaysBeg=0 and CntDaysEnd>0 and CntDaysEnd<=90  then rec_c:=rRate.rub_0_90    ; -- RUB на срок до 90 дней;
+				elsif CntDaysBeg=0 and CntDaysEnd>0 and CntDaysEnd<=180 then rec_c:=rRate.rub_91_180  ; -- RUB на срок от 91 до 180 дней;
+				elsif CntDaysBeg=0 and CntDaysEnd>0 and CntDaysEnd<=365 then rec_c:=rRate.rub_181_365 ; -- RUB на срок от 181 дня до 1 года;
+				elsif CntDaysBeg=0 and CntDaysEnd>0 and CntDaysEnd>=366 then rec_c:=rRate.rub_366     ; -- RUB на срок свыше 1 года;
+				else pragma error('.AddRate -- Нужна доработка');
+				end if;
+			
+			elsif cCurShort='USD' then	
+				if    CntDaysBeg=0 and CntDaysEnd=0                     then rec_c:=rRate.usd_NULL    ; -- USD до востребования;
+				elsif CntDaysBeg>0 and CntDaysBeg<=90                   then rec_c:=rRate.usd_0_90    ; -- USD на срок до 90 дней;
+				elsif CntDaysBeg>0 and CntDaysBeg<=180                  then rec_c:=rRate.usd_91_180  ; -- USD на срок от 91 до 180 дней;
+				elsif CntDaysBeg>0 and CntDaysBeg<=365                  then rec_c:=rRate.usd_181_365 ; -- USD на срок от 181 дня до 1 года;
+				elsif CntDaysBeg>0 and CntDaysBeg>=366                  then rec_c:=rRate.usd_366     ; -- USD на срок свыше 1 года;
+				elsif CntDaysBeg=0 and CntDaysEnd>0 and CntDaysEnd<=90  then rec_c:=rRate.usd_0_90    ; -- USD на срок до 90 дней;
+				elsif CntDaysBeg=0 and CntDaysEnd>0 and CntDaysEnd<=180 then rec_c:=rRate.usd_91_180  ; -- USD на срок от 91 до 180 дней;
+				elsif CntDaysBeg=0 and CntDaysEnd>0 and CntDaysEnd<=365 then rec_c:=rRate.usd_181_365 ; -- USD на срок от 181 дня до 1 года;
+				elsif CntDaysBeg=0 and CntDaysEnd>0 and CntDaysEnd>=366 then rec_c:=rRate.usd_366     ; -- USD на срок свыше 1 года;
+				else pragma error('.AddRate -- Нужна доработка');
+				end if;
+			
+			elsif cCurShort='EUR' then					
+				if    CntDaysBeg=0 and CntDaysEnd=0                     then rec_c:=rRate.eur_NULL    ; -- EUR до востребования;
+				elsif CntDaysBeg>0 and CntDaysBeg<=90                   then rec_c:=rRate.eur_0_90    ; -- EUR на срок до 90 дней;
+				elsif CntDaysBeg>0 and CntDaysBeg<=180                  then rec_c:=rRate.eur_91_180  ; -- EUR на срок от 91 до 180 дней;
+				elsif CntDaysBeg>0 and CntDaysBeg<=365                  then rec_c:=rRate.eur_181_365 ; -- EUR на срок от 181 дня до 1 года;
+				elsif CntDaysBeg>0 and CntDaysBeg>=366                  then rec_c:=rRate.eur_366     ; -- EUR на срок свыше 1 года;
+				elsif CntDaysBeg=0 and CntDaysEnd>0 and CntDaysEnd<=90  then rec_c:=rRate.eur_0_90    ; -- EUR на срок до 90 дней;
+				elsif CntDaysBeg=0 and CntDaysEnd>0 and CntDaysEnd<=180 then rec_c:=rRate.eur_91_180  ; -- EUR на срок от 91 до 180 дней;
+				elsif CntDaysBeg=0 and CntDaysEnd>0 and CntDaysEnd<=365 then rec_c:=rRate.eur_181_365 ; -- EUR на срок от 181 дня до 1 года;
+				elsif CntDaysBeg=0 and CntDaysEnd>0 and CntDaysEnd>=366 then rec_c:=rRate.eur_366     ; -- EUR на срок свыше 1 года;
+				else pragma error('.AddRate -- Нужна доработка');
+				end if;
+			else pragma error('.AddRate -- Нужна доработка');
+			end if;
+			/** /
+			if bC then if c<>0 then rec_c := rec_c + rec_c*c/100; end if;
+			else				    rec_c := rec_c+c;
+			end if;
+			rec_c := Greatest(rec_c,0);
+
+			if   then if l<>0 then rec_l := rec_c - rec_c*l/100; end if;
+			else				    rec_l := rec_c - l;
+			end if;
+			rec_l := Greatest(rec_l,0);
+
+			if bR then if r<>0 then rec_r := rec_c + rec_c*r/100; end if;
+			else				    rec_r := rec_c + r;
+			end if;
+			rec_r := Greatest(rec_r,0);
+			/**/
+
+			&debug('.AddRate -- (2)'||ClProd||' '||cCurShort||' l|c|r|bL|bC|bR|n|a='||l||'|'||c||'|'||r||'|'||bL||'|'||bC||'|'||bR||'|'||n||'|'||a,dp)
+
+			if    bC='%' then  if  c<>0 then rec_c := rec_c + rec_c*c/100; end if;
+			elsif bC='+' then                rec_c := rec_c+c;
+			elsif bC='-' then                rec_c := rec_c-c;
+			else                             rec_c := rec_c;
+			end if;
+			rec_c := Greatest(rec_c,0);
+
+			if    bL='%' then if  l<>0 then rec_l := rec_c + rec_c*l/100; end if;
+			elsif bL='+' then               rec_l := rec_c+l;
+			elsif bL='-' then               rec_l := rec_c-l;
+			else                            rec_l := l;
+			end if;
+			rec_l := Greatest(rec_l,0);
+
+			if    bR='%' then if  l<>0 then rec_r := rec_c + rec_c*r/100; end if;
+			elsif bR='+' then               rec_r := rec_c+r;
+			elsif bR='-' then               rec_r := rec_c-r;
+			else                            rec_r := r;
+			end if;
+			rec_r := Greatest(rec_r,0);
+			
+			rec_n := n;
+			rec_a := a;
+
+			if rec_c is null then
+				&debug('.AddRate --  '||ClProd||' '||cCurShort||' Ставка не указана(!) Ничего не добавляем Параметры:'||to_char(rec_d,fmt)||' '||Lpad(rec_l,8)||' '||Lpad(rec_c,8)||' '||Lpad(rec_r,8),dp3)
+			else
+				&debug('.AddRate --  '||ClProd||' '||cCurShort||' ДОБАВЛЯЕМ ставки за '||to_char(rec_d,fmt)||' '||Lpad(rec_l,8)||' '||Lpad(rec_c,8)||' '||Lpad(rec_r,8),dp3)
+				grRef.[RATES].[NEW_AUTO](
+					 rec_d	--Дата
+					,rec_c	--Ставка
+					,rec_r	--Правая граница диапазона
+					,rec_l	--Левая граница диапазона
+					,rec_n	--Признак наблюдаемости
+					,rec_a);--Активный рынок
+				add_Rate:=add_Rate+1;
+			end if;
+		else
+			old_Rate:=old_Rate+1;
+		end if;
+		
+		nnn_Rate:=nnn_Rate+1;
+		Idx:= tRate.next(Idx);
+	  --Exit;
+	end loop;
+	&debug('ИТОГО  '||ClProd||' обработано:'||nnn_Rate||' уже было:'||old_Rate||' добавлено:'||add_Rate,dp)
+end;
+PSH_IMP_BUDV (
+	@name('Файл')                                     P_FILE   in [FILE$LOAD],
+	@name('Перекладывать файлы')                      P_VAR    in [CASE_BETWEEN_TWO],
+	@name('Сканировать каталог')                      P_SCAN   in [BOOLEAN],
+	@name('Обновлять только актуальные ГФИ')          P_ACTUAL in [BOOLEAN],
+	@name('Предварительно удалять предыдущие ставки') P_DEL    in [BOOLEAN]
+) is
+
+validate is
+/** /
+ПСБ. Классы продуктов для загрузки рыночных ставок МСФО
+DEPN(RUB;10%;0;10%;true;false;USD;10%;0;10%;true;false;EUR;10%;0;10%;true;false);
+VEKSEL_GUIDE(RUB;10%;4.5;10%;true;false;USD;10%;2.5;10%;true;false;EUR;10%;2.5;10%;true;false);
+RKO(RUB;10%;0;10%;true;false;USD;10%;0;10%;true;false;EUR;10%;0;10%;true;false);
+RKO_CUR(RUB;10%;0;10%;true;false;USD;10%;0;10%;true;false;EUR;10%;0;10%;true;false);
+AGREEMENT_PRC(RUB;10%;0;10%;true;false;USD;10%;0;10%;true;false;EUR;10%;0;10%;true;false);
+/**/
+begin
+	if p_message = 'DEFAULT' then
+	   [CSMD].init_form(V_DEST_STR, &METHOD$CLASS, &METHOD$SNAME);
+	   P_VAR.[0]:=2;			--Перекладывать файлы 1-Да 2-Нет
+	 --P_DP:=false;				--Включить трассировку
+	   G_DP:=false;				
+	   P_SCAN:=true;			--Сканировать каталог
+	   P_ACTUAL:=true;			--Обновлять только актуальные ГФИ
+	   P_DEL:=false;			--Предварительно удалять предыдущие ставки
+	
+	   PathGetErr 	:=trim([FP_TUNE]::[LIB].get_str_value(GSystemParamGetErr, null,throw_error==0),'/'); --::[SYSTEM_PARAMS].[GET](GSystemParamGetErr, null);	--каталог для ошибок
+	   PathGetArch 	:=trim([FP_TUNE]::[LIB].get_str_value(GSystemParamGetArch,null,throw_error==0),'/'); --::[SYSTEM_PARAMS].[GET](GSystemParamGetArch,null);	--каталог для архива
+	   vMask   		:=trim([FP_TUNE]::[LIB].get_str_value(GvMask,             null,throw_error==0),'/'); --::[SYSTEM_PARAMS].[GET](GvMask,             null);	--маска файл-менеджера МФР
+	   LikeMask		:=trim([FP_TUNE]::[LIB].get_str_value(GLikeMask,          null,throw_error==0),'/'); --::[SYSTEM_PARAMS].[GET](GLikeMask,          null);	--маска файлов МФР
+	   PathGet      :=trim([FP_TUNE]::[LIB].get_str_value(GSystemParamGet,    null,throw_error==0),'/');
+
+	   P_FILE.[SRC_MASK]:=vMask;
+	   P_FILE.[DST_MASK]:=vMask;
+	
+	   if PrevFile.[DST_NAME] is not null then
+	   		P_SCAN:=false;	--Не сканировать каталог
+			P_FILE:=PrevFile;
+			if  P_FILE.[SRC_TYPE] is null or P_FILE.[DST_TYPE] is null then  -- В p_info = 'OK' присваивается NULL
+				P_FILE.[SRC_TYPE] := true;                                   -- BFS00013813 п.1 IMityanin
+				P_FILE.[DST_TYPE] := true;
+			end if;
+	   else
+			P_FILE.[DST_TYPE]   := true;	--Тип приемника (false-клиент, true-сервер)
+			P_FILE.[DST_PATH]   := trim([FP_TUNE]::[LIB].get_str_value(GSystemParamGet,null,throw_error==0),'/');
+		  --P_FILE.[DST_NAME]	:= 'RS_200903161348300001000095.txt';
+			P_FILE.[DST_DELETE] := true;	--Признак удаления приемника
+	
+			P_FILE.[SRC_TYPE]   := true;	--Тип источника (false-клиент, true-сервер)
+			P_FILE.[SRC_PATH]   := P_FILE.[DST_PATH];
+		  --P_FILE.[SRC_NAME]	:= P_FILE.[DST_NAME];
+
+			debug_pipe('Путь для каталога с файлами импорта из системного параметра  BUDV_IN='||P_FILE.[DST_PATH],dp);
+			debug_pipe('Путь для каталога файлов с ошибками из системного параметра BUDV_ERR='||PathGetErr,dp);
+			debug_pipe('Путь для каталога архива из системного параметра           BUDV_ARCH='||PathGetArch,dp);
+			debug_pipe('Маска файлов для файл-менеджера:'||vMask,dp);
+			debug_pipe('Маска файлов для поиска:'||LikeMask,dp);
+			debug_pipe('P_FILE.[DST_NAME]='||P_FILE.[DST_NAME],dp5);
+	   end if;
+	
+	   p_info := 'OK,P_FILE.SRC_TYPE,P_FILE.SRC_NAME';
+	
+	elsif p_message = 'VALIDATE' then
+		V_dest_str:=null;
+		if  p_info = 'P_FILE.SRC_TYPE' then
+			if P_FILE.[SRC_TYPE] then	P_FILE.[SRC_PATH] := trim([FP_TUNE]::[LIB].get_str_value(GSystemParamGet,null,throw_error==0),'/');
+			else						P_FILE.[SRC_PATH] := null;
+			end if;
+		end if;
+		if  p_info = 'OK' then
+			if  P_FILE.[SRC_NAME] is null and not P_SCAN then pragma error('Укажите *.txt файл!'); end if;
+			if nvl(P_FILE.[SRC_TYPE], false) then -- файл на сервере - ничего передавать не надо
+				P_FILE.[SRC_TYPE] := null;
+				P_FILE.[DST_TYPE] := null;
+			end if;
+			if P_FILE.[SRC_NAME] is not null then
+				P_SCAN:=false;
+			end if;
+			P_FILE.[DST_PATH]:=P_FILE.[SRC_PATH];
+			P_FILE.[DST_NAME]:=P_FILE.[SRC_NAME];
+		end if;
+		/** /
+		if  p_info = 'P_DP' then
+			G_DP:=P_DP;
+		end if;
+		/**/
+		if  p_info = 'P_SCAN' then
+			if P_SCAN then
+		   		P_VAR.[0]:=1;	--Перекладывать файлы 1-Да 2-Нет
+				if P_FILE.[SRC_TYPE] = true then P_FILE.[SRC_PATH] := trim([FP_TUNE]::[LIB].get_str_value(GSystemParamGet,null,throw_error==0),'/');
+				else							 P_FILE.[SRC_PATH] := null;
+				end if;
+				P_FILE.[DST_NAME]:=null;
+				P_FILE.[SRC_NAME]:=null;
+			end if;
+		end if;
+		if  p_info = 'P_FILE.SRC_NAME' then
+			if P_FILE.[SRC_NAME] is not null and lower(P_FILE.[SRC_NAME]) not like '%.txt' then
+				pragma error('Укажите budv_*.txt файл!');
+			end if;
+			if P_FILE.[SRC_NAME] is not null then
+				P_SCAN:=false;
+			end if;
+		end if;
+	end if;
+end;
+
+execute is
+--pragma MACRO (IPD, '[UNIVERS_IMP]::[IMP_PLAT_DOC]');
+pragma MACRO (IPD, '[UNIVERS_IMP]::[KUP_IMP_PLAT_DO]');
+file               integer;
+fError             integer;
+wtime              integer;
+len                integer;
+TitleStr           varchar2(32767);
+Docum              [DOCUMENT_REF];
+md				   [MAIN_DOCUM_REF];
+NameFile 	 varchar2;
+NameFileErr  varchar2;
+NameFileMsg  varchar2;
+pFileDstPath [STRING];
+pFileSrcPath [STRING];
+pFileDstName [STRING];
+pFileSrcName [STRING];
+file_list string(32767);
+FirsMsg	boolean:=true;
+
+All_Rate		integer:=0;	--Обработано дат с изменением ставок
+All_Rate_total	integer:=0;	--Обработано дат с изменением ставок
+All_Rate_err	integer:=0;	--с Ошибками
+All_Rate_notImp	integer:=0;	--Пропущено дат с изменением ставок
+All_Rate_already integer:=0;--Из прочитанных уже есть дат с изменением ставок
+All_Rate_doc	integer:=0;	--Подтверждено дат с изменением ставок
+All_Rate_noseek	integer:=0;	--Не найдено дат с изменением ставок
+
+InSubStr 	varchar2(32767);
+ErrStr		varchar(32767);
+MessStr		varchar(32767);
+
+AllFile integer:=0;
+Idx varchar2(160);
+ReplChr string(1):='#';
+
+pFile 	string(256);
+s		string(32000);
+NN		string(256);
+TekDateRate string(8);
+TekVal  string(3);
+FlNextRate boolean;
+PsbIfrsGft string(32000);
+grRef ref [IFRS_GRP_RATES];
+
+strRubRate1 string(7);
+RubRate1 [NUMBER_7_4]; UsdRate1 [NUMBER_7_4]; EurRate1 [NUMBER_7_4];
+RubRate2 [NUMBER_7_4]; UsdRate2 [NUMBER_7_4]; EurRate2 [NUMBER_7_4];
+RubRate3 [NUMBER_7_4]; UsdRate3 [NUMBER_7_4]; EurRate3 [NUMBER_7_4];
+RubRate4 [NUMBER_7_4]; UsdRate4 [NUMBER_7_4]; EurRate4 [NUMBER_7_4];
+RubRate5 [NUMBER_7_4]; UsdRate5 [NUMBER_7_4]; EurRate5 [NUMBER_7_4];
+
+l [NUM_16_8];
+c [NUM_16_8];
+r [NUM_16_8];
+bL string(10);
+bC string(10);
+bR string(10);
+n boolean;
+a boolean;
+/*********************************************************************
+     Получение строки времени
+*********************************************************************/
+Function get_st(t integer) return varchar2 is
+Begin
+if nvl(wtime,0)=0 then wtime:=1; end if;	--Ош. деления на 0
+return to_char(trunc(t/100))||' ('||ltrim(to_char(t/wtime*100,'990.9'))||' %)';
+End;
+/********************************************************************/
+Begin
+  --G_DP:=P_DP;
+	wtime        := utils.get_time;
+	PrevFile     := P_FILE;
+	
+	n_err		 :=0;
+	
+	pFileDstPath:=P_FILE.[DST_PATH];
+	pFileSrcPath:=P_FILE.[SRC_PATH];
+	pFileDstName:=P_FILE.[DST_NAME];
+	pFileSrcName:=P_FILE.[SRC_NAME];
+	
+	n_total:=0;		--Обработано платежей
+	n_err:=0;		--с Ошибками
+	n_notImp:=0;	--Пропущено платежей не текущего опердня
+	n_already:=0; 	--Из прочитанных уже Подтверждено ранее платежей
+	n_doc:=0;		--Подтверждено платежей
+	n_noseek:=0;	--Не найдено платежей
+
+	if P_SCAN then
+		&debug('--- Сканирование каталога '||pFileDstPath,dp)
+		begin
+			file_list := substr( stdio.file_list(pFileDstPath), 1, file_list%size);
+		exception when OTHERS then
+			pragma error('Ошибка при получении списка файлов в каталоге ' || pFileDstPath || NL$ || 'Возможно, в каталоге слишком много файлов!');
+		end;
+		
+		if file_list is null or Length(file_list)=0 then
+			pragma error('Нет файлов для обработки!');
+		end if;
+		
+		&debug('Список файлов: '||LF$||file_list,dp2)
+		
+		LikeMask:=nvl(LikeMask,trim([FP_TUNE]::[LIB].get_str_value(GLikeMask,null,throw_error==0),'/')); --маска файлов
+		&debug('Накладывем маску: '||LikeMask,dp)
+		
+	elsif pFileSrcName is not null then
+		file_list:=pFileSrcName||Chr(10);
+	end if;
+
+	AllFile:=InitTFile(pFileSrcName, file_list);
+	&debug('На обработку '||AllFile||' файла(ов)',dp)
+
+	Idx := tNFile.first();
+	while (not Idx is null) loop
+		&debug('Обрабатываем tNFile('||Idx||').nFile='||tNFile(idx).nFile,dp)
+-----------------------------
+	pFile:=tNFile(idx).nFile;
+	if pFile is null then pragma error('Укажите имя файла'); end if;
+	file :=stdio.open(PathGet,pFile, 'r');
+	
+	&debug('-= Начало закачки '||PathGet||'|'||pFile||' =-    file='||file,dp)
+	NN:=0;
+	TekVal:='RUB';
+	TekDateRate:=Replace(SubStr(pFile,6,7),'-')||'01'; --budv_2015-05.txt
+	&debug('TekDateRate='||TekDateRate,dp)
+	FlNextRate:=false;
+	RubRate1=RubRate2=RubRate3=RubRate4=RubRate5:=null;
+	UsdRate1=UsdRate2=UsdRate3=UsdRate4=UsdRate5:=null;
+	EurRate1=EurRate2=EurRate3=EurRate4=EurRate5:=null;
+	--begin
+		while stdio.get_line(file, s) loop
+			s:=Replace(s,TB$,ReplChr);
+			s:=ReplDublSpace(s); 
+			NN:=NN+1;
+			&debug(RPad(NN,5)||'('||Rpad(length(s),3)||')'||s||iif(length(s)=1,'ASCII:'||Ascii(s),''),dp)
+			if FlNextRate then
+				FlNextRate:=false;
+				if    TekVal='RUB' then
+					  strRubRate1:=Replace(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,Separator,1,true),',','.');
+					  if nvl(instr(Upper(strRubRate1),'X'),0)>0
+					  or nvl(instr(Upper(strRubRate1),'Х'),0)>0
+					  then RubRate1:=null;
+					  else RubRate1:=strRubRate1;
+					  end if;
+					  RubRate2:=Replace(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,Separator,1,true),',','.');
+					  RubRate3:=Replace(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,Separator,1,true),',','.');
+					  RubRate4:=Replace(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,Separator,1,true),',','.');
+					  RubRate5:=Replace(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,Separator,1,true),',','.');
+  					  &debug('      '||TekVal||' '|| RubRate1||' '|| RubRate2||' '|| RubRate3||' '|| RubRate4||' '|| RubRate5,dp2)
+					  TekVal:='USD';
+				elsif TekVal='USD' then
+					  UsdRate1:=Replace(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,Separator,1,true),',','.');
+					  UsdRate2:=Replace(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,Separator,1,true),',','.');
+					  UsdRate3:=Replace(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,Separator,1,true),',','.');
+					  UsdRate4:=Replace(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,Separator,1,true),',','.');
+					  UsdRate5:=Replace(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,Separator,1,true),',','.');
+  					  &debug('      '||TekVal||' '||UsdRate1||' '||UsdRate2||' '||UsdRate3||' '||UsdRate4||' '||UsdRate5,dp2)
+					  TekVal:='EUR';
+				elsif TekVal='EUR' then
+					  EurRate1:=Replace(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,Separator,1,true),',','.');
+					  EurRate2:=Replace(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,Separator,1,true),',','.');
+					  EurRate3:=Replace(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,Separator,1,true),',','.');
+					  EurRate4:=Replace(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,Separator,1,true),',','.');
+					  EurRate5:=Replace(::[CL_PRIV].[PSH_DATE_DEATH].wbn(s,Separator,1,true),',','.');
+  					  &debug('      '||TekVal||' '||EurRate1||' '||EurRate2||' '||EurRate3||' '||EurRate4||' '||EurRate5,dp2)
+				end if;
+			end if;
+
+			if s like '1%2%3%4%5' then
+				if FlNextRate then
+				rRate.d:=to_date(TekDateRate,'YYYYMMDD');
+				rRate.rub_NULL		:=RubRate1;	-- RUB до востребования;
+				rRate.rub_0_90		:=RubRate2;	-- RUB на срок до 90 дней;
+				rRate.rub_91_180	:=RubRate3;	-- RUB на срок от 91 до 180 дней;
+				rRate.rub_181_365	:=RubRate4;	-- RUB на срок от 181 дня до 1 года;
+				rRate.rub_366		:=RubRate5;	-- RUB на срок свыше 1 года;
+				rRate.usd_NULL		:=UsdRate1;	-- USD до востребования;
+				rRate.usd_0_90		:=UsdRate2;	-- USD на срок до 90 дней;
+				rRate.usd_91_180	:=UsdRate3;	-- USD на срок от 91 до 180 дней;
+				rRate.usd_181_365	:=UsdRate4;	-- USD на срок от 181 дня до 1 года;
+				rRate.usd_366		:=UsdRate5;	-- USD на срок свыше 1 года;
+				rRate.eur_NULL		:=EurRate1;	-- EUR до востребования;
+				rRate.eur_0_90		:=EurRate2;	-- EUR на срок до 90 дней;
+				rRate.eur_91_180	:=EurRate3;	-- EUR на срок от 91 до 180 дней;
+				rRate.eur_181_365	:=EurRate4;	-- EUR на срок от 181 дня до 1 года;
+				rRate.eur_366		:=EurRate5;	-- EUR на срок свыше 1 года;
+				
+				tRate(TekDateRate):=rRate;
+				&debug('tRate('||TekDateRate||')'||
+				to_char(rRate.d,fmt)				||LF$
+				||' '||Lpad(rRate.rub_NULL,7)		||'- RUB. До востребования'||LF$
+				||' '||Lpad(rRate.rub_0_90,7)		||'- RUB. На срок до 90 дней'||LF$
+				||' '||Lpad(rRate.rub_91_180,7)		||'- RUB. На срок от 91 до 180 дней'||LF$
+				||' '||Lpad(rRate.rub_181_365 ,7)	||'- RUB. На срок от 181 дня до 1 года'||LF$
+				||' '||Lpad(rRate.rub_366,7)		||'- RUB. На срок свыше 1 года'||LF$
+				||' '||Lpad(rRate.usd_NULL,7)		||'- USD. До востребования'||LF$
+				||' '||Lpad(rRate.usd_0_90,7)		||'- USD. На срок до 90 дней'||LF$
+				||' '||Lpad(rRate.usd_91_180,7)		||'- USD. На срок от 91 до 180 дней'||LF$
+				||' '||Lpad(rRate.usd_181_365 ,7)	||'- USD. На срок от 181 дня до 1 года'||LF$
+				||' '||Lpad(rRate.usd_366,7)		||'- USD. На срок свыше 1 года'||LF$
+				||' '||Lpad(rRate.eur_NULL,7)		||'- EUR. До востребования'||LF$
+				||' '||Lpad(rRate.eur_0_90,7)		||'- EUR. На срок до 90 дней'||LF$
+				||' '||Lpad(rRate.eur_91_180,7)		||'- EUR. На срок от 91 до 180 дней'||LF$
+				||' '||Lpad(rRate.eur_181_365 ,7)	||'- EUR. На срок от 181 дня до 1 года'||LF$
+				||' '||Lpad(rRate.eur_366,7)		||'- EUR. На срок свыше 1 года',dp)
+				end if;
+				
+				All_Rate:=All_Rate+1;	--Обработано дат с изменением ставок
+				FlNextRate:=true;
+			end if;
+		end loop;
+
+		stdio.close(file);
+
+		&debug('ИТОГО строк:'||NN,dp2)
+		Idx:= tNFile.next(Idx);
+	   --Exit;
+	end loop;
+	&debug('ИТОГО дат с изменением ставок:'||All_Rate,dp)
+
+	  rRate.d:=to_date(TekDateRate,'YYYYMMDD');
+	  rRate.rub_NULL	:=RubRate1;	-- RUB до востребования;
+	  rRate.rub_0_90	:=RubRate2;	-- RUB на срок до 90 дней;
+	  rRate.rub_91_180	:=RubRate3;	-- RUB на срок от 91 до 180 дней;
+	  rRate.rub_181_365 :=RubRate4;	-- RUB на срок от 181 дня до 1 года;
+	  rRate.rub_366		:=RubRate5;	-- RUB на срок свыше 1 года;
+	  rRate.usd_NULL	:=UsdRate1;	-- USD до востребования;
+	  rRate.usd_0_90	:=UsdRate2;	-- USD на срок до 90 дней;
+	  rRate.usd_91_180	:=UsdRate3;	-- USD на срок от 91 до 180 дней;
+	  rRate.usd_181_365 :=UsdRate4;	-- USD на срок от 181 дня до 1 года;
+	  rRate.usd_366		:=UsdRate5;	-- USD на срок свыше 1 года;
+	  rRate.eur_NULL	:=EurRate1;	-- EUR до востребования;
+	  rRate.eur_0_90	:=EurRate2;	-- EUR на срок до 90 дней;
+	  rRate.eur_91_180	:=EurRate3;	-- EUR на срок от 91 до 180 дней;
+	  rRate.eur_181_365 :=EurRate4;	-- EUR на срок от 181 дня до 1 года;
+	  rRate.eur_366		:=EurRate5;	-- EUR на срок свыше 1 года;
+
+	  tRate(TekDateRate):=rRate;
+	  &debug('tRate('||TekDateRate||')'||
+	  to_char(rRate.d,fmt)				||LF$
+	  ||' '||Lpad(rRate.rub_NULL,7)		||'- RUB. До востребования'||LF$
+	  ||' '||Lpad(rRate.rub_0_90,7)		||'- RUB. На срок до 90 дней'||LF$
+	  ||' '||Lpad(rRate.rub_91_180,7)	||'- RUB. На срок от 91 до 180 дней'||LF$
+	  ||' '||Lpad(rRate.rub_181_365 ,7)	||'- RUB. На срок от 181 дня до 1 года'||LF$
+	  ||' '||Lpad(rRate.rub_366,7)		||'- RUB. На срок свыше 1 года'||LF$
+	  ||' '||Lpad(rRate.usd_NULL,7)		||'- USD. До востребования'||LF$
+	  ||' '||Lpad(rRate.usd_0_90,7)		||'- USD. На срок до 90 дней'||LF$
+	  ||' '||Lpad(rRate.usd_91_180,7)	||'- USD. На срок от 91 до 180 дней'||LF$
+	  ||' '||Lpad(rRate.usd_181_365 ,7)	||'- USD. На срок от 181 дня до 1 года'||LF$
+	  ||' '||Lpad(rRate.usd_366,7)		||'- USD. На срок свыше 1 года'||LF$
+	  ||' '||Lpad(rRate.eur_NULL,7)		||'- EUR. До востребования'||LF$
+	  ||' '||Lpad(rRate.eur_0_90,7)		||'- EUR. На срок до 90 дней'||LF$
+	  ||' '||Lpad(rRate.eur_91_180,7)	||'- EUR. На срок от 91 до 180 дней'||LF$
+	  ||' '||Lpad(rRate.eur_181_365 ,7)	||'- EUR. На срок от 181 дня до 1 года'||LF$
+	  ||' '||Lpad(rRate.eur_366,7)		||'- EUR. На срок свыше 1 года',dp)
+
+	if P_ACTUAL then null; &debug('Обновлять только актуальные ГФИ',dp)
+	else			 null; &debug('Обновлять ВСЕ ГФИ',dp)
+	end if;
+	
+	PsbIfrsGft:=::[FP_TUNE].[LIB].get_str_value('PSB_IFRS_GFT', null, '0');
+	&debug('ПСБ. Классы продуктов для загрузки рыночных ставок по ставкам базового уровня доходности ЦБ:'||PsbIfrsGft,dp)
+	--DEPOSIT_PRIV(RUB;5.5;0;25;true;false;USD;-2;0;+2;true;false;EUR;-2;0;+2;true;false);
+	-- С 30.11.2023
+	--DEPOSIT_PRIV(RUB;-4;0;+4;true;false;USD;-2;0;10;true;false;EUR;-2;0;8;true;false);
+	for ftg in ::[IFRS_FTOOL_GRP]
+	where ftg.[IS_ACTUAL] is not null and ftg.[IS_ACTUAL]=P_ACTUAL and InStr(PsbIfrsGft,ftg.[OBJ_CLASS]||'(')>0
+	order by ftg.[NAME]
+	loop
+		TuneDeltaRate(ftg.[OBJ_CLASS],ftg.[CURRENCY].[CUR_SHORT],PsbIfrsGft,l,c,r,bL,bC,bR,n,a); --DEPN(2;0;2;true;false)
+		&debug(ftg.[NAME],dp3)
+		grRef:=null;
+		for gr in ::[IFRS_GRP_RATES] all where gr.[FTOOL_GRP]=ftg%id loop
+			&debug('gr='||gr||' {'||gr.[RATES]%size(0)||'} '||gr.[FTOOL_GRP].[NAME],dp5)
+			grRef:=gr;
+			if P_DEL then
+				&debug('Предварительно удалим предыдущие ставки',dp)
+				gr.[RATES]%delete;
+			end if;
+		end loop;
+		if grRef is null then
+			grRef:=::[IFRS_GRP_RATES].[NEW_AUTO](ftg,rtl.next_value('SEQ_ID'));
+			&debug('Создали запись ID:'||grRef||' в '||grRef%classname,dp)
+		end if;
+		AddRate(grRef,l,c,r,bL,bC,bR,n,a); --DEPN(2;0;2;true;false)
+	end loop;
+	stdio.close_all;
+	
+	--- ИТОГОВАЯ статистика ------
+	/** /
+								 wMsg('');
+								
+								
+								 wMsg('ИМПОРТ '||All_File||' ФАЙЛОВ(а/ов) ЗАВЕРШЕН');
+								 wMsg('  Итого Подтверждено файлов  '||All_File);
+								 wMsg('  Итого обработано платежей '||All_File_total);
+	If All_File_err > 0 then	 wMsg('  Итого платежей с ошибками '||All_File_err);
+	else	   					 wMsg('  Ошибок не обнаружено');
+	End if;
+	If All_File_notImp  > 0 then wMsg('  Итого Пропущено платежей не текущего опердня '||All_File_notImp); end if;
+	If All_File_already > 0 then wMsg('  Итого Из прочитанных уже Подтверждено ранее платежей ' || All_File_already); end if;
+								 wMsg('  Итого Подтверждено платежей '||All_File_doc);
+	If All_File_noseek > 0  then wMsg('  Итого Не найдено платежей '||All_File_noseek); end if;
+	If All_File_nocard > 0  then wMsg('  Итого Не поставлено в картотеку платежей '||All_File_nocard); end if;
+	/**/
+
+	tNFile.delete();
+	tRate.delete();
+End;
+
+
+
+end;
+end;

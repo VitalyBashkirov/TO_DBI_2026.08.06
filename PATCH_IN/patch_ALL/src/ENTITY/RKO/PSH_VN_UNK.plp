@@ -1,0 +1,246 @@
+class RKO;
+
+@import_plsql(true)
+@name('[ПСБ] Удержание комиссии по ВК за постановку, переоформление и списание УНК')
+batch method PSH_VN_UNK is
+
+public function Get_VK_Oper (rko ref [RKO], DateCalc [DATE] default [SYSTEM].[OP_DATE], kod	varchar2(100), quan integer) return varchar2(1) is
+bo 		ref [PATTERN_DOC];
+begin
+	bo := ::[PATTERN_DOC]([PATTERN_CODE] = kod);
+	for (select com(com)
+		in rko.[ARRAY_OPER_DOG]
+		where com.[BO] = bo
+			and com.[DATE_CALC] = DateCalc
+			and com.[QUANTITY] = quan
+			and com.[ACC_DT].[MAIN_V_ID] like '40%'
+		)
+	loop
+		return '+';
+	end loop;  
+	
+	return null;
+end;
+
+public function Get_VK_RKO (rko ref [RKO], DateCalc [DATE] default [SYSTEM].[OP_DATE]) return varchar2(2000) is 
+str varchar2(2000);
+s	varchar2(1);
+begin
+   str := null;
+  for pr in rko.[PROPERTIES]
+	where pr.[GROUP_PROP]   in (::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_SET'),
+							    ::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_CH'),
+								::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_REM'),
+								::[PROPERTY_GRP]([CODE] = 'PSB_VK_CRED_SET'),
+								::[PROPERTY_GRP]([CODE] = 'PSB_VK_CRED_CH')
+							   )
+		and pr.[DATE_BEG] = DateCalc
+		order by  pr.[GROUP_PROP].[CODE] desc
+  loop
+	s := Get_VK_Oper(rko, DateCalc, pr.[GROUP_PROP].[CODE], pr.[NUM]);
+	if str is null then
+	   if pr.[GROUP_PROP] = ::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_SET') then
+	   		str := 'За постановку УНК на учет: ' || pr.[NUM] || 'шт.' || s;
+	   elsif pr.[GROUP_PROP] = ::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_REM') then
+	   		str := 'За снятие с учета: ' || pr.[NUM] || 'шт.' || s;
+	   elsif pr.[GROUP_PROP] = ::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_CH') then
+	   		str := 'За внесение изменений по УНК: ' || pr.[NUM] || 'шт.' || s;
+	   elsif pr.[GROUP_PROP] = ::[PROPERTY_GRP]([CODE] = 'PSB_VK_CRED_SET') then
+	   		str := 'За постановку кредита на учет: ' || pr.[NUM] || 'шт.' || s;
+	   elsif pr.[GROUP_PROP] = ::[PROPERTY_GRP]([CODE] = 'PSB_VK_CRED_CH') then
+	   		str := 'За внесение изменений по кредиту: ' || pr.[NUM] || 'шт.' || s;
+	   end if;
+	else
+	   if pr.[GROUP_PROP] = ::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_SET') then
+	   		str := str || 'За постановку УНК на учет: ' || pr.[NUM] || 'шт.' || s;
+	   elsif pr.[GROUP_PROP] = ::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_REM') then
+	   		str := str || 'За снятие с учета: ' || pr.[NUM] || 'шт.' || s;
+	   elsif pr.[GROUP_PROP] = ::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_CH') then
+	   		str := str || 'За внесение изменений по УНК: ' || pr.[NUM] || 'шт.' || s;
+	   elsif pr.[GROUP_PROP] = ::[PROPERTY_GRP]([CODE] = 'PSB_VK_CRED_SET') then
+	   		str := str || 'За постановку кредита на учет: ' || pr.[NUM] || 'шт.' || s;
+	   elsif pr.[GROUP_PROP] = ::[PROPERTY_GRP]([CODE] = 'PSB_VK_CRED_CH') then
+	   		str := str || 'За внесение изменений по кредиту: ' || pr.[NUM] || 'шт.' || s;
+	   end if;
+	end if;
+
+  end loop;
+    if length(str)>2000 then str:=substr('!'||str,1,2000); end if;
+    return str;
+end;
+
+procedure change_date(v_rko ref [RKO], fold ref [FOLDER_PAY], dt	date) is
+begin
+	if substr(fold.[BUSINESS_OP].[PATTERN_CODE],1,6) = 'PSB_VK' then
+		fold.[DOCUMENT_DATE] := dt;
+		for doc in fold.[DOCS_IN_FOLD]
+			where   doc.[DOCUMENT]%class = 'MAIN_DOCUM'
+				and doc.[DOCUMENT]%state = 'FORM'
+		loop
+			doc.[DOCUMENT].[DOCUMENT_DATE] := dt;
+			doc.[DOCUMENT]->(MAIN_DOCUM)[DATE_DOC] := dt;
+			doc.[DOCUMENT]->(MAIN_DOCUM)[DATE_VAL] := dt;
+			for (select com(com obj)
+				in v_rko.[ARRAY_OPER_DOG]
+				where com.[DOC_BORN] = doc.[DOCUMENT]
+					and substr(com.[BO].[PATTERN_CODE],1,6) = 'PSB_VK'
+				)
+			loop
+				com.obj.[DATE_BEG]  := dt;
+				com.obj.[DATE_END]  := dt;
+				com.obj.[DATE_CALC] := dt;
+			end loop;
+		end loop;
+	end if;
+end;
+PSH_VN_UNK (
+	@name('Дата комиссии')     P_DATE in [DATE],
+	@name('По всем договорам') P_ALL  in [BOOLEAN]
+) is
+
+validate is
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		P_DATE := ::[SYSTEM].[OP_DATE];
+		
+	elsif p_message = 'VALIDATE' then
+		if P_DATE is null then
+			pragma error('Ошибка! Не заполнена дата комиссии!');
+		end if;
+	end if;
+end;
+
+execute is
+bo 		ref [PATTERN_DOC];
+fold	ref [FOLDER_PAY];
+idx		integer;
+i		integer;
+v_rkoKt	ref [RKO];
+begin
+	i := 0;
+	debug_pipe('Начало формирование комиссии ВК за УНК', 0);
+	if P_ALL then
+		for (select rk(rk obj, prop.[GROUP_PROP].[CODE] pr_bo, prop.[NUM] pr_quan)
+				in ::[RKO] 
+				,(::[PROPERTIES] all prop) all
+				where rk.[DATE_CLOSE] is null
+					and rk.[PROPERTIES] = prop%collection
+					and prop.[DATE_BEG] = P_DATE
+					and prop.[NUM] > 0
+					and prop.[GROUP_PROP] in (::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_SET'),
+											  ::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_CH'),
+											  ::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_REM'),
+											  ::[PROPERTY_GRP]([CODE] = 'PSB_VK_CRED_SET'),
+											  ::[PROPERTY_GRP]([CODE] = 'PSB_VK_CRED_CH')
+											 ) 
+			 order by rk%id
+			)
+		loop
+			bo := ::[PATTERN_DOC]([PATTERN_CODE] = rk.pr_bo);
+			if Get_VK_Oper(rk.obj, P_DATE, rk.pr_bo, rk.pr_quan) = '+' then
+				debug_pipe('По договору РКО: ' || rk.obj.[NUM_DOG] || ' комиссия: ' || bo.[PATTERN_NAME] || ' в кол-ве '|| rk.pr_quan || ' уже взята. Пропускаем!', 0);
+				continue;
+			end if;
+			i := i + 1;
+			::[MAIN_DOCUM].[COMMIS_GT](bo, rk.obj.[ACCOUNT], rk.obj.[CLIENT], false, rk.pr_quan, false, fold);
+			debug_pipe('По договору РКО: ' || rk.obj.[NUM_DOG] || ' по комиссии: ' || bo.[PATTERN_NAME] || ' в кол-ве '|| rk.pr_quan || ' сформированы документы комиссии!', 0);
+
+			if P_DATE < ::[SYSTEM].[OP_DATE] then
+				change_date(rk.obj, fold, P_DATE);	-- Меняем все даты документов на прошлые
+			end if;
+			
+		end loop;
+		
+		-- Подокументая комиссия за УНК по проведённым зачислениям из РКЦ
+		for (select doc(doc obj)
+			in ::[MAIN_DOCUM]
+			where doc.[DATE_PROV] >= ::[SYSTEM].[OP_DATE] - 31
+				and doc%STATE = 'PROV' 
+				--and (doc.[ACC_DT].[MAIN_V_ID] like '30102810%' or doc.[ACC_DT].[MAIN_V_ID] like '47416810%') 
+				and doc.[ACC_KT].[MAIN_V_ID] like '40%'
+			)
+		loop
+			fold := null;
+			v_rkoKt := ::[RKO].[LIB_RKO].get_rko_on_acc(doc.obj.[ACC_KT]);
+			for (select tar(bo 					: BO,
+							bo.[OPER] 			: OPER
+							)
+					in ::[PERIOD_PLAN],  
+					   (::[TARIF_BO] all : bo) all
+					where  tar%collection = v_rkoKt.[TARIF_PLAN]
+							and bo%collection = tar.[TAR_PLAN].[TARIFS]
+							and bo.[OPER].[PATTERN_CODE] in ('PSB_DOC_VK_UNK', 'PSB_DOC_VK_NOT_UNK')
+							and (tar.[DATE_BEGIN] <= ::[SYSTEM].[OP_DATE] and coalesce(tar.[DATE_END], ::[SYSTEM].[OP_DATE]) >= ::[SYSTEM].[OP_DATE])
+							and not exists(select com(com)
+											in v_rkoKt.[ARRAY_OPER_DOG]
+												where com.[FIRST_DOC] = doc.obj
+													and com.[BO].[PATTERN_CODE] in ('PSB_DOC_VK_UNK', 'PSB_DOC_VK_NOT_UNK')
+										  )
+							fetch 1
+				)
+			loop
+				for (select hst(hst.[ADD_INFO] val)
+							in doc.obj.[HISTORY_STATE]
+								where hst.[STATE] = 'PSB_UNK_SEL'
+									fetch 1
+					)
+				loop
+					if hst.val = '1' then
+						doc.obj.[PSH_COMMIS_GT].[V_ON_THIS] := true;
+						doc.obj.[PSH_COMMIS_GT].[V_DT].[0] := 2;
+						doc.obj.[PSH_COMMIS_GT](::[PATTERN_DOC]([PATTERN_CODE] = 'PSB_DOC_VK_UNK'), v_rkoKt.[ACCOUNT], v_rkoKt.[CLIENT], false, 1, false, fold);
+						debug_pipe('По документу зачисления № ' || doc.obj.[DOCUMENT_NUM] || ' от ' || to_char(doc.obj.[DATE_DOC], 'DD.MM.YYYY') || ' на сумму ' || doc.obj.[SUM] 
+								   || ' сформированы документы комиссии: ' || ::[PATTERN_DOC]([PATTERN_CODE] = 'PSB_DOC_VK_UNK').[PATTERN_NAME], 0
+						);
+						i := i + 1;
+					elsif hst.val = '2' then
+						doc.obj.[PSH_COMMIS_GT].[V_ON_THIS] := true;
+						doc.obj.[PSH_COMMIS_GT].[V_DT].[0] := 2;
+						doc.obj.[PSH_COMMIS_GT](::[PATTERN_DOC]([PATTERN_CODE] = 'PSB_DOC_VK_NOT_UNK'), v_rkoKt.[ACCOUNT], v_rkoKt.[CLIENT], false, 1, false, fold);
+						debug_pipe('По документу зачисления № ' || doc.obj.[DOCUMENT_NUM] || ' от ' || to_char(doc.obj.[DATE_DOC], 'DD.MM.YYYY') || ' на сумму ' || doc.obj.[SUM] 
+							       || ' сформированы документы комиссии: ' || ::[PATTERN_DOC]([PATTERN_CODE] = 'PSB_DOC_VK_NOT_UNK').[PATTERN_NAME], 0
+						);
+						i := i + 1;
+					end if;
+				end loop;
+			end loop;
+		end loop;
+		
+	else
+		idx := this.first;
+		while idx is not null
+		loop
+			if this(idx).[DATE_CLOSE] is null then
+				for (select prop(prop.[GROUP_PROP].[CODE] pr_bo, prop.[NUM] pr_quan)
+						in this(idx).[PROPERTIES] 
+						where   prop.[DATE_BEG] = P_DATE
+							and prop.[NUM] > 0
+							and prop.[GROUP_PROP] in (::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_SET'),
+													  ::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_CH'),
+													  ::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_REM'),
+													  ::[PROPERTY_GRP]([CODE] = 'PSB_VK_CRED_SET'),
+													  ::[PROPERTY_GRP]([CODE] = 'PSB_VK_CRED_CH')
+													 ) 
+					)
+				loop
+					bo := ::[PATTERN_DOC]([PATTERN_CODE] = prop.pr_bo);
+					if Get_VK_Oper(this(idx), P_DATE, prop.pr_bo, prop.pr_quan) = '+' then
+						debug_pipe('По договору РКО: ' || this(idx).[NUM_DOG] || ' комиссия: ' || bo.[PATTERN_NAME] || ' в кол-ве '|| prop.pr_quan || ' уже взята. Пропускаем!', 0);
+					else
+						i := i + 1;					
+						::[MAIN_DOCUM].[COMMIS_GT](bo, this(idx).[ACCOUNT], this(idx).[CLIENT], false, prop.pr_quan, false, fold);
+						debug_pipe('По договору РКО: ' || this(idx).[NUM_DOG] || ' по комиссии: ' || bo.[PATTERN_NAME] || ' в кол-ве '|| prop.pr_quan || ' сформированы документы комиссии!', 0);
+					end if;
+				end loop;
+			end if;
+
+			if P_DATE < ::[SYSTEM].[OP_DATE] then
+				change_date(this(idx), fold, P_DATE);	-- Меняем все даты документов на прошлые
+			end if;
+			idx := this.next(idx);
+		end loop;
+	end if;	
+	debug_pipe('Окончание формирование комиссии ВК за УНК. Всего удержано комиссий: ' || i || ' шт.', 0);
+end;
+end;
+end;

@@ -1,0 +1,292 @@
+class MAIN_DOCUM;
+
+@name('[ПСБ] СШИВ. Наклейка на папку')
+@tag('COPIED')
+static method PSH_NAK_SHIV_XLS is
+
+@name('V_DEST') public V_DEST [MEMO_32767];
+public vUserFilial ref [BRANCH] 	:= ::[SYSTEM].[VARIABLES].OurBranch;
+PSH_NAK_SHIV_XLS (
+	@name('Дата начала')   P_DATE     in [DATE],
+	@name('Дата конца')    P_DATE_END in [DATE],
+	@name('Подписант')     P_USER     in [USER_REF],
+	@name('Филиал')        P_FIL      in [BRANCH_REF],
+	@name('Гл. бухгалтер') P_USER_GL  in [USER_REF]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATE := [SYSTEM]::[OP_DATE];
+	P_DATE_END := [SYSTEM]::[OP_DATE];
+
+end if;
+-- End initialization of parameters and variables
+declare
+pragma include( ::[PR_CRED].[LIB_MACRO] );
+
+i 			number;
+vColCount 	number; -- колво колонок в отчете
+vLineCount 	number; -- первая строка в Excel
+vFileName 	varchar2(250); -- имя Excel-шаблона
+itog_sum_RUB number;
+itog_sum_VAL number;
+itog_sum_RUB_KASS number;
+itog_sum_RUB_KASS_VNB number;
+itog_sum_VAL_KASS number;
+itog_sum_RUB_KASS_VKL number;
+itog_sum_VAL_KASS_VKL number;
+itog_sum_RUB_BUH_VKL number;
+itog_sum_VAL_BUH_VKL number;
+begin
+  if P_MESSAGE = 'DEFAULT' then -- первый запуск процедуры
+		[EXCEL].Init_Xls;
+		P_USER := STDLIB.USERID;
+		P_FIL:=P_USER.[FILIAL];
+		if P_FIL.[CODE]='001' then P_USER_GL :=22645994; end if;
+
+					
+  elsif P_MESSAGE = 'VALIDATE' then -- переход между полями
+
+  		If P_INFO='P_DATE' then
+  		P_DATE_END := P_DATE;
+  		end if;
+
+		if p_info = 'OK' then
+  			
+  			if P_DATE is null or P_DATE_END is null then
+  				pragma error('Дата начала и конца обязательно для заполнения!');
+  			end if;
+			if P_FIL is null then
+  				pragma error('Поле "Филиал" обязательно для заполнения!');
+  			end if;
+  			
+  			vFileName := 'PSH_Наклейка_сшив.xls';
+  			  			  	
+			if [EXCEL].F_Click then
+				[EXCEL].F_Click := False;
+
+				vColCount := 2; -- всего колонок в отчете
+				vLineCount := 8; -- первая строка в Excel
+				i:=vLineCount;
+				
+				-- обнуляем переменные
+
+				-- запуск Excel
+				[EXCEL].open_file(::[REPS].[SLIB].GetPath('PATH_PRINT_EXCEL', vFileName),false);
+				
+				[EXCEL].Open_Sheet('Бух. ин.вал');
+				[EXCEL].Write(5, 2, P_FIL.[BANK].[NAME]);
+				if P_DATE != P_DATE_END then
+				[EXCEL].Write(13, 2, 'За период с '||to_char(P_DATE,'DD.MM.YYYY')||' по '||to_char(P_DATE_END,'DD.MM.YYYY'));
+				[EXCEL].Write(11, 2, ' ');
+				else [EXCEL].Write(13, 2, ::[USER].[PSH_KAV].kav_data_propis(P_DATE,'DMONYYYY'));
+				end if;
+				[EXCEL].Write(22, 5,'('||::[RUNTIME].[STDLIB].FIO(P_USER.[NAME])||')');
+				[EXCEL].Write(24, 5,'('||::[RUNTIME].[STDLIB].FIO(P_USER_GL.[NAME])||')');
+				
+				[EXCEL].AddCopySheet('Бух. ин.вал','по вкладам РУБЛЬ');
+				[EXCEL].Write(1, 3, '5 лет');
+				[EXCEL].Write(7, 2, 'МЕМОРИАЛЬНЫЕ ДОКУМЕНТЫ ПО ОПЕРАЦИЯМ ФИЗИЧЕСКИХ ЛИЦ');
+				[EXCEL].Write(8, 2, 'По БС 42301, 42302, 42303, 42304, 42305, 42306, 40817, 42601, 42602, 42603, 42604, 42605, 42606, 40820, 47411');
+				/*[EXCEL].AddCopySheet('Бух. ин.вал','по вкладам ВАЛЮТА');
+				[EXCEL].Write(7, 2, 'МЕМОРИАЛЬНЫЕ ДОКУМЕНТЫ ПО ОПЕРАЦИЯМ ФИЗИЧЕСКИХ ЛИЦ В ИНОСТРАННОЙ ВАЛЮТЕ');
+				[EXCEL].Write(8, 2, 'По БС 42301, 42302, 42303, 42304, 42305, 42306, 40817, 42601, 42602, 42603, 42604, 42605, 42606, 40820');*/
+				[EXCEL].Open_Sheet('Общий');
+				
+
+				[EXCEL].Write(4, 2, P_FIL.[BANK].[NAME]);
+				if P_DATE != P_DATE_END then
+				[EXCEL].Write(5, 3, 'За период с '||to_char(P_DATE,'DD.MM.YYYY')||' по '||to_char(P_DATE_END,'DD.MM.YYYY'));
+				else [EXCEL].Write(5, 3, ::[USER].[PSH_KAV].kav_data_propis(P_DATE,'DMONYYYY'));
+				end if;
+												
+				-- цикл по договорам
+				for (select doc (count(doc) C_KOLVO, sum (doc.[SUM_NT]) C_SUM, doc.[ACC_DT].[MAIN_USV].[USV_US].[NEW_BS1].[RASD].[CHAPTER].[CHAPTER] C_GL) in ::[MAIN_DOCUM] all
+										where trunc(doc.[DATE_PROV])>=P_DATE and trunc(doc.[DATE_PROV])<=P_DATE_END
+												and doc%state='PROV'
+												and P_FIL=doc.[FILIAL]
+									group by doc.[ACC_DT].[MAIN_USV].[USV_US].[NEW_BS1].[RASD].[CHAPTER].[CHAPTER]
+									order by doc.[ACC_DT].[MAIN_USV].[USV_US].[NEW_BS1].[RASD].[CHAPTER].[CHAPTER]
+				)loop
+
+					-- вывод в Ексель
+					
+				if doc.C_GL='А' then
+				[EXCEL].Write(i, 2, doc.C_SUM);
+				elsif doc.C_GL='Б' then
+				[EXCEL].Write(i, 6, doc.C_SUM);
+				elsif doc.C_GL='В' then
+				[EXCEL].Write(i, 3, doc.C_SUM);
+				elsif doc.C_GL='Г' then
+				[EXCEL].Write(i, 4, doc.C_SUM);
+				elsif doc.C_GL='Д' then
+				[EXCEL].Write(i, 5, doc.C_SUM);
+				end if;
+				end loop;
+				
+				-- цикл по договорам Валюта главы Б-Д
+				for (select doc (count(doc) C_KOLVO, sum (doc.[SUM_NT]) C_SUM, doc.[ACC_DT].[MAIN_USV].[USV_US].[NEW_BS1].[RASD].[CHAPTER].[CHAPTER] C_GL) in ::[MAIN_DOCUM] all
+										where trunc(doc.[DATE_PROV])>=P_DATE and trunc(doc.[DATE_PROV])<=P_DATE_END
+												and doc%state='PROV'
+												and P_FIL=doc.[FILIAL]
+												--and (doc.[VALUTA_PO].[CUR_SHORT] not in ('RUB','RUR') or doc.[VALUTA].[CUR_SHORT] not in ('RUB','RUR'))
+												and doc.[VALUTA].[CUR_SHORT] not in ('RUB','RUR')
+												and (doc.[KOD_NAZN_PAY] != ::[KOD_N_PAY](KOD_NAZN='RECONT') or doc.[KOD_NAZN_PAY] is null)
+												and (doc.[KOD_NAZN_PAY] != ::[KOD_N_PAY](KOD_NAZN='RECONT+') or doc.[KOD_NAZN_PAY] is null)	
+									group by doc.[ACC_DT].[MAIN_USV].[USV_US].[NEW_BS1].[RASD].[CHAPTER].[CHAPTER]
+									order by doc.[ACC_DT].[MAIN_USV].[USV_US].[NEW_BS1].[RASD].[CHAPTER].[CHAPTER]
+				)loop
+
+					-- вывод в Ексель
+					
+				if doc.C_GL='Б' then
+				[EXCEL].Write(18, 6, doc.C_SUM);
+				[EXCEL].Open_Sheet('Бух. ин.вал');
+				[EXCEL].Write(16, 5, doc.C_SUM);
+				[EXCEL].Open_Sheet('Общий');
+				elsif doc.C_GL='В' then
+				[EXCEL].Write(18, 3, doc.C_SUM);
+				[EXCEL].Open_Sheet('Бух. ин.вал');
+				[EXCEL].Write(16, 2, doc.C_SUM);
+				[EXCEL].Open_Sheet('Общий');				
+				elsif doc.C_GL='Г' then
+				[EXCEL].Write(18, 4, doc.C_SUM);
+				[EXCEL].Open_Sheet('Бух. ин.вал');
+				[EXCEL].Write(16, 3, doc.C_SUM);
+				[EXCEL].Open_Sheet('Общий');
+				elsif doc.C_GL='Д' then
+				[EXCEL].Write(18, 5, doc.C_SUM);
+				[EXCEL].Open_Sheet('Бух. ин.вал');
+				[EXCEL].Write(16, 4, doc.C_SUM);
+				[EXCEL].Open_Sheet('Общий');
+				end if;
+				end loop;
+				
+				-- Из них
+				itog_sum_RUB :=0;
+				itog_sum_VAL :=0;
+				itog_sum_RUB_KASS :=0;
+				itog_sum_RUB_KASS_VNB :=0;
+				itog_sum_VAL_KASS :=0;
+				itog_sum_RUB_KASS_VKL :=0;
+				itog_sum_VAL_KASS_VKL :=0;
+				itog_sum_RUB_BUH_VKL :=0;
+				itog_sum_VAL_BUH_VKL :=0;
+								
+				for (select doc (doc.[SUM_NT] C_SUM
+								,substr(doc.[ACC_DT].[MAIN_V_ID],1,5) C_BS2_DT
+								,doc.[VALUTA].[CUR_SHORT] C_VAL_DT
+								,substr(doc.[ACC_KT].[MAIN_V_ID],1,5) C_BS2_KT
+								,doc.[VALUTA_PO].[CUR_SHORT] C_VAL_KT
+								,doc.[ACC_DT].[MAIN_USV].[USV_US].[NEW_BS1].[RASD].[CHAPTER].[CHAPTER] C_GL
+								) in ::[MAIN_DOCUM] all
+										where trunc(doc.[DATE_PROV])>=P_DATE and trunc(doc.[DATE_PROV])<=P_DATE_END
+												and doc%state='PROV'
+												and P_FIL=doc.[FILIAL]
+												and (doc.[KOD_NAZN_PAY] != ::[KOD_N_PAY](KOD_NAZN='RECONT') or doc.[KOD_NAZN_PAY] is null)
+												and (doc.[KOD_NAZN_PAY] != ::[KOD_N_PAY](KOD_NAZN='RECONT+') or doc.[KOD_NAZN_PAY] is null)	
+									order by doc.[ACC_DT].[MAIN_USV].[USV_US].[NEW_BS1].[RASD].[CHAPTER].[CHAPTER]
+				)loop
+				if doc.C_GL='А' then
+					--if doc.C_VAL_DT in ('RUB','RUR') and doc.C_VAL_KT in ('RUB','RUR')
+					if doc.C_VAL_DT in ('RUB','RUR')
+						then 	if 	-- бухгалтерские
+									doc.C_BS2_DT not in ('20202','40817','40820','40820','47411') and substr(doc.C_BS2_DT,1,3) not in ('423','426')
+									and doc.C_BS2_KT not in ('20202')
+									--and doc.C_BS2_KT not in ('20202','40817','40820') and substr(doc.C_BS2_KT,1,3) not in ('423','426')
+									then itog_sum_RUB :=itog_sum_RUB+doc.C_SUM;
+								elsif 	-- кассовые вкладные
+										(doc.C_BS2_DT in ('20202') or substr(doc.C_BS2_KT,1,5) in ('20202'))
+										and (doc.C_BS2_DT in ('40817','40820','47411') or substr(doc.C_BS2_DT,1,3) in ('423','426')
+											)
+											--or doc.C_BS2_KT in ('40817','40820') or substr(doc.C_BS2_KT,1,3) in ('423','426'))
+										then itog_sum_RUB_KASS_VKL :=itog_sum_RUB_KASS_VKL+doc.C_SUM;
+								elsif 	-- кассовые
+										(doc.C_BS2_DT in ('20202') or substr(doc.C_BS2_KT,1,5) in ('20202'))
+										and doc.C_BS2_DT not in ('40817','40820','47411') and substr(doc.C_BS2_DT,1,3) not in ('423','426')
+										--and doc.C_BS2_KT not in ('40817','40820') and substr(doc.C_BS2_KT,1,3) not in ('423','426')
+										then itog_sum_RUB_KASS :=itog_sum_RUB_KASS+doc.C_SUM;
+								else -- бухгалтерские вкладные
+										if doc.C_BS2_DT not in ('30102') then
+											itog_sum_RUB_BUH_VKL :=itog_sum_RUB_BUH_VKL+doc.C_SUM;
+										end if;	
+								end if;	
+								
+					else 		if 	-- бухгалтерские
+									doc.C_BS2_DT not in ('20202','40817','40820','47411') and substr(doc.C_BS2_DT,1,3) not in ('423','426')
+									and doc.C_BS2_KT not in ('20202')
+									--and doc.C_BS2_KT not in ('20202','40817','40820') and substr(doc.C_BS2_KT,1,3) not in ('423','426')
+									then itog_sum_VAL :=itog_sum_VAL+doc.C_SUM;
+								elsif 	-- кассовые вкладные
+										(doc.C_BS2_DT in ('20202') or substr(doc.C_BS2_KT,1,5) in ('20202'))
+										and (doc.C_BS2_DT in ('40817','40820','47411') or substr(doc.C_BS2_DT,1,3) in ('423','426')
+											)
+											--or doc.C_BS2_KT in ('40817','40820') or substr(doc.C_BS2_KT,1,3) in ('423','426'))
+										then itog_sum_VAL_KASS_VKL :=itog_sum_VAL_KASS_VKL+doc.C_SUM;
+								elsif 	-- кассовые
+										(doc.C_BS2_DT in ('20202') or substr(doc.C_BS2_KT,1,5) in ('20202'))
+										and doc.C_BS2_DT not in ('40817','40820','47411') and substr(doc.C_BS2_DT,1,3) not in ('423','426')
+										--and doc.C_BS2_KT not in ('40817','40820') and substr(doc.C_BS2_KT,1,3) not in ('423','426')
+										then itog_sum_VAL_KASS :=itog_sum_VAL_KASS+doc.C_SUM;
+								else -- бухгалтерские вкладные
+											itog_sum_VAL_BUH_VKL :=itog_sum_VAL_BUH_VKL+doc.C_SUM;
+								end if;		
+					end if;			
+				end if;
+				
+				if doc.C_GL='В' then
+					--if doc.C_VAL_DT in ('RUB','RUR') and doc.C_VAL_KT in ('RUB','RUR')
+						--then 	
+								if 	-- кассовые
+										(doc.C_BS2_DT in ('91202') or substr(doc.C_BS2_KT,1,5) in ('91202'))
+										then itog_sum_RUB_KASS_VNB :=itog_sum_RUB_KASS_VNB+doc.C_SUM;
+								end if;	
+					--end if;			
+				end if;				
+				end loop;
+
+				[EXCEL].Write(14, 2, itog_sum_RUB_KASS_VKL+itog_sum_VAL_KASS_VKL+itog_sum_VAL_KASS+itog_sum_RUB_KASS);
+				[EXCEL].Write(14, 3, itog_sum_RUB_KASS_VNB);
+				
+				[EXCEL].Write(18, 2, itog_sum_VAL);
+				/*[EXCEL].Write(21, 2, itog_sum_VAL_KASS);
+				[EXCEL].Write(24, 2, itog_sum_VAL_BUH_VKL);
+				[EXCEL].Write(28, 2,  itog_sum_VAL_KASS_VKL);
+				
+				[EXCEL].Write(34, 2, itog_sum_RUB_BUH_VKL);
+				[EXCEL].Write(37, 2, itog_sum_RUB_KASS_VKL);*/
+				
+				[EXCEL].Write(23, 2, itog_sum_RUB_BUH_VKL+itog_sum_VAL_BUH_VKL);
+				[EXCEL].Write(26, 2, itog_sum_RUB_KASS_VKL+itog_sum_VAL_KASS_VKL);
+				
+				[EXCEL].Open_Sheet('Бух. ин.вал');
+				[EXCEL].Write(16, 1, itog_sum_VAL);
+				/*[EXCEL].Open_Sheet('по вкладам ВАЛЮТА');
+				[EXCEL].Write(16, 1, itog_sum_VAL_BUH_VKL);*/
+				[EXCEL].Open_Sheet('по вкладам РУБЛЬ');
+				[EXCEL].Write(16, 1, itog_sum_RUB_BUH_VKL+itog_sum_VAL_BUH_VKL);
+				[EXCEL].Open_Sheet('Общий');
+				
+				
+				
+--				[EXCEL].Borders(vLineCount, 1, i-1, vColCount, 'RLBTVH'); 		-- границы всюду
+				
+
+				[EXCEL].Write(30, 5,'('||::[RUNTIME].[STDLIB].FIO(P_USER.[NAME])||')');
+				[EXCEL].Write(32, 5,'('||::[RUNTIME].[STDLIB].FIO(P_USER_GL.[NAME])||')');
+--				[EXCEL].Merge(i,1,i,vColCount);
+
+				[EXCEL].Visible;
+				[EXCEL].Release;
+				
+			end if;
+			
+			[EXCEL].Exec_Script(V_DEST);	
+		end if;	
+  end if;
+end;
+end;
+end;
+end;

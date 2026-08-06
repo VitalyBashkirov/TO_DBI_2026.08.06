@@ -1,0 +1,27 @@
+class PSH_SCRIPTS;
+
+@name('[ПСБ] Удалить информацию об ошибках вкладчиков')
+@tag('COPIED')
+static method PSH_DEL_ERR is
+PSH_DEL_ERR (
+	@name('Реестр') P_REGISTRY in [U1417_REESTR_REF]
+) is
+
+execute is
+p_mess string := 'VALIDATE';
+p_inf string := 'REFRESH';
+cnt integer := 0;
+
+begin
+	for (select x(x : cl_id)
+	in ::[U1417_IMPORT_ERR]
+	where (x.[REESTR] = P_REGISTRY or x.[REESTR].[HL_REESTR] = P_REGISTRY)
+	)
+	loop
+		x.cl_id.[DELETE_AUTO_EXT]();
+		cnt := cnt + 1;
+	end loop;
+	debug_pipe('cnt = ' || cnt,0);
+end;
+end;
+end;

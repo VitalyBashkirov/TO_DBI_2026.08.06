@@ -1,0 +1,787 @@
+class CL_CORP;
+
+@import_plsql(true)
+@name('Противодействие легализации. Заполнение анкеты клиента (просмотр)')
+@tag('COPIED')
+method PSH_EDIT_ANKETA is
+
+@name('Управление формой')                                                  public V_VB                       [STRING_32000];
+@name('Критерии риска')                                                     public V_CRITERIA_GRID   table of [MONIT_CRIT_GRID];
+@name('Признак действующих критериев других филиалов')                      public V_ACTIVE_CRIT              [STRING_1];
+@name('Анкета актуальна')                                                   public V_UPD_ANKETA               [BOOLEAN];
+@name('Сообщение')                                                          public V_MESSAGE                  [STRING];
+@name('Отображать факторы')                                                 public V_SHOW_FACTORS             [BOOLEAN];
+@name('Категории риска')                                                    public V_RISK_KIND_GRID  table of [RISK_KIND_GRID];
+@name('Дополнительные свойства')                                            public V_ADD_PROP                 [PROPERTIES_ARR];
+@name('Виды сведений')                                                      public V_TYPE_OF_DATA    table of [PROPERTIES];
+@name('Отобразить неактуальные')                                            public V_SHOW_IRRELEVANT          [BOOLEAN];
+@name('Текст вида сведений')                                                public V_TEXT_VALUE               [MEMO];
+@name('Список шаблонов сведений')                                           public V_INFO_SHAB_LIST  table of [CL_ANK_TEMPLATES];
+@name('Раздел доп. сведений')                                               public V_ADD_CL_INFO              [CL_REQS_INFO_REF];
+@name('Пункты раздела сведений')                                            public V_ADD_INFO_REQS   table of [CL_INF_PNTS_GRID];
+@name('Отобразить редактор доп. сведений')                                  public V_SHOW_ADD_INFO            [BOOLEAN];
+@name('Текст доп. сведений')                                                public V_FINAL_TEXT               [MEMO];
+@name('Сообщение при заполненных доп. сведениях')                           public V_TEXT_MESSAGE             [STRING_2000];
+@name('Данные для ввода сведений')                                          public V_COLS_ROWS       table of [CL_STR_COLS_ROWS];
+@name('Наименования колонок для отображения в гриде')                       public V_COLS_NAMES      table of [ADD_INFO_CL_GRID];
+@name('Использовать альтернативный ввод дополнительных сведений о клиенте') public V_ADDITIONAL_FILL          [BOOLEAN];
+@name('Класс клиента для фильтра')                                          public V_CLASS                    [STRING_20];
+@name('[ПСБ] Оценка риска легализации доходов (расширение)')                public V_PSB_FAIL_MARK            [MEMO_32767];
+public Type RiskKindGirdType is table of [RISK_KIND_GRID];
+
+
+Type MonitorGirdType is table of [MONIT_CRIT_GRID];
+Type TableClient is table of ref [CLIENT];
+Type ChangedAddRecs is table of ref [PROPERTIES] index by string;
+
+today			date := trunc(sysdate);
+tune_fail_level	integer;
+
+cl_priv		ref [CL_PRIV];
+cl_info 	ref	[CL_INFO_REQ];
+u_open 		ref [CL_INFO_USER];
+u_conf 		ref [CL_INFO_USER];
+u_manag 	ref [CL_INFO_USER];
+is_auto		boolean;
+selected_raw_td 	integer;
+selected_raw_shb 	integer;
+v_selected_row		integer;
+v_add_prop_rec 		ref [PROPERTIES];
+v_oper_date			date := [SYSTEM].[VARIABLES].OpDate;
+v_ChangedRec		ChangedAddRecs;
+
+procedure is_client_CHP (p_client ref [CL_ORG])
+is
+cl_p	ref [CL_PRIV];
+begin
+	cl_priv := null;	
+	cl_p := ::[LEGAL_INTERFACE].[PRX_CLIENT].getCHPclPriv(p_client);
+	
+	if (p_client.[PS_REF].[PS_CODE] = 'F_П')		-- Предприниматели
+	  	and (cl_p is not Null)
+	then
+		cl_priv := cl_p;
+	end if;
+end;
+
+-- Получение информации о пользователе, работающем с клиентом
+public function get_user_ref(	  p_code		::[MARK_PERS_G].[CODE]%type
+						, p_cl_info		ref	[CL_INFO_REQ]
+						, p_name	out ::[CL_INFO_USER].[NAME]%type
+						, p_casta	out ::[CL_INFO_USER].[CASTA_NAME]%type
+					)
+return ref [CL_INFO_USER] is 
+res_user 	ref [CL_INFO_USER];
+begin
+	if p_cl_info is not null then
+		for(	select u(u : id, u.[NAME] : name, u.[CASTA_NAME] : casta_name)
+				in ::[CL_INFO_USER] collections
+				where	u%collection = p_cl_info.[CL_WORK_USERS]
+					and u.[PERSON_TYPE].[CODE] = p_code
+					and	u.[OPER_TYPE].[CODE] = 'FIRST_ACCOUNT_OPEN'
+				order by u.[OPER_DATE]
+			)	
+		loop	
+			res_user	:= u.id;	
+			p_name		:= u.name;
+			p_casta		:= u.casta_name;
+			exit;
+		end loop;
+	end if;
+	return  res_user;
+exception when NO_DATA_FOUND then
+	p_name := null;
+ 	p_casta := null;
+	return null;
+end;
+
+-- Определение руководителя подразделения
+public function get_chief_user (p_depart ref [DEPART], p_code ::[MARK_PERS_G].[CODE]%type) return ref [USER] is 
+	user_ref ref [USER];
+	mark_ref ref [MARK_PERS_G];
+	v_depart ref [DEPART];
+begin
+	v_depart := p_depart;
+	locate  mark_ref in ::[MARK_PERS_G] where mark_ref.[CODE] = p_code;
+	while user_ref is null and v_depart is not null loop
+		begin
+			locate user_ref in ::[USER] where user_ref.[MARK_PERS].[MARK] = mark_ref and user_ref.[DEPART] = v_depart and user_ref.[END_DATE] is null;
+		exception when NO_DATA_FOUND then
+			v_depart := v_depart.[HIGH];
+		end;
+	end loop;
+	return user_ref;
+exception when NO_DATA_FOUND then
+	return null;
+end;
+
+public procedure GetDepartByUser(p_user ref [USER], p_dep_code out ::[DEPART].[CODE]%type, p_dep_name out ::[DEPART].[NAME]%type) is 
+begin
+	select d(d.[CODE], d.[NAME]) in ::[DEPART], (::[USER] : u) where d = u.[DEPART] and u = p_user into p_dep_code, p_dep_name;
+exception when no_data_found then
+	begin
+		select d(d.[CODE], d.[NAME]) in ::[DEPART] where d = ::[SYSTEM].[VARIABLES].OurDepart into p_dep_code, p_dep_name;
+	exception when no_data_found then
+		null;
+	end;	
+end;		
+
+public function is_auto_fill_date_upd(on_date date default null) return boolean is 
+begin
+	return ::[FP_TUNE].[LIB].get_bool_value( '207P_AUTO_FILL_DATE_FORM_UPD', throw_error == '0', p_date == on_date );
+end;
+
+--заполнение таблицы с категориями риска клеинта
+public function FillRiskGrid(pClient ref [CLIENT], pReNew boolean default false) return RiskKindGirdType is 
+begin
+	return ::[LEGAL_INTERFACE].[PRX_CLIENT].FillRiskKindGrid(pClient, pReNew);
+end;
+
+-- заполнение таблицы доп. свойств
+public procedure Fill_Type_Of_Data_Grid(
+	p_property [PROPERTIES]%collection
+	, p_Tbl in out PROPERTIES_TABLE
+	, p_show_irrelevant boolean -- Отобразить неактуальные
+) is 
+i integer:=0;
+op_date date := trunc(sysdate);
+begin
+	p_Tbl.delete;
+	for (	select prop(	  prop%id			: prop_id
+							, prop.[DATE_BEG]	: dt_begin
+							, prop.[DATE_END]	: dt_end
+							, prop.[STR]		: str
+							, prop.[GROUP_PROP]	: grp_code
+						)
+			in ::[PROPERTIES] all
+			where prop%collection = p_property
+			  and prop.[GROUP_PROP].[CODE] like 'CL_ANK%'
+			  and (	p_show_irrelevant
+			  	  	or (	not p_show_irrelevant -- Показывать только действующие
+			  	  	  		and (	prop.[DATE_BEG] < op_date + 1
+			  	  	  	   			and (prop.[DATE_END] is null or prop.[DATE_END] >= op_date)
+			  	  	  	  		)
+					 	)		
+				  )
+		)
+	loop
+		i := i + 1;
+		p_Tbl(i)%id				:= prop.prop_id;
+		p_Tbl(i).[DATE_BEG]		:= prop.dt_begin;
+		p_Tbl(i).[DATE_END]		:= prop.dt_end;
+		p_Tbl(i).[STR]			:= prop.str;
+		p_Tbl(i).[GROUP_PROP]	:= prop.grp_code;
+	end loop;
+end;
+
+-- заполнение таблицы шаблонов
+public procedure Fill_Shablon_Data_Grid(
+					p_Shab_Tbl in out CL_ANK_TEMPLATES_TABLE
+					,grp_code number
+				  ) is 
+j integer:=0;
+begin
+	p_Shab_Tbl.delete;
+		for(select cl_ank(cl_ank.[CODE] : code, cl_ank.[VALUE] : val)
+			in ::[CL_ANK_TEMPLATES], ([PROPERTY_GRP] all : prop_grp) all
+			where prop_grp%id = grp_code and cl_ank.[ADDITIONAL_PROP] = prop_grp)
+		loop
+			j:=j+1;
+			p_Shab_Tbl(j).[CODE]:=cl_ank.code;
+			p_Shab_Tbl(j).[VALUE]:=cl_ank.val;
+		end loop;
+end;
+
+-- Запомним введенные данные в грид и в справочник
+public procedure confirm_data (
+	row_number integer
+	, inserted_text [MEMO]
+	, p_Tbl in out PROPERTIES_TABLE -- грид
+) is 
+	data_type	ref [PROPERTIES];
+begin
+	data_type:=p_Tbl(row_number)%id;
+	p_Tbl(row_number).[STR]:=inserted_text;
+	data_type.[STR]:=inserted_text;
+end;
+
+function RemoveFormCode (
+	p_client	ref [CL_ORG]
+) return [CL_ORG].[FORM_CODE]%type
+is
+	v_result	[CL_ORG].[FORM_CODE]%type;
+	
+	v_OKATO		[CL_ORG].[OKATO_CODE]%type;
+	v_OKTMO		[CL_ORG].[OKTMO_CODE]%type;
+	v_OKFS		[OWNERSHIP_TYPE].[SHORT_NAME]%type;
+	v_OKOPF		[FORM_PROPERTY].[CODE]%type;
+	v_OKOGU		[OKOGU].[CODE]%type;
+
+--	"ОКАТО - 50401379000,  ОКТМО - 50701000, ОКФС - 16, ОКОПФ - 67, ОКОГУ - 49014"
+begin
+	begin
+		select co (co.[OKATO_CODE], co.[OKTMO_CODE], co.[OWNERSHIP].[SHORT_NAME], co.[FORMA].[CODE], co.[OKOGU_CODE].[CODE])
+		in [CL_ORG] all
+		where co = p_client
+		into v_OKATO, v_OKTMO, v_OKFS, v_OKOPF, v_OKOGU;
+	exception
+		when NO_DATA_FOUND then
+			v_OKATO := null; v_OKTMO := null; v_OKFS := null; v_OKOPF := null; v_OKOGU := null;
+	end;
+	
+	v_OKATO	:= coalesce (v_OKATO,  [LEGAL_INTERFACE].[PRX_CLIENT].get_territory (p_client).[CODE] );
+	v_OKTMO	:= coalesce (v_OKTMO,  [LEGAL_INTERFACE].[PRX_CLIENT].get_oktmo_from_address (p_client).[CODE] );
+
+	if v_OKATO is not null then
+		v_result := 'ОКАТО - ' || v_OKATO;
+	end if;
+	if v_OKTMO is not null then
+		v_result := v_result || case when v_result is null then '' else ', ' end || 'ОКТМО - ' || v_OKTMO;
+	end if;
+	if v_OKFS is not null then
+		v_result := v_result || case when v_result is null then '' else ', ' end || 'ОКФС - ' || v_OKFS;
+	end if;
+	if v_OKOPF is not null then
+		v_result := v_result || case when v_result is null then '' else ', ' end || 'ОКОПФ - ' || v_OKOPF;
+	end if;
+	if v_OKOGU is not null then
+		v_result := v_result || case when v_result is null then '' else ', ' end || 'ОКОГУ - ' || v_OKOGU;
+	end if;
+
+	return v_result;
+end;
+
+procedure setNewFormCode(p_this ref [CL_ORG], p_date_ank date, p_form_code varchar2(140), p_tune boolean, p_date in out date) is
+	pragma autonomous_transaction;
+begin		
+	p_this.[FORM_CODE] := p_form_code;
+		 					 			
+	if p_tune then	
+		if p_this.[DATE_ANK] is null and p_date_ank is not null then
+			p_this.[DATE_ANK] := p_date_ank;
+		end if;
+		 							
+		p_date := trunc(sysdate);
+		p_this.[DATE_FORM_UPD_F] := p_date;				
+	end if;
+	commit;
+end;
+PSH_EDIT_ANKETA (
+	@name('Даты заполнения анкеты клиента')                                                                                                  P_DATE_ANK        in     [DATE],
+	@name('Уровень риска')                                                                                                                   P_FAIL_LEVEL      in     [FAIL_LEVEL_REF],
+	@name('Операции клиента')                                                                                                                P_CL_OPER1        in     [CL_OPER_COLLECT],
+	@name('Поступление средств')                                                                                                             P_INC_RESOURCES   in     [CL_OPER_COLLECT],
+	@name('Характеристика операций')                                                                                                         P_OPER_CHARACTER  in     [MEMO],
+	@name('Оценка риска легализации доходов')                                                                                                P_FAIL_MARK       in     [MEMO],
+	@name('Коды форм федерального гос.стат.наблюдения')                                                                                      P_FORM_CODE       in     [STRING_140],
+	@name('Сведения о местонахождении юридического лица')                                                                                    P_INFO_ADDR       in     [STRING_2000],
+	@name('Дата обновления анкеты')                                                                                                          P_DATE_FORM_UPD   in     [DATE],
+	@name('ПДЛ')                                                                                                                             P_IPDL            in     [IPDL_TYPE_REF]    default null,
+	@name('ФИО и должность сотрудника, заполнившего анкету')                                                                                 P_EDIT_USER       in     [STRING_500]       default null,
+	@name('Дата начала отношений с Клиентом (открытие 1-го счета)')                                                                          P_FIRST_ACC       in     [DATE]             default null,
+	@name('Cотрудник, открывший счет')                                                                                                       P_ACC_USER_OPEN   in     [USER_REF]         default null,
+	@name('Cотрудник, утвердивший открытие счета')                                                                                           P_ACC_USER_CONF   in     [USER_REF]         default null,
+	@name('Куратор счета или менеджер клиента')                                                                                              P_ACC_MANAG       in     [USER_REF]         default null,
+	@name('ФИО сотрудника, открывшего счет')                                                                                                 P_USER_OPEN_FIO   in     [NAME]             default null,
+	@name('ФИО сотрудника, утвердившего открытие счета')                                                                                     P_USER_CONF_FIO   in     [NAME]             default null,
+	@name('ФИО куратора счета или менеджера клиента')                                                                                        P_ACC_MANAG_FIO   in     [NAME]             default null,
+	@name('Должность сотрудника, открывшего счет')                                                                                           P_USER_OPEN_CASTA in     [STRING_250]       default null,
+	@name('Должность сотрудника, утвердившего открытие счета')                                                                               P_USER_CONF_CASTA in     [STRING_250]       default null,
+	@name('Должность куратора счета или менеджера клиента')                                                                                  P_ACC_MANAG_CASTA in     [STRING_250]       default null,
+	@name('Работа с клиентом в подразделениях')                                                                                              P_WORK_IN_DEPAT   in     [CL_INFO_USER_REF] default null,
+	@name('Подразделения, в которых зарегистрирован клиент')                                                                                 P_ADD_OFFICE      in     [ADD_OFFICE_ARR]   default null,
+	@name('Критерии риска')                                                                                                                  P_CRITERIES       in ref [MONITORING_CRIT]  default null,
+	@name('Присутствие клиента по своему местонахождению')                                                                                   P_PRESENCE_PLACE  in     [SIXTH_CHOICE]     default null,
+	@name('Присутствие по своему местонахождению постоянно действующего органа управления юр. лица')                                         P_PRESENCE_MANAG  in     [SIXTH_CHOICE]     default null,
+	@name('Присутствие по своему местонахождению иного органа или лица, которые имеют право действовать без доверенности от имени юр. лица') P_PRESENCE_OTHER  in     [SIXTH_CHOICE]     default null,
+	@name('Значение уровня риска')                                                                                                           P_FAIL_VALUE      in     [NUM_20_4]         default null,
+	@name('Дата прекращения отношений с клиентом')                                                                                           P_CLOSE_DATE      in     [DATE]             default null
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATE_ANK := this.[DATE_ANK];
+	P_CL_OPER1 := this.[CL_OPER1];
+	P_INC_RESOURCES := this.[INC_RESOURCES];
+	P_OPER_CHARACTER := this.[OPER_CHARACTER];
+	P_FAIL_MARK := this.[FAIL_MARK];
+	P_FORM_CODE := this.[FORM_CODE];
+	P_DATE_FORM_UPD := this.[DATE_FORM_UPD_F];
+	P_ADD_OFFICE := this.[ADD_OFFICE];
+
+	V_PSB_FAIL_MARK := this.[PSH_FAIL_MARK];
+end if;
+-- End initialization of parameters and variables
+declare
+MonitorGrid			MonitorGirdType;
+KindRisk			RiskKindGirdType;
+pAdds				string(32000);
+v_info_req_ind		integer;
+v_cols_rows_ind		integer;
+col_row_rec			integer;
+begin
+	if p_message = 'DEFAULT' then
+		V_CLASS				:= this%class;
+		V_UPD_ANKETA		:= false;
+		V_SHOW_FACTORS		:= false;
+		V_SHOW_IRRELEVANT	:= false;
+		P_INFO_ADDR			:= [INFO_ADDR];
+		V_ADD_PROP			:= [ADD_PROP];
+		V_ADDITIONAL_FILL	:= ::[FP_TUNE].[LIB].get_bool_value('207P_ENTER_ADD_CL_INFO', null);
+		V_SHOW_ADD_INFO		:= true;
+
+		Fill_Type_Of_Data_Grid([ADD_PROP],V_TYPE_OF_DATA,false);
+	
+		if V_TYPE_OF_DATA.exists(1) then
+			V_TEXT_VALUE:=V_TYPE_OF_DATA(1).[STR];
+			Fill_Shablon_Data_Grid(V_INFO_SHAB_LIST,V_TYPE_OF_DATA(1).[GROUP_PROP]);
+		end if;
+		
+		if V_ADDITIONAL_FILL then
+			csmd.command(V_VB, 'AdditionFill.Visible = true');
+			csmd.command(V_VB, 'Form4.Visible = false');
+			
+			v_info_req_ind:=V_ADD_INFO_REQS.count+1;
+			for (select distinct det_info(det_info%id 				: info_id
+										, pnts%id 					: p_id
+										, pnts.[LIST_OF_COLUMNS] 	: list_of_columns
+										, pnts.[LIST_OF_ROWS] 		: list_of_rows
+										, pnts.[NAME] 				: rec_name
+										, pnts.[POINT_NUMBER]		: pnt_number
+										)
+				in ::[CL_REQS_ADD_INFO], ([CL_ADD_INFO_PNTS] all : pnts)
+				where det_info.[DETAIL_INFO] = pnts%collection
+				order by pnts.[POINT_NUMBER] asc nulls last
+			) loop
+
+				V_ADD_INFO_REQS(v_info_req_ind).[REC_ID]:= det_info.p_id;
+				V_ADD_INFO_REQS(v_info_req_ind).[LIST_OF_COLUMNS]:= det_info.list_of_columns;
+				V_ADD_INFO_REQS(v_info_req_ind).[LIST_OF_ROWS]:= det_info.list_of_rows;
+				V_ADD_INFO_REQS(v_info_req_ind).[NAME]:= det_info.rec_name;
+				V_ADD_INFO_REQS(v_info_req_ind).[ADD_CL_INFO_CODE]:= det_info.info_id;
+				
+				v_cols_rows_ind:= V_COLS_ROWS.count+1;
+				for (select row(row%id 				  : row_id
+								, row.[ROW_REC_NUMBER] : row_rec_number
+								)
+				 	in ::[ADD_INFO_GRP_ROW] all
+				 	where row%collection = V_ADD_INFO_REQS(v_info_req_ind).[LIST_OF_ROWS]
+					order by row.[ROW_REC_NUMBER] asc nulls last
+				) loop
+					V_COLS_ROWS(v_cols_rows_ind).[GRID_ROW]:= row.row_id;
+					V_COLS_ROWS(v_cols_rows_ind).[TYPE_ADD_INFO]:=V_ADD_INFO_REQS(v_info_req_ind).[ADD_CL_INFO_CODE];
+					V_COLS_ROWS(v_cols_rows_ind).[POINTS_ADD_INFO]:=V_ADD_INFO_REQS(v_info_req_ind).[REC_ID];
+					
+					v_cols_rows_ind:=v_cols_rows_ind+1;
+				end loop;
+				v_info_req_ind:=v_info_req_ind+1;
+			end loop;
+		else
+			csmd.command(V_VB, 'AdditionFill.Visible = false');
+			csmd.command(V_VB, 'Form4.Visible = true');
+		end if;
+		
+		is_auto := 	is_auto_fill_date_upd;	
+		if is_auto then
+			csmd.Disable(V_VB, 'P_DATE_FORM_UPD');
+			csmd.Show(V_VB, 'V_UPD_ANKETA', 'V');
+		else
+			V_UPD_ANKETA :=  P_DATE_ANK is not null and [DATE_FORM_UPD] is null; -- обновляем
+			--csmd.Enable(V_VB, 'P_DATE_FORM_UPD');
+			csmd.Hide(V_VB, 'V_UPD_ANKETA', 'V');
+		end if;
+
+		::[MONITORING_CRIT].[NEW#AUTO].v_client :=  this;
+		executor.set_context('MONITOR_CLIENT', this%id);
+
+		MonitorGrid 	:= ::[MONIT_CRIT_GRID].[LIB].FillGrid(this, V_SHOW_FACTORS);
+		V_CRITERIA_GRID := MonitorGrid;
+		V_ACTIVE_CRIT 	:= bool_char(V_CRITERIA_GRID.count = 0
+										and ::[MONITORING_CRIT].[LIB].OtherBranchCrit(this, today, ::[SYSTEM].[VARIABLES].OurBranch), '1', '0');
+
+		tune_fail_level := nvl(::[FP_TUNE].[LIB].get_num_value('FAIL_LEVEL_AUTO', null, '0'), 0);
+		if tune_fail_level > 0 then
+			csmd.Disable(V_VB, 'P_FAIL_LEVEL');
+			csmd.command(V_VB, 'btnRecalc.Visible = true');
+		else	
+			csmd.command(V_VB, 'btnRecalc.Visible = false');
+		end if;
+		
+		if nvl(::[FP_TUNE].[LIB].get_bool_value('1B010171', null, '0'), false) then
+			csmd.Show(V_VB,'P_CRITERIES');
+		else
+			csmd.Hide(V_VB,'P_CRITERIES');
+		end if;
+		
+		csmd.command(V_VB, 'FailValue.Visible = '		|| bool_char(tune_fail_level > 1, 'true', 'false'));
+		csmd.command(V_VB, 'FailValueLabel.Visible = '	|| bool_char(tune_fail_level > 1, 'true', 'false'));
+		
+		is_client_chp(this);
+		if cl_priv is not null then
+			[CSMD].command(V_VB, 'Frame6.Visible = True');
+			P_IPDL := cl_priv.[IS_IPDL];
+		else
+			[CSMD].command(V_VB, 'Frame6.Visible = False');
+		end if;
+
+		--текущие значения уровня риска
+		::[LEGAL_INTERFACE].[PRX_CLIENT].getRisk_FailValueAndLevel(this, P_FAIL_LEVEL, P_FAIL_VALUE);
+		
+		--доп реквизиты клиента
+		cl_info := ::[CL_INFO_REQ].[LIB].getReqRefByClient(this);
+
+		P_FIRST_ACC 			:= cl_info.[FIRST_ACC_DATE];
+		P_CLOSE_DATE 			:= cl_info.[CLOSE_DATE];
+		P_PRESENCE_PLACE.[0]	:= cl_info.[PRESENCE_PLACE].[0];
+		P_PRESENCE_MANAG.[0]	:= cl_info.[PRESENCE_MANAG].[0];
+		P_PRESENCE_OTHER.[0]	:= cl_info.[PRESENCE_OTHER].[0];
+				
+		u_open	:= get_user_ref('ACC_OPEN_USER', 	cl_info, P_USER_OPEN_FIO, P_USER_OPEN_CASTA);
+		u_conf	:= get_user_ref('ACC_CONFIRM', 		cl_info, P_USER_CONF_FIO, P_USER_CONF_CASTA);
+		u_manag := get_user_ref('ACC_MANAGER', 		cl_info, P_ACC_MANAG_FIO, P_ACC_MANAG_CASTA);
+		
+		executor.set_context( 'CL_INFO_DATE', to_char(sysdate, 'DD/MM/YYYY'));
+		if cl_info is not null then
+			executor.set_context('CL_INFO_COLLECTION', to_char(cl_info.[CL_WORK_USERS]));
+		else
+			executor.set_context('CL_INFO_COLLECTION', to_char(null));
+		end if;
+		
+		for ( select a(a.[USER_NAME]: USER_NAME, a.[USER_CASTA]: USER_CASTA) in ::[CL_HIST] all
+				where	a.[CLIENT_REF] = this and a.[qual] = 'DATE_ANK'
+					order by a.[DATE_EDIT] desc )
+		loop
+			P_EDIT_USER := a.[USER_NAME]|| bool_char(a.USER_CASTA is not null, ', '||a.USER_CASTA, '');
+			exit;
+		end loop;
+					
+		if P_FAIL_LEVEL is null then
+			P_FAIL_LEVEL := ::[FAIL_LEVEL]([CODE] = 'НИЗКИЙ');
+		end if;
+
+		KindRisk := FillRiskGrid(this);
+		V_RISK_KIND_GRID := KindRisk;
+		
+	elsif P_MESSAGE = 'VALIDATE' then
+
+	 	if P_INFO = 'P_DATE_ANK' then
+		  	P_EDIT_USER := stdlib.userId.[NAME]|| bool_char(stdlib.userId.[CASTA].[VALUE] is not null, ', '||stdlib.userId.[CASTA].[VALUE], '');
+		
+		elsif P_INFO = 'P_ACC_USER_OPEN' then
+			if P_ACC_USER_OPEN is not null then
+				P_USER_OPEN_FIO := P_ACC_USER_OPEN.[NAME];
+				P_USER_OPEN_CASTA := P_ACC_USER_OPEN.[CASTA].[VALUE];
+			end if;
+		
+		elsif P_INFO = 'P_ACC_USER_CONF' then
+			if P_ACC_USER_CONF is not null then
+				P_USER_CONF_FIO := P_ACC_USER_CONF.[NAME];
+				P_USER_CONF_CASTA := P_ACC_USER_CONF.[CASTA].[VALUE];
+			end if;
+		
+		elsif P_INFO = 'P_ACC_MANAG' then
+			if P_ACC_MANAG is not null then
+				P_ACC_MANAG_FIO := P_ACC_MANAG.[NAME];
+				P_ACC_MANAG_CASTA := P_ACC_MANAG.[CASTA].[VALUE];
+			end if;
+		
+		elsif P_INFO = 'P_IPDL' then
+			if nvl(P_IPDL.[CONTROL], false) and tune_fail_level = 0 then
+				P_FAIL_LEVEL := ::[FAIL_LEVEL]([CODE]='ВЫСОКИЙ');
+			end if;
+	 	
+	 	elsif p_info in ('P_CRITERIES', '%VAR%.V_SHOW_FACTORS') then
+			MonitorGrid		:= ::[MONIT_CRIT_GRID].[LIB].FillGrid(this, V_SHOW_FACTORS);
+			V_CRITERIA_GRID := MonitorGrid;
+			V_ACTIVE_CRIT 	:= bool_char(V_CRITERIA_GRID.count = 0
+								and ::[MONITORING_CRIT].[LIB].OtherBranchCrit(this, today, ::[SYSTEM].[VARIABLES].OurBranch), '1', '0');
+			if tune_fail_level > 0 then
+				P_FAIL_LEVEL := ::[MONITORING_CRIT].[LIB].GetFailLevel(this, today, P_FAIL_VALUE);
+			end if;
+			KindRisk := FillRiskGrid(this, true);
+			V_RISK_KIND_GRID := KindRisk;
+			
+	 	elsif p_info = 'RECALC' then
+			if tune_fail_level > 0 then
+				P_FAIL_LEVEL := ::[MONITORING_CRIT].[LIB].GetFailLevel(this, today, P_FAIL_VALUE);
+			end if;
+			KindRisk := FillRiskGrid(this, true);
+			V_RISK_KIND_GRID := KindRisk;
+
+		elsif p_info = 'P_DATE_FORM_UPD' then
+			 -- если пользователь сам установил дату или удалил, тогда
+			 V_UPD_ANKETA := false;	
+
+		elsif p_info = '%VAR%.V_UPD_ANKETA' then
+			 -- если пользователь сам установил дату или удалил, тогда
+			if V_UPD_ANKETA then
+				P_DATE_FORM_UPD := trunc(sysdate);
+			else
+				P_DATE_FORM_UPD := [DATE_FORM_UPD_F];
+			end if;
+		--Работа с видом сведений. Определяем текущую выделенную строку в гриде, обновляем поле "Значение"
+	 	elsif p_info like 'V_TYPE_OF_DATA%' then
+	 		selected_raw_td:= translate(p_info,'0'||translate(p_info, '_1234567890', '_'), '0');
+	 		if selected_raw_td > 0 then
+	 			V_TEXT_VALUE:=V_TYPE_OF_DATA(selected_raw_td).[STR];
+	 			Fill_Shablon_Data_Grid(V_INFO_SHAB_LIST,V_TYPE_OF_DATA(selected_raw_td).[GROUP_PROP]);
+	 		end if;
+	 	--Работа с шаблонами. Определяем текущую выделенную строку грида и по необходимоти добавляем текст шаблона в "Значение"
+	 	elsif p_info like 'V_INFO_SHAB_LIST%' then
+	 		selected_raw_shb:= translate(p_info,'0'||translate(p_info, '_1234567890', '_'), '0');
+	 		if V_INFO_SHAB_LIST.count > 0 then
+	 			if V_TEXT_VALUE is null then
+	 				V_TEXT_VALUE:=V_INFO_SHAB_LIST(selected_raw_shb).[VALUE];
+	 			else
+	 				V_TEXT_VALUE:=V_TEXT_VALUE||NL$||V_INFO_SHAB_LIST(selected_raw_shb).[VALUE];
+	 			end if;
+	 			--Определяем для какой строки грида присвоить значение строки
+	 			if selected_raw_td is not null then
+	 				confirm_data(selected_raw_td,V_TEXT_VALUE, V_TYPE_OF_DATA);
+	 			end if;
+	 		end if;
+	 	elsif p_info = 'P_PRESENCE_PLACE.0' then
+	 		if P_PRESENCE_PLACE.[0] = 6 and nvl (cl_info.[PRESENCE_PLACE].[0], 0) != 6 then
+	 			csmd.command(V_VB, 'MsgBox ("Установка вручную признака ''Не присутствует по информации ФНС'' нежелательна.")');
+	 		end if;
+	 	--После редактирования поля "Значение" - запомним содержимое
+	 	elsif p_info = '%VAR%.V_TEXT_VALUE' then
+	 			confirm_data(selected_raw_td,V_TEXT_VALUE, V_TYPE_OF_DATA);
+	 	--Отобразить записи, без привязки к датам.
+	 	elsif p_info = 'SHOW_IRRELEVANT' then -- Вызывается из клиент-скрипта
+	 		Fill_Type_Of_Data_Grid(this.[ADD_PROP], V_TYPE_OF_DATA, V_SHOW_IRRELEVANT);
+	 	--После добавления сведения, обновить грид видов сведений и в соответствии с выделенной строкой, обновить и грид шаблонов
+	 	--Это так же обновит поле "Значение"
+	 	elsif p_info = '%VAR%.V_ADD_PROP' then
+	 		Fill_Type_Of_Data_Grid([ADD_PROP],V_TYPE_OF_DATA,false);
+		
+			if V_TYPE_OF_DATA.exists(selected_raw_td) then
+				V_TEXT_VALUE:=V_TYPE_OF_DATA(selected_raw_td).[STR];
+				Fill_Shablon_Data_Grid(V_INFO_SHAB_LIST,V_TYPE_OF_DATA(selected_raw_td).[GROUP_PROP]);
+			end if;
+	 	elsif p_info = 'RemoveFormCode' then	 			 		
+	 		if is_auto_fill_date_upd and P_DATE_ANK is null then
+				pragma error ('В анкете не может быть указана дата обновления, если не указана дата заполнения!');
+			end if;
+			
+			P_FORM_CODE := RemoveFormCode ( this );
+			setNewFormCode(this, P_DATE_ANK, P_FORM_CODE, is_auto_fill_date_upd, P_DATE_FORM_UPD);
+			
+	 	elsif p_info = '%VAR%.V_SHOW_ADD_INFO' then
+	 		if V_SHOW_ADD_INFO then
+	 			csmd.Hide(V_VB, 'V_FINAL_TEXT', 'V');
+			else
+				csmd.Show(V_VB, 'V_FINAL_TEXT', 'V');
+			end if;
+	 	elsif p_info = 'ADD_CL_INFO_CHANGE' then
+	 		if V_ADD_CL_INFO is not null then
+				begin
+					locate v_add_prop_rec
+					in this.[ADD_PROP]
+					where v_add_prop_rec.[GROUP_PROP] = V_ADD_CL_INFO.[PROP_AGREEMENT]
+						  and (v_add_prop_rec.[DATE_BEG] < v_oper_date + 1
+								and (v_add_prop_rec.[DATE_END] is null or v_add_prop_rec.[DATE_END] >= v_oper_date));
+					
+					V_FINAL_TEXT:=v_add_prop_rec.[STR];
+
+					if V_FINAL_TEXT is not null then
+						V_SHOW_ADD_INFO := false;
+					end if;
+				exception when NO_DATA_FOUND then
+					V_SHOW_ADD_INFO := false;
+					V_FINAL_TEXT:=null;
+				end;
+			end if;
+	 	elsif p_info = '%VAR%.V_FINAL_TEXT' then
+	 		v_add_prop_rec.[STR] := V_FINAL_TEXT;
+	 	elsif p_info like 'INFO_REQS_FORM%' then
+	 		-- Переименуем колонки в человеческое название
+	 		v_selected_row:= translate(p_info,'0'||translate(p_info, '_1234567890', '_'), '0');
+
+		 	for (
+		 	select col(col.[NAME_BOOL]	: name_bool
+					,col.[NAME_STR_1]	: name_str_1
+					,col.[NAME_NUM_1]	: name_num_1
+					,col.[NAME_STR_2]	: name_str_2
+					,col.[NAME_NUM_2]	: name_num_2
+					,col.[NAME_STR_3]	: name_str_3
+					,col.[NAME_NUM_3]	: name_num_3)
+			in ::[ADD_INFO_GRP_COL] all
+			where col = V_ADD_INFO_REQS(v_selected_row).[LIST_OF_COLUMNS]
+			)
+			loop
+				V_COLS_NAMES(v_selected_row).[POINTS_ADD_INFO]:=V_ADD_INFO_REQS(v_selected_row).[REC_ID];
+				V_COLS_NAMES(v_selected_row).[NAME_BOOL] := col.name_bool;
+				V_COLS_NAMES(v_selected_row).[NAME_STR_1] := col.name_str_1;
+				V_COLS_NAMES(v_selected_row).[NAME_NUM_1] := col.name_num_1;
+				V_COLS_NAMES(v_selected_row).[NAME_STR_2] := col.name_str_2;
+				V_COLS_NAMES(v_selected_row).[NAME_NUM_2] := col.name_num_2;
+				V_COLS_NAMES(v_selected_row).[NAME_STR_3] := col.name_str_3;
+				V_COLS_NAMES(v_selected_row).[NAME_NUM_3] := col.name_num_3;
+			end loop;
+	 	elsif p_info like '%FILL_STR_VAL_1' then
+	 		v_selected_row:= regexp_substr(p_info,'^[^F]*',1);
+	 		V_COLS_ROWS(v_selected_row).COL_STR_VAL_1:=V_TEXT_MESSAGE;
+	 	elsif p_info like '%FILL_STR_VAL_2' then
+	 		v_selected_row:= regexp_substr(p_info,'^[^F]*',1);
+	 		V_COLS_ROWS(v_selected_row).COL_STR_VAL_2:=V_TEXT_MESSAGE;
+	 	elsif p_info like '%FILL_STR_VAL_3' then
+	 		v_selected_row:= regexp_substr(p_info,'^[^F]*',1);
+	 		V_COLS_ROWS(v_selected_row).COL_STR_VAL_3:=V_TEXT_MESSAGE;
+		elsif p_info = 'OK' then
+			--if tune_fail_level then
+			-- Gorinov O.V.  13/07/2011 14:49:18 закоментировал. 	
+			-- т.к. не очень хорошо получится, если пользователь увидит на экране один уровень, а после нажантия на кнопку ОК он резко изменится.
+			-- При изменении критериев риска с ЭФ этой операции, уровень пересчитывается в автомате. И не имеет смысла пересчитывать его вновь
+			-- Уровень и критерии могут разъехаться только в том случае, когда изменят балл влияния категории на уровень. Или пересчитают категории без изменения уровня
+			-- Вот тогда и возникнет ситуация, когда пользователь открыв форму увидит одно, а сохранив получит другое.
+			-- Убираю пересчет уровня, теперь для пересчета необходимо использовать кнопку "Пересчитать".
+			
+			/*
+			if tune_fail_level > 0 then -- Gorinov O.V. 12/07/2011 12:23:11
+				P_FAIL_LEVEL := ::[MONITORING_CRIT].[LIB].GetFailLevel(this, today);
+			end if;
+			*/		
+			
+			-- если заполнили дату обновления анкеты, но не заполнили дату заполнения, тогда необходимо указать дату заполнения.
+			-- дата обновления анкеты заполняется текущим временем, только , если указана дата заполнения анкеты
+			-- иначе она остается пустой.
+			if P_DATE_FORM_UPD is not null and P_DATE_ANK is null then
+				pragma error ('В анкете не может быть указана дата обновления, если не указана дата заполнения!');
+			end if;
+			
+			if V_UPD_ANKETA and (is_auto or (not is_auto and P_DATE_ANK is not null and P_DATE_FORM_UPD is null)) then
+				V_MESSAGE := 'Хотите изменить дату обновления на текущую -' ||to_char(sysdate, 'dd/mm/yyyy') || '?';
+			end if;
+			
+			if V_ADDITIONAL_FILL then
+				declare
+					v_row_val				[MEMO_32767];
+				begin
+			 		for info_rec in V_ADD_INFO_REQS.first .. V_ADD_INFO_REQS.last
+			 		loop
+				 		if V_ADD_INFO_REQS(info_rec).[INFO_FILLED] then
+				 			begin
+						 		locate v_add_prop_rec
+						 		in ::[PROPERTIES] all
+						 		where v_add_prop_rec%collection = this.[ADD_PROP]
+						 		and v_add_prop_rec.[GROUP_PROP] = V_ADD_INFO_REQS(info_rec).[ADD_CL_INFO_CODE].[PROP_AGREEMENT]
+						 		and (v_add_prop_rec.[DATE_BEG] < v_oper_date + 1
+									and (v_add_prop_rec.[DATE_END] is null or v_add_prop_rec.[DATE_END] >= v_oper_date)
+									);
+						 	exception when NO_DATA_FOUND then
+						 		-- Добавляем новое свойство с пустым значением, даже если у доп. свойста не стоит признак "Допускает пустые значения".
+						 		-- Так как значение ниже сформируется и запишется в доп. свойство.
+								v_add_prop_rec := ::[LEGAL_INTERFACE].[PRX_CRED].NewProperty(
+				 						p_date_beg == v_oper_date
+									, p_date_end == null
+									, p_group_prop == V_ADD_INFO_REQS(info_rec).[ADD_CL_INFO_CODE].[PROP_AGREEMENT]
+									, p_null_val == true
+								  );
+						 		this.[ADD_PROP]%insert(v_add_prop_rec);
+							end;
+							if v_add_prop_rec is not null and not v_ChangedRec.exists(v_add_prop_rec) then
+		 						v_add_prop_rec.[STR]:=null;
+		 						v_ChangedRec(v_add_prop_rec) := v_add_prop_rec;
+					 		end if;
+					 		if v_add_prop_rec.[STR]%size < length(v_add_prop_rec.[STR]||v_add_prop_rec.[STR]||V_ADD_INFO_REQS(info_rec).[NAME]||NL$) then
+						 		pragma error('Внимание! Общее количество символов в тексте раздела сведений '||V_ADD_INFO_REQS(info_rec).[ADD_CL_INFO_CODE].[NAME]||' превышает допустимое количество символов (2000 символов). Сократите текст.');
+						 	end if;
+				 			v_add_prop_rec.[STR] := v_add_prop_rec.[STR]||V_ADD_INFO_REQS(info_rec).[NAME]||NL$;
+					 		col_row_rec:=V_COLS_ROWS.first;
+				 			while col_row_rec is not null loop
+				 				if V_COLS_ROWS(col_row_rec).[POINTS_ADD_INFO] = V_ADD_INFO_REQS(info_rec).[REC_ID] then
+						 			v_row_val:=null;
+						 			if V_COLS_NAMES(info_rec).[NAME_BOOL] is not null and V_COLS_ROWS(col_row_rec).[COL_BOOL_VAL] = true then
+						 				v_row_val := v_row_val||'Да; ';
+						 			end if;
+						 			if V_COLS_NAMES(info_rec).[NAME_BOOL] is null or V_COLS_ROWS(col_row_rec).[COL_BOOL_VAL] = true or V_COLS_ROWS(col_row_rec).[GRID_ROW].[PROCESS_CHECK] = 1 then
+						 				if V_COLS_NAMES(info_rec).[NAME_STR_1] is not null and V_COLS_ROWS(col_row_rec).[COL_STR_VAL_1] is not null then
+							 				v_row_val := v_row_val||V_COLS_NAMES(info_rec).[NAME_STR_1]||': '||nvl(V_COLS_ROWS(col_row_rec).[COL_STR_VAL_1],'Пусто')||'; ';
+							 			end if;
+							 			
+							 			if V_COLS_NAMES(info_rec).[NAME_NUM_1] is not null and V_COLS_ROWS(col_row_rec).[COL_NUM_VAL_1] is not null then
+							 				v_row_val := v_row_val||V_COLS_NAMES(info_rec).[NAME_NUM_1]||': '||to_char(V_COLS_ROWS(col_row_rec).[COL_NUM_VAL_1],'fm999999999999990.00')||'; ';
+							 			end if;
+							 			
+							 			if V_COLS_NAMES(info_rec).[NAME_STR_2] is not null and V_COLS_ROWS(col_row_rec).[COL_STR_VAL_2] is not null then
+							 				v_row_val := v_row_val||V_COLS_NAMES(info_rec).[NAME_STR_2]||': '||nvl(V_COLS_ROWS(col_row_rec).[COL_STR_VAL_2],'Пусто')||'; ';
+							 			end if;
+							 			
+							 			if V_COLS_NAMES(info_rec).[NAME_NUM_2] is not null and V_COLS_ROWS(col_row_rec).[COL_NUM_VAL_2] is not null then
+							 				v_row_val := v_row_val||V_COLS_NAMES(info_rec).[NAME_NUM_2]||': '||to_char(V_COLS_ROWS(col_row_rec).[COL_NUM_VAL_2],'fm999999999999990.00')||'; ';
+							 			end if;
+							 			
+							 			if V_COLS_NAMES(info_rec).[NAME_STR_3] is not null and V_COLS_ROWS(col_row_rec).[COL_STR_VAL_3] is not null then
+							 				v_row_val := v_row_val||V_COLS_NAMES(info_rec).[NAME_STR_3]||': '||nvl(V_COLS_ROWS(col_row_rec).[COL_STR_VAL_3],'Пусто')||'; ';
+							 			end if;
+							 			
+							 			if V_COLS_NAMES(info_rec).[NAME_NUM_3] is not null and V_COLS_ROWS(col_row_rec).[COL_NUM_VAL_3] is not null then
+							 				v_row_val := v_row_val||V_COLS_NAMES(info_rec).[NAME_NUM_3]||': '||to_char(V_COLS_ROWS(col_row_rec).[COL_NUM_VAL_3],'fm999999999999990.00')||'; ';
+							 			end if;
+						 			end if;
+						 			
+						 			if v_row_val is not null then
+						 				if v_add_prop_rec.[STR]%size < length(v_add_prop_rec.[STR]||V_COLS_ROWS(col_row_rec).[GRID_ROW].[NAME]||': '||v_row_val||NL$) then
+						 					pragma error('Внимание! Общее количество символов в тексте раздела сведений '||V_ADD_INFO_REQS(info_rec).[ADD_CL_INFO_CODE].[NAME]||' превышает допустимое количество символов (2000 символов). Сократите текст.');
+						 				end if;
+						 				v_add_prop_rec.[STR] := v_add_prop_rec.[STR]||V_COLS_ROWS(col_row_rec).[GRID_ROW].[NAME]||': '||v_row_val||NL$;
+						 			end if;
+				 				end if;
+					 			col_row_rec:=V_COLS_ROWS.next(col_row_rec);
+					 		end loop;
+					 	end if;
+			 		end loop;
+			 		v_ChangedRec.delete;
+				end;
+	 		end if;
+		end if;
+
+		if p_info in ('OK', 'CANCEL') then
+			executor.set_context('MONITOR_CLIENT', null);
+		end if;
+	end if;
+
+	--------------------------------------------------------------------------
+	::[LEGAL_INTERFACE].[PRX_CLIENT].HOOK_CL_CHECK_REQS
+	(
+		P_METH		== &METHOD$CLASS || '.' || &METHOD$SNAME	--Операция
+		,P_CALL		== p_message			--Тип вызова
+		,P_OP_INFO	== p_info				--Вид изменения
+		,P_CLIENT	== this					--Клиент, ссылка
+		,P_CL_PRIV	== null					--Физическое лицо
+		,P_CL_ORG	== null					--Юридическое лицо
+		,P_ADDS		== pAdds				--Дополнительные параметры
+		,P_ADDRESS	== null					--Адреса
+		,P_DOC		== null					--Удостоверение
+		,P_DOCS		== null					--Доп. удостоврения
+		,P_REGISTER	== null					--Регистрация
+		,P_LINKS_OTHER	== null				--Связи с другими клиентами
+		,P_ALL_BOSS		== null				--Должностные лица
+		,P_VB			== V_VB				--Клиент-скрипт
+	);	
+end;
+end;
+
+execute is
+/*********************************************************************
+Назначение:
+
+GALKA, последнее изменение Wednesday, July 03, 2002
+*********************************************************************/
+
+add_office		[ADD_OFFICE];
+dep_chiefs_ref	ref [USER];
+oper_type		ref [VID_OPER_DOG];
+user_dep_code	::[DEPART].[CODE]%type;
+user_dep_name	::[DEPART].[NAME]%type;
+temp_date_upd	date;
+cl_tbl			TableClient;
+pAdds			string(32000);
+begin
+	null;
+end;
+end;
+end;

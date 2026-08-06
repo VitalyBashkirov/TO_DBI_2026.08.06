@@ -1,0 +1,156 @@
+class PSH_RFM_CTRL;
+
+@import_plsql(true)
+@name('[ПСБ] Контроль операций по запросу РФМ (JOB)')
+static method PSH_RFM_JOB is
+PSH_RFM_JOB is
+
+execute is
+P_DATE date := ::[SYSTEM].[VARIABLES].OpDate - 1;
+
+cl_filter		varchar2(32000);
+add_filter		varchar2(32000);
+tr_filter		varchar2(32000);
+msg 			varchar2(32000);
+
+BaseName	varchar2(100);
+
+begin
+-- CLIENT
+	for (
+		select cl(cl : cl_id,
+				cl.[NAME] : cl_name,
+				cl.[CONTACTS] : cl_cont) 
+		in ::[CLIENT] 
+	)
+	loop
+		for (
+			select cont(cont)
+			in cl.cl_cont
+			left outer join (
+				select a(a.[CTRL_REC] : rec) in ::[PSH_RFM_CTRL]
+				where a.[CTRL_TYPE].[0] = 1 and a.[CTRL_PERIOD].[0] = 2
+              	)
+		    on (instr(upper(cont.[NUMB]), upper(a.rec)) > 0)
+			where a.rec is not null
+		)
+		loop
+			debug_pipe('ID: ' || cl.cl_id || ' Наименование: ' || cl.cl_name, 0);
+			msg := msg || chr(10) || NL$ ||
+            'ID: ' || cl.cl_id || ' Наименование: ' || cl.cl_name;		
+			cl_filter := cl_filter || ', ' || chr(39) || cl.cl_id || chr(39);
+		end loop;
+	end loop;
+	if cl_filter is not null then
+		cl_filter := 'ID in (' || ltrim(cl_filter, ', ') || ')';
+		debug_pipe('Обнаружены подозрительные клиенты! Установите указанный фильтр во вкладке "дополнительно" в представлении "Организации" или "Физические лица":', 0);
+		debug_pipe(cl_filter, 0);
+		msg := 'Обнаружены подозрительные клиенты! Установите указанный фильтр во вкладке "дополнительно" в представлении "Организации" или "Физические лица":'
+			|| chr(10) || cl_filter;
+	else
+		debug_pipe('Проверка клиентов проведена успешно. Подозрительных клиентов с использованием указанных контактных данных не выявлено.', 0);
+		msg := 'Проверка клиентов проведена успешно. Подозрительных клиентов с использованием указанных контактных данных не выявлено.';
+	end if;
+	
+-- MAIN_DOCUM
+	for (
+	    select md(md : md_id, coalesce(a.rec, b.rec) : rec) 
+		in ::[MAIN_DOCUM]
+		left outer join (
+			select a(a.[CTRL_REC] : rec) in ::[PSH_RFM_CTRL]
+			where a.[CTRL_TYPE].[0] = 3 and a.[CTRL_PERIOD].[0] = 2
+		)
+		on
+			(trim(nvl(md.[KL_DT].[2].[1],md.[NUM_DT])) = a.rec
+			or trim(nvl(md.[KL_KT].[2].[1],md.[NUM_KT])) = a.rec)
+		left outer join (
+			select b(b.[CTRL_REC] : rec) in ::[PSH_RFM_CTRL]
+			where b.[CTRL_PERIOD].[0] = 2
+		)
+		on
+			(instr(upper(md.[NAZN]), upper(a.rec)) > 0)
+		where 
+		--md.[DATE_DOC] >= to_date('24/02/2022', 'dd/MM/yyyy')
+		md.[DATE_DOC] >= P_DATE -- P_DATE - дата на 1 день меньше опер. дня
+		--and md.[DATE_DOC] = P_DATE --проверка документов только за текущую дату
+		and (a.rec is not null or b.rec is not null)
+	    )
+	loop
+		debug_pipe('ID: ' || md.md_id || ' Значение: ' || md.rec, 0);
+        msg := msg || chr(10) || NL$ ||
+            'ID: ' || md.md_id || ' Значение: ' || md.rec;		
+		add_filter := add_filter || ', ' || chr(39) || md.md_id || chr(39);
+	end loop;
+	if add_filter is not null then
+		add_filter := 'ID in (' || ltrim(add_filter, ', ') || ')';
+		debug_pipe('Обнаружены подозрительные счета! Установите указанный фильтр во вкладке "дополнительно" в представлении "Платежные документы":', 0);
+		debug_pipe(add_filter, 0);
+		msg := msg || chr(10) || NL$ ||
+		'Обнаружены подозрительные счета! Установите указанный фильтр во вкладке "дополнительно" в представлении "Платежные документы":'
+			|| chr(10) || add_filter;
+	else
+		debug_pipe('Проверка счетов проведена успешно. Подозрительных операций с использованием указанных счетов не выявлено.', 0);
+		msg := msg || chr(10) || NL$ || 'Проверка счетов проведена успешно. Подозрительных операций с использованием указанных счетов не выявлено.';
+	end if;
+	
+-- TRANSACTION
+	for (select tr(tr : tr_id,
+			tr.[SRV_CARD_REF].[PAN] : tr_pan,
+			tr.[TRG_ORIG_NUMBER] : tr_num,
+			a.rec : rec)
+		in ::[IP_TRANSACTION]
+		left outer join (
+			select a(a.[CTRL_REC] : rec) in ::[PSH_RFM_CTRL]
+			where a.[CTRL_TYPE].[0] = 2 and a.[CTRL_PERIOD].[0] = 2
+		)
+		on
+			1 = 1
+--			(tr.[SRV_CARD_REF].[PAN] = a.rec
+--			or tr.[TRG_ORIG_NUMBER] = a.rec)
+		where 
+		--tr.[TRANS_DTIME] >= to_date('24/02/2022', 'dd/MM/yyyy')
+		tr.[TRANS_DTIME] >= P_DATE
+        and (tr.[SRV_CARD_REF].[PAN] = a.rec or tr.[TRG_ORIG_NUMBER] = a.rec)
+		and a.rec is not null
+	)
+	loop
+		debug_pipe('PAN: ' || tr.tr_pan || ' NUM: ' || tr.tr_num || ' Значение: ' || tr.rec, 0);
+        msg := msg || chr(10) || NL$ ||
+            'PAN: ' || tr.tr_pan || ' NUM: ' || tr.tr_num || ' Значение: ' || tr.rec;
+		tr_filter := tr_filter || ', ' || chr(39) || tr.tr_id || chr(39);
+	end loop;
+	if tr_filter is not null then
+		tr_filter := 'ID in (' || ltrim(tr_filter, ', ') || ')';
+		debug_pipe('Обнаружены подозрительные карты! Установите указанный фильтр во вкладке "дополнительно" в представлении "Транзакции":', 0);
+		debug_pipe(tr_filter, 0);
+		msg := msg || chr(10) || NL$ ||
+			'Обнаружены подозрительные карты! Установите указанный фильтр во вкладке "дополнительно" в представлении "Транзакции":'
+			|| chr(10) || tr_filter;
+	else
+		debug_pipe('Проверка карт проведена успешно. Подозрительных операций с указанными банковскими картами не выявлено.', 0);
+		msg := msg || chr(10) || NL$ || 'Проверка карт проведена успешно. Подозрительных операций с указанными банковскими картами не выявлено.';
+	end if;
+	
+--Рассылка
+	for (select bn(bn.name :c_name) in v$database%rowtype)
+  	loop
+		BaseName:=bn.c_name;
+		exit;
+	end loop;
+	
+	if BaseName='IBSO' then
+		::[FP_INTERFACE].[PRX_PCORE].Send_Mail(  
+			::[PSH_EMAIL_RASSIL]([PSH_EMAIL_COD] = 'KO_RFM').[PSH_EMAIL_ADRES]
+			, 'Контроль операций по запросу РФМ'
+			, msg
+			, 'IT@pshb.ru'					    
+			, false							    
+			,null
+			);
+	end if;
+
+exception when others then
+	null;
+end;
+end;
+end;

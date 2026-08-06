@@ -1,0 +1,2116 @@
+class DOCUM_RC;
+
+@optimize(false)
+@import_plsql(true)
+@name('Обработка валютного документа 3.0')
+@tag('COPIED')
+method PROC#VD_3 is
+
+@name('Наименование банка плательщика')             public V_BPNAME           [SBRF_NAME];
+@name('Наименование банка получателя')              public V_BRNAME           [SBRF_NAME];
+@name('Наименование Участника отправителя')         public V_PPNAME           [SBRF_NAME];
+@name('Наименование Участника получателя')          public V_PRNAME           [SBRF_NAME];
+@name('Наименование плательщика')                   public V_PNAME            [SBRF_NAME];
+@name('Наименование получателя')                    public V_RNAME            [SBRF_NAME];
+@name('Статус формы')                               public V_STATE            [STRING];
+@name('Операция')                                   public V_SCHEMA           [PATTERN_DOC_REF];
+@name('Сообщение об ошибке')                        public V_ERRM             [STRING_2000];
+@name('Наименование банка посредника')              public V_BINAME           [SBRF_NAME];
+@name('Наименование банка бенифициара')             public V_BBNAME           [SBRF_NAME];
+@name('Ссылка (21)')                                public V_REF              [STRING_16];
+@name('Комментарий')                                public V_COMMENT          [MEMO];
+@name('Дополнительная информация')                  public V_DOPINFO          [MEMO_BIG];
+@name('Тип 11')                                     public V_TYPE11           [STRING_1];
+@name('Значение 11')                                public V_VALUE11          [STRING_10];
+@name('Клиент-скрипт')                              public V_VB               [STRING_32000];
+@name('Переадресовать')                             public V_READDR           [CL_PART_REF];
+@name('Список ID документов')                       public V_MAIN_DOC         [STRING_32000];
+@name('Тип документа - Наименование')               public V_TYPED_NAME       [STRING];
+@name('Тип документа - Код')                        public V_TYPED_COD        [STRING];
+@name('Выбор панели элементов')                     public V_PANEL            [ONE_FROM_5];
+@name('Время обработки')                            public V_13C              table of [STRING_REC];
+@name('Код инструкций')                             public V_23E              table of [SWIFT_23E_REC];
+@name('Расходы отправителя')                        public V_71F              table of [STRING_REC];
+@name('Показывать невыясненные')                    public V_UKNOWN           [STRING_10];
+@name('Признак конверсии')                          public V_CONV             [BOOLEAN];
+@name('Маршрут')                                    public V_ROUTE            [SWIFT_ROUTE_REF];
+@name('Опция поля 58')                              public V_OPT58            [OPTIONS_5X_REF];
+@name('Валюта 33B')                                 public V_33B_VAL          [FT_MONEY_REF];
+@name('Сумма 33B')                                  public V_33B_SUM          [SUMMA];
+@name('Текст')                                      public V_TEXT             [STRING_250];
+@name('Клиринговый код')                            public V_CLEARCODE        [VAL_KLIR_COD_REF];
+@name('Ключевое слово 70')                          public V_CODWORD70        [VAL_CODWORD_REF];
+@name('Ключевое слово 72')                          public V_CODWORD72        [VAL_CODWORD_REF];
+@name('Вид валютной операции')                      public V_CURR_OP          [CURR_OPERATI_REF];
+@name('Уникальный номер контракта')                 public V_DEAL_PASP        [STRING_22];
+@name('Вариант обработки')                          public V_VARIANT          [ONE_FROM_THREE];
+@name('Код отправляемого отказа')                   public V_REFTYPE          [STRING];
+@name('Причина отказа')                             public V_REFREASON        [STRING_250];
+@name('Код банковской операции')                    public V_23B              [VAL_CODE_23B_REF];
+@name('Кодовое слово строки номера счета 50')       public V_ACC_CODWORD50    [VAL_ACC_CODW_REF];
+@name('Код идентификации клиента 50F')              public V_IDENT50F         [VAL_IDENT50F_REF];
+@name('Внешняя конверсия')                          public V_OUT_CONV         [BOOLEAN];
+@name('Договор для перечисления внешней конверсии') public V_AGR_OUT_CONV     [TRC_REF];
+@name('Курс внешней конверсии')                     public V_RATE_OUT_CONV    [SUPER_NUMBER];
+@name('Создавать МТ202COV')                         public V_CREATE_202COV    [BOOLEAN];
+@name('Формировать MT210')                          public V_CR_210           [BOOLEAN];
+@name('Счет для списания комиссии')                 public V_ACC_FOR_COMISS   [AC_FIN_REF];
+@name('Клиент-владелец счета')                      public V_CLIENT           [CLIENT_REF];
+@name('Поле 77А')                                   public V_77A              [MEMO];
+@name('Плановый остаток')                           public V_PLAN             [SUMMA];
+@name('Код страны получателя')                      public V_REC_COUNTRY      [COUNTRY_REF];
+@name('Код страны банка получателя')                public V_REC_BANK_COUNTRY [COUNTRY_REF];
+@name('Ключевое слово 77')                          public V_CODWORD77        [VAL_CODWORD_REF];
+@name('Открыть дело')                               public V_OPEN_INV         [BOOLEAN];
+@name('Создать запрос')                             public V_CREATE_MT195     [BOOLEAN];
+@name('Дело')                                       public V_INV              ref [INVESTIGATION];
+@name('Информационные документы')                   public V_INF_DOCS         ref [DOCUM_RC];
+@name('Список информационных документоы')           public V_STR_INF_DOCS     [STRING_32000];
+@name('Включение приложения расследования')         public V_APP_INV          [BOOLEAN];
+@name('Тип сообщения')                              public V_CASE             [SIXTH_CHOICE];
+@name('Исходный документ')                          public V_ORIG_EPD         [DOCUM_RC_REF];
+@name('Номер исходного документа')                  public V_ORIG_DOC_NUM     [STRING_16];
+@name('Открыть дело для инф. документа')            public V_OPEN_INV_INF     [BOOLEAN];
+@name('Связанные документы')                        public V_LINK_DOCS        ref [DOCUM_RC];
+@name('Список связанных документов')                public V_LD_STR           [STRING_32000];
+@name('Надпись на кнопке связи')                    public V_BC               [STRING_20];
+@name('Код идентификации клиента 59F')              public V_IDENT59F         [VAL_IDENT50F_REF];
+@name('Срочный платеж')                             public V_URGENT           [BOOLEAN];
+@name('Текст MX')                                   public V_MX               [MEMO_32767];
+@name('Счет 50 в формате IBAN')                     public V_IBAN_50          [BOOLEAN];
+@name('Отправить в ED503')                      	public V_TO_ED503         [BOOLEAN];
+@name('Буфер обмена для LOB')                      	public V_LOB_BUFF         [STRING_32000];
+
+
+pragma INCLUDE( ::[RUNTIME].[MACRO_LIB]);
+pragma INCLUDE( ::[SYSTEM].[DEFINES] );
+pragma INCLUDE( ::[FT_MONEY].[NAT_CUR] );
+pragma INCLUDE( ::[RC_LINK].[LIB]);
+
+pragma macro (VCHK, '::[DOCUM_RC].[VCHK_NEW]');
+pragma macro (SCHK, '::[DOCUM_RC].[SCHK_NEW]');
+pragma macro (RCHK, '::[DOCUM_RC].[RCHK_NEW]');
+pragma macro (LV, 	'::[DOCUM_RC].[LIB_VAL]');
+pragma macro (SDL,	'::[DOCUM_RC].[SWIFT_DOC_LIB]');
+
+ORI_DOC_RC		[DOCUM_RC];
+ORI_MT103		[MT103];
+ORI_ISO 		ref [FT_MONEY];
+ORI_SUMMA 		number;
+ORI_MAIN_DOC 	ref [MAIN_DOCUM];
+ORI_DOG_IN		ref [TRC];
+ORI_DOG_OUT		ref [TRC];
+
+last_error 		string(2000);
+
+first_time 		boolean;
+
+in_dog			ref [TRC];
+out_dog			ref [TRC];
+in_iso 			ref [FT_MONEY];
+out_iso 		ref [FT_MONEY];
+
+new_summa_doc	number;
+this_state 		string(16);
+
+acc_rc_fintool	[TRC].[FINTOOL]; -- валюта счета получателя
+
+v_summa			number;
+
+vTextFirstDoc	string(32000);
+vTextExpDoc		string(32000);
+
+--Дело из информационных документов, для предотвращения изменений
+v_inf_inv		ref [INVESTIGATION];
+v_inf_epd		ref [DOCUM_RC];
+v_inf_is_in			boolean;
+v_one_esid 			boolean;
+v_99_type			number;
+
+v_esid_inv 		ref [INVESTIGATION];
+v_rd_inv		ref [INVESTIGATION];
+v_epd_inv		ref [INVESTIGATION];
+
+mx_blob 			blob;
+is_controlled_type	boolean;
+
+procedure clear_blob is
+begin
+	if mx_blob is not null then
+		if dbms_lob.istemporary(mx_blob)=1 then
+			dbms_lob.freetemporary(mx_blob);
+		else
+			mx_blob := null;
+		end if;
+	end if;
+end;
+
+procedure init_blob(p_blob blob := null) is
+begin
+	clear_blob;
+	if p_blob is not null then
+		mx_blob := p_blob;
+	else
+		dbms_lob.createtemporary(mx_blob,false,dbms_lob.session);
+	end if;
+end;
+
+-- заголовки массивов в структуре МТ103
+public procedure set_caption_array( V_VB 		in out [STRING_32000],
+							 P_MT103	[MT103],
+							 name_par	string,
+							 type_par 	string(1)
+							 ) is
+begin
+	::[DOCUM_RC].[LIB_VAL].set_caption_array(V_VB, P_MT103, name_par, type_par);
+end;
+
+-- притеняем поля наименования банка при расшифровке по опции А
+public procedure set_forecolor( V_VB 		in out [STRING_32000],
+						 name_par	string,
+						 type_par 	string(1),
+						 set_par	boolean
+						 ) is
+begin
+	::[DOCUM_RC].[LIB_VAL].set_forecolor(V_VB, name_par, type_par, set_par);
+end;
+
+-- функция get_part_val работает по более надежным условиям и поэтому
+-- подходит для автоматической переадресации
+public function get_part_val( doc_rc ref [DOCUM_RC], p_manual boolean default false) return ref [CL_PART] is
+begin
+	return ::[DOCUM_RC].[LIB_VAL].get_part_val(doc_rc, p_manual);
+end;
+
+-- из служебных полей вытаскиваем информацию про ORIGINATOR и DESTINATION
+-- из служебных полей вытаскиваем информацию про ORIGINATOR и DESTINATION (для совместимости с др операциями)
+public function get_orig_dest( doc ref [DOCUM_RC]) return string(32000) is
+	STR				string(32000);
+	orig_str		string;
+	dest_str		string;
+begin
+	str := doc.[DOC_TEXT]||doc.[DOPINFO];
+
+	str :=
+		nvl( orig_str, 'ORIGINATOR :' || TB$ || ' SENT:' || '" & chr(13) & chr(10) & "') ||
+		nvl( dest_str, 'DESTINATION:' || TB$ || ' RCPT:' );
+
+	return str;
+end;
+
+function Get_F33B(val ref [FT_MONEY], summa number) return varchar2
+is
+begin
+	if val is not null and nvl(summa, 0) > 0 then
+		return replace(val.[CUR_SHORT], 'RUR', 'RUB') || rtrim( to_char( summa, '9999999999999990D99','NLS_NUMERIC_CHARACTERS = '', ''' ), '0');
+	else
+		return null;
+	end if;
+end;
+
+procedure set_71( val in ref [FT_MONEY],
+				  charge in out ref [CHARGES],
+				  mt103	 in out [MT103],
+				  p_dog in ref [TRC],
+				  P_SUMMA in out [SUMMA],
+				  p_orig_summa in [SUMMA],
+				  p_doc ref [DOCUM_RC],
+				  P_GET_PAYER ref [AC_FIN]
+				  )
+is
+	F_71F_stru	[STRING_REC];
+	v_sum_comiss number;
+	v_cur_comiss ref [FT_MONEY];
+
+begin
+
+	if charge is null then
+		charge := ::[CHARGES]([CODE] = 'OUR' );
+	end if;
+	if &LV.is_COM_BEN(charge, doc_rc == p_doc) then
+		if nvl(P_SUMMA, 0) <> 0 then
+			v_sum_comiss := ::[DOCUM_RC].[LIB_VAL].get_doc_comiss(p_doc, P_SUMMA, p_dog, /*P_RC_PART,*/ true, v_cur_comiss, P_GET_PAYER);
+			v_sum_comiss := round(::[DOCUMENT].[LIB_CUR].Cur2Cur(v_sum_comiss, v_cur_comiss, val), 2);--nvl(val.[DIGIT], 2));
+			if v_sum_comiss is not null then
+				V_33B_VAL := nvl(V_33B_VAL, val);
+				if p_orig_summa = 0 then
+					V_33B_SUM := P_SUMMA;
+					V_71F.delete;
+				else
+					V_33B_SUM := nvl(V_33B_SUM, P_SUMMA);
+				end if;
+				P_SUMMA := P_SUMMA - v_sum_comiss; -- уменьшаем сумму на сумму комиссии
+				F_71F_stru.[STRING] := val.[CUR_SHORT] || rtrim( to_char( v_sum_comiss, '9999999999999990D99','NLS_NUMERIC_CHARACTERS = '', ''' ), '0');
+				V_71F(V_71F.count + 1) := F_71F_stru;
+			end if;
+			mt103.[F_71G] := null;
+		else -- P_SUMMA = 0 -- для комиссии BEN все равно заполняем поля 33B и 71F
+			P_SUMMA := 0; -- т.к. могли просто скинуть сумму, а не проставить 0
+			mt103.[F_71G] := null;
+			V_71F.delete;
+			F_71F_stru.[STRING] := val.[CUR_SHORT] || '0,';
+			V_71F(nvl(V_71F.last, 1)) := F_71F_stru;
+			V_33B_VAL := val;
+			V_33B_SUM := P_SUMMA;
+		end if;
+	else
+		mt103.[F_71G] := null;
+		V_71F.delete;
+	end if;
+end;
+
+--(kozlova) возвращает текст документа p_rDocRc в формате SWIFT
+public function get_dopinfo(
+	p_rDocRc	ref [DOCUM_RC]
+) return varchar2(4000) is
+	v_sform				string(10);
+	v_swift_receiver	varchar2;
+	v_block3			string;
+	v_idMT103			string;	
+	v_ret				varchar2(4000);
+	ed503_				boolean;
+begin
+	&sp(sp1)
+	ed503_ := nvl(p_rDocRc.[DOG_RC].[AB].[ED503] and ::[TRC].[GET_FLAG]('UFEBS_COS_ED503'), false); -- признак ED503 на абоненте и для ED503, и для ED514
+	::[DOCUM_RC].[SWIFT_LIB].INIT_EXP_FORMAT;
+    v_sform := ::[DOCUM_RC].[LIB_VIEW].get_type_doc_sform(p_rDocRc);
+    if v_sform in ('608', '940', '941', '950', '942') then
+		v_ret := ::[DOCUM_RC].[SWIFT_LIB_EXP].get_950(p_rDocRc, ed503_);		
+    	if v_ret is null then	-- для экспортированного телекса get_950 вернет null  - просто покажем текст из DOPINFO
+  			v_ret := p_rDocRc.[DOPINFO];   	
+    	end if;
+    else
+	    if v_sform = '202' then
+			v_idMT103 := ::[RUNTIME].[STR].get_str_par(p_rDocRc.[BLOCK_DATA], 'MT103COV');
+	    	if v_idMT103 is not null then
+	    		v_block3 := '119:COV';
+	    	end if;
+	    elsif v_sform = '103+' then
+	    	v_block3 := '119:STP';
+	    	v_sform := '103';
+	    end if;
+	
+	    if p_rDocRc.[DOG_RC].[CLIENT] = ::[TRC].[INI].SWIFT_PART or v_sform like '_9_'  then
+		    begin
+	    		select x(x.[MT103].[RECEIVER_BANK].[SWIFT_C]) in ::[DOCUM_RC] where x = p_rDocRc into v_swift_receiver;
+	    	exception when NO_DATA_FOUND or TOO_MANY_ROWS then null;
+	    	end;
+	    end if;
+		if p_rDocRc.[SETTYPE] = '7' then -- внешняя конверсия
+			v_swift_receiver := nvl(trim(::[TRC].[LIB_NEW].attr_val(p_rDocRc.[DOG_RC], ::[ATTR]([CODE]='SWIFT_ALTERNATE'))), null);
+		end if;
+	
+		if v_sform in ('300', '320') then	
+	  		v_ret := ::[DOCUM_RC].[SWIFT_LIB].get_title(p_rDocRc.[DOG_RC], v_sform, v_swift_receiver, v_block3, doc_rc == p_rDocRc, ed503==ed503_)
+	  			|| ::[DOCUM_RC].[SWIFT_EXP_3XX].EXP_DOC(p_rDocRc, v_sform);
+		else
+			v_ret := ::[DOCUM_RC].[SWIFT_LIB].get_title(p_rDocRc.[DOG_RC], v_sform, v_swift_receiver, v_block3, doc_rc == p_rDocRc, ed503==ed503_)
+				|| ::[DOCUM_RC].[SWIFT_LIB_EXP].get_block_4(p_rDocRc, v_sform, ::[TRC].[INI].TODAY, false, null, false, v_idMT103);
+		end if;
+				
+		if v_sform in ('200', '202') and [STR].get_bool_par(p_rDocRc.[BLOCK_DATA], 'MT210') then
+			v_ret := v_ret||NL$||'MT210: '||NL$||
+				::[DOCUM_RC].[SWIFT_LIB].get_title(null, '210', p_rDocRc.[RECEIVER].[BCODE], doc_rc == p_rDocRc, ed503==ed503_) || ::[DOCUM_RC].[SWIFT_LIB_EXP].get_block_4_for_mt210(p_rDocRc);
+		end if;
+    end if;
+
+	::[DOCUM_RC].[T_LIB].RESET_ERRS;
+	return v_ret;
+exception when others then
+	&rb(sp1)
+end;
+
+
+PROC#VD_3 (
+	@name('Тип документа РЦ')                          P_TYPE_DOC      in [TYPE_DOC_RC_REF],
+	@name('Номер документа')                           P_NUMBER_DOC    in [STRING_6],
+	@name('Дата создания')                             P_CRDATE        in [DATE],
+	@name('Участник-отправитель')                      P_SDCL          in [CL_PART_REF],
+	@name('Участник-получатель')                       P_RCCL          in [CL_PART_REF],
+	@name('Сумма')                                     P_SUMMA         in [SUMMA],
+	@name('Дата валютирования')                        P_VALDATE       in [DATE],
+	@name('Вид валюты')                                P_ISO           in [FT_MONEY_REF],
+	@name('Тип сообщения')                             P_MSGTYPE       in [SBRF_TYPE_ME_REF],
+	@name('Проводки')                                  P_MAIN_DOC      in [MAIN_DOCUM_REF],
+	@name('Наименование плательщика (50)')             P_PAYER         in [SWIFT_5X],
+	@name('Код банка плательщика (52)')                P_CODE_BANKPAY  in [STRING_35],
+	@name('Наименование банка плательщика (52)')       P_NAME_BANKPAY  in [SWIFT_5X],
+	@name('Код банка посредника (56)')                 P_CODE_BANKINT  in [STRING_35],
+	@name('Наименование банка посредника (56)')        P_NAME_BANKINT  in [SWIFT_5X],
+	@name('Код банка бенефициара (58)')                P_CODE_BANBEN   in [STRING_35],
+	@name('Код банка получателя (57)')                 P_CODE_BANKREC  in [STRING_35],
+	@name('Наименование банка получателя (57)')        P_NAME_BANKREC  in [SWIFT_5X],
+	@name('Наименование получателя (59)')              P_RECEIVER      in [SWIFT_5X],
+	@name('Детали расходов (71A)')                     P_CHARGE        in [CHARGES_REF],
+	@name('Инф. отправителя получателю (72)')          P_CLINFO        in [MEMO],
+	@name('Детали платежа (70)')                       P_DEST          in [MEMO],
+	@name('Ссылочный идентификатор (20)')              P_TRN           in [STRING_16],
+	@name('Выбор получателя')                          P_GET_RECEIVER  in [INTER_BEN_REF],
+	@name('Договор списания')                          P_GET_INPUT     in [TRC_REF],
+	@name('Вариант обработки')                         P_VAR           in [DOC_RC_VARIANT],
+	@name('Договор зачисления')                        P_GET_OUTPUT    in [TRC_REF],
+	@name('Курс сделки')                               P_RATE          in [SUPER_NUMBER],
+	@name('Обратный курс')                             P_BACK_RATE     in [BOOLEAN],
+	@name('Исходный документ')                         P_FIRST_REF     in [DOCUM_RC_REF],
+	@name('Дополнительная информация')                 P_DOPINFO       in [MEMO_BIG],
+	@name('Реквизиты МТ103')                           P_MT103         in [MT103],
+	@name('Корреспондент отправителя (53)')            P_NAME_BANK_53  in [SWIFT_5X],
+	@name('Код банка (53)')                            P_CODE_BANK_53  in [STRING_35],
+	@name('Корреспондент получателя (54)')             P_NAME_BANK_54  in [SWIFT_5X],
+	@name('Код банка (54)')                            P_CODE_BANK_54  in [STRING_35],
+	@name('Третий банк возмещения (55)')               P_NAME_BANK_55  in [SWIFT_5X],
+	@name('Код банка (55)')                            P_CODE_BANK_55  in [STRING_35],
+	@name('Поставить на невыясненные')                 P_UKNOWN        in [BOOLEAN],
+	@name('Филиал')                                    P_FILIAL        in [BRANCH_REF],
+	@name('Счет плательщика')                          P_GET_PAYER     in [AC_FIN_REF],
+	@name('Печать')                                    P_PRINT         in [BOOLEAN],
+	@name('Банк-получатель')                           P_RECEIVER_BANK in [CL_BANK_F_REF],
+	@name('Вид перевода (1/null-не опр, 2-кл, 3-бан)') P_KL_BNK        in [ONE_FROM_THREE]   default null,
+	@name('Обязательная отчетность (77B)')             P_77B           in [MEMO],
+	@name('Тип запроса n99')                           P_99_TYPE       in [ONE_FROM_THREE]
+) is
+
+validate is
+	new_doc				[DOCUM_RC];
+	new_doc_ref 		ref [DOCUM_RC];
+	file_num			varchar2;
+	tmp_in_iso 			ref [FT_MONEY];
+	tmp_out_iso 		ref [FT_MONEY];
+	err_msg				varchar2(250);
+	v_string			[STRING_REC];
+	v_23E_rec 			[SWIFT_23E_REC];
+	lob_loc				CLOB;
+	amount				integer := 32000;
+	cnt					integer;
+	v_add_len_70		number :=0;
+	v_refid_list		varchar2(500);
+	erm					[MEMO];
+	procedure check_open_inv is	
+	begin
+		if V_APP_INV then
+				--Если есть дело, новое открывать не надо
+			if V_INV is not null then
+				if ORI_DOC_RC.[TYPE_DOC] = '007' then
+					V_OPEN_INV_INF := null;	
+					csmd.Hide( V_VB, 'V_OPEN_INV_INF', 'V');
+				else
+					V_OPEN_INV := null;	
+					csmd.Hide( V_VB, 'V_OPEN_INV', 'V');
+				end if;
+			else
+				if ORI_DOC_RC.[TYPE_DOC] = '007' then
+					V_OPEN_INV_INF	:= nvl(::[DEFVALS].[SLIB].RestoreBool(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_OPEN_INV_INF'),false);	
+					csmd.Show( V_VB, 'V_OPEN_INV_INF', 'V');
+				else
+					V_OPEN_INV	:= nvl(::[DEFVALS].[SLIB].RestoreBool(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_OPEN_INV'),false);	
+					csmd.Show( V_VB, 'V_OPEN_INV', 'V');
+				end if;
+				
+			end if;
+		end if;
+	end;
+		
+	procedure put_to_47416(P_CHK_ACC boolean) is
+		v_undef_dest	varchar2(4000);
+		v_templ 		boolean;
+	begin
+		if P_CHK_ACC then
+			if not((ORI_DOC_RC.[TYPE_DOC] in ('002', '004') and nvl(P_MAIN_DOC.[ACC_DT], 0) = ::[TRC].[LIB].calculate_acc(ORI_DOG_OUT, P_MAIN_DOC, null, true, 'STRANGE_ACC')) or
+				(ORI_DOC_RC.[TYPE_DOC] not in ('002', '004') and nvl(P_MAIN_DOC.[ACC_KT], 0) = ::[TRC].[LIB].calculate_acc(ORI_DOG_OUT, P_MAIN_DOC, null, false, 'STRANGE_ACC')))
+			then
+				return;
+			end if;
+		end if;
+		if in_iso != out_iso then -- на невыясненные не ставим, если есть конверсия платежа
+			return;
+		end if;
+		if not ::[DOCUM_RC].[BUX_LIB].is_in(this) then -- BS00150726 п.1 если документ РЦ исходящий, то ничего не делаем
+			return;
+		end if;
+		if V_UKNOWN = 'YES' then
+			-- Удалим имеющуюся проводку, дабы не задублироваться
+			::[DOCUM_RC].[LIB].delete_main_doc(this, true, false, false, 'DELETED');
+			if ORI_DOC_RC.[TYPE_DOC] in ('002', '004') then
+				P_MAIN_DOC := [LIB].create_main_doc(this, false, P_GET_OUTPUT, 'STRANGE_ACC');
+				
+				if this.[QUIT_DOC] is not null then
+					P_MAIN_DOC.[EDIT_PROV](
+				      ::[TRC].[LIB].calculate_acc(P_GET_OUTPUT, P_MAIN_DOC, null, true, 'STRANGE_ACC'),	-- Счет Дебет
+				      ::[TRC].[LIB].calculate_acc(P_GET_INPUT, P_MAIN_DOC, null, true),					-- Вычислим прямой счет для договора
+				      this.[QUIT_DOC]->(MAIN_DOCUM)[DATE_PROV]	-- если была квитовка, ставим на невыясненные тем же днем
+					);
+				
+					V_MAIN_DOC := ::[DOCUM_RC].[SWIFT_DOC_LIB].get_docs_list_id(P_MAIN_DOC, null);
+				else
+					V_MAIN_DOC := ::[DOCUM_RC].[SWIFT_DOC_LIB].get_docs_list_id(P_MAIN_DOC, this.[QUIT_DOC]);
+				end if;
+			else
+				P_MAIN_DOC := [LIB].create_main_doc(this, false, null, null, P_GET_OUTPUT, 'STRANGE_ACC');
+				
+				if this.[QUIT_DOC] is not null then	-- если к документу была сформирована квитовка
+					P_MAIN_DOC.[EDIT_PROV](
+				      ::[TRC].[LIB].calculate_acc(P_GET_INPUT, P_MAIN_DOC, null, true),						-- Вычислим прямой счет для договора
+				      ::[TRC].[LIB].calculate_acc(P_GET_OUTPUT, P_MAIN_DOC, null, false, 'STRANGE_ACC'),	-- Счет Кредит
+				      this.[QUIT_DOC]->(MAIN_DOCUM)[DATE_PROV]	-- если была квитовка, ставим на невыясненные тем же днем
+					);
+					
+					V_MAIN_DOC := ::[DOCUM_RC].[SWIFT_DOC_LIB].get_docs_list_id(P_MAIN_DOC, null);
+				else
+					V_MAIN_DOC := ::[DOCUM_RC].[SWIFT_DOC_LIB].get_docs_list_id(P_MAIN_DOC, this.[QUIT_DOC]);
+				end if;
+			end if;
+			::[RUNTIME].[STR].SET_PAR(this.[BLOCK_DATA], 'UNKNOWN', '1');
+			P_MAIN_DOC.[TEXT_VOZV] := '[TO_UNDEF]'||[REFREASON]||[REFREASON2];
+			
+			-- Если установлена настройка 'MO_BO_47416',
+			-- то формируем мем. ордер и меняем назначение платежа
+			if ::[TRC].[GET_FLAG]('MO_BO_47416', null, this) then
+				P_MAIN_DOC.[VID_DOC] := ::[NAME_PAYDOC]( [CODE] = 'БЕЗН_МЕМО_ОРД');
+				P_MAIN_DOC.[DATE_DOC] := NVL(P_MAIN_DOC.[DATE_VAL], ::[SYSTEM].[VARIABLES].OpDate);
+			end if;
+			
+			-- RP0092528 Если указана настройка, то берем назначение платежа из нее, иначе все работает по старому
+			v_templ := ::[DOCUM_RC].[LIB_NEW].get_undef_templ(&METHOD$ID, this, P_MAIN_DOC, P_MAIN_DOC.[ACC_DT].[FINTOOL], v_undef_dest);
+			if v_templ then
+				P_MAIN_DOC.[NAZN] := v_undef_dest;
+			elsif ::[TRC].[GET_FLAG]('MO_BO_47416', null, this) then
+				P_MAIN_DOC.[NAZN] := 'Мем. ордер сформирован на основании МТ'||::[DOCUM_RC].[LIB_VIEW].get_type_doc_sform(this)||' референс '||::[DOCUM_RC].[LIB_VIEW].GetFirst(this).[ELDOCNUM]||' дата валютирования '||to_char(this.[VALDATE], 'DD.MM.YYYY');
+			end if;
+			
+			P_UKNOWN := true;
+		end if;
+	end;
+	
+	procedure section_ok is
+		v_doc ref [DOCUMENT];
+		
+		procedure change_receiver(p_doc ref [DOCUM_RC]) is
+			v_esid ref [DOCUM_RC];
+		begin
+			-- Если включена настройка и документ входящий, то необходимо подменить участника получателя, т.к. докумет может прийти по межфилу
+			if ::[TRC].[GET_FLAG]('MT19X_AUTO_ROUTE') and V_ORIG_EPD is not null and ORI_DOC_RC.[TYPE_DOC] = '007' and ::[DOCUM_RC].[BUX_LIB].is_in(::[DOCUM_RC].[MFIL_LIB_EXP].get_first_doc(p_doc)) then
+				v_esid := ::[DOCUM_RC].[LIB_QA].get_original_swift(p_doc);
+				::[DOCUM_RC].[PER_LIB].change_receiver(nvl(v_esid, V_ORIG_EPD), p_doc, ERR_MSG);
+			end if;
+		end;
+	begin
+	
+		change_receiver(this);
+	
+		if ::[TRC].[GET_FLAG]('CONF_OPT', null, this) then
+			&sp(conf_opt)
+			this.[MAN_DOC_TO_PROV];
+			last_error := [STR].get_str_par(this.[BLOCK_DATA], 'full_mess');
+			&rb(conf_opt)
+		end if;
+		if (first_time and last_error is not null or V_ERRM is not null) and nvl(this.[FLAG_UPDATE], '*') <> '3' then
+			V_ERRM := ::[DOCUM_RC].[PROC_DOCUM].ask(last_error);
+			first_time := false;
+		else
+			if (ORI_DOG_IN != P_GET_INPUT or ORI_DOG_OUT != P_GET_OUTPUT) and ORI_DOG_OUT.[TYPE_DOG] != ::[CONTRACT_TYPE]([IDENT] = 'Z') then
+				-- конверсия
+				-- Если делаем конвертацию со сменой валюты в поле 32А
+				new_doc := ::[DOCUM_RC].[COPY].next_doc( this, false, bool_char(P_VAR.[0] = 2, '1', '2'));
+				-- BFS00032808 Имеет смысл только для МТ103
+				if V_TYPED_COD like '103%' then
+					-- 1) пишем курс в поле 36
+					if P_MT103.[F_36] is null then
+						new_doc.[MT103].[F_36] := P_RATE;
+					end if;
+					-- 2) рассчитываем сумму 33B
+					if P_MT103.[F_33B] is null then
+						if ORI_DOG_IN.[FINTOOL] != P_GET_INPUT.[FINTOOL] then
+							-- Была конверсия по Дт
+							new_doc.[MT103].[F_33B] :=	replace(  P_GET_INPUT.[FINTOOL].[CUR_SHORT], 'RUR', 'RUB') ||
+								rtrim( TO_CHAR( nvl(::[DOCUM_RC].[LIB_VIEW].GetProv(this).[SUM], ORI_SUMMA), '9999999999999990D99','NLS_NUMERIC_CHARACTERS = '', ''' ), '0');							
+						else
+							new_doc.[MT103].[F_33B] :=	replace(  ORI_ISO.[CUR_SHORT], 'RUR', 'RUB') ||
+								rtrim( TO_CHAR( ORI_SUMMA, '9999999999999990D99','NLS_NUMERIC_CHARACTERS = '', ''' ), '0');
+						end if;
+					end if;
+				end if;
+				new_doc.[ISO] := out_iso.[CUR_SHORT];
+				new_doc.[SUMMA] := new_summa_doc;
+				new_doc.[VALDATE] := P_VALDATE;
+				new_doc.[MAIN_DOC] := P_MAIN_DOC;
+				new_doc.[QUIT_DOC] := this.[QUIT_DOC];
+				this.[QUIT_DOC] := null;
+				
+				new_doc.[DOPINFO] := 'NO_UPDATE'; -- Не менять документ при проводке документов
+				
+				if P_VAR.[0] = 2 then
+					-- Новый уч.-получатель
+					new_doc.[RCCLCODE] := V_READDR.[CODE];
+					new_doc.[RECEIVER].[PART_REF] := V_READDR;
+				end if;
+	
+				new_doc.[DOG_CR] := P_GET_INPUT;
+				new_doc.[DOG_SD] := P_GET_INPUT;
+				new_doc.[DOG_RC] := P_GET_OUTPUT;
+				new_doc.[DONE] := this.[DONE];
+	
+				if ORI_DOC_RC.[TYPE_DOC] != '007' then
+					new_doc.[CLINFO] := &SDL.str_to_swt(P_CLINFO,1,35,6);
+				end if;
+	
+				if substr(V_TYPED_COD, 1, 2) = '20' then
+					new_doc.[PAYER].[NAME] := substr(V_REF, 1, ORI_DOC_RC.[PAYER].[NAME]%size);
+				end if;
+	
+				this.[MAIN_DOC] := null;
+				this.[QUIT_DOC] := null;
+				
+				new_doc_ref := [DOCUM_RC]%insert(new_doc);
+				
+				::[DOCUM_RC].[LIB].init_data(new_doc_ref);
+				
+				if instr(V_MAIN_DOC, ',') > 0 then
+					-- папка может висеть аппендиксом к документу РЦ
+					--(kozlova) var v_doc ref [DOCUMENT];
+					v_doc := P_MAIN_DOC.[IN_FOLDER];
+					v_doc := nvl(v_doc, P_MAIN_DOC);
+					::[DOCUM_RC].[RUN_BO].confirm_bo( v_doc, 'TO_MBR', P_VALDATE);
+				end if;
+	
+				last_error := this.[REFREASON] || this.[REFREASON2];
+				this.[NEXT_REF] := new_doc_ref;
+				this.[OPER_MSG] := ::[DOCUMENT].ADD_MEMO( SYSDATE,
+					'Произведена конвертация валюты. Создан порожденный документ с ID ' || new_doc_ref,
+					this.[OPER_MSG] );
+	
+				if this%state <> 'S_16' then
+					::[DOCUM_RC].[ADD_REC].COM := 'Произведена конвертация валюты. Создан порожденный документ с ID ' || new_doc_ref;
+					this%state := 'S_16';
+				end if;
+	
+				if this%state = 'S_16' then
+					-- документ автоматом переоформился или переадресовался
+					V_ERRM := null;
+				elsif last_error is not null and nvl(this.[FLAG_UPDATE], '*') <> '3' then
+					V_ERRM := ::[DOCUM_RC].[PROC_DOCUM].ask(last_error);
+				else
+					V_ERRM := null;
+				end if;
+				-- Обновление данных первичного документа
+				if (::[TRC].[GET_FLAG]('UFEBS_SIGN_COS') or ::[TRC].[GET_FLAG]('COS_CR_FDATA')) and is_controlled_type then
+					::[UFEBS_DATA_CONTR].[LIB].update_udc_fdoc(p_rDoc_rc == new_doc_ref, p_oDoc_rc == new_doc, p_oMT103 == new_doc.[MT103]);
+				end if;	
+			else
+				if P_VAR.[0] = 7 and ORI_DOG_OUT != P_GET_OUTPUT and ORI_DOG_OUT.[TYPE_DOG] = ::[CONTRACT_TYPE]([IDENT] = 'Z') then
+					::[RUNTIME].[STR].SET_PAR(this.[BLOCK_DATA], 'p_rate', P_RATE); 			-- 16.03.10
+					::[RUNTIME].[STR].SET_PAR(this.[BLOCK_DATA], 'p_back_rate', P_BACK_RATE); 	-- 16.03.10
+				end if;
+				if ORI_DOC_RC.[TYPE_DOC] != '007' then
+					this.[CLINFO] := &SDL.str_to_swt(P_CLINFO,1,35,6);
+				end if;
+				if instr(V_MAIN_DOC, ',') > 0 then
+					-- папка может висеть аппендиксом к документу РЦ
+					v_doc := P_MAIN_DOC.[IN_FOLDER];
+					v_doc := nvl(v_doc, P_MAIN_DOC);
+					::[DOCUM_RC].[RUN_BO].confirm_bo( v_doc, 'TO_MBR', P_VALDATE);
+				end if;
+				if P_UKNOWN then
+					if ::[TRC].[GET_FLAG]('SWIFT_USE_GPI') or (::[TRC].[GET_FLAG]('SWIFT_USE_UC') and ::[TRC].[GET_FLAG]('NEED_REASON_RJCT')) then
+						::[RUNTIME].[STR].SET_PAR(this.[BLOCK_DATA], 'LAST_ERROR', ::[DOCUM_RC].[GPI_LIB].get_last_error(this));
+					end if;
+					if instr(this.[CHK], 'CR_MAIN') > 0  then
+						-- Документ, поставленный на невыясненные суммы, не должен
+						-- хранить сообщений об ошибках (иначе его не проведет автомат)
+						if nvl( instr( this.[DONE], this.[CHK]||';' ), 0 ) = 0 then
+							-- запомним эту ошибку для анализа в перечне ответных платежей
+								this.[DONE] := SUBSTR( this.[DONE] || this.[CHK]||';', 1, this.[DONE]%size );
+							end if;
+						this.[CHK] := null ;
+					end if;
+					if this_state <> 'S_1' then
+						if this_state = 'S_15' then
+							this.[ANS_DOC_1].[REJECTED] := null; -- ribkin RP0630713 Сбросим признак, так как документ пошел на СНС и чтобы в дальнейшем он попал в выборку при сверке
+						end if;
+						
+						::[DOCUM_RC].[ADD_REC].COM := 'Документ поставлен на счет невыясненных сумм';
+						this%state := 'S_1';
+				        if this.[VALDATE] > ::[TRC].[INI].TODAY then -- ETY 18.12.09 добавила переопределение ДПП, иначе при проводке для этого документа счет меняется на транзитный
+					        var dpp	[DATE]; -- ДПП вычисляется с учетом DUE_PERIOD
+					        dpp := ::[DOCUM_RC].[CHK_LIB].get_DPP(this, this.[DOG_RC]);
+					        if dpp > ::[TRC].[INI].TODAY then
+						        this.[BEGDATE] := dpp;
+					        end if;
+				        end if;
+					end if;
+					if ORI_DOG_IN.[TYPE_DOG] <> ::[CONTRACT_TYPE]([IDENT] = 'Z') then
+						this.[DOG_RC] := ::[TRC].[LIB].get_dog(::[TRC].[INI].OUR_PART, err_msg, false, P_ISO);
+					end if;
+					if this.[QUIT_DOC] is not null then  -- при постановке на невыясненные всегда удаляем квитовку
+						::[DOCUM_RC].[LIB].delete_main_doc(this, true, true);
+					end if;
+					
+					return;
+				end if;
+				this.[DOG_SD] := P_GET_INPUT;
+				this.[DOG_RC] := P_GET_OUTPUT;
+	
+				change_receiver(this);
+				
+				this.[MAN_DOC_TO_PROV];
+	
+				last_error := [REFREASON]||[REFREASON2];
+				if this%state in  ('S_7','S_16') then
+					-- документ автоматом переоформился или переадресовался
+					V_ERRM := null;
+				elsif last_error is not null and nvl(this.[FLAG_UPDATE], '*') <> '3' then
+					V_ERRM := ::[DOCUM_RC].[PROC_DOCUM].ask(last_error);
+				else
+					V_ERRM := null;
+				end if;
+			end if;
+		end if;		
+	end;
+
+BEGIN	
+	if P_MESSAGE = 'DEFAULT' then
+		V_VB := null;
+		csmd.init_form( V_VB, 'DOCUM_RC', 'PROC#VD_3');
+	
+		ORI_DOC_RC	:= this;
+		
+		-- Проверка контекста
+		::[TRC].[LIB_MFIL].check_context(ORI_DOC_RC.[FILIAL]);
+		
+		-- Кэшируем исходные данные о документе
+		ORI_MT103 					:= ORI_DOC_RC.[MT103];
+		P_MT103						:= ORI_MT103;
+		ORI_SUMMA = P_SUMMA = new_summa_doc	:= ORI_DOC_RC.[SUMMA];
+		v_summa						:= nvl(&LV.get_first_summa(ORI_DOC_RC%id), P_SUMMA);
+		ORI_ISO = P_ISO 			:= ::[FT_MONEY].[LIB].Get_Money(ORI_DOC_RC.[ISO], 1);
+		ORI_MAIN_DOC 				:= ORI_DOC_RC.[MAIN_DOC];
+		ORI_DOG_IN = P_GET_INPUT 	:= ORI_DOC_RC.[DOG_SD];
+		ORI_DOG_OUT = P_GET_OUTPUT	:= ORI_DOC_RC.[DOG_RC];
+			
+		-- Запомним валюту счета получателя
+		acc_rc_fintool := nvl(::[DOCUM_RC].[LIB_VIEW].GetProv(this).[ACC_KT].[FINTOOL], ORI_DOG_OUT.[FINTOOL]);
+		
+		begin
+			select x(x%id, x.[NAME], x.[SFORM]) in ::[TYPE_DOC_RC]
+				where x.[NUM_CODE] = ORI_DOC_RC.[TYPE_DOC] and nvl(x.[UT], '*') = nvl(ORI_DOC_RC.[SUB_TYPE], '*')
+				into P_TYPE_DOC, V_TYPED_NAME, V_TYPED_COD;
+		exception when NO_DATA_FOUND or TOO_MANY_ROWS then
+			pragma error('Не найден тип документа РЦ "' || ORI_DOC_RC.[TYPE_DOC] || '.' || ORI_DOC_RC.[SUB_TYPE] || '"');
+		end;
+		is_controlled_type := ::[UFEBS_DATA_CONTR].[LIB].is_controlled_type(this,  P_TYPE_DOC.[SFORM]);
+		-- Контроль реквизитов на соответствие данным первичного документа
+		if ::[TRC].[GET_FLAG]('UFEBS_SIGN_COS') and is_controlled_type then
+			erm := ::[UFEBS_DATA_CONTR].[LIB].doc_data_control(p_rDoc_rc == this, p_oDoc_rc == ORI_DOC_RC, p_oMT103 == ORI_MT103);
+			if erm is not null then
+				pragma error('Ошибка контроля реквизитов: '||erm);
+			end if;
+		end if;
+		--Установка контекстов для представлений опций
+		&SDL.set_option_contexts(V_TYPED_COD, P_PAYER.[OPTION]
+											, P_NAME_BANKPAY.[OPTION]
+											, P_NAME_BANK_53.[OPTION]
+											, P_NAME_BANK_54.[OPTION]
+											, P_NAME_BANK_55.[OPTION]
+											, P_NAME_BANKINT.[OPTION]
+											, P_NAME_BANKREC.[OPTION]
+											, V_OPT58
+											, P_RECEIVER.[OPTION]);
+
+		-- Параметры
+		P_FILIAL		:= ORI_DOC_RC.[FILIAL];
+		P_TRN 			:= ORI_DOC_RC.[ELDOCNUM];
+		P_NUMBER_DOC 	:= ORI_DOC_RC.[NUMBER_DOC];
+		P_CRDATE 		:= ORI_DOC_RC.[CRDATE];
+		-- Если был выход из области тиражирования
+		P_SDCL 			:= nvl(ORI_DOC_RC.[ORIGINAL].[DOG_SD].[CLIENT], ORI_DOC_RC.[PAYER].[PART_REF]);
+		P_RCCL 			:= ORI_DOC_RC.[RECEIVER].[PART_REF];
+		P_SUMMA 		:= ORI_DOC_RC.[SUMMA];
+		P_VALDATE 		:= nvl(ORI_DOC_RC.[VALDATE], ::[TRC].[INI].TODAY);
+		P_MAIN_DOC 		:= ORI_DOC_RC.[MAIN_DOC];
+		P_FIRST_REF 	:= ORI_DOC_RC.[FIRST_REF];
+		P_MSGTYPE 		:= [DOCUM_RC]::[BUX_LIB].get_message_type(ORI_DOC_RC.[MSGTYPE]);
+		if V_TYPED_COD = 'SWT' then
+	   		begin
+		   		select x(x.[TEXT]) in ::[SWIFT_RAW_DATA] where x.[DOC_RC] = this into lob_loc;
+		   		if lob_loc is null then
+		   			P_DOPINFO := 'Текст отсутствует';
+		   		else
+					DBMS_LOB.READ(lob_loc, amount, 1, P_DOPINFO);
+		   		end if;
+		   	exception when NO_DATA_FOUND then
+		   		P_DOPINFO := ORI_DOC_RC.[DOC_TEXT] || ORI_DOC_RC.[DOPINFO];
+	   		end;
+		else
+			--KL P_DOPINFO 		:= replace(replace(ORI_DOC_RC.[DOC_TEXT] || ORI_DOC_RC.[DOPINFO], ';', ' '), 'NO_UPDATE');
+			vTextExpDoc := null;
+			if ::[DOCUM_RC].[BUX_LIB].is_in(::[DOCUM_RC].[LIB_VIEW].GetFirst(this)) then --KL
+				vTextFirstDoc := replace(replace(ORI_DOC_RC.[DOC_TEXT], chr(1)), chr(3)); --KL
+			else
+				vTextFirstDoc := null;
+			end if;			
+		end if;
+		-- Поле 72
+		P_CLINFO  := &SDL.str_to_swt(ORI_DOC_RC.[CLINFO],1,35,6);
+		-- Поля 50, 52
+		&SDL.part_to_swift(ORI_DOC_RC.[PAYER], P_PAYER, P_NAME_BANKPAY, P_CODE_BANKPAY);
+		-- Поле 53,54,55,56
+		&SDL.ben_to_swift( ORI_MT103.[F_53], P_NAME_BANK_53, P_CODE_BANK_53);
+		&SDL.ben_to_swift( ORI_MT103.[F_54], P_NAME_BANK_54, P_CODE_BANK_54);
+		&SDL.ben_to_swift( ORI_MT103.[F_55], P_NAME_BANK_55, P_CODE_BANK_55);
+		&SDL.ben_to_swift( ORI_DOC_RC.[INT], P_NAME_BANKINT, P_CODE_BANKINT);
+		-- Поле 57
+		&SDL.part_to_swift(ORI_DOC_RC.[RECEIVER], P_RECEIVER, P_NAME_BANKREC, P_CODE_BANKREC);
+		-- Поле 58
+		if substr(V_TYPED_COD, 1, 2) = '20' then
+			&SDL.ben_to_swift(ORI_DOC_RC.[BEN], P_RECEIVER, P_CODE_BANBEN, true);
+			V_OPT58 := P_RECEIVER.[OPTION];
+		end if;
+		
+		-- Поле 70, Если новый формат, то добавляем 3*NL$
+		if instr(ORI_DOC_RC.[DEST], NL$) > 0 then
+			v_add_len_70 := 3*length(NL$);
+		end if;
+		P_DEST := &SDL.str_to_swt(SUBSTR( ORI_DOC_RC.[DEST], 1, 140+v_add_len_70));
+
+		-- Поле 71
+		begin
+			P_CHARGE := ::[CHARGES]([VALUE] = ORI_DOC_RC.[CHARGPAY]);
+		exception when NO_DATA_FOUND then
+			null;
+		end;
+		P_RATE := 1;
+
+		--Обязательная отчетность (77B)
+		P_77B := &SDL.str_to_swt(&VCHK.swift_to_str(ORI_MT103.[F_77B]), 1, 35, 3);
+
+		-- Переменные
+		if substr(V_TYPED_COD, 1, 2) in ('10', '20') then
+			V_PANEL.[0]	:= 1;
+		elsif V_TYPED_COD = 'SWT' then
+			V_PANEL.[0]	:= 4;
+		else
+			V_PANEL.[0]	:= 3;
+		end if;
+		V_BPNAME 		:= ORI_DOC_RC.[PAYER].[RB];
+		V_BRNAME 		:= ORI_DOC_RC.[RECEIVER].[RB];
+		if P_SDCL = ::[TRC].[INI].SWIFT_PART then
+			V_PPNAME	:= ORI_MT103.[RECEIVER_BANK].[NAME];
+		else
+			V_PPNAME 	:= P_SDCL.[NAME];
+		end if;
+		if P_RCCL = ::[TRC].[INI].SWIFT_PART then
+			V_PRNAME	:= ORI_MT103.[RECEIVER_BANK].[NAME];
+		else
+			V_PRNAME	:= P_RCCL.[NAME];
+		end if;
+		V_PNAME 		:= ORI_DOC_RC.[PAYER].[RN];
+		V_RNAME  		:= ORI_DOC_RC.[RECEIVER].[RN];
+		V_BINAME 		:= &LV.get_bank_name(ORI_DOC_RC.[INT].[BANK]);
+		V_BBNAME 		:= &LV.get_bank_name(ORI_DOC_RC.[BEN].[BANK]);
+		
+		-- BS00484035 Получаем коды стран банка и получателя
+		[STR].GET_PAR(this.[BLOCK_DATA], 'REC_COUNTRY', V_REC_COUNTRY);
+		[STR].GET_PAR(this.[BLOCK_DATA], 'REC_BANK_COUNTRY', V_REC_BANK_COUNTRY);
+		
+		--Проверка корректности заполнения стран, на случай, если вместо ИД страны там что-то другое
+		if V_REC_COUNTRY is not null then
+			select x(count(1)) in ::[COUNTRY] where x%id = V_REC_COUNTRY into cnt;
+			if cnt = 0 then
+				stdio.put_line_buf('Неверный ID страны получателя - ' || V_REC_COUNTRY);
+				V_REC_COUNTRY :=null;
+			end if;
+		end if;
+		
+		if V_REC_BANK_COUNTRY is not null then 		
+			select x(count(1)) in ::[COUNTRY] where x%id = V_REC_BANK_COUNTRY into cnt;
+			if cnt = 0 then
+				stdio.put_line_buf('Неверный ID страны банка получателя - ' || V_REC_BANK_COUNTRY);
+				V_REC_BANK_COUNTRY :=null;
+			end if;
+		end if;
+		
+		-- Поле 21
+		if ORI_DOC_RC.[TYPE_DOC] = '007' or V_TYPED_COD like '202%' then
+			V_REF := SUBSTR( nvl( ORI_DOC_RC.[PAYER].[NAME], 'NONREF'), 1, 16);
+		end if;
+
+		-- RP0013708 Проверка приложения "Расследования SWIFT"
+		v_inf_inv := null;
+		v_inf_epd := null;
+		v_inf_is_in := null;
+		v_one_esid := null;
+		v_99_type := null;
+		
+		V_APP_INV := ::[INVESTIGATION].[LIB].check_swift_app;
+		--Заполнение опций открытия дела
+		if V_APP_INV then
+			V_OPEN_INV	:= nvl(::[DEFVALS].[SLIB].RestoreBool(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_OPEN_INV'),false);
+			V_OPEN_INV_INF	:= nvl(::[DEFVALS].[SLIB].RestoreBool(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_OPEN_INV_INF'),false);
+			V_CREATE_MT195	:= nvl(::[DEFVALS].[SLIB].RestoreBool(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_CREATE_MT195'),false);
+		end if;
+		
+		-- Поля переписки
+		if ORI_DOC_RC.[TYPE_DOC] = '007' then
+			v_inf_is_in := ::[DOCUM_RC].[BUX_LIB].is_in(this);
+			
+			-- Поле 11
+			V_TYPE11  := substr( ORI_DOC_RC.[PAYER].[INN], 1, 1);
+			V_VALUE11 := substr( ORI_DOC_RC.[PAYER].[INN], 2, V_VALUE11%size);
+			-- Поле 77
+			--(kozlova) V_COMMENT := ::[DOCUM_RC].[SWIFT_SB].str2swift( ORI_DOC_RC.[CLINFO], 30, 35, NL$);
+			V_COMMENT := rtrim(substr(ORI_DOC_RC.[CLINFO], 1, 6*(35 + length(NL$))-length(NL$))); --(kozlova)
+			V_77A := substr(ORI_DOC_RC.[CLINFO], 6*(35 + length(NL$))-length(NL$) + 1); --(kozlova)
+			-- Поле 79
+			V_DOPINFO := ORI_DOC_RC.[DEST];
+			
+			--Заполнение исходного документа, необходмо также заполнить при изменении.
+			--Также проверять если найдено много документов, то давать на выбор только из них
+			V_ORIG_EPD := ::[DOCUM_RC].[LIB_QA].get_original_swift(this);
+			V_ORIG_EPD := ::[DOCUM_RC].[LIB_VIEW].GetLast(V_ORIG_EPD);
+			
+			if V_ORIG_EPD is null then
+				--Если много документов, необходимо присвоить фильтр
+				if ::[RUNTIME].[STR].get_bool_par(this.[BLOCK_DATA], 'MANY_DOCS') then
+					v_refid_list := ::[RUNTIME].[STR].get_str_par(this.[BLOCK_DATA], 'MANY_DOC_IDS');
+					if v_refid_list is not null then	-- RP0531669 если найдено более 10 "исходных" докуметов, их перечень не сохраняется и фильтр не накладывается
+						csmd.Set_Validate_Prop( V_VB, 'V_ORIG_EPD', 'V', '.ViewFilter ="ID in ('|| v_refid_list ||')" ', true);
+					end if;
+				end if;
+			else
+				--Получаем референс
+				v_inf_epd := V_ORIG_EPD;
+				V_ORIG_DOC_NUM := ::[DOCUM_RC].[LIB_QA].get_reference(V_ORIG_EPD);
+				
+				--Если документ исходящий, то нельзя менять исходный документ
+				if not v_inf_is_in then
+					csmd.Set_Validate_Prop( V_VB, 'V_ORIG_EPD', 'V', '.ViewFilter ="ID = '|| V_ORIG_EPD%id ||'" ', true);
+					v_one_esid := true;
+				end if;
+			end if;
+			
+			--Если дело открыто по текущему документу
+			v_esid_inv := ::[INVESTIGATION].[LIB].get_inv_on_esid(this);
+			
+			if v_esid_inv is not null then
+				v_epd_inv := ::[INVESTIGATION].[LIB].get_inv_on_epd(V_ORIG_EPD);
+				--Исходный финансовый документ также исходный по делу
+				if v_epd_inv = v_esid_inv then
+					csmd.Set_Validate_Prop( V_VB, 'V_ORIG_EPD', 'V', '.ViewFilter ="ID = '|| V_ORIG_EPD%id ||'" ', true);
+					v_one_esid := true;
+				else
+					--Исходный документ привязан к текущему делу
+					v_rd_inv := ::[INVESTIGATION].[LIB].get_inv_on_epd(::[DOCUM_RC].[LIB_VIEW].GetFirst(V_ORIG_EPD));
+					if v_rd_inv = v_esid_inv then
+						csmd.Set_Validate_Prop( V_VB, 'V_ORIG_EPD', 'V', '.ViewFilter ="ID = '|| V_ORIG_EPD%id ||'" ', true);						
+						v_one_esid := true;
+					end if;
+				end if;
+			end if;			
+			csmd.Show( V_VB, 'V_ORIG_EPD', 'V');
+			csmd.Show( V_VB, 'V_ORIG_DOC_NUM','V');
+		else
+			--Для финансовых документов заполним информационные документы
+			V_STR_INF_DOCS := ::[RC_LINK].[LIB].get_links_to_str(::[DOCUM_RC].[LIB_VIEW].GetFirst(this), ::[RC_LINK_TYPE]([CODE]='ORIG_EPD(drc_drc)'), 'last_doc_rc');
+			if V_STR_INF_DOCS is not null then
+				csmd.Show( V_VB, 'V_INF_DOCS', 'V');
+			end if;
+		end if;
+
+		::[DOCUM_RC].[SWIFT_DOC_LIB].getRelDocs(this, V_LD_STR, V_BC);
+		
+		--Дела по переписке
+		if V_APP_INV then
+			V_INV := ::[INVESTIGATION].[LIB].get_inv(this);
+			v_99_type := P_99_TYPE.[0];
+			
+			if V_INV is not null then
+				csmd.Show( V_VB, 'V_INV', 'V', true);
+				--Сохраняем дело, если есть
+				v_inf_inv := V_INV;
+			else
+				csmd.Set_Validate_Prop( V_VB, 'V_INV', 'V', '.ViewFilter ="1=1" ', true);
+			end if;
+			
+			--Для информационных документов
+			if ORI_DOC_RC.[TYPE_DOC] = '007' and V_TYPED_COD <> '103' then
+				--Выводим номер дела
+				csmd.Show( V_VB, 'V_INV', 'V');
+				if V_INV is null then
+					csmd.Show( V_VB, 'V_OPEN_INV_INF', 'V');
+				else
+					V_OPEN_INV_INF := null;
+				end if;
+				--Для запроса n99 выводим вариант обработки
+				if substr(V_TYPED_COD, 2, 2) = '99' then
+					P_99_TYPE.[0] := ::[RUNTIME].[STR].get_num_par(this.[BLOCK_DATA], 'P_99_TYPE');
+					csmd.Show( V_VB, 'P_99_TYPE', 'P');
+				end if;
+			end if;
+			
+		end if;
+		-- //RP0013708		
+		
+		if ORI_MT103.[F_23B] is not null then
+			begin
+				V_23B := ::[VAL_CODE_23B]([CODE] = ORI_MT103.[F_23B]);
+			exception when NO_DATA_FOUND then
+				null;
+			end;
+		end if;
+		V_13C.delete;
+		V_23E.delete;
+		V_71F.delete;
+		for i in P_MT103.[F_13C]
+		loop
+			V_13C(nvl(V_13C.last, 0) + 1) := i;
+		end loop;
+		for i in P_MT103.[F_23E]
+		loop
+			v_string := i;
+			begin
+				v_23E_rec.[CODE] := ::[VAL_INSTR23]([CODE] = substr(v_string.[STRING], 1, 4));
+			exception when NO_DATA_FOUND then
+				v_23E_rec.[CODE] := null;
+			end;
+			if substr(v_string.[STRING], 5, 1) = '/' then
+				v_23E_rec.[ADD_INFO] := substr(v_string.[STRING], 6);
+			else
+				v_23E_rec.[ADD_INFO] := null;
+			end if;
+			V_23E(nvl(V_23E.last, 0) + 1) := v_23E_rec;
+		end loop;
+		for i in P_MT103.[F_71F] order by i%id
+		loop
+			V_71F(nvl(V_71F.last, 0) + 1) := i;
+		end loop;
+		
+		in_dog := P_GET_INPUT;
+		in_iso := P_GET_INPUT.[FINTOOL];
+		out_dog := P_GET_OUTPUT;
+		out_iso := P_GET_OUTPUT.[FINTOOL];
+
+		P_UKNOWN := nvl(::[RUNTIME].[STR].get_str_par(ORI_DOC_RC.[BLOCK_DATA], 'UNKNOWN') = '1', false);
+		V_UKNOWN := null;
+		if ORI_DOG_OUT.[TYPE_DOG] = ::[CONTRACT_TYPE]([IDENT] = 'Z') and ORI_DOC_RC.[TYPE_DOC] != '007' /*and in_iso = out_iso*/ then	-- BS00584188, avs 25/11/13 конверсию тоже надо ставить на н/с
+			V_UKNOWN := 'YES';
+		end if;
+
+		this_state := this%state;
+		first_time := true;
+		if this_state = 'S_15' then
+			V_STATE := 'S_15';
+		elsif this_state not in ('S_3','S_4','S_5', 'S_6','S_8','S_9') then
+			pragma error('Обработка документа в состоянии ' || lib.state_name( this_state, 'DOCUM_RC') || ' невозможна');
+		elsif this.[FLAG_UPDATE] = '3' and this_state = 'S_6' then
+			pragma error ('Документ находится в очереди особого контроля!'||NL$||'Для его обработки воспользуйтесь специализированной операцией!');
+		end if;
+		
+		if &LV.is_COM_BEN(P_CHARGE, doc_rc == this) and  not nvl(::[RUNTIME].[STR].get_str_par(ORI_DOC_RC.[BLOCK_DATA], 'TAKE_COM_BEN'), false) and P_GET_OUTPUT.[TYPE_DOG] = ::[CONTRACT_TYPE]([IDENT] = 'N') then
+			set_71( P_ISO, P_CHARGE, P_MT103, P_GET_INPUT, P_SUMMA, v_summa, this, P_GET_PAYER);
+		end if;
+
+		-- Умолчательное действие
+		if this_state in ('S_5', 'S_7') then
+			-- dpp1 проводку создаем только если ДПП не больше текущего опердня
+			if ORI_DOC_RC.[BEGDATE] <= ::[TRC].[INI].TODAY then
+				::[DOCUM_RC].[LIB].create_main_doc(this);
+			end if;
+			P_MAIN_DOC := this.[MAIN_DOC];
+			P_VAR.[0] := 7;	-- На проводку
+			V_STATE := 'PROV';
+			-- 25.03.10
+			if acc_rc_fintool != ORI_DOG_OUT.[FINTOOL] then
+			 -- если валюта счета проводки по кредиту не совпадает с валютой договора рц по кредиту, поищем договор рц в нужной валюте
+				P_GET_OUTPUT := nvl(::[TRC].[LIB].get_dog(/*::[DOCUM_RC].[LIB_VAL].get_part_val(this),*/ P_RCCL, -- BS00478139 avs 29/04/13 при подтверждении документа берем участника на которого он уже идет, а не тот который вычислится - участника надо менять (только?) при переадресации
+															err_msg,
+															false,
+															acc_rc_fintool)
+															, P_GET_OUTPUT);
+				-- определим новый курс
+				tmp_out_iso := P_GET_OUTPUT.[FINTOOL];
+				out_dog := P_GET_OUTPUT;
+				out_iso := tmp_out_iso;
+				P_RATE := ::[DOCUM_RC].[VCHK_NEW].[CALC_RATE](in_iso, out_iso, &LV.get_date_rate(P_GET_INPUT, P_VALDATE));
+				P_BACK_RATE := true;
+/*				if P_BACK_RATE then -- необходимо, если поднят признак обратного курса --16.03.10		
+					P_RATE := 1 / P_RATE;
+				end if;*/
+			end if;			
+			-- 25.03.10
+		elsif this_state = 'S_9' and ORI_DOC_RC.[TYPE_DOC] = '007' then
+			P_VAR.[0] := 7;	-- На проводку
+			V_STATE := 'PROV';
+		elsif this_state = 'S_9' then
+			P_VAR.[0] := 2;	-- Переадресовать
+			-- avs 23.01.13 BS00467576 не будем создавать проводку - она сформируется (если ее еще нет) уже при обработке переадресованного документа
+			-- dpp1 проводку создаем только если ДПП не больше текущего опердня
+/*			if ORI_DOC_RC.[BEGDATE] <= ::[TRC].[INI].TODAY then
+				::[DOCUM_RC].[LIB].create_main_doc(this);
+			end if;*/
+			P_MAIN_DOC := this.[MAIN_DOC];
+			-- В ст.9 всегда находятся документы, для которых стандартных образом (через get_part_val)
+			-- не удалось опредлить уч.-получателя; поэтому пытаемся найти более гибким способом
+			V_READDR := ::[DOCUM_RC].[LIB_VAL].get_part_val( this);
+			V_STATE := 'READDR';
+		elsif this_state = 'S_6'  then
+			-- dpp1 проводку создаем только если ДПП не больше текущего опердня
+			if ORI_DOC_RC.[BEGDATE] <= ::[TRC].[INI].TODAY then
+				::[DOCUM_RC].[LIB].create_main_doc(this, false);
+			end if;
+			P_MAIN_DOC := this.[MAIN_DOC];
+
+			-- 03.11.10
+			acc_rc_fintool := nvl(P_MAIN_DOC.[ACC_KT].[FINTOOL], ORI_DOG_OUT.[FINTOOL]);
+			if acc_rc_fintool != ORI_DOG_OUT.[FINTOOL] then
+			 -- если валюта счета проводки по кредиту не совпадает с валютой договора рц по кредиту, поищем договор рц в нужной валюте
+				P_GET_OUTPUT := nvl(::[TRC].[LIB].get_dog(/*::[DOCUM_RC].[LIB_VAL].get_part_val(this),*/ P_RCCL, -- BS00478139 avs 29/04/13 при подтверждении документа берем участника на которого он уже идет, а не тот который вычислится - участника надо менять (только?) при переадресации
+															err_msg,
+															false,
+															acc_rc_fintool)
+															, P_GET_OUTPUT);
+				-- определим новый курс
+				tmp_out_iso := P_GET_OUTPUT.[FINTOOL];
+				out_dog := P_GET_OUTPUT;
+				out_iso := tmp_out_iso;
+				P_RATE := ::[DOCUM_RC].[VCHK_NEW].[CALC_RATE](in_iso, out_iso, &LV.get_date_rate(P_GET_INPUT, P_VALDATE));
+				P_BACK_RATE := true;
+			end if;			
+			-- 03.11.10
+			
+			P_VAR.[0] := 1;	-- Подтвердить отказ
+			V_STATE := 'REJECT';
+		elsif this_state = 'S_15'  then
+			if ORI_DOG_IN.[TYPE_DOG] = ::[CONTRACT_TYPE]([IDENT] = 'N')
+			 and ORI_DOG_OUT.[TYPE_DOG] = ::[CONTRACT_TYPE]([IDENT] = 'L')
+			 and ORI_DOG_OUT.[ACC_OVERD] is not null then
+				V_STATE := 'REJECTED_FROM_FIL';
+				P_VAR.[0] := 7;
+				if ::[DOCUM_RC].[LIB].is_prov(P_MAIN_DOC) then	-- сразу пробуем ликивидировать проводку
+					::[DOCUM_RC].[LIB].delete_main_doc(this);
+					if P_MAIN_DOC%state = 'DELETED' then
+						P_MAIN_DOC%state := 'TO_MBR';
+					end if;
+				end if;
+				V_UKNOWN := 'YES';
+				put_to_47416(false);
+			else
+				P_VAR.[0] := 3;
+				V_STATE := 'S_15';
+			end if;
+		end if;
+		V_MAIN_DOC := ::[DOCUM_RC].[SWIFT_DOC_LIB].get_docs_list_id( P_MAIN_DOC, this.[QUIT_DOC]);
+		if in_iso != out_iso then
+-- 16.03.10-- 16.03.10-- 16.03.10-- 16.03.10-- 16.03.10		
+--			P_RATE := P_MT103.[F_36];
+--			if P_RATE is null then
+				P_RATE := ::[RUNTIME].[STR].GET_NUM_PAR(this.[BLOCK_DATA], 'p_rate'); -- 16.03.10
+				P_BACK_RATE := nvl(::[RUNTIME].[STR].GET_BOOL_PAR(this.[BLOCK_DATA], 'p_back_rate'), true); -- 16.03.10
+				if P_RATE is null then
+					P_RATE := P_MT103.[F_36];
+					if P_RATE is null then
+						P_RATE := ::[DOCUM_RC].[VCHK_NEW].[CALC_RATE](in_iso, out_iso, &LV.get_date_rate(P_GET_INPUT, P_VALDATE));
+					end if;
+				end if;
+--			end if;
+		end if;
+-- 16.03.10-- 16.03.10-- 16.03.10-- 16.03.10-- 16.03.10		
+				
+		last_error := ORI_DOC_RC.[REFREASON] || ORI_DOC_RC.[REFREASON2];
+		P_VAR.[REJECT].[REZ] := last_error;
+		if ORI_DOC_RC.[REFTYPE] is not null then
+			begin
+				select x(x%id, substr(nvl(last_error, x.[NAME]), 1, P_VAR.[REJECT].[REZ]%size)) in ::[REJECT]
+					where x.[CODE] = ORI_DOC_RC.[REFTYPE]
+					into P_VAR.[REJECT].[CODE], P_VAR.[REJECT].[REZ];
+			exception when NO_DATA_FOUND then
+				null;
+			when TOO_MANY_ROWS then
+				begin
+					select x(x%id, substr(nvl(last_error, x.[NAME]), 1, P_VAR.[REJECT].[REZ]%size)) in ::[REJECT]
+						where x.[CODE] = ORI_DOC_RC.[REFTYPE] and x.[ERR_CLASS]= 'E'
+						into P_VAR.[REJECT].[CODE], P_VAR.[REJECT].[REZ];
+				exception when NO_DATA_FOUND or TOO_MANY_ROWS then
+					null;
+				end;
+			end;
+		else
+			P_VAR.[REJECT].[CODE] := ::[REJECT]([CODE] = '600' and [ERR_CLASS] = 'E');
+		end if;
+
+		if not P_UKNOWN and ::[DOCUM_RC].[BUX_LIB].is_in(this) then
+			if (ORI_DOC_RC.[TYPE_DOC] in ('002', '004') and P_MAIN_DOC.[ACC_DT] = ::[TRC].[LIB].calculate_acc(ORI_DOG_OUT, P_MAIN_DOC, null, true, 'STRANGE_ACC')) or
+			   (ORI_DOC_RC.[TYPE_DOC] not in ('002', '004') and P_MAIN_DOC.[ACC_KT] = ::[TRC].[LIB].calculate_acc(ORI_DOG_OUT, P_MAIN_DOC, null, false, 'STRANGE_ACC'))
+			then
+				P_UKNOWN := true; -- BS00132505
+			end if;
+		end if;
+
+		if ::[RUNTIME].[STR].get_str_par(this.[BLOCK_DATA], 'MX_REF') is not null then
+			declare
+				mxClob 		clob;
+				mxFileName 	string;
+				tmpBlob 	blob;
+			begin
+				mxClob 	   := ::[ISO_MESSAGE].[LIB].getIsoText(this);
+				if mxClob is not null and coalesce(dbms_lob.getlength(mxClob),0) < 20000 then
+					V_MX := mxClob;
+				elsif mxClob is not null and dbms_lob.getlength(mxClob) > 0 then
+					V_MX := substr(mxClob,1,20000)||'...';
+					dbms_lob.createtemporary( tmpBlob, false );
+					::[RUNTIME].[LOB_UTILS].clob2blob(tmpBlob, mxClob, 'CL8MSWIN1251') ;	
+					init_blob(tmpBlob);
+					mxFileName := ::[ISO_MESSAGE].[LIB].getIsoFileName(this);
+					csmd.command(V_VB, 'openFileMx_Btn.Visible = true');
+					csmd.command(V_VB, 'openFileMxFIleName.Caption = "'||mxFileName||'"');
+				else
+					V_MX := mxClob;
+				end if;	
+			end;
+		end if;
+
+		if V_TYPED_COD in ('103', '103+','200', '202') then
+			V_URGENT := this.[HOWLONG] = '1';
+			csmd.command(V_VB, 'urg.Enabled = false');
+		else
+			csmd.command(V_VB, 'urg.Visible = false');
+		end if;
+
+		-- Клиент скрипты
+		csmd.Set_Validate_Prop( V_VB, 'P_GET_PAYER', 'P', '.Visible = false');
+
+		::[RUNTIME].[STR].get_par(this.[BLOCK_DATA], 'ACC_FOR_COMISS', V_ACC_FOR_COMISS);
+		if V_ACC_FOR_COMISS is not null then
+			csmd.Set_Validate_Prop( V_VB, 'V_ACC_FOR_COMISS.MAIN_V_ID', 'V', '.locked = true', true);
+			csmd.Set_Validate_Prop( V_VB, 'V_ACC_FOR_COMISS', 'V', '.enabled = false', true);
+		else
+			csmd.Set_Validate_Prop( V_VB, 'V_ACC_FOR_COMISS', 'V', '.visible = false');
+		end if;
+
+		csmd.Set_Validate_Prop( V_VB, 'P_PAYER.ACC', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_PAYER.NAME', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_PAYER.OPTION.OPT', 'P', '.locked = true');
+
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKPAY.ACC', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKPAY.NAME', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKPAY.OPTION.OPT', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKPAY.BANK', 'P', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKPAY.BANK.SWIFT_C', 'P', '.enabled = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKPAY.BANK.SWIFT_C', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKPAY.BANK.SWIFT_C', 'P', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'P_CODE_BANKPAY', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKINT.ACC', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKINT.NAME', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKINT.OPTION.OPT', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKINT.BANK', 'P', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKINT.BANK.SWIFT_C', 'P', '.enabled = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKINT.BANK.SWIFT_C', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKINT.BANK.SWIFT_C', 'P', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'P_CODE_BANKINT', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		
+
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKREC.ACC', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKREC.NAME', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKREC.OPTION.OPT', 'P', '.locked = true');
+
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKREC.BANK', 'P', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKREC.BANK.SWIFT_C', 'P', '.enabled = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKREC.BANK.SWIFT_C', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANKREC.BANK.SWIFT_C', 'P', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'P_CODE_BANKREC', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+
+		if V_TYPED_COD like '10%' then
+			csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER', 'P', '.Caption = "Бенефициар (59)"', true);
+			csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.ACC', 'P', '.top = 360');
+			csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.NAME', 'P', '.top = 690');
+			csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER', 'P', '.Height = 1740', true);
+			csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.BANK', 'P', '.visible = false');
+			csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.OPTION.OPT', 'P', '.visible = true', true);
+			csmd.Set_Validate_Prop( V_VB, 'V_OPT58.OPT', 'V', '.visible = false', true);
+			csmd.Set_Validate_Prop( V_VB, 'V_OPT58', 'V', '.visible = false');
+			
+		elsif V_TYPED_COD like '20%' then
+			csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.ACC', 'P', '.top = 600');
+			csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.NAME', 'P', '.top = 930');
+			csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER', 'P', '.Caption = "Банк-бенефициар (58)"', true);
+			csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER', 'P', '.Height = 1980', true);
+			csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.BANK', 'P', '.visible = true');
+			csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.OPTION.OPT', 'P', '.visible = false', true);
+			csmd.Set_Validate_Prop( V_VB, 'V_OPT58.OPT', 'V', '.visible = true', true);
+			csmd.Set_Validate_Prop( V_VB, 'V_OPT58', 'V', '.visible = true');
+		end if;
+
+		csmd.Set_Validate_Prop( V_VB, 'P_GET_RECEIVER', 'P', '.visible = false', true);
+		csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.ACC', 'P', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.ACC', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.NAME', 'P', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.NAME', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.OPTION.OPT', 'P', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.OPTION', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		csmd.Set_Validate_Prop( V_VB, 'V_OPT58.OPT', 'V', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'V_OPT58', 'V', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		
+		csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.BANK', 'P', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.BANK.SWIFT_C', 'P', '.enabled = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.BANK.SWIFT_C', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER.BANK.SWIFT_C', 'P', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'P_CODE_BANBEN', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+
+
+		csmd.Set_Validate_Prop( V_VB, 'P_DEST', 'P', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'P_DEST', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+
+		csmd.Set_Validate_Prop( V_VB, 'P_CLINFO', 'P', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'P_CLINFO', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_53.ACC', 'P', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_53.ACC', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_53.NAME', 'P', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_53.NAME', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_53.OPTION.OPT', 'P', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_53.OPTION', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_53.BANK', 'P', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_53.BANK.SWIFT_C', 'P', '.enabled = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_53.BANK.SWIFT_C', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_53.BANK.SWIFT_C', 'P', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'P_CODE_BANK_53', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		csmd.Set_Validate_Prop( V_VB, 'P_CODE_BANK_53', 'P', '.ToolTipText = "' || &VCHK.del_symbols(&LV.get_bank_name(P_NAME_BANK_53.[BANK]), 'N', true) || '"');
+
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_54.ACC', 'P', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_54.ACC', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_54.NAME', 'P', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_54.NAME', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_54.OPTION.OPT', 'P', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_54.OPTION', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_54.BANK', 'P', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_54.BANK.SWIFT_C', 'P', '.enabled = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_54.BANK.SWIFT_C', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_54.BANK.SWIFT_C', 'P', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'P_CODE_BANK_54', 'P', '.BackColor = "' || ::[DOCUM_RC].[LIB_VAL].BackColorGRAY || '"');
+		csmd.Set_Validate_Prop( V_VB, 'P_CODE_BANK_54', 'P', '.ToolTipText = "' || &VCHK.del_symbols(&LV.get_bank_name(P_NAME_BANK_54.[BANK]), 'N', true) || '"');
+
+
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_55.ACC', 'P', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_55.ACC', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_55.NAME', 'P', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_55.NAME', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_55.OPTION.OPT', 'P', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_55.OPTION', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_55.BANK', 'P', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_55.BANK.SWIFT_C', 'P', '.enabled = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_55.BANK.SWIFT_C', 'P', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_NAME_BANK_55.BANK.SWIFT_C', 'P', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'P_CODE_BANK_55', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+		csmd.Set_Validate_Prop( V_VB, 'P_CODE_BANK_55', 'P', '.ToolTipText = "' || &VCHK.del_symbols(&LV.get_bank_name(P_NAME_BANK_55.[BANK]), 'N', true) || '"');
+
+		csmd.Set_Validate_Prop( V_VB, 'V_CODWORD70', 'V', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'V_CODWORD72', 'V', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'V_ACC_CODWORD50', 'V', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'V_IDENT50F', 'V', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'V_IDENT59F', 'V', '.visible = false');
+
+		csmd.Set_Validate_Prop( V_VB, 'P_77B', 'P', '.locked = true');
+		--csmd.Set_Validate_Prop( V_VB, 'P_77B', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+
+		--Прячем кнопки удаления
+		csmd.command( V_VB, 'btnClear50.visible = false');		
+		csmd.command( V_VB, 'btnClear52.visible = false');		
+		csmd.command( V_VB, 'btnClear53.visible = false');		
+		csmd.command( V_VB, 'btnClear54.visible = false');		
+		csmd.command( V_VB, 'btnClear55.visible = false');		
+		csmd.command( V_VB, 'btnClear56.visible = false');		
+		csmd.command( V_VB, 'btnClear57.visible = false');		
+		csmd.command( V_VB, 'btnClear58.visible = false');		
+		csmd.command( V_VB, 'btnClear59.visible = false');		
+
+		--Убираем плановый остаток
+		csmd.Set_Validate_Prop( V_VB, 'V_PLAN', 'V', '.visible = false');
+		
+		
+		csmd.command( V_VB, 'txt71G.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_MT103.F_71G', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+
+		csmd.command( V_VB, 'lbl23B.enabled = false');
+		csmd.command( V_VB, 'txt23B.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'V_23B.CODE', 'V', '.BackColor = "' || &LV.BackColorGRAY || '"');
+
+		csmd.command( V_VB, 'txt26T.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_MT103.F_26T', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+
+		csmd.command( V_VB, 'txt33B.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_MT103.F_33B', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+
+		if V_TYPED_COD in ('200', '202') then
+			csmd.command( V_VB, 'Object21.visible = false');
+			csmd.command( V_VB, 'txtVal33b.visible = false');
+			csmd.command( V_VB, 'numSum33b.visible = false');
+		end if;		
+		
+		csmd.command( V_VB, 'num36.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'P_MT103.F_36', 'P', '.BackColor = "' || &LV.BackColorGRAY || '"');
+
+		csmd.Set_Validate_Prop( V_VB, 'V_13C', 'V', '.enabled = false');
+		csmd.Set_Validate_Prop( V_VB, 'V_23E', 'V', '.enabled = false');
+		csmd.Set_Validate_Prop( V_VB, 'V_71F', 'V', '.enabled = false');
+		csmd.Set_Validate_Prop( V_VB, 'V_33B', 'V', '.visible = false');
+
+		csmd.Set_Validate_Prop( V_VB, 'V_COMMENT', 'V', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'V_COMMENT', 'V', '.BackColor = "' || ::[DOCUM_RC].[LIB_VAL].BackColorGRAY || '"');
+
+		csmd.Set_Validate_Prop( V_VB, 'V_77A', 'V', '.locked = true'); --(kozlova)
+		csmd.Set_Validate_Prop( V_VB, 'V_77A', 'V', '.BackColor = "' || ::[DOCUM_RC].[LIB_VAL].BackColorGRAY || '"'); --(kozlova)
+
+		csmd.Set_Validate_Prop( V_VB, 'V_DOPINFO', 'V', '.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'V_DOPINFO', 'V', '.BackColor = "' || ::[DOCUM_RC].[LIB_VAL].BackColorGRAY || '"');
+
+		csmd.command( V_VB, 'txt11_1.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'V_TYPE11', 'V', '.BackColor = "' || ::[DOCUM_RC].[LIB_VAL].BackColorGRAY || '"');
+
+		csmd.command( V_VB, 'txt11_2.locked = true');
+		csmd.Set_Validate_Prop( V_VB, 'V_VALUE11', 'V', '.BackColor = "' || ::[DOCUM_RC].[LIB_VAL].BackColorGRAY || '"');
+
+		csmd.Set_Validate_Prop( V_VB, 'V_CURR_OP', 'V', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'V_DEAL_PASP', 'V', '.visible = false');
+
+		csmd.Set_Validate_Prop( V_VB, 'P_RECEIVER_BANK', 'P', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'P_RCCL', 'P', '.visible = true');
+
+		V_OUT_CONV := nvl(this.[SETTYPE] = '7', false);
+		V_CR_210 := [STR].get_bool_par(this.[BLOCK_DATA], 'MT210');
+		if V_TYPED_COD in ('200', '202') then
+			csmd.ShowS(V_VB, 'mt210');
+		else
+			csmd.HideS(V_VB, 'mt210');
+		end if;
+		if V_OUT_CONV then
+			V_AGR_OUT_CONV := P_GET_OUTPUT;
+			[STR].get_par(ORI_DOC_RC.[BLOCK_DATA], 'rate_out_conv', V_RATE_OUT_CONV);
+			[STR].get_par(ORI_DOC_RC.[BLOCK_DATA], 'p_rate', P_RATE);
+			if P_BACK_RATE is null then
+				P_BACK_RATE := nvl(::[RUNTIME].[STR].GET_BOOL_PAR(this.[BLOCK_DATA], 'p_back_rate'), true);
+			end if;
+		end if;
+
+		if substr(V_TYPED_COD, 1, 2) in ('10', '20') then
+			if V_STATE <> 'REJECT' then
+				csmd.Set_Validate_Prop( V_VB, 'P_GET_INPUT', 'P', '.visible = true');
+				csmd.Set_Validate_Prop( V_VB, 'P_GET_OUTPUT', 'P', '.visible = true');
+				csmd.Set_Validate_Prop( V_VB, 'P_RATE', 'P', '.visible = true');
+				csmd.Set_Validate_Prop( V_VB, 'P_BACK_RATE', 'P', '.visible = true');
+			elsif not V_OUT_CONV then
+				csmd.Set_Validate_Prop( V_VB, 'P_GET_INPUT', 'P', '.visible = false');
+				csmd.Set_Validate_Prop( V_VB, 'P_GET_OUTPUT', 'P', '.visible = false');
+				csmd.Set_Validate_Prop( V_VB, 'P_RATE', 'P', '.visible = false');
+				csmd.Set_Validate_Prop( V_VB, 'P_BACK_RATE', 'P', '.visible = false');
+			end if;
+		end if;
+
+		P_KL_BNK.[0] := to_number(::[RUNTIME].[STR].GET_STR_PAR(this.[BLOCK_DATA], 'KL_BNK_385'));
+		csmd.Set_Validate_Prop( V_VB, 'V_VARIANT', 'V', '.visible = false');
+		csmd.Set_Validate_Prop( V_VB, 'V_REFREASON', 'V', '.visible = false');
+
+		csmd.Set_Validate_Prop( V_VB, 'V_REFTYPE', 'V', '.visible = false');
+		
+		for x in ::[DOCUM_RC_MESS] where x.[DOC_RC]=this and x.[MESS_TYPE] = 'ExtInfo' loop
+			csmd.command( V_VB, 'Rej_reason.Width = Rej_reason.Width - 360');
+			csmd.ShowS( V_VB, 'Info2');
+			exit;
+		end loop;
+		-- подсветка полей, требующих утверждения
+		if this_state = 'S_5' and V_TYPED_COD in ('103', '103+','200', '202') then
+			declare
+				v_col_fields	varchar2(4000);
+				str				varchar2(128);
+				num				pls_integer := 1;
+			begin
+				[STR].get_par(this.[BLOCK_DATA], 'color_fields', v_col_fields);
+
+				if v_col_fields	is not null then
+					str := regexp_substr(v_col_fields, '[^,]+', 1, num);
+					while (str is not null) loop
+						case substr(str, 1, 2) of
+						:'13':
+							csmd.command(V_VB,'For i = 0 to Grid13C.Rows'
+									||NL$||	'	Grid13C.CellBackColor(i, 0, i, 0) = &h00D2D2FF'
+									||NL$||	'Next');			
+						:'20':
+							csmd.command(V_VB, 'txtTRN.BackColor = &h00D2D2FF');
+						:'21':
+							csmd.command(V_VB, 'txtRef.BackColor = &h00D2D2FF');
+						:'23':
+							csmd.command(V_VB,'For i = 0 to Grid23E.Rows'
+									||NL$||	'	Grid23E.CellBackColor(i, 0, i, 0) = &h00D2D2FF'
+									||NL$||	'Next');
+						:'26':
+							csmd.command(V_VB, 'txt26T.BackColor = &h00D2D2FF');
+						:'32':
+							case substr(str, 3) of
+							:'SUM':
+								csmd.command(V_VB, 'txtSumma.BackColor = &h00D2D2FF');
+							:'VAL':
+								csmd.command(V_VB, 'ft_iso.BackColor = &h00D2D2FF');
+							:'DAT':
+								csmd.command(V_VB, 'txtDValue.BackColor = &h00D2D2FF');
+							end;
+						:'33':
+							csmd.command(V_VB, 'txt33B.BackColor = &h00D2D2FF');
+						:'36':
+							csmd.command(V_VB, 'num36.BackColor = &h00D2D2FF');
+						:'50':
+							case substr(str, 3) of
+							:'OPT':
+								csmd.command(V_VB, 'txtOpt50.BackColor = &h00D2D2FF');
+							:'BNK':
+								csmd.command(V_VB, 'code50.BackColor = &h00D2D2FF');
+							:'ACC':
+								csmd.command(V_VB, 'txtAcc50.BackColor = &h00D2D2FF');
+							:'NAME':
+								csmd.command(V_VB, 'swt50.BackColor = &h00D2D2FF');
+							else
+								csmd.command(V_VB, 'txtOpt50.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'code50.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'txtAcc50.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'swt50.BackColor = &h00D2D2FF');
+							end;
+						:'52':
+							case substr(str, 3) of
+							:'OPT':
+								csmd.command(V_VB, 'txtOpt52.BackColor = &h00D2D2FF');
+							:'BNK':
+								csmd.command(V_VB, 'pbic.BackColor = &h00D2D2FF');
+							:'BACC':
+								csmd.command(V_VB, 'txtAcc52.BackColor = &h00D2D2FF');
+							:'NAME':
+								csmd.command(V_VB, 'swt52.BackColor = &h00D2D2FF');
+							else
+								csmd.command(V_VB, 'txtOpt52.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'pbic.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'txtAcc52.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'swt52.BackColor = &h00D2D2FF');
+							end;
+						:'53':
+							case substr(str, 3) of
+							:'OPT':
+								csmd.command(V_VB, 'objOpt53.BackColor = &h00D2D2FF');
+							:'BNK':
+								csmd.command(V_VB, 'Text90.BackColor = &h00D2D2FF');
+							:'ACC':
+								csmd.command(V_VB, 'txtAcc53.BackColor = &h00D2D2FF');
+							:'NAME':
+								csmd.command(V_VB, 'swt53.BackColor = &h00D2D2FF');
+							else
+								csmd.command(V_VB, 'objOpt53.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'Text90.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'txtAcc53.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'swt53.BackColor = &h00D2D2FF');
+							end;
+						:'54':
+							case substr(str, 3) of
+							:'OPT':
+								csmd.command(V_VB, 'objOpt54.BackColor = &h00D2D2FF');
+							:'BNK':
+								csmd.command(V_VB, 'Text98.BackColor = &h00D2D2FF');
+							:'ACC':
+								csmd.command(V_VB, 'txtAcc54.BackColor = &h00D2D2FF');
+							:'NAME':
+								csmd.command(V_VB, 'swt54.BackColor = &h00D2D2FF');
+							else
+								csmd.command(V_VB, 'objOpt54.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'Text98.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'txtAcc54.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'swt54.BackColor = &h00D2D2FF');
+							end;
+						:'55':
+							case substr(str, 3) of
+							:'OPT':
+								csmd.command(V_VB, 'objOpt55.BackColor = &h00D2D2FF');
+							:'BNK':
+								csmd.command(V_VB, 'Text105.BackColor = &h00D2D2FF');
+							:'ACC':
+								csmd.command(V_VB, 'txtAcc55.BackColor = &h00D2D2FF');
+							:'NAME':
+								csmd.command(V_VB, 'swt55.BackColor = &h00D2D2FF');
+							else
+								csmd.command(V_VB, 'objOpt55.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'Text105.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'txtAcc55.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'swt55.BackColor = &h00D2D2FF');
+							end;
+						:'56':
+							case substr(str, 3) of
+							:'OPT':
+								csmd.command(V_VB, 'txtOpt56.BackColor = &h00D2D2FF');
+							:'BNK':
+								csmd.command(V_VB, 'T_i_bic.BackColor = &h00D2D2FF');
+							:'ACC':
+								csmd.command(V_VB, 'txtAcc56.BackColor = &h00D2D2FF');
+							:'NAME':
+								csmd.command(V_VB, 'swt56.BackColor = &h00D2D2FF');
+							else
+								csmd.command(V_VB, 'txtOpt56.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'T_i_bic.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'txtAcc56.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'swt56.BackColor = &h00D2D2FF');
+							end;
+						:'57':	
+							case substr(str, 3) of
+							:'OPT':
+								csmd.command(V_VB, 'txtOpt57.BackColor = &h00D2D2FF');
+							:'BNK':
+								csmd.command(V_VB, 'rbic.BackColor = &h00D2D2FF');
+							:'ACC':
+								csmd.command(V_VB, 'txtAcc57.BackColor = &h00D2D2FF');
+							:'NAME':
+								csmd.command(V_VB, 'swt57.BackColor = &h00D2D2FF');
+							else
+								csmd.command(V_VB, 'txtOpt57.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'rbic.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'txtAcc57.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'swt57.BackColor = &h00D2D2FF');
+							end;
+						:'58':
+							case substr(str, 3) of
+							:'OPT':
+								csmd.command(V_VB, 'txtOpt58.BackColor = &h00D2D2FF');
+							:'BNK':
+								csmd.command(V_VB, 'T_r_bic.BackColor = &h00D2D2FF');
+							:'ACC':
+								csmd.command(V_VB, 'txtAcc59.BackColor = &h00D2D2FF');
+							:'NAME':
+								csmd.command(V_VB, 'swt59.BackColor = &h00D2D2FF');
+							else
+								csmd.command(V_VB, 'txtOpt58.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'T_r_bic.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'txtAcc59.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'swt59.BackColor = &h00D2D2FF');
+							end;
+						:'59':
+							case substr(str, 3) of
+							:'OPT':
+								csmd.command(V_VB, 'txtOpt59.BackColor = &h00D2D2FF');
+							:'ACC':
+								csmd.command(V_VB, 'txtAcc59.BackColor = &h00D2D2FF');
+							:'NAME':
+								csmd.command(V_VB, 'swt59.BackColor = &h00D2D2FF');
+							else
+								csmd.command(V_VB, 'txtOpt59.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'txtAcc59.BackColor = &h00D2D2FF');
+								csmd.command(V_VB, 'swt59.BackColor = &h00D2D2FF');
+							end;
+						:'70':
+							csmd.command(V_VB, 'swt70.BackColor = &h00D2D2FF');
+						:'71':
+							case substr(str, 3) of
+							:'A':			
+								csmd.command(V_VB, 'T_charges.BackColor = &h00D2D2FF');
+							:'G':
+								csmd.command(V_VB, 'txt71G.BackColor = &h00D2D2FF');
+							:'F':
+								csmd.command(V_VB,'For i = 0 to Grid71F.Rows'
+										||NL$||	'	Grid71F.CellBackColor(i, 0, i, 0) = &h00D2D2FF'
+										||NL$||	'Next');
+							end;
+						:'72':
+							csmd.command(V_VB, 'swt72.BackColor = &h00D2D2FF');
+						:'77':
+							csmd.command(V_VB, 'swt77B.BackColor = &h00D2D2FF');
+						end;
+						
+						num := num + 1;
+						str := regexp_substr(v_col_fields, '[^,]+', 1, num);
+					end loop;
+				end if;
+			end;
+		end if;
+		
+		if ::[TRC].[GET_FLAG]('UFEBS_COS_ED503') then
+			V_TO_ED503 := ::[RUNTIME].[STR].get_str_par(this.[BLOCK_DATA], 'USE_ED503') or ::[RUNTIME].[STR].get_str_par(this.[BLOCK_DATA], 'USE_SPFS');
+		end if;		
+		
+		--		V_VB := V_VB || get_depend_of_type_script(V_TYPED_COD, null, false);
+		--stdio.put_line_buf('V_VB=' || V_VB);
+							--------------------------'VALIDATE'------------------------------
+
+	elsif P_MESSAGE = 'VALIDATE' then	
+		last_error := this.[REFREASON] || this.[REFREASON2]; -- avs при формировании проводки могла случится новая ошибка, поэтому освежим вопрос пользователю
+		if P_INFO = '%VAR%.V_PANEL.0' then
+			if V_PANEL.[0] = 4 then
+				-- Покажем SWIFTовку
+				if V_TYPED_COD = 'SWT' then --(kozlova)
+					if P_DOPINFO/*replace(replace(ORI_DOC_RC.[DOC_TEXT] || ORI_DOC_RC.[DOPINFO], ';', ' '), 'NO_UPDATE')*/ is null then
+						begin
+							&sp(sp2)
+							::[DOCUM_RC].[SWIFT_LIB].INIT_EXP_FORMAT;
+							P_DOPINFO := 'При экспорте в SWIFT будет сформирован следующий текст:' || NL$
+								|| ::[DOCUM_RC].[SWIFT_LIB_EXP].get_block_4(this, V_TYPED_COD, ::[TRC].[INI].TODAY, false, null, false,
+																			::[RUNTIME].[STR].get_str_par(this.[BLOCK_DATA], 'MT103COV'));
+						exception when OTHERS then
+							&rb(sp2)
+						end;
+						::[DOCUM_RC].[T_LIB].RESET_ERRS;
+					end if;
+				else
+--<<(kozlova)				
+					declare						
+						v_temp_errm				[STRING];
+						v_temp_first_time		boolean;
+						v_temp_last_error		string(1000);
+						v_temp_add_rec_com		::[DOCUM_RC].[ADD_REC].COM%size;	
+					begin		
+						if vTextFirstDoc is not null then					
+							P_DOPINFO := 'Текст входящего документа:'||NL$||vTextFirstDoc||NL$||NL$;	
+						else
+							P_DOPINFO := null;
+						end if;	
+						if vTextExpDoc is null then
+							vTextExpDoc := 'При экспорте в SWIFT будет сформирован следующий текст:'||NL$||get_dopinfo(this); 		
+						end if;		
+						if P_VAR.[0] = 2 then
+							v_temp_errm := V_ERRM;
+							v_temp_first_time := first_time;
+							v_temp_last_error := last_error;
+							v_temp_add_rec_com := ::[DOCUM_RC].[ADD_REC].COM;
+							&sp(readdress)
+							section_ok;
+							if ORI_DOG_IN.[FINTOOL] = P_GET_INPUT.[FINTOOL] and ORI_DOG_OUT.[FINTOOL] = P_GET_OUTPUT.[FINTOOL] then
+								this.[READDRESS](V_READDR, NULL, NULL, NULL);
+							end if;
+
+							P_DOPINFO := P_DOPINFO||'Текст переадресованного документа:'||NL$||get_dopinfo(this.[NEXT_REF]);	
+							
+							&rb(readdress)
+							V_ERRM := v_temp_errm;
+							first_time := v_temp_first_time;
+							last_error := v_temp_last_error;
+							::[DOCUM_RC].[ADD_REC].COM := v_temp_add_rec_com ;
+							new_doc = new_doc_ref := null;	
+						else
+							P_DOPINFO := P_DOPINFO||vTextExpDoc; 											
+						end if;							
+					exception when OTHERS then
+						&rb(readdress)
+					end;
+				end if;
+--(kozlova)>>										
+			end if;
+--Переписка
+		elsif P_INFO = 'Инфо' then
+			stdio.put_line_buf('<% PLPCALL %THIS%.[LOOK_EXT_INFO](%PARAM%.P_MESS_TYPE => ''ExtInfo'')%>');
+		elsif P_INFO = '%VAR%.V_INV' then
+			if v_inf_inv is not null then
+				--Если нет исходного документа, либо исходный документ не в деле, то можно менять дело
+				if ::[INVESTIGATION].[LIB].get_inv(V_ORIG_EPD) is not null then
+					V_INV  := v_inf_inv;
+				end if;
+			end if;
+			check_open_inv;
+			
+		elsif P_INFO = '%VAR%.V_ORIG_EPD' then
+			--Выбрали исходный документ, необходимо привязать его. Если есть дело, то привязать в дело
+
+			if V_ORIG_EPD is null and v_one_esid then
+				V_ORIG_EPD := v_inf_epd;
+				stdio.put_line_buf('Невозможно удалить исходный документ ID=' || V_ORIG_EPD%id || ', т.к. он связан с текущим делом №' || v_inf_inv.[NUM_INV]);
+			end if;
+			V_INV := ::[INVESTIGATION].[LIB].get_inv(V_ORIG_EPD);
+			
+			if v_inf_inv is not null and V_INV != v_inf_inv and v_esid_inv is not null then
+				stdio.put_line_buf('Невозможно указать исходный документ ID=' || V_ORIG_EPD%id || ', т.к. он связан с делом №' || V_INV.[NUM_INV]
+								|| ', а обрабатываемый документ является исходным для текущего дела №' || v_inf_inv.[NUM_INV]);
+				V_INV := v_inf_inv;
+				V_ORIG_EPD := v_inf_epd;
+			end if;
+
+			
+			if v_inf_inv is not null and V_INV is null and v_esid_inv is not null then
+				stdio.put_line_buf('Обрабатываемый документ является исходным по делу №' || v_inf_inv.[NUM_INV] || '. Дело изменено не будет.');
+				V_INV := v_inf_inv;
+			end if;
+
+			V_ORIG_EPD := ::[DOCUM_RC].[LIB_VIEW].GetLast(V_ORIG_EPD);
+			V_ORIG_DOC_NUM := ::[DOCUM_RC].[LIB_QA].get_reference(V_ORIG_EPD);						
+			
+			if V_INV is null then
+				csmd.Set_Validate_Prop( V_VB, 'V_INV', 'V', '.ViewFilter ="1=1" ', true);
+			else
+				csmd.Set_Validate_Prop( V_VB, 'V_INV', 'V', '.ViewFilter ="ID = '||V_INV%id||'" ', true);
+			end if;
+			check_open_inv;
+--//Переписка		
+
+		elsif P_INFO = 'P_VAR.0' then
+			if P_VAR.[0] != 2 then
+				V_READDR := null;
+			end if;
+			
+			if P_VAR.[0] = 1 then  --Подтвердить отказ
+				V_STATE := 'REJECT';
+
+			elsif P_VAR.[0] = 2 then -- Переадресовать
+				V_READDR := ::[DOCUM_RC].[LIB_VAL].get_part_val( this);	
+				V_STATE := 'READDR';
+				-- если валюта счета проводки по кредиту не совпадает с валютой договора рц по кредиту,
+				-- то возможно, уже жали "на проводку" и договор выбрался другой, вернем договор который был
+				if acc_rc_fintool != ORI_DOG_OUT.[FINTOOL] then
+					P_GET_OUTPUT := nvl(::[TRC].[LIB].get_dog(V_READDR,
+															  err_msg,
+															  false,
+															  ORI_DOG_OUT.[FINTOOL]), P_GET_OUTPUT);
+					P_INFO := 'P_GET_OUTPUT';
+				end if;
+			elsif P_VAR.[0] = 3 then -- Удалить отказ
+				V_STATE := 'REJECTED';
+
+			elsif P_VAR.[0] = 5 then --Возврат средств
+				V_STATE  := 'REFAUND';
+
+			elsif P_VAR.[0] = 7 then -- На проводку
+				if V_SCHEMA is null then
+					if P_MAIN_DOC is null and ORI_DOC_RC.[BEGDATE] <= ::[TRC].[INI].TODAY then
+						[LIB].create_main_doc(this, false);
+						P_MAIN_DOC := this.[MAIN_DOC];
+					end if;
+				end if;
+				V_STATE := 'PROV';
+				V_MAIN_DOC := ::[DOCUM_RC].[SWIFT_DOC_LIB].get_docs_list_id( P_MAIN_DOC, this.[QUIT_DOC]);
+				acc_rc_fintool := nvl(P_MAIN_DOC.[ACC_KT].[FINTOOL], ORI_DOG_OUT.[FINTOOL]);
+				if	acc_rc_fintool != ORI_DOG_OUT.[FINTOOL] or
+					P_GET_OUTPUT != ORI_DOG_OUT -- BS00506659 Возможно, уже выбирали вариант "переадресация" и договор РЦ получателя переопределился, поищем его еще раз
+				then
+					-- если валюта счета проводки по кредиту не совпадает с валютой договора рц по кредиту, поищем договор рц в нужной валюте
+					P_GET_OUTPUT := nvl(::[TRC].[LIB].get_dog(/*::[DOCUM_RC].[LIB_VAL].get_part_val(this),*/ P_RCCL, -- BS00478139 avs 29/04/13 при подтверждении документа берем участника на которого он уже идет, а не тот который вычислится - участника надо менять (только?) при переадресации
+															  err_msg,
+															  false,
+															  acc_rc_fintool), P_GET_OUTPUT);
+					-- для того, чтобы все завилидировалось по измененому договору кредита
+					P_INFO := 'P_GET_OUTPUT';
+				end if;
+				if P_MAIN_DOC is not null then
+					put_to_47416(true); -- BS00132505
+				end if;
+			end if;
+
+		elsif P_INFO = 'P_VAR.REJECT.CODE' then
+			if P_VAR.[REJECT].[REZ] is null then
+				P_VAR.[REJECT].[REZ] := P_VAR.[REJECT].[CODE].[NAME];
+			end if;
+		end if;
+		
+		-- Переадресация - необходимо перевычислить договора
+		if P_INFO = '%VAR%.V_READDR' and V_READDR is not null then
+			if ORI_DOC_RC.[TYPE_DOC] in ('001', '005') then
+				-- Договор получателя
+				P_GET_OUTPUT := nvl(::[TRC].[LIB].get_dog(V_READDR, err_msg, false, P_GET_OUTPUT.[FINTOOL]), P_GET_OUTPUT);
+			else
+				-- Договор отправителя
+				P_GET_INPUT := nvl(::[TRC].[LIB].get_dog(V_READDR, err_msg, true, P_GET_INPUT.[FINTOOL]), P_GET_INPUT);
+			end if;
+			if err_msg is not null then
+				stdio.put_line_buf(err_msg);
+			end if;
+		end if;
+
+		-- Изменились валюты
+		if P_INFO in ('P_GET_INPUT', 'P_GET_OUTPUT') then
+			tmp_in_iso := P_GET_INPUT.[FINTOOL];
+			tmp_out_iso := P_GET_OUTPUT.[FINTOOL];
+			if tmp_in_iso != ORI_ISO and tmp_out_iso != ORI_ISO or P_GET_INPUT is null or P_GET_OUTPUT is null then
+				-- вернем прежние значения
+				if P_INFO = 'P_GET_INPUT' then
+					P_GET_INPUT := in_dog;
+				else
+					P_GET_OUTPUT := out_dog;
+				end if;
+			else
+				if P_INFO = 'P_GET_INPUT' then
+					in_dog := P_GET_INPUT;
+					in_iso := tmp_in_iso;
+				elsif P_INFO = 'P_GET_OUTPUT' then
+					out_dog := P_GET_OUTPUT;
+					out_iso := tmp_out_iso;
+				end if;
+--				16.03.10
+				P_RATE := ::[DOCUM_RC].[VCHK_NEW].[CALC_RATE](in_iso, out_iso, &LV.get_date_rate(P_GET_INPUT, P_VALDATE));
+				P_BACK_RATE := true;
+/*				if P_BACK_RATE then
+					P_RATE := 1 / P_RATE;
+				end if;*/
+--				16.03.10
+				
+				if tmp_in_iso != tmp_out_iso then
+					V_CONV := true;
+				else
+					V_CONV := false;
+				end if;
+			end if;
+		elsif P_INFO = 'P_BACK_RATE' then
+			P_RATE := 1 / P_RATE;
+			P_INFO := 'P_RATE';
+		end if;
+		
+		if P_INFO = 'SHOW_AUDIT' then
+			stdio.put_line_buf('<% CALL DOCUM_RC AUDIT ' || this%id || '%>');
+		end if;
+		
+		-- Формирование новых проводок
+		if P_INFO in ('P_GET_INPUT', 'P_GET_OUTPUT', 'P_RATE', '%VAR%.V_SCHEMA', 'P_UKNOWN') then
+		
+			if P_INFO = 'P_UKNOWN' then
+				-- Решили поставить документ на счет невыясненных сумм
+				-- Если поменяли договора, то ставить нельзя
+				if P_UKNOWN then
+					if in_iso != out_iso then
+						-- pragma error('Невозможна постановка на невыяненные с конверсией платежа');	-- avs 25/11/13 BS00584188 не взрываемся, а меняем валюту договора
+						ORI_DOG_OUT := P_GET_OUTPUT;
+						P_GET_OUTPUT := ::[TRC].[LIB].get_dog(::[TRC].[INI].OUR_PART, err_msg, false, in_iso);
+						out_iso := in_iso;
+					end if;
+					put_to_47416(false); -- BS00132505
+				else
+					-- На случай, если флаг "Поставлен на невыясненные" сначала установили а потом сбросили
+					-- Удалим имеющуюся проводку, дабы не задублироваться
+					P_GET_OUTPUT := ORI_DOG_OUT;
+					out_iso := ORI_DOG_OUT.[FINTOOL];
+					::[DOCUM_RC].[LIB].delete_main_doc(this, true, false, false, 'DELETED');
+					P_MAIN_DOC := [LIB].create_main_doc(this);
+					::[RUNTIME].[STR].SET_PAR(this.[BLOCK_DATA], 'UNKNOWN', '');
+					this.[DONE] := replace(this.[DONE],';PROV_PAST_WO_QUIT;');
+				end if;
+			else
+				if P_UKNOWN and in_iso != out_iso then
+					pragma error('Невозможна постановка на невыясненные с конверсией платежа');
+				end if;
+
+				-- Если документ с конверсией от собственного участника и меняется курс, то необходимо перезаполнить поле 36 и 33B
+				if P_GET_INPUT.[FINTOOL] <> P_GET_OUTPUT.[FINTOOL] then							-- 16.03.10
+					::[RUNTIME].[STR].SET_PAR(this.[BLOCK_DATA], 'p_rate', P_RATE); 			-- 16.03.10
+					::[RUNTIME].[STR].SET_PAR(this.[BLOCK_DATA], 'p_back_rate', P_BACK_RATE); 	-- 16.03.10
+				end if;																			-- 16.03.10
+				if P_INFO = 'P_RATE' and P_ISO != P_GET_INPUT.[FINTOOL] and P_GET_INPUT.[TYPE_DOG] = ::[CONTRACT_TYPE]([IDENT] = 'Z') then
+					if P_BACK_RATE then
+						V_33B_SUM := P_SUMMA / P_RATE;
+					else
+						V_33B_SUM := P_SUMMA * P_RATE;
+					end if;
+					-- BFS00032808 Имеет смысл только для МТ103
+					if V_TYPED_COD like '103%' then
+						P_MT103.[F_36] = this.[MT103].[F_36] := P_RATE;
+						V_33B_VAL := P_GET_INPUT.[FINTOOL];
+						P_MT103.[F_33B] = this.[MT103].[F_33B] := Get_F33B(V_33B_VAL, V_33B_SUM);
+					end if;
+					
+					-- RP0262042 а операции редактировании документа присутствует следующий блок, удаляюший имеющуюся квитовку:
+					if  this.[QUIT_DOC] is not null and this.[MAIN_DOC] is not null then
+						if this.[MAIN_DOC].[IN_FOLDER] is not null then
+							for		doc
+							in		this.[MAIN_DOC].[IN_FOLDER].[DOCS_IN_FOLD]
+							where	doc.[DOCUMENT]->([MAIN_DOCUM])[KOD_NAZN_PAY] = ::[KOD_N_PAY]([KOD_NAZN] = 'QUIT_DOC')
+								and nvl(trunc(doc.[DOCUMENT]->(MAIN_DOCUM)[DATE_PROV]), ::[SYSTEM].[VARIABLES].OpDate) >= ::[SYSTEM].[VARIABLES].OpDate
+							loop
+								-- istomin. RP0544705: При комиссии BEN с будущей ДВ квитовок может быть две. Вторая достается из папки платежей.
+								doc.[DOCUMENT].[DEL_COMISS](false, true, 'EDIT');
+								::[DOCUM_RC].[LIB_1].delete_one(doc.[DOCUMENT], 'Квитовка удалена в связи c изменением даты валютирования', true, this, to_postponed == ::[MAIN_DOCUM].[MD_FUN_ADD].is_postponed_part(P_GET_OUTPUT.[CLIENT]));				
+							end loop;
+						end if;	
+						if nvl(trunc(this.[QUIT_DOC]->(MAIN_DOCUM)[DATE_PROV]), ::[SYSTEM].[VARIABLES].OpDate) >= ::[SYSTEM].[VARIABLES].OpDate then -- RP0540011 квитовку с будущей ДВ тоже удалим
+							this.[QUIT_DOC].[DEL_COMISS](false, true, 'EDIT');
+							::[DOCUM_RC].[LIB_1].delete_one(this.[QUIT_DOC], 'Квитовка удалена в связи c изменением даты валютирования', true, this, to_postponed == ::[MAIN_DOCUM].[MD_FUN_ADD].is_postponed_part(P_GET_OUTPUT.[CLIENT]));	
+							::[RUNTIME].[STR].SET_PAR(this.[BLOCK_DATA], 'QUIT_EXIST', false); --(kozlova)
+						end if;					
+					end if;
+					
+					P_MAIN_DOC := ::[DOCUM_RC].[LIB_VAL].make_prov(this, ORI_ISO, ORI_SUMMA, P_GET_INPUT, in_iso, P_GET_OUTPUT, out_iso, P_RATE, P_BACK_RATE, V_SCHEMA, P_VALDATE, new_summa_doc, true, false, V_33B_SUM);
+				else
+					if P_VAR.[0] = 7 then
+						if P_INFO = 'P_GET_OUTPUT' and acc_rc_fintool <> P_GET_OUTPUT.[FINTOOL] and P_GET_OUTPUT.[TYPE_DOG] = ::[CONTRACT_TYPE]([IDENT] = 'Z') then 	-- если выбрали договор в другой валюте,
+							P_MAIN_DOC.[ACC_KT] := null;												-- зачистим счет, иначе make_prov не будет его перевычислять
+						end if;
+						P_MAIN_DOC := ::[DOCUM_RC].[LIB_VAL].make_prov(this, ORI_ISO, ORI_SUMMA, P_GET_INPUT, in_iso, P_GET_OUTPUT, out_iso, P_RATE, P_BACK_RATE, V_SCHEMA, P_VALDATE, new_summa_doc, true);
+						acc_rc_fintool := P_MAIN_DOC.[ACC_KT].[FINTOOL];
+						if P_INFO = 'P_GET_OUTPUT' and acc_rc_fintool <> P_GET_OUTPUT.[FINTOOL] then -- если счет в документе не соответствует валюте выбранного догоаора
+							P_MAIN_DOC.[ACC_KT] := ::[TRC].[LIB].calculate_acc(P_GET_OUTPUT, null, null, false, 'STRANGE_ACC'); -- заменим его на счет н/с
+							acc_rc_fintool := P_GET_OUTPUT.[FINTOOL];
+						end if;
+					end if;
+				end if;
+			end if;
+			V_MAIN_DOC := ::[DOCUM_RC].[SWIFT_DOC_LIB].get_docs_list_id(P_MAIN_DOC, this.[QUIT_DOC]);
+		end if;
+		
+		if P_INFO = 'OK' and (P_VAR.[0] = 7 or P_VAR.[0] = 2 and
+			ORI_DOG_IN.[FINTOOL] != P_GET_INPUT.[FINTOOL] or ORI_DOG_OUT.[FINTOOL] != P_GET_OUTPUT.[FINTOOL])
+		then ----Переспрашивание
+			section_ok;
+		end if;
+		
+		if ::[RUNTIME].[LOB_UTILS].lob_check_validate_info(P_INFO) then			
+			::[RUNTIME].[LOB_UTILS].lob_validate(P_INFO, V_LOB_BUFF, mx_blob);
+			return;
+		end if;
+	end if;
+END;
+
+
+execute is
+	v_new_inv		ref [INVESTIGATION];
+	v_old_inv		ref [INVESTIGATION];
+	v_request_type	ref [INV_STATES];
+	v_reverse_type	ref [INV_STATES];
+	v_message			string;
+	v_rev_message		string;
+	v_link_type		ref [RC_LINK_TYPE];
+	v_epd 			ref [DOCUM_RC];
+	v_inv_type		ref [INV_TYPES];
+	v_inv_state		ref [INV_STATES];
+	v_cr_inv		ref [INVESTIGATION];
+BEGIN
+	::[TRC].[LIB_MFIL].check_context(this.[FILIAL]);
+
+	--Статистика обработки
+	::[DOCUM_RC].[LIB_NEW].put_sla_event(&METHOD$CLASS, this);
+	-- выполним подмену для 007
+	if this.[TYPE_DOC] = '007' then
+		P_CLINFO := rpad(V_COMMENT, 6*(35 + length(NL$))-length(NL$)) || V_77A;
+		P_DEST := V_DOPINFO;
+	end if;
+
+    if P_VAR.[0] = 1 then -- Подтвердить отказ
+		this.[MAIN_DOC] := P_MAIN_DOC;
+		this.[DO_REJECT](P_VAR.[REJECT].[CODE], P_VAR.[REJECT].[REZ]);
+	elsif P_VAR.[0] = 2 and ORI_DOG_IN.[FINTOOL] = P_GET_INPUT.[FINTOOL] and ORI_DOG_OUT.[FINTOOL] = P_GET_OUTPUT.[FINTOOL] then -- Переадресовать
+		::[RUNTIME].[STR].SET_PAR(this.[BLOCK_DATA], 'UNKNOWN', ''); -- BS00141341 сбросим признак установки на НС при переадресации
+		this.[READDRESS](V_READDR, NULL, NULL, NULL);
+	elsif P_VAR.[0] = 3 then -- Удалить отказ
+		this.[DELETE_REJ];
+	end if;
+	
+	/*if &LV.is_COM_BEN(P_CHARGE, docum_rc == this) then -- в [BLOCK_DATA] пропишем признак того, что комиссию BEN уже взяли -- а может, и надо...
+		::[RUNTIME].[STR].SET_PAR(this.[BLOCK_DATA], 'TAKE_COM_BEN', true);
+	else
+		::[RUNTIME].[STR].get_bool_par(this.[BLOCK_DATA], 'TAKE_COM_BEN', true);
+	end if;*/
+	
+	if V_CR_210 then
+		::[RUNTIME].[STR].SET_PAR(this.[BLOCK_DATA], 'MT210', true);
+	else
+		::[RUNTIME].[STR].get_bool_par(this.[BLOCK_DATA], 'MT210', true);
+	end if;
+
+	--RP0013708 Сохранение опций открытия дела
+	if V_APP_INV then
+		::[DEFVALS].[SLIB].SaveBool(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_OPEN_INV',V_OPEN_INV);
+		::[DEFVALS].[SLIB].SaveBool(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_CREATE_MT195',V_CREATE_MT195);
+		::[DEFVALS].[SLIB].SaveBool(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_OPEN_INV_INF',V_OPEN_INV_INF);
+		--Если включена опция "В дело", то создаем дело
+		if V_OPEN_INV and P_UKNOWN and V_INV is null and P_VAR.[0] = 7 then
+			::[INVESTIGATION].[CREATE_INV](::[INV_TYPES]([CODE] = 'SWIFT_UNDEF_SUM'), ::[INV_STATES]([CODE] = 'SW_DOC_TO_UNDEF'), this, this.[MAIN_DOC], null, P_NOTES == last_error);
+		end if;
+	end if;
+	
+	-- сброс подсветки полей
+	if ORI_DOC_RC%state <> this%state then
+		::[RUNTIME].[STR].set_par(this.[BLOCK_DATA], 'color_fields', '');
+	end if;
+			
+	if ORI_DOC_RC.[TYPE_DOC] = '007' then
+		--Выясним тип запроса
+		v_request_type := ::[INVESTIGATION].[LIB].get_state(V_TYPED_COD, P_99_TYPE,v_inf_is_in, v_link_type, v_message);
+		v_reverse_type := ::[INVESTIGATION].[LIB].get_rev_state(V_TYPED_COD, P_99_TYPE,v_inf_is_in, v_link_type, v_rev_message);
+
+		if substr(V_TYPED_COD, 2, 2) = '99' then
+			::[RUNTIME].[STR].set_par(this.[BLOCK_DATA], 'P_99_TYPE', p_99_type.[0]);	
+		end if;
+		
+
+		--Отвязываем предыдущий документ, если поменялся, либо был заполнен и удалили
+		if v_inf_epd is not null and v_inf_epd != nvl(V_ORIG_EPD,0)  then
+			::[DOCUM_RC].[LIB_QA].del_sw_original_epd(this, v_inf_epd, v_link_type);
+			if V_APP_INV then
+				v_old_inv := ::[INVESTIGATION].[LIB].get_inv_on_rd(this);
+				if v_old_inv is not null then
+					::[INVESTIGATION].[LIB].proc_swift_inv(v_old_inv,  v_reverse_type, 'MT'||V_TYPED_COD, v_message, this, p_reverse == true);
+				end if;						
+			end if;
+		end if;
+
+		--Сбрасываем флаги множества документов
+		if V_ORIG_EPD is not null then
+			::[RUNTIME].[STR].set_par(this.[BLOCK_DATA], 'MANY_DOCS', '');
+			::[RUNTIME].[STR].set_par(this.[BLOCK_DATA], 'MANY_DOC_IDS', '');
+
+			--Если документ поменялся								
+			if 	nvl(v_inf_epd,0) != V_ORIG_EPD then	
+	
+				--Привязываем исходный новый документ
+				v_epd := ::[DOCUM_RC].[LIB_QA].set_sw_original_epd(this, V_ORIG_EPD, v_link_type);
+				if V_APP_INV then
+					v_new_inv := ::[INVESTIGATION].[LIB].get_inv_on_epd(v_epd);
+					::[INVESTIGATION].[LIB].proc_swift_inv(v_new_inv,  v_request_type, 'MT'||V_TYPED_COD, v_message, this);
+				end if;		
+			end if;				
+		end if;
+		
+		--Привязали новое дело, необходимо привязать документ
+		if  nvl(V_INV,0) != nvl(v_inf_inv,0) and V_APP_INV then
+			--Если дело привязали ранее, то ничего обрабатываем, иначе привязываем документ к делу
+			if v_new_inv is  null then
+				--Если дело сменили сначала отвязываем старое
+				if v_inf_inv is not null and v_inf_inv != nvl(V_INV,0) then
+					::[INVESTIGATION].[LIB].proc_swift_inv(v_inf_inv,  v_reverse_type, 'MT'||V_TYPED_COD, v_rev_message, this, p_reverse == true);
+				end if;
+				--n99 просто привязываем к делу
+				if v_request_type is null then
+					--Сообщение уже привязано ранее
+					null;
+				else
+					::[INVESTIGATION].[LIB].proc_swift_inv(V_INV,  v_request_type, 'MT'||V_TYPED_COD, v_message, this);
+				end if;
+			end if;
+		--Если дело не указано, то проверяем опцию открытия дела и создаем его.
+		else
+			if V_APP_INV and P_VAR.[0] = 7 then		
+				if V_OPEN_INV_INF then
+					if v_inf_is_in then
+						v_inv_type := ::[INV_TYPES]([CODE] = 'SWIFT_IN_REQ');
+						v_inv_state := ::[INV_STATES]([CODE] = 'SW_REQ_RECEIVED');
+					else
+						v_inv_type := ::[INV_TYPES]([CODE] = 'SWIFT_OUT_REQ');
+						v_inv_state := ::[INV_STATES]([CODE] = 'SW_REQ_CREATED');
+						
+					end if;
+					
+					if ::[DOCUM_RC].[LIB_NEW].is_fin_doc(V_ORIG_EPD.[TYPE_DOC])  then
+						::[INVESTIGATION].[CREATE_INV](v_inv_type, v_inv_state, V_ORIG_EPD, V_ORIG_EPD.[MAIN_DOC], this, P_NOTES == last_error);
+					else
+						v_cr_inv := ::[INVESTIGATION].[CREATE_INV](v_inv_type, v_inv_state, null, null, this, P_NOTES == last_error);	
+						if V_ORIG_EPD is not null then
+							::[INVESTIGATION].[LIB].proc_swift_inv(v_cr_inv, null, 'MT'||::[DOCUM_RC].[LIB_VIEW].get_type_doc_sform(V_ORIG_EPD), 'Исходное сообщение', V_ORIG_EPD);
+						end if;
+					end if;
+				else
+				--Может измениться только тип 99
+					if nvl(v_99_type,1) != P_99_TYPE.[0] and P_99_TYPE.[0] in (2,3) then
+						::[INVESTIGATION].[LIB].proc_swift_inv(V_INV,  v_request_type, 'MT'||V_TYPED_COD, v_message, this);
+					end if;
+				end if;
+			end if;
+		end if;
+	end if;
+
+	--Если включено приложение "Расследования SWIFT", документ поставлен на выясненные и включена опция "Создать запрос"
+	if V_APP_INV and V_CREATE_MT195 and P_UKNOWN then
+		--В качестве шаблона необходимо передать шаблон по умолчанию
+		V_CASE.[0] := 4;
+	
+		stdio.put_line_buf('<% PLPCALL %PARAM%.P_MAIN_DOC.[INF_MES_BY_DOC](%PARAM%.P_DOC_RC_REF => '''|| this%id ||''', %PARAM%.P_CASE => %VAR%.V_CASE )%>' || NL$);	
+	end if;
+	--//RP0013708
+
+	if P_PRINT then
+		stdio.put_line_buf('<% CALL DOCUM_RC PRINT_SWIFT ' || this%id || '%>' || NL$);
+	end if;
+
+	--Статистика обработки
+	::[DOCUM_RC].[LIB_NEW].put_sla_event_f(&METHOD$CLASS, this);
+END;
+end;
+end;

@@ -1,0 +1,170 @@
+class HOOK_BANK;
+
+@name('Получить строковое представление адреса')
+@tag('COPIED')
+static method GET_PRINT_ADDR_1 is
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+dp  integer:=0; --управление debug_pipe
+dp1 integer:=0;	--управление debug_pipe
+
+fmt	   string(10):='dd/mm/yyyy';
+fmt24  string(22):='dd/mm/yyyy HH24:MI:SS';
+
+public g_V_STRUCT_0 number; --Башкиров В.Г. 27.01.2025
+public g_V_OKTMO_REF ref [OKTMO]; --Башкиров В.Г. 07.01.2025 для фильтров в Представлениях для выбора адресных объектов
+
+
+public function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+public function Get_ADM_or_MUN(p_o_pa [PERSONAL_ADDRESS]) return string(1000) is
+ret_nStruct number(1);
+begin
+	if g_V_STRUCT_0 is not null then
+		&debug('.Get_ADM_or_MUN -- Тип адресного деления задан в операциях создания/редактирования адреса. Будем использовать его: '||g_V_STRUCT_0,dp)
+		ret_nStruct:=g_V_STRUCT_0;
+	elsif p_o_pa.[INPUT_STRUCT] is null then
+		ret_nStruct:=1;
+		&debug('.Get_ADM_or_MUN -- Тип адресного деления пуст. Будем использовать: 1 - адм.-тер.',dp)
+	elsif p_o_pa.[TYPE]=::[ADDRESS_TYPE]([KOD]='SWIFT_ADDRESS') then
+		ret_nStruct:=1;
+		&debug('.Get_ADM_or_MUN -- Тип адреса SWIFT_ADDRESS. Будем использовать Тип адресного деления: 1 - адм.-тер.',dp)
+	end if;
+
+	ret_nStruct:=coalesce(g_V_STRUCT_0, ret_nStruct,p_o_pa.[INPUT_STRUCT],1); -- +g_V_STRUCT_0 -Башкиров В.Г. 27.01.2025
+	&debug('.Get_ADM_or_MUN -<- ret_nStruct='||ret_nStruct,dp)
+	return ret_nStruct;
+end;
+
+public function GetFmtAddrO(p_o_pa [PERSONAL_ADDRESS]) return string(1000) is
+ret_sFmt string(1000);
+nStruct number(1);
+begin
+	if p_o_pa.[TYPE].[KOD] like 'ASV%' then
+			ret_sFmt:=nvl(::[FP_TUNE].[LIB].get_str_value('PSB_ASV_SH_ADDR', null, '0')
+			  --,'ZIP,REGION_TE,DISTRICT_TE,MAIN_CITY_TE,CITY_TE,STREET,HOUSE_NT,BUILD_NT,KORPUS_NT,FLAT_NT');
+			  -- Формат из Настройки PATTERN_ADDRESS-Формат адреса для
+			  --  ZIP,COUNTRY_CODE,REGION_TE,DISTRICT_TE,MAIN_CITY_TE,CITY_TE,SUBAREA_NT,STREET,HOUSE_NT,BUILD_ONLY,KORPUS_NT,FLAT_NT 	--BUILD_ONLY,KORPUS_NT,
+				,'ZIP,COUNTRY_CODE,REGION_TE,DISTRICT_TE,MAIN_CITY_TE,CITY_TE,SUBAREA_NT,STREET,HOUSE_NT,BUILD,KORPUS_ONLY_NT,FLAT_NT');--BUILD,KORPUS_ONLY_NT
+			&debug('.GetFmtAddr -- < Формат для АСВ:'||ret_sFmt,dp)
+	else
+		nStruct:=Get_ADM_or_MUN(p_o_pa);
+		if nStruct = 1 then
+			ret_sFmt:=nvl(::[FP_TUNE].[LIB].get_str_value('PSB_ADM_SH_ADDR', null, '0')
+				,'COUNTRY_NO,ZIP,REGION,DISTRICT,MAIN_CITY,CITY,SUBAREA,STREET,HOUSE,KORPUS_ONLY,BUILD,FLAT');
+			&debug('.GetFmtAddr -- < Тип адресного деления: 1 - адм.-тер. Формат:'||ret_sFmt,dp)
+		elsif nStruct = 2 then
+			ret_sFmt:=nvl(::[FP_TUNE].[LIB].get_str_value('PSB_MUN_SH_ADDR', null, '0')
+				,'COUNTRY_NO,ZIP,REGION,DISTRICT,SETTLEMENT,MAIN_CITY,CITY,SUBAREA,STREET,HOUSE,KORPUS_ONLY,BUILD,FLAT');
+			&debug('.GetFmtAddr -- < Тип адресного деления: 2 - муниципал. Формат:'||ret_sFmt,dp)
+		end if;
+	end if;
+	return ret_sFmt;
+end;
+
+public function GetFmtAddr(p_rPA ref [PERSONAL_ADDRESS]) return string(1000) is
+oPA [PERSONAL_ADDRESS];
+begin
+	oPA:=p_rPA;
+	return GetFmtAddrO(oPA);
+end;
+
+-- Башкиров В.Г. 19.02.2025
+public procedure GetInfoPersonalAddress(p_oPA [PERSONAL_ADDRESS], p_pref_info string (100) default null) is
+begin
+	if trim(p_pref_info) is not null then p_pref_info:=trim(p_pref_info)||' '; end if;
+	&debug('=== '||p_pref_info,dp)
+	if p_oPA.[TYPE] is not null then null;             &debug(p_pref_info||'Тип адреса                ='||p_oPA.[TYPE].[KOD],dp)
+	end if;
+	if p_oPA.[INPUT_STRUCT] is not null then null;     &debug(p_pref_info||'Тип деления(адм/муниципал)='||iif(p_oPA.[INPUT_STRUCT]=2,'2-Муниципал.',p_oPA.[INPUT_STRUCT]||'-Адм.'),dp)
+	end if;
+	if p_oPA.[POST_CODE] is not null then null;        &debug(p_pref_info||'Почтовый индекс           ='||p_oPA.[POST_CODE],dp)
+	end if;
+	if p_oPA.[CITY].[NAME] is not null then null;      &debug(p_pref_info||'Населенный пункт (ref)    ='||p_oPA.[CITY].[NAME]      ||'   ['||p_oPA.[CITY].[OKTMO].[CODE]||']-'||p_oPA.[CITY].[OKTMO].[NAME],dp)
+	end if;
+	if p_oPA.[STREET_REF].[NAME] is not null then null;&debug(p_pref_info||'Улица нас.пункта (ref)    ='||p_oPA.[STREET_REF].[NAME]||'   ['||p_oPA.[STREET_REF].[OKTMO].[CODE]||']-'||p_oPA.[STREET_REF].[OKTMO].[NAME],dp)
+	end if;
+	if p_oPA.[HOUSE] is not null then null;            &debug(p_pref_info||'Дом                       ='||p_oPA.[HOUSE],dp)
+	end if;
+	if p_oPA.[KORPUS] is not null then null;           &debug(p_pref_info||'Корпус                    ='||p_oPA.[KORPUS],dp)
+	end if;
+	if p_oPA.[FLAT] is not null then null;             &debug(p_pref_info||'Квартира / комната        ='||p_oPA.[FLAT],dp)
+	end if;
+	if p_oPA.[DISTRICT] is not null then null;         &debug(p_pref_info||'Район нас.пункта (ref)    ='||p_oPA.[DISTRICT].[NAME]  ||'   ['||p_oPA.[DISTRICT].[OKTMO].[CODE]||']-'||p_oPA.[DISTRICT].[OKTMO].[NAME],dp)
+	end if;
+	if p_oPA.[HOUSE_REF] is not null then null;        &debug(p_pref_info||'Дом (ref)                 ='||p_oPA.[HOUSE_REF].[NAME] ||'   ['||p_oPA.[HOUSE_REF].[OKTMO].[CODE]||']-'||p_oPA.[HOUSE_REF].[OKTMO].[NAME],dp)
+	end if;
+	if p_oPA.[STREET_STR] is not null then null;       &debug(p_pref_info||'Улица (строкой)           ='||p_oPA.[STREET_STR],dp)
+	end if;
+	if p_oPA.[REG_DATE] is not null then null;         &debug(p_pref_info||'Дата регистрации          ='||to_char(p_oPA.[REG_DATE],fmt),dp)
+	end if;
+	if p_oPA.[REG_END_DATE] is not null then null;     &debug(p_pref_info||'Дата окончания регистрации='||to_char(p_oPA.[REG_END_DATE],fmt),dp)
+	end if;
+	if p_oPA.[ADDR_OBJ] is not null then null;         &debug(p_pref_info||'Адресный объект           ='||p_oPA.[ADDR_OBJ]%class||'.'||p_oPA.[ADDR_OBJ]%id||' '||p_oPA.[ADDR_OBJ].[FULL_NAME]||'   ['||p_oPA.[ADDR_OBJ].[OKTMO].[CODE]||']-'||p_oPA.[ADDR_OBJ].[OKTMO].[NAME],dp)
+	end if;
+	if p_oPA.[OKTMO] is not null then null;            &debug(p_pref_info||'ОКТМО                     ='||'['||p_oPA.[OKTMO].[CODE]||']-'||p_oPA.[OKTMO].[NAME],dp)
+	end if;
+  --if p_oPA.[FIX_PRINT] is not null then null;        &debug(p_pref_info||'Фиксировать               ='||p_oPA.[FIX_PRINT],dp)
+  --end if;
+  --if p_oPA.[IMP_STR] is not null then null;          &debug(p_pref_info||'Адрес строкой             ='||p_oPA.[IMP_STR],dp)
+  --end if;
+													   &debug(p_pref_info||'Фиксировать               ='||p_oPA.[FIX_PRINT],dp)
+													   &debug(p_pref_info||'Адрес строкой             ='||p_oPA.[IMP_STR],dp)
+end;
+
+public procedure GetInfoPersonalAddress(p_rPA ref [PERSONAL_ADDRESS], p_pref_info string (100) default null) is
+oPA [PERSONAL_ADDRESS];
+begin
+	oPA:=p_rPA;
+	GetInfoPersonalAddress(oPA);
+end;
+GET_PRINT_ADDR_1 (
+	@name('Адрес') P_ADDR in [PERSONAL_ADDRESS]
+) return [STRING_250] is
+
+execute is
+/*************************************************************************************************\
+ * Операция предназначена для построения строкового представления адреса                         *
+ * (заполнения реквизита адреса [IMP_STR] структуры [PERSONAL_ADRESS])                           *
+ * Данный хук вызывается из библиотечной операции ::[PERSONAL_ADDRESS].[LIB]                     *
+ * в функции Get_For_Print(P_ADDR). Дистрибутивного заполнения адреса строкй нет,                *
+ * в банковском хуке GET_PRINT_ADDR_1 есть возможность сформировать "Адрес строкой"              *
+ * как необходимо для банка.                                                                     *
+ * Параметры:                                                                                    *
+ *  -> P_ADDR [PERSONAL_ADDRESS] - Структура типа "Адрес", по которой должно быть построено      *
+ *                                 текстовое представление.                                      *
+\*************************************************************************************************/
+oPA [PERSONAL_ADDRESS];
+nStruct number(1);					-- Структура адресного деления: 1 - административно-территориальное, 2 - муниципальное
+bUse_addr_struct boolean:=false;	--Брать структуру адресного деления с адреса
+sFmt1 string(1000);
+sFmt2 string(1000);
+
+ret_str string(1024);
+begin
+	oPA:=P_ADDR;
+	::[HOOK_BANK].[GET_PRINT_ADDR_1].GetInfoPersonalAddress(oPA,'Получить строку адреса.');
+
+	if oPA.[TYPE].[KOD]='SWIFT_ADDRESS' then
+		&debug('Тип адреса SWIFT_ADDRESS. Используем ::[HOOK_BANK].[EXP_GET_PR_ADDR]',dp)
+		ret_str := ::[HOOK_BANK].[EXP_GET_PR_ADDR](P_ADDR);
+	else
+		if oPA.[FIX_PRINT] and oPA.[IMP_STR] is not null then
+			ret_str:=oPA.[IMP_STR];
+			&debug('Адрес строкой.Ручной ввод.Возвращаем:'||ret_str,dp)
+		else
+			--ret_str := ::[PERSONAL_ADDRESS].[SLIB].addr_to_str(p_addr, GetFmtAddr(oPA), ', ','0', p_use_addr_struct == bUse_addr_struct);
+			nStruct := Get_ADM_or_MUN(oPA);
+			&debug('nStruct='||nStruct||' Вызываем ::[PERSONAL_ADDRESS].[PSH_SLIB].addr_to_str',dp) -- updated CHANGE_SHORT_NAME PSB_SLIB->PSH_SLIB 14/10/25
+
+			ret_str := ::[PERSONAL_ADDRESS].[PSH_SLIB].addr_to_str(oPA, GetFmtAddrO(oPA), ', ','0', nStruct); -- updated CHANGE_SHORT_NAME PSB_SLIB->PSH_SLIB 14/10/25
+			ret_str := substr(ret_str, 1, ::[PERSONAL_ADDRESS].[IMP_STR]%size);
+		end if;
+	end if;
+	
+	ret_str:=trim(ret_str);	--Башкиров В.Г. 23.06.2025
+	&debug('<('||length(ret_str)||')'||ret_str,dp)
+	return ret_str;
+end;
+end;
+end;

@@ -1,0 +1,210 @@
+class PR_CRED;
+
+@optimize(false)
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Вычислить параметр')
+@tag('COPIED')
+static method PSH_CALC_PAR is
+
+pragma include(::[RUNTIME].[DEBUG_MACRO]);
+dp  integer:=0;	--управление debug_pipe
+dp2 integer:=0;	--управление debug_pipe
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+fmt	   string(10):='dd/mm/yyyy';
+fmtHMS string(22):='dd/mm/yyyy HH24:MI:SS';
+
+--Башкиров В.Г. 07.02.2019 Добавлена корректировка наименования для 60322  PSH_60323-ПСХБ. Счет  учета штрафов (пени) по кредитам
+procedure EditName60322 (AccAct ref [AC_FIN], AccPas ref [AC_FIN]) is
+msg string(2000);
+begin
+	if AccAct.[TARGET]=::[INTEND_FOR]([CODE]='PSH_60323') then --ПСХБ. Счет  учета штрафов (пени) по кредитам
+		if AccPas.[NAME]='Расчеты с прочими кредиторами' then
+		   AccPas.[NAME]:=AccAct.[NAME];
+		   msg:=AccPas.[MAIN_V_ID]||' "'||AccPas.[NAME]||'" ЗАМЕНА на "'||AccAct.[NAME]||'"';
+		   &debug('.EditName60322 -- '||msg,dp2)
+		   ::[CL_PRIV].[PSH_DATE_DEATH].UniLog(
+				Substr(msg,1,350),
+				Rpad('60322',10),				--тема
+				'_'||&METHOD$SNAME||'.log');	--log
+		end if;
+	end if;
+end;
+PSH_CALC_PAR (
+	@name('Параметр')                P_PAR  in [STRING_16],
+	@name('Документ')                P_DOC  in [DOCUMENT_REF],
+	@name('Продукт')                 P_PROD in [A_PROD_REF],
+	@name('Дополнительный параметр') P_ADDS in [STRING_32000]
+) return [MEMO] is
+
+execute is
+ExVal [MEMO]:='null';
+md ref [MAIN_DOCUM];
+OpDateBranch [DATE];
+AcDtRef ref [AC_FIN];
+AcKtRef ref [AC_FIN];
+AccAct ref [AC_FIN];
+AccPas ref [AC_FIN];
+paf  ref [PAIR_ACC_FIN];
+paf2 ref [PAIR_ACC_FIN];
+Summ_NT_A [SUMMA];
+Summ_NT_P [SUMMA];
+
+DateCalc [DATE];
+result boolean := true; -- Возвращаемый признак удачного выполнени "Привести в соответствие пару"
+PRODUCT_DT_CLASS string(32);
+PRODUCT_CT_CLASS string(32);
+begin
+	var timeStart number:=utils.get_time;
+  --&debug('Старт:'||to_char(sysdate,'hh24:mm:ss')||LF$||utils.call_stack, dp2)
+    &debug('Старт:'||to_char(sysdate,'hh24:mm:ss'), dp2)
+	
+	begin
+		&debug('P_PAR ='||P_PAR||' P_ADDS='||P_ADDS,dp)
+		&debug('P_DOC ='||P_DOC%class||'.'||P_DOC%id||'.'||P_DOC%state,dp)
+		&debug('P_PROD='||P_PROD%class||'.'||P_PROD%id||'.'||P_PROD.[COM_STATUS].[CODE],dp)
+		/** /
+		&debug('-- Контроль на необходимость свертки парных ЛС для МСФО-корректировок',dp2)
+		::[CL_PRIV].[PSH_DATE_DEATH].UniLog(
+			Substr(P_DOC%class||'.'||P_DOC%id||' Парность МСФО-корректировок',1,350),
+			Rpad('Парность',10),			--тема
+			'_'||&METHOD$SNAME||'.log');	--log
+		/**/
+	exception when others then null;
+	end;
+	
+	if P_PAR='PSB_CR_IFRS_POSTM' then
+		if P_DOC%class='MAIN_DOCUM' then
+			md:=P_DOC;
+			AcDtRef:=md.[ACC_DT];
+			AcKtRef:=md.[ACC_KT];
+			PRODUCT_DT_CLASS:= md.[PRODUCT_DT].[ACC_PROD]%class;
+			PRODUCT_CT_CLASS:= md.[PRODUCT_CT].[ACC_PROD]%class;
+
+
+			if AcDtRef.[VID]=::[TYPE_ACC]([CODE]='А') then AccAct:=AcDtRef; end if; --активный
+			if AcDtRef.[VID]=::[TYPE_ACC]([CODE]='П') then AccPas:=AcDtRef; end if; --пассивный
+			if AcKtRef.[VID]=::[TYPE_ACC]([CODE]='А') then AccAct:=AcKtRef; end if; --активный
+			if AcKtRef.[VID]=::[TYPE_ACC]([CODE]='П') then AccPas:=AcKtRef; end if; --пассивный
+			
+			if AccAct is not null then
+				&debug('Ищем: '||AccAct.[MAIN_V_ID]||'(А)',dp2)
+				for (select p(p%id	:	C_ID) in ::[PAIR_ACC_FIN]
+			  --where p.[ACC_KT]=AccAct and p.[ACC_DT]=AccPas)
+				where p.[ACC_KT]=AccAct) loop
+					paf:=p.C_ID;
+					exit;
+				end loop;
+			end if;
+			if AccPas is not null then
+				&debug('Ищем: '||AccPas.[MAIN_V_ID]||'(П)',dp2)
+				for (select p(p%id	:	C_ID) in ::[PAIR_ACC_FIN]
+			  --where p.[ACC_KT]=AccAct and p.[ACC_DT]=AccPas)
+				where p.[ACC_DT]=AccPas) loop
+					paf2:=p.C_ID;
+					exit;
+				end loop;
+			end if;
+			
+			if paf is not null then
+				DateCalc:=coalesce(md.[DATE_VAL],md.[DATE_PROV],OpDateBranch,[SYSTEM].[OP_DATE]);
+				AccAct:=paf.[ACC_KT];
+				AccPas:=paf.[ACC_DT];
+				EditName60322(AccAct,AccPas); --Башкиров В.Г. 07.02.2019 Добавлена корректировка наименования для 60322 --Учтенные штрафы (пени) по КД № [NUM_DOG] от [DATE_BEGIN] г. с [CLIENT_R]
+				&debug('(1)Пара: '||AccAct.[MAIN_V_ID]||'(А) Отношение счета к продукту:'||AccAct.[TO_PRODUCT].[CODE]||' '||AccPas.[MAIN_V_ID]||'(П) Отношение счета к продукту:'||AccPas.[TO_PRODUCT].[CODE],dp2)
+				if AccAct.[TO_PRODUCT] in (::[ACC_PRODUCT]([CODE]='DEPN'),::[ACC_PRODUCT]([CODE]='DEPOSIT_PRIV'),::[ACC_PRODUCT]([CODE]='DEPOSIT_ORG'),::[ACC_PRODUCT]([CODE]='DEPOSIT_MULT'), --Башкиров В.Г. 06.02.2019 Добавлены депозиты
+										   ::[ACC_PRODUCT]([CODE]='PR_CRED'),
+										   ::[ACC_PRODUCT]([CODE]='OVERDRAFT'),
+										   ::[ACC_PRODUCT]([CODE]='GUARANTIES'),
+										   ::[ACC_PRODUCT]([CODE]='FACTORING'))
+					or
+				   AccPas.[TO_PRODUCT] in (::[ACC_PRODUCT]([CODE]='DEPN'),::[ACC_PRODUCT]([CODE]='DEPOSIT_PRIV'),::[ACC_PRODUCT]([CODE]='DEPOSIT_ORG'),::[ACC_PRODUCT]([CODE]='DEPOSIT_MULT'), --Башкиров В.Г. 06.02.2019 Добавлены депозиты
+				   						   ::[ACC_PRODUCT]([CODE]='PR_CRED'),
+				   						   ::[ACC_PRODUCT]([CODE]='OVERDRAFT'),
+				   						   ::[ACC_PRODUCT]([CODE]='GUARANTIES'),
+				   						   ::[ACC_PRODUCT]([CODE]='FACTORING'))
+				   	or PRODUCT_DT_CLASS in ('DEPOSIT_PRIV','DEPOSIT_ORG','DEPOSIT_MULT','KRED_PERS','KRED_CORP','KRED_BANK','OVERDRAFT','GUARANTIES','FACTORING')
+				   	or PRODUCT_CT_CLASS in ('DEPOSIT_PRIV','DEPOSIT_ORG','DEPOSIT_MULT','KRED_PERS','KRED_CORP','KRED_BANK','OVERDRAFT','GUARANTIES','FACTORING')
+				then
+					Summ_NT_A:=F.a('И'||paf.[ACC_KT]||'СН',DateCalc+1);
+					Summ_NT_P:=F.a('И'||paf.[ACC_DT]||'СН',DateCalc+1);
+					&debug('(1)Пара: '||AccAct.[MAIN_V_ID]||'(А) СуммаНП='||Summ_NT_A||' '||AccPas.[MAIN_V_ID]||'(П) СуммаНП='||Summ_NT_P||' Суммы на утро '||to_char(DateCalc+1,fmt),dp2)
+					if Summ_NT_A>0 or Summ_NT_P<0 or (Summ_NT_A<>0 and Summ_NT_P<>0) then
+						OpDateBranch:=coalesce(md.[FILIAL].[OP_DATE],[SYSTEM].[OP_DATE]);
+						if DateCalc>OpDateBranch then DateCalc:=OpDateBranch; end if; --Башкиров В.Г. 22.01.2019 Не нужно приводить в соответсвие пару в будущем ОД (Замечение Гривцовой С.В.)
+						&debug('(1)Приводим в соответсвие пару c  '||to_char(DateCalc,fmt),dp2)
+						/** / -- Башкиров В.Г. 29.11.2023 Отключил из-за проблем с МСФО
+						result:=paf.[PROCESS](
+						 iif(DateCalc>=OpDateBranch,true,false) --Обработка счетов в текущем опердне
+						,iif(DateCalc< OpDateBranch,true,false) --Обработка счетов в закрытых оперднях
+						,DateCalc	--Дата начала пересчета
+						,null);		--Назначение платежа
+						
+						if    result=true   then ExVal:='Пара была успешно обработана(не обязательно проходила сальдирование)';
+						elsif result=false  then ExVal:='произошла ошибка (до или во время сальдирования)';
+						else					 ExVal:='Пара проходила сальдирование';
+						end if;
+						/**/
+						&debug('(1)      '||AccAct.[MAIN_V_ID]||'(А) СуммаНП='||AccAct.[SALDO_NT]||' '||AccPas.[MAIN_V_ID]||'(П) СуммаНП='||AccPas.[SALDO_NT],dp2)
+					else
+						&debug('(2)Приводить в соответсвие пару c '||to_char(DateCalc,fmt)||' не нужно!',dp2)
+					end if;
+				end if;
+			end if;
+			
+			if paf2 is not null and (paf is null or paf<>paf2) then
+				DateCalc:=coalesce(md.[DATE_VAL],md.[DATE_PROV],OpDateBranch,[SYSTEM].[OP_DATE]);
+				AccAct:=paf2.[ACC_KT];
+				AccPas:=paf2.[ACC_DT];
+				EditName60322(AccAct,AccPas); --Башкиров В.Г. 07.02.2019 Добавлена корректировка наименования для 60322 --Учтенные штрафы (пени) по КД № [NUM_DOG] от [DATE_BEGIN] г. с [CLIENT_R]
+				&debug('(2)Пара: '||AccAct.[MAIN_V_ID]||'(А) Отношение счета к продукту:'||AccAct.[TO_PRODUCT].[CODE]||' '||AccPas.[MAIN_V_ID]||'(П) Отношение счета к продукту:'||AccPas.[TO_PRODUCT].[CODE],dp2)
+				if AccAct.[TO_PRODUCT] in (::[ACC_PRODUCT]([CODE]='DEPN'),::[ACC_PRODUCT]([CODE]='DEPOSIT_PRIV'),::[ACC_PRODUCT]([CODE]='DEPOSIT_ORG'),::[ACC_PRODUCT]([CODE]='DEPOSIT_MULT'), --Башкиров В.Г. 06.02.2019 Добавлены депозиты
+										   ::[ACC_PRODUCT]([CODE]='PR_CRED'),
+										   ::[ACC_PRODUCT]([CODE]='OVERDRAFT'),
+										   ::[ACC_PRODUCT]([CODE]='GUARANTIES'),
+										   ::[ACC_PRODUCT]([CODE]='FACTORING'))
+					or
+				   AccPas.[TO_PRODUCT] in (::[ACC_PRODUCT]([CODE]='DEPN'),::[ACC_PRODUCT]([CODE]='DEPOSIT_PRIV'),::[ACC_PRODUCT]([CODE]='DEPOSIT_ORG'),::[ACC_PRODUCT]([CODE]='DEPOSIT_MULT'), --Башкиров В.Г. 06.02.2019 Добавлены депозиты
+				   						   ::[ACC_PRODUCT]([CODE]='PR_CRED'),
+				   						   ::[ACC_PRODUCT]([CODE]='OVERDRAFT'),
+				   						   ::[ACC_PRODUCT]([CODE]='GUARANTIES'),
+				   						   ::[ACC_PRODUCT]([CODE]='FACTORING'))
+				   	or PRODUCT_DT_CLASS in ('DEPOSIT_PRIV','DEPOSIT_ORG','DEPOSIT_MULT','KRED_PERS','KRED_CORP','KRED_BANK','OVERDRAFT','GUARANTIES','FACTORING')
+				    or PRODUCT_CT_CLASS in ('DEPOSIT_PRIV','DEPOSIT_ORG','DEPOSIT_MULT','KRED_PERS','KRED_CORP','KRED_BANK','OVERDRAFT','GUARANTIES','FACTORING')
+				then
+					Summ_NT_A:=F.a('И'||paf2.[ACC_KT]||'СН',DateCalc+1);
+					Summ_NT_P:=F.a('И'||paf2.[ACC_DT]||'СН',DateCalc+1);
+					&debug('(2)Пара: '||AccAct.[MAIN_V_ID]||'(А) СуммаНП='||Summ_NT_A||' '||AccPas.[MAIN_V_ID]||'(П) СуммаНП='||Summ_NT_P||' Суммы на утро '||to_char(DateCalc+1,fmt),dp2)
+					if Summ_NT_A>0 or Summ_NT_P<0 or (Summ_NT_A<>0 and Summ_NT_P<>0) then
+						OpDateBranch:=coalesce(md.[FILIAL].[OP_DATE],[SYSTEM].[OP_DATE]);
+						if DateCalc>OpDateBranch then DateCalc:=OpDateBranch; end if; --Башкиров В.Г. 22.01.2019 Не нужно приводить в соответсвие пару в будущем ОД (Замечение Гривцовой С.В.)
+						/** / -- Башкиров В.Г. 29.11.2023 Отключил из-за проблем с МСФО
+						&debug('(2)Приводим в соответсвие пару c  '||to_char(DateCalc,fmt),dp2)
+						result:=paf2.[PROCESS](
+						 iif(DateCalc>=OpDateBranch,true,false) --Обработка счетов в текущем опердне
+						,iif(DateCalc< OpDateBranch,true,false) --Обработка счетов в закрытых оперднях
+						,DateCalc	--Дата начала пересчета
+						,null);		--Назначение платежа
+						
+						if    result=true   then ExVal:='Пара была успешно обработана(не обязательно проходила сальдирование)';
+						elsif result=false  then ExVal:='произошла ошибка (до или во время сальдирования)';
+						else					 ExVal:='Пара проходила сальдирование';
+						end if;
+						/**/
+						&debug('(2)      '||AccAct.[MAIN_V_ID]||'(А) СуммаНП='||AccAct.[SALDO_NT]||' '||AccPas.[MAIN_V_ID]||'(П) СуммаНП='||AccPas.[SALDO_NT],dp2)
+					else
+						&debug('(1)Приводить в соответсвие пару c '||to_char(DateCalc,fmt)||' не нужно!',dp2)
+					end if;
+				end if;
+			end if;
+		end if;
+	end if;
+	&debug('ExVal='||ExVal,dp)
+	&debug('Стоп :'||to_char(sysdate,'hh24:mm:ss')||' ('||::[CL_PRIV].[PSH_DATE_DEATH].GetTimeInterval(utils.get_time,timeStart)||'сотыхСек.)',dp2)
+	return ExVal;
+end;
+end;
+end;

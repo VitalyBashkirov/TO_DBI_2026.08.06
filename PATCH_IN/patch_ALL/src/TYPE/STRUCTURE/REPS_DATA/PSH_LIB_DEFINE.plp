@@ -1,0 +1,1280 @@
+class REPS_DATA;
+
+@import_plsql(true)
+@generate_ansi_joins(true)
+@name('[ПСБ] Библиотека. Функции для работы с конфигурацией/приложениями')
+@tag('COPIED')
+library PSH_LIB_DEFINE is
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+dp integer:=0;	--управление &debug
+dp10 integer:=0;	--управление &debug
+fmt	   string(10):='dd/mm/yyyy';
+---
+/**
+ *	Функция проверки доступности операции в режиме DBI.
+ *	Проверяется наличие признака "Не компилировать в java".
+ *
+ *	@PARAM	p_class		- короткое имя класса
+ *	@PARAM	p_short		- короткое имя операции
+ *
+ *	@RETURN	- false, если операция содержит признак "не компилировать в java", иначе true.
+*/
+function AccessedInJava --Башкиров В.Г. 19.11.2023 После наката
+		(	P_CLASS	varchar2(32767)
+		,	P_SHORT	varchar2(32767)
+		)
+	return boolean
+is
+begin
+
+	for	(
+		select m (m)
+		in methods%rowtype all
+		where	m.[SHORT_NAME] = P_SHORT
+			and m.[CLASS_ID] = P_CLASS
+			and m.[PROPERTIES] like '%COMPILER __________________02%'
+		fetch 1
+		)
+	loop
+		debug_pipe('Операция ::[' || P_CLASS || '].[' || P_SHORT || '] не доступна в архитектуре 2MCA и 2MCA DBI', 10);
+		return false;
+	end loop;
+
+	return true;
+end;
+
+-- изменен метод динамического запуска отчетных приложений;
+public pragma macro(call_method, 'begin ::[INTEGR_FORMS].[RUN_APP].run(P_PARAM, P_STR, P_PROF); end;', substitute);
+
+-- Допустимые префиксы для операций, которые могут быть добавлены в конфигурацию профиля
+function GetDefAppCodePrefixes
+	return varchar2(128)
+is
+	vRet varchar2(128);
+begin
+	-- Список допустимых префиксов в конфигурации профиля
+	vRet := '#'||	'INI'		||		-- Инициализация расчета
+			'#'||	'CLC'		||		-- Расчет
+			'#'||	'CLF'		||		-- Расчет формул
+			'#'||	'PRN'		||		-- Печать
+			'#'||	'EXP'		||		-- Экспорт
+			'#'||	'PSB'		||		-- Экспорт (!!!)
+			'#'||	'CONS'		||		-- Консолидация
+			'#'||	'CHK'		||		-- Контроль данных
+			'#'||	'CMP'		||		-- Сравнение данных
+			'#';
+	return vRet;
+end;
+
+-- Проверка короткого имени операции на допустимость использования в конфигурации
+public function CheckAppShortName(P_OPER	varchar2(128))
+	return boolean
+is
+	bRet					boolean;
+	vDefAppCodePrefixes		varchar2(128);
+begin
+	bRet := false;
+	if P_OPER is not null then
+		vDefAppCodePrefixes := GetDefAppCodePrefixes();
+		vDefAppCodePrefixes	:= replace(rtrim(ltrim(vDefAppCodePrefixes, '#'), '#'), '#', '|');
+
+		-- Допустимое короткое имя для операции: префикс_ + произвольный текст + _версия
+		if regexp_like(P_OPER, '^('||vDefAppCodePrefixes||')(_|_.+_)\d+$', 'i') then
+			bRet := true;
+		end if;
+	end if;
+	
+	&debug(TB$||TB$||'Проверка на допустимость:'||P_OPER||' < '||bRet,dp)
+	return bRet;
+end;
+
+-- Структура с диапазоном версий ядра
+type rec_CoreVerRange is record	( iMinValue		integer
+								, iMaxValue		integer
+								);
+
+-- Таблица для кэша информации о версий ядра операций одного ТБП
+type map_ClassCoreInfo is table of rec_CoreVerRange index by varchar2(128);
+lmClassCoreInfo	map_ClassCoreInfo;
+
+-- Получение диапазона версий ядра операции
+function GetCoreVerOperRange
+		(	P_CLASS	varchar2(32767)
+		,	P_METH	varchar2(32767)
+		)
+	return rec_CoreVerRange
+is
+	vCorever	varchar2(250);
+	recCoreVer	rec_CoreVerRange;
+	iPos		integer;
+begin
+	-- Если не передан класс или метод - выход
+	if P_CLASS is null or P_METH is null then
+		return null;
+	end if;
+
+	-- Если по ядрам ТБП была накоплена какая-либо информация
+	if lmClassCoreInfo.count > 0 then
+		-- Если накопленная информация относится к другому ТБП, чистим ее
+		if lmClassCoreInfo.first not like P_CLASS||'.%' then
+			lmClassCoreInfo.delete;
+		else
+			-- Если определяли ранее ядро для этой операции - возвращаем его
+			if lmClassCoreInfo.exists(P_CLASS||'.'||P_METH) then
+				return lmClassCoreInfo(P_CLASS||'.'||P_METH);
+			end if;
+		end if;
+	end if;
+
+	if		::[REPS_DATA].[MD].Using3LMode
+		--and	not ::[REPS_DATA].[MD].AccessedInJava(P_CLASS, P_METH)
+		and	not AccessedInJava(P_CLASS, P_METH) --Башкиров В.Г. 19.11.2023 После наката
+	then
+		return null;
+	end if;
+
+	vCorever := ::[REPS_DATA].[MD].run_func('Result := ::['||P_CLASS||'].['||P_METH||'].GetCoreVer;');
+	-- Если информации о версии ядра нет, выводим соответствующее предупреждение. Такую операцию добавить в конфигурацию нельзя!
+	if upper(vCorever) like '%ОШИБКА%' then
+		&debug('В операции ::['||P_CLASS||'].['||P_METH||'] не реализована функция получения версии ядра GetCoreVer!', dp10)
+
+	-- Если версия ядра имеет числовой тип
+	elsif regexp_like(vCorever, '^\d+$') then
+		recCoreVer.iMinValue := to_number(vCorever);	-- Версию ядра относим на нижнюю границу
+		recCoreVer.iMaxValue := to_number(vCorever);
+
+	-- Если версия ядра представлена в виде диапазона "минимальное ядро:максимальное ядро"
+	elsif regexp_like(vCorever, '^\d+:(\d+$|$)') then
+		-- Двоеточие является разделителем диапазона - "минимальное ядро:максимальное ядро",
+		-- по сути "минимальное ядро" - означает версию актуального ядра на момент создания библиотеки, "максимальное ядро" - последнее ядро, с которым может быть совместима операция,
+		-- если правая граница не указана, значит операция совместима со всеми версиями ядра, начиная от "левой границы".
+		iPos := instr(vCorever, ':');
+		recCoreVer.iMinValue := to_number(substr(vCorever, 1, iPos - 1));
+		recCoreVer.iMaxValue := to_number(substr(vCorever, iPos + 1));
+
+		-- Если левая (минимальная) граница > правой (максимальной) - ошибка, соответственно выход
+		if recCoreVer.iMinValue > nvl(recCoreVer.iMaxValue, recCoreVer.iMinValue) then
+			&debug('В операции ::['||P_CLASS||'].['||P_METH||'] ошибка в описании диапозона версий ядра "'||vCorever||'": левая граница ['||recCoreVer.iMinValue||'] больше правой ['||recCoreVer.iMaxValue||']!', dp10)
+			return null;
+		end if;
+	else
+		&debug('В операции ::['||P_CLASS||'].['||P_METH||'] неверный формат описания ядра, возвращаемый функцией GetCoreVer: ['||vCorever||']!', dp10)
+	end if;
+
+	lmClassCoreInfo(P_CLASS||'.'||P_METH) := recCoreVer;
+	return recCoreVer;
+end;
+
+-- Получение диапазона версий ядра профиля
+function GetCoreVerProfRange(P_PROF ref [REPS_PROF_TUN]) return rec_CoreVerRange
+is
+	recCoreVerOper	rec_CoreVerRange;
+	recCoreVerProf	rec_CoreVerRange;
+	v_src_app			varchar2(128);
+begin
+	v_src_app := P_PROF.[DEFINE].[SRC_APP];
+
+	-- Определение диапазона версий ядра профиля
+	for(select op(op.[CODE] : C_CODE) in P_PROF.[DEFINE].[LIST_APP])loop
+		-- Диапазон версий ядра профиля определяется как пересечение диапазонов версий ядра всех операций, находящихся в конфигурации
+		recCoreVerOper	:= GetCoreVerOperRange(v_src_app, op.C_CODE);
+
+	 	-- Нижняя граница диапазона определяется как самая максимальная из всех нижних границ операций из конфигурации
+		if recCoreVerOper.iMinValue > nvl(recCoreVerProf.iMinValue, -1) then
+			 recCoreVerProf.iMinValue := recCoreVerOper.iMinValue;
+		end if;
+
+		-- Верхняя граница диапазона определяется как самая минимальная из всех верхних границ операций из конфигурации
+		if recCoreVerOper.iMaxValue < nvl(recCoreVerProf.iMaxValue, 999) then
+			 recCoreVerProf.iMaxValue := recCoreVerOper.iMaxValue;
+		end if;
+	end loop;
+	return recCoreVerProf;
+end;
+
+-- Проверка совместимости операции и конфигурации переданного профиля,
+--		GetCoreVer всегда возвращает диапазон, например, "1:2" (для числовых нижняя и верхняя границы одинаковы "1:1"), где
+--		"1" - нижняя граница диапазона версий ядра, а "2" - верхняя граница диапазона версий ядра (включительно), то
+--		у всех операций в конфигурации диапазон версий ядра должен пересекаться, например: Операция 1: "1:5", Операция 2: "2:3", Операция 3: "2",
+-- Проверка совместимости операции и конфигурации переданного профиля
+public function CheckCoreVer
+		(	P_PROF	ref [REPS_PROF_TUN]
+		,	P_METH		varchar2(32767)
+		)
+	return boolean
+is
+	bRet 			boolean;
+	v_src_app			varchar2(128);
+	recCoreVerOper	rec_CoreVerRange;
+	recCoreVerProf	rec_CoreVerRange;
+begin
+	bRet 	:= false;
+	v_src_app := P_PROF.[DEFINE].[SRC_APP];
+	-- Если справочник данных не определен
+	if v_src_app is null then
+		&debug(TB$||TB$||'Проверка совместимости: Для операции "'||P_METH||'" не удалось определить справочник, в котором она находится!', dp10)
+		return bRet;
+	end if;
+
+	-- Определения диапазона версии ядра операции
+	recCoreVerOper := GetCoreVerOperRange(v_src_app, P_METH);
+	-- Если отсутствует и нижняя и верхняя граница, то скорее всего не реализована функция GetCoreVer,
+	-- без этой функции считаем, что операция не совместима ни с одной конфигурацией
+	if recCoreVerOper.iMinValue is null and recCoreVerOper.iMaxValue is null then
+		&debug('Для операции ::['||v_src_app||'].['||P_METH||'] не удалось определить версию ядра!', dp10)
+	else
+		-- Определение диапазона версий ядра профиля
+		recCoreVerProf := GetCoreVerProfRange(P_PROF);
+		-- Если нижняя граница версий ядра профиля не заполнена, значит конфигурация пуста, операцию можно добавить без проверок
+		if recCoreVerProf.iMinValue is null then
+			bRet := true;
+		else
+			-- Если диапазон версий ядра операции пересакается с диапазоном версий ядра профиля, то операцию можно добавить
+			if  	recCoreVerOper.iMinValue 	<= nvl(recCoreVerProf.iMaxValue, recCoreVerOper.iMinValue)
+				and recCoreVerProf.iMinValue 	<= nvl(recCoreVerOper.iMaxValue, recCoreVerProf.iMinValue)
+			then
+				bRet := true;
+			end if;
+		end if;
+	end if;
+	&debug(TB$||TB$||'Проверка совместимости  :'||P_METH||' < '||bRet, dp10)
+	return bRet;
+end;
+
+-- Функция возвращает левую границу диапазона версий ядра операции
+-- p_src - короткое наименование справочника
+-- p_method - короткое наименование операции
+public function GetCoreVerOper
+		(	p_src varchar2(32767)
+		,	p_method varchar2(32767)
+		)
+return integer
+is
+	recCoreVer	rec_CoreVerRange;
+begin
+	recCoreVer := GetCoreVerOperRange(p_src, p_method);
+	return recCoreVer.iMinValue;
+end;
+
+-- Функция возвращает левую границу диапазона версий ядра профиля
+public function GetCoreVerProf(p_prof ref [REPS_PROF_TUN])
+	return integer
+is
+	recCoreVer	rec_CoreVerRange;
+begin
+	recCoreVer := GetCoreVerProfRange(p_prof);
+	return recCoreVer.iMinValue;
+end;
+
+
+/**
+	* Процедура проверки совместимости операций экспорта с текущей конфигурацией профиля с использованием версии ядра
+	* @PARAM	p_prof			-- ссылка на профиль
+	* @PARAM	p_corever_upper	-- значение версии ядра, с которой экспорт должен выдавать сообщение/ошибку	
+	* @PARAM	p_need_exception == true  - выполнение останавливается и выдается соответствующее сообщение
+	* @PARAM	p_need_exception == false  - в монитор выводится сообщение о возможной несовместимости экспорта
+*/
+public procedure AllowedRun
+	(	p_prof ref			[REPS_PROF_TUN]
+	,	p_corever_upper		integer
+	,	p_need_exception	boolean default false
+	)
+is
+begin
+	-- если указан профиль и верхняя граница
+	if p_prof is not null and p_corever_upper is not null then
+		-- если конфигурация профиля больше либо равна верхней границе
+		if GetCoreVerProf(p_prof) >= p_corever_upper then
+			-- если операция экспорта невозможна
+			if p_need_exception then
+				pragma error('Используется устаревшая операция, экспорт невозможен. Доработка операции будет выполнена после публикации новых описателей форматов ЦБ РФ.');
+			-- если операция экспорта возможна
+			else
+				&debug('Внимание! Используется устаревшая операция, экспорт может быть некорректен. Доработка операции будет выполнена после публикации новых описателей форматов ЦБ РФ.' ,dp)
+			end if;
+		end if;
+	end if;
+end;
+
+
+/**
+	* Процедура проверки совместимости операций экспорта с текущей конфигурацией профиля с использованием версии ядра
+	* @PARAM	p_prof			-- ссылка на профиль
+	* @PARAM	p_act_code		-- номер Указания ЦБ
+	* @PARAM	p_need_exception == true  - выполнение останавливается и выдается соответствующее сообщение
+	* @PARAM	p_need_exception == false  - в монитор выводится сообщение о возможной несовместимости экспорта
+*/
+public procedure AllowedRunByCbAct
+	(	p_prof			ref [REPS_PROF_TUN]
+	,	p_act_code			varchar2(32767)
+	,	p_need_exception	boolean default false
+	)
+is
+begin
+	if ::[REPS_CB_ACTS].[LIB].IsProfBefore(p_prof, p_act_code) then
+		-- Если Указание до  p_act_code, выходим. Экспорт может быть запущен
+		return;
+	end if;
+
+	-- Если профиль по Указание p_act_code или позже - выдаём предупреждение/ошибку
+	-- если операция экспорта невозможна
+	if p_need_exception then
+		pragma error('Используется устаревшая операция, экспорт невозможен. Доработка операции будет выполнена после публикации новых описателей форматов ЦБ РФ.');
+	-- если операция экспорта возможна
+	else
+		&debug('Внимание! Используется устаревшая операция, экспорт может быть некорректен. Доработка операции будет выполнена после публикации новых описателей форматов ЦБ РФ.' ,dp)
+	end if;
+end;
+
+ltCoreInfoCache		::[REPS_DATA].[LIB_TYPE].tab_str_s;
+lvSrcForCoreInfo	varchar2(128);
+
+-- проверка ядра операции
+-- p_src - короткое наименование справочника
+-- p_method - короткое наименование операции
+public function GetCoreInfo
+		(	p_src varchar2(32767)
+		,	p_method varchar2(32767)
+		)
+	return varchar2(4000)
+is
+	v_ret	varchar2(4000);
+begin
+	if p_src is null or p_method is null then
+		return null;
+	end if;
+
+	if lvSrcForCoreInfo = p_src then
+		if ltCoreInfoCache.exists(p_method) then
+			return ltCoreInfoCache(p_method);
+		end if;
+	else
+		ltCoreInfoCache.delete;
+		lvSrcForCoreInfo := p_src;
+	end if;
+
+	begin
+		v_ret := ::[REPS_DATA].[MD].run_func('Result := ::['||p_src||'].['||p_method||'].GetCoreInfo;');
+
+	exception when others then
+		debug(' В пакете '||p_method||' не реализована функция  GetCoreInfo.');
+		v_ret := null;
+	end;
+	ltCoreInfoCache(p_method) := v_ret;
+	return v_ret;
+end;
+
+-- Вернуть значение параметра из информации ядра операции
+public function GetParOfCoreInfo
+		(	P_PROF		ref [REPS_PROF_TUN]
+		,	P_PAR			varchar2(32767)
+		,	P_METH			varchar2(32767)	default '%'
+		)
+	return varchar2(4000)
+is
+	vRet		varchar2(4000);
+	vInfo		varchar2(4000);
+	v_src_app		varchar2(4000);
+begin
+	-- Если профиль не передан - выходим
+	if P_PROF is null then
+		return null;
+	end if;
+
+	v_src_app := P_PROF.[DEFINE].[SRC_APP];
+	-- Выполняется проход по конфигурации переданного профиля с ограничением на код операции
+	for (
+			select	x(	x.[CODE]		: C_CODE)
+			in		P_PROF.[DEFINE].[LIST_APP]
+			where	x.[CODE] like P_METH
+		)
+	loop
+		-- Запрашиваем информацию из ядра операции
+		vInfo 	:= GetCoreInfo(v_src_app, x.C_CODE);
+		-- Определяем значение переданного параметра
+		vRet	:= ::[RUNTIME].[STR].GET_STR_PAR(vInfo, P_PAR);
+		-- Если значение опеределено - выходим
+		exit when vRet is not null;
+	end loop;
+	return vRet;
+end;
+
+-- функция осуществляет поиск операции по коду в конфигурации профиля
+public function FindOper
+		(	p_prof			ref [REPS_PROF_TUN]	-- профиль
+		,	p_oper_prefix		varchar2(32767)		-- префикс кода операции (например, 'CLC_BASE')
+		)
+	-- возвращает имя найденной операции
+	return varchar2(32767)
+is
+begin
+	for(
+		select	p( p.[CODE]	: C_OPER_CODE)
+		in		p_prof.[DEFINE].[LIST_APP]
+		where	p.[CODE] like p_oper_prefix || '%'
+		)
+	loop
+		return p.C_OPER_CODE;
+	end loop;
+
+	return null;
+end;
+
+-- Функция сопоставления кодов двух операций
+public function EqualOperCode
+		(	P_SRC			varchar2(32767)
+		,	P_OPER_1		varchar2(32767)
+		,	P_OPER_2		varchar2(32767)
+		)
+	return boolean
+is
+	pragma macro(CutVer, 'substr([1], 1, instr([1], ''_'', -1))', substitute);
+	vDistrCode1		varchar2(128);
+	vDistrCode2		varchar2(128);
+	
+	tmpBool boolean;
+begin
+	-- В локальных библиотеках в параметре P_DISTR_METH указывается дистрибутивная операция, которую перекрывает локальная
+	vDistrCode1 := nvl(::[RUNTIME].[STR].get_str_par(GetCoreInfo(P_SRC, P_OPER_1), 'P_DISTR_METH'), P_OPER_1);
+	vDistrCode2 := nvl(::[RUNTIME].[STR].get_str_par(GetCoreInfo(P_SRC, P_OPER_2), 'P_DISTR_METH'), P_OPER_2);
+	&debug(TB$||TB$||'vDistrCode1='||vDistrCode1||' CutVer(vDistrCode1)='||&CutVer(vDistrCode1),dp)
+	&debug(TB$||TB$||'vDistrCode2='||vDistrCode2||' CutVer(vDistrCode2)='||&CutVer(vDistrCode2),dp)
+	
+	-- Сравнение выполняется с учетом дистрибутивных эквивалентов
+	tmpBool:=nvl(&CutVer(vDistrCode1) = &CutVer(vDistrCode2), false);
+	
+	&debug(TB$||TB$||'Cопоставления кодов операций:P_SRC='||P_SRC||' P_OPER_1='||P_OPER_1||' P_OPER_2='||P_OPER_2||' < '||tmpBool ,dp)	
+	return tmpBool;
+end;
+
+-- функция проверяет наличие операции в профиле
+function CheckDefineOper
+		(	p_prof		ref [REPS_PROF_TUN]
+		,	p_oper			varchar2(32767)
+		,	p_err		out varchar2(4000)
+		)
+	return boolean
+is
+	vSrc			varchar2(128);
+	vCodeProf		varchar2(4000);
+begin
+	vSrc := GetSrcAPP(p_prof.[REP]);
+	vCodeProf := p_prof.[CODE];
+	for	( select	p(	p.[CODE] : C_OPER_CODE)	in	p_prof.[DEFINE].[LIST_APP])
+	loop
+		-- Если в конфигурации найден метод совпадающий по маске с переданным методом
+		if EqualOperCode(vSrc, p.C_OPER_CODE, p_oper) then
+			p_err := 'В профиле "'||vCodeProf||'" уже определена операция типа "'||substr(p_oper, 1, instr(p_oper, '_', -1))||'": "'||p.C_OPER_CODE||'"';
+			return false;
+		end if;
+	end loop;
+
+	return true;
+end;
+
+-- добавить операцию в конфигурацию профиля (если операции не было)
+-- заменить операцию (если найдена операция данного типа, где тип, это p_oper без "_NNN")
+-- делаются проверки на совместимость по CoreVer
+-- функция возвращает true если приложение добавлено и false если проверки не прошли (p_err - информативный текст ошибки)
+public function SetDefineOper
+		(	p_prof		ref [REPS_PROF_TUN]
+		,	p_oper			varchar2(32767)
+		,	p_err		out varchar2(4000)
+		,	p_checkreg		boolean default true
+		)
+	return boolean
+is
+	v_src_app		varchar2(128);
+	refTmp		ref [LIST_APP];
+	vIsExt			varchar2(32767);
+	vCurOperInfo	varchar2(4000);
+	vPril			varchar2(32767);
+	vCompRep		varchar2(32767);
+	vRepCode		varchar2(32767);
+	aListApp		::[LIST_APP]%collection;
+begin
+	if p_prof.[DEFINE] is null then
+		p_prof.[CREATE_DEFINE]
+			(
+				p_prof						-- Профиль
+			,	GetSrcAPP(p_prof.[REP])		-- Справочник приложений
+			,	false						-- Удалить текущую конфигурацию
+			);
+	end if;
+
+	-- Проверка: существует ли уже данная операция в конфигурации
+	if not CheckDefineOper(p_prof, p_oper, p_err) then
+		&debug(p_err,dp)
+		return false;
+
+	-- Проверка на совместимость ядра операции с конфигурацией
+	elsif not CheckCoreVer(p_prof, p_oper) then
+		p_err := 'Операция "'||p_oper||'" не совместима с версией отчета по профилю "'||p_prof.[CODE]||'"!';
+		&debug(p_err,dp)
+		return false;
+	end if;
+
+	v_src_app	:= p_prof.[DEFINE].[SRC_APP];
+	vRepCode	:= p_prof.[REP].[CODE];
+	aListApp	:= p_prof.[DEFINE].[LIST_APP];
+
+	for(
+			select	x(	x.[NAME]	: NAME)
+			in		::[METHOD]
+			where	x.[CLASS_ID] = v_src_app
+				and x.[SHORT_NAME] = p_oper
+		)
+	loop
+		-- Получение строки параметров из операции
+		vCurOperInfo := GetCoreInfo(v_src_app, p_oper);
+
+		if vCurOperInfo is not null then
+			-- Если приложение платно, то оно должно быть зарегистрировано в SYS_LIST_APP
+			::[RUNTIME].[STR].get_par(vCurOperInfo,'P_IS_EXT',vIsExt);
+			if nvl(vIsExt,'0') = '1' then
+				-- Если приложение, к которому относится операция не зарегистрировано
+				if not ::[REPS_DATA].[LIB_REG_DOP_PRIL].IsMethReg(p_oper, vRepCode, vPril) and p_checkreg then
+					-- Выводим строку и выходим без добавления операции
+					p_err := 'Приложение с кодом ['||vPril||'] не зарегистрировано, добавление метода ['||p_oper||'] в конфигурацию не выполнено!';
+					&debug(p_err,dp)
+					return false;
+				end if;
+			end if;
+
+			-- Проверка на совместимость с отчетом
+			::[RUNTIME].[STR].get_par(vCurOperInfo, 'P_COMP_REP', vCompRep);
+			if vCompRep is not null and instr(vCompRep, '#'||vRepCode||'#') = 0 then
+				p_err := 'Метод ['||p_oper||'] не совместим с отчетом ['||vRepCode||'], добавление в конфигурацию не выполнено!';
+				&debug(p_err,dp)
+				return false;
+			end if;
+		end if;
+
+		refTmp := aListApp.[NEW#AUTO]
+					(	p_oper/*P_CODE*/		--Код приложения
+					,	x.NAME/*P_NAME*/		--Наименование приложения
+					);
+	end loop;
+
+	return true;
+end;
+
+/* function UpdDefineOper: заменяет версию операций перечисленных в P_OPER в конфигурации профиля P_PROF */
+public function UpdDefineOper
+		(	P_PROF		ref [REPS_PROF_TUN]		-- Профиль, с конфигурацией которого будет производится работа
+		,	P_OPER			varchar2(32767)				-- Перечень обновляемых операций через # ("#oper1#oper2#...#"), если одна операция то "#oper1#"
+		,	P_SRC			varchar2(32767) default null	-- Справочник данных, откуда брать операции - опционально
+		,	P_MODE			integer default 1 		-- 1 - если не нашли старую версию операции в конфигурации, то ничего не делаем;
+														-- 2 - если не нашли старую версию операции в конфигурации, то добавляем новую все-равно.
+		)
+	return varchar2(32000)		-- Возвращаемое значение - результат выполнения (успешно или ошибка)
+is
+	-- Структура с необходимыми данными о профиле настроек
+	type ProfInfo is record( fProfId	ref [REPS_PROF_TUN]
+							,fProfCode		::[REPS_PROF_TUN].[CODE]%type
+							,fDefine	ref [REPS_DEFINE]
+							,fRepId		ref [REPS]
+							,fRepCode		::[REPS].[CODE]%type
+							,fDefSrc		::[REPS_DEFINE].[SRC_APP]%type
+							,fListApp		::[REPS_DEFINE].[LIST_APP]%type
+							,fCntApp		number
+							);
+	rec_ProfInfo 		ProfInfo;
+
+	v_ResMess			varchar2(32000);	-- Возвращаемый результат
+	v_StrOper			varchar2(4000);		-- Полный список операций, переданный в функцию
+	v_ProfSrcApp		varchar2(32767);			-- Справочник данных, определенный с помощью GetSrcAPP
+	v_SrcApp			varchar2(32767);			-- Справочник данных
+	v_CurOper			varchar2(32767);			-- Текущая обновляемая операция
+	v_CurOperPrefix		varchar2(32767);			-- Код операции без версии (например, без _001)
+	v_CurOperInfo		varchar2(4000);		-- Информация об операции, полученная с из GetCoreInfo
+	v_IsExt				varchar2(32767);			-- Признак платности обновляемой операции
+	v_RegPril			varchar2(32767);			-- Приложение, к которому относится обновляемая операция
+	r_DelOldApp		ref [LIST_APP];			-- Ссылка на операцию, вместо которого будет добавлена новая
+	r_AddNewApp		ref [LIST_APP];			-- Ссылка на новую добавленную операцию
+
+	-- Возможные исходы при попытке обновить операцию в конфигурации
+	function GetMess(P_NUM integer)
+		return varchar2(32000)
+	is
+		v_ResMess varchar2(32000);
+	begin
+		case P_NUM of
+			:0: 	v_ResMess := 'UpdDefineOper>> Операция: ['||v_CurOper||']: успешно добавлена в конфигурацию профиля!'||LF$;
+			:1: 	v_ResMess := 'UpdDefineOper>> Не передан профиль настроек, необходимо передать профиль настроек!';
+			:2: 	v_ResMess := 'UpdDefineOper>> Передан пустой список обновляемых операций, необходимо передать хотя бы одну операцию!';
+			:3: 	v_ResMess := 'UpdDefineOper>> Передан список обновляемых операций не разделенный "#", список операций должен выглядеть как "#oper1#oper2#..#" !';
+			:4: 	v_ResMess := 'UpdDefineOper>> Передан профиль с ID: ['||to_char(P_PROF)||'] отсутствующий в справочнике REPS_PROF_TUN!';
+			:5: 	v_ResMess := 'UpdDefineOper>> Передан профиль с ID: ['||to_char(P_PROF)||'] с отсутствующей конфигурацией!';
+			:6: 	v_ResMess := 'UpdDefineOper>> Передан профиль с ID: ['||to_char(P_PROF)||'], в конфигурации которого отсутствуют операции!';
+			:7: 	v_ResMess := 'UpdDefineOper>> Операция: ['||v_CurOper||']: версия операции не совпадает с версией конфигурации профиля, обновление не произведено!'||LF$;
+			:9: 	v_ResMess := 'UpdDefineOper>> Операция: ['||v_CurOper||']: уже присутствует в конфигурации профиля, либо в конфигурации профиля отсутствует старая версия обновляемой операции, обновление не произведено!'||LF$;
+			:10: 	v_ResMess := 'UpdDefineOper>> Операция: ['||v_CurOper||']: приложение ['||v_RegPril||'], к которому относится операция - не зарегистровано,  обновление не произведено!'||LF$;
+			:11: 	v_ResMess := 'UpdDefineOper>> Операция: ['||v_CurOper||']: отсутствует в справочнике "'||v_SrcApp||'",  обновление не произведено!'||LF$;
+			:12: 	v_ResMess := 'UpdDefineOper>> Обновление операций не произведено!'||LF$;
+		end;
+		return v_ResMess;
+	end;
+begin
+	-- Если профиль не передан - выходим
+	if P_PROF is null then
+		return GetMess(1);
+	else
+
+		if P_OPER is null or P_OPER = '#' then								-- Если список операций не передан - выходим
+			return GetMess(2);
+		elsif substr(P_OPER,1,1) <> '#' or substr(P_OPER,-1) <> '#' then	-- Если список операций не обрамлен # - выходим
+			return GetMess(3);
+		end if;
+
+		-- Получение необходимых данных о профиле настроек и его конфигурации
+		for(
+			select	x
+				(	x						:ID
+				,	x.[CODE]				:C_CODE
+				,	x.[REP]					:C_REP
+				,	x.[REP].[CODE]			:C_REP_CODE
+				,	x.[DEFINE] 				:C_DEFINE
+				,	x.[DEFINE].[SRC_APP]	:C_SRC_APP
+				,	x.[DEFINE].[LIST_APP]	:C_LIST_APP
+				,	(	select	z(count(z))
+						in		x.[DEFINE].[LIST_APP]
+					)						:C_CNT_APP
+				)
+			in		::[REPS_PROF_TUN]
+			where	x = P_PROF
+			fetch 1
+		)
+		loop
+			rec_ProfInfo.fProfId	:= x.ID;
+			rec_ProfInfo.fProfCode	:= x.C_CODE;
+			rec_ProfInfo.fDefine	:= x.C_DEFINE;
+			rec_ProfInfo.fRepId		:= x.C_REP;
+			rec_ProfInfo.fRepCode	:= x.C_REP_CODE;
+			rec_ProfInfo.fDefSrc	:= x.C_SRC_APP;
+			rec_ProfInfo.fListApp	:= x.C_LIST_APP;
+			rec_ProfInfo.fCntApp	:= x.C_CNT_APP;
+			exit;
+		end loop;
+		if rec_ProfInfo.fProfId is null then		-- Если профиль не нашли - выходим
+			return GetMess(4);
+		elsif rec_ProfInfo.fDefine is null then		-- Если конфигурации нет - выходим
+			return GetMess(5);
+		elsif rec_ProfInfo.fCntApp is null or rec_ProfInfo.fCntApp = 0 then	-- Если конфигурация пуста - выходим
+			return GetMess(6);
+		end if;
+	end if;
+
+	v_StrOper		:= P_OPER;													-- Список операций через #
+	v_ProfSrcApp 	:= GetSrcAPP(rec_ProfInfo.fRepId, rec_ProfInfo.fRepCode);	-- Справочник данных для данного отчета, указанный в GetSrcAPP
+	v_SrcApp 		:= coalesce(P_SRC, rec_ProfInfo.fDefSrc, v_ProfSrcApp);		-- Окончательное определение справочника данных
+
+	-- Цикл до тех пор, пока не обработаются все операции, указанные в перечне v_StrOper
+	while v_StrOper <> '#' loop
+
+		v_CurOper := substr(v_StrOper,2,instr(v_StrOper,'#',2)-2);	-- Достаем первую операцию
+		v_StrOper := replace(v_StrOper,'#'||v_CurOper||'#','#');	-- Удаляем ее из списка операций
+		v_CurOper := upper(v_CurOper);
+
+		-- Если версия добавляемой операции совпадает с версией операций конфигурации,
+		-- если же с профиля не определилась версия, то считаем, что она совпала, если с операции
+		-- не определилась версия, то ничего делать не будем
+		if CheckCoreVer(p_prof, v_CurOper) then
+			v_CurOperPrefix := substr(v_CurOper, 1, instr(v_CurOper,'_',-1)-1);
+
+			-- Поиск предыдущей версии обновляемой операции в конфигурации
+			r_DelOldApp := null;
+			for	(
+					select	op
+						(	op				: ID
+						,	op.[CODE]		: C_CODE
+						)
+					in		rec_ProfInfo.fListApp
+					order by case op.[CODE] when v_CurOper then 1 else 2 end
+				)
+			loop
+				if op.C_CODE = v_CurOper then	-- Если обновляемая операция уже есть в конфигурации то переходим к следующей операции
+					P_MODE := 1;	-- Независимо от режима, обновление уже не требуется
+					exit;
+				-- Если в конфигурации найден метод совпадающий по маске с переданным методом
+				elsif EqualOperCode(v_SrcApp, v_CurOper, op.C_CODE) then
+					if op.C_CODE like v_CurOperPrefix||'%' then
+						r_DelOldApp := op.ID;	-- Запоминаем операцию предыдущей версии
+					else
+						P_MODE := 1;
+					end if;
+					exit;
+				end if;
+			end loop;
+
+			-- Если подобная операция удалялась из конфигурации профиля,
+			-- или режим 2 и в конфигурации отсутствует операция такого типа, то добавляем текущую операцию
+			if r_DelOldApp is not null or P_MODE = 2 then
+				v_CurOperInfo := GetCoreInfo(v_SrcApp, v_CurOper); 	-- Получаем строку информации о текущей операции
+				::[RUNTIME].[STR].get_par(v_CurOperInfo,'P_IS_EXT',v_IsExt);	-- Получаем значение параметра P_IS_EXT - платность
+
+				if nvl(v_IsExt,'0') = '1' then	-- Если приложение платно, то оно должно быть зарегистрировано в SYS_LIST_APP
+					-- Если приложение, к которому относится операция не зарегистрировано
+					if not ::[REPS_DATA].[LIB_REG_DOP_PRIL].IsMethReg(v_CurOper, rec_ProfInfo.fRepCode, v_RegPril) then
+						v_ResMess := v_ResMess||GetMess(10);
+						continue;
+					end if;
+				end if;
+
+				-- Добавление новой операции в конфигурацию профиля
+				r_AddNewApp := null;
+				for	(
+					select		x(x.[NAME]	: NAME)
+					in		::[METHOD]
+					where	x.[CLASS_ID]	= v_SrcApp
+						and x.[SHORT_NAME]	= v_CurOper
+					)
+				loop
+					if r_DelOldApp is not null then
+						r_DelOldApp.[DELETE#AUTO];	-- Удаление старой версии из конфигурации
+					end if;
+					r_AddNewApp := rec_ProfInfo.fListApp.[NEW#AUTO](v_CurOper, x.NAME);
+				end loop;
+
+				-- Если ссылка есть - успешное обновление операции
+				if r_AddNewApp is not null then
+					v_ResMess := v_ResMess||GetMess(0);
+				else	-- Иначе - выход
+					v_ResMess := v_ResMess||GetMess(11);
+					continue;
+				end if;
+			else
+				v_ResMess := v_ResMess||GetMess(9);
+				continue;
+			end if;
+		else
+			v_ResMess := v_ResMess||GetMess(7);
+			continue;
+		end if;
+	end loop;
+
+	v_ResMess := coalesce(v_ResMess, GetMess(12));
+	return v_ResMess;
+end;
+
+/* Вместо UpdateDefineOper желательно использовать UpdDefineOper */
+-- заменить операцию в профиле
+-- делаются проверки на совместимость по CoreVer и подтверждение использования платного приложения в шагах настройки
+-- p_prof - ссылка на профиль, p_oper - добавляемая операция
+-- функция возвращает true если приложение добавлено и false если проверки не прошли (p_err - информативный текст ошибки)
+public function UpdateDefineOper
+		(	p_prof ref [REPS_PROF_TUN]
+		,	p_oper varchar2(32767)
+		,	p_err out varchar2(4000)
+		)
+	return boolean
+is
+	v_oper		varchar2(128);
+	v_src_app		varchar2(128);
+	b_isdel		boolean;
+	v_oper_info	varchar2(4000);
+	v_is_ext	varchar2(32767);
+	v_pril		varchar2(32767);
+	vProfCode	varchar2(32767);
+begin
+	-- Флаг, показывающий была ли подобная операция в конфигурации профиля
+	b_isdel	:= false;
+	vProfCode := p_prof.[CODE];
+	-- Если версия добавляемой операции p_oper совпадает с версией операций конфигурации
+	if CheckCoreVer(p_prof, p_oper) then
+		v_oper := substr(p_oper,1, instr(p_oper,'_',-1)-1);
+		for (
+				select	op(op.[CODE] : C_CODE)
+				in		p_prof.[DEFINE].[LIST_APP]
+				where	op.[CODE] like v_oper||'%'
+			)
+		loop
+			if op.C_CODE = p_oper then
+				--Если операция уже есть в конфигурации то выходим из функции
+				p_err := 'Операция ' ||p_oper|| ' уже есть в конфигурации профиля ' ||to_char(vProfCode);
+				return false;
+			else
+				-- Удаляем старую операцию из конфигурации профиля
+				DelDefineOper(p_prof, '#'||op.C_CODE||'#');
+				&debug('	из конфигурации профиля "' ||to_char(vProfCode)|| '" удалена операция "' ||op.C_CODE|| '"',dp)
+				b_isdel	:= true;
+			end if;
+		end loop;
+	end if;
+
+	-- Если подобная операция удалялась из конфигурации профиля, то добавляем p_oper
+	if b_isdel then
+		-- Получаем тип, где расположены операции приложения
+		v_src_app := p_prof.[DEFINE].[SRC_APP];
+		-- Получаем строку информации из операции p_oper
+		v_oper_info := GetCoreInfo(v_src_app, p_oper);
+
+		-- Получаем значение параметра P_IS_EXT из строки v_oper_info
+		::[RUNTIME].[STR].get_par(v_oper_info, 'P_IS_EXT', v_is_ext);
+
+		-- Если приложение платно, то оно должно быть зарегистрировано в SYS_LIST_APP
+		if nvl(v_is_ext,'0') = '1' then
+			-- Если приложение, к которому относится операция не зарегистрировано
+			if not ::[REPS_DATA].[LIB_REG_DOP_PRIL].IsMethReg(p_oper, p_prof.[REP].[CODE], v_pril) then
+				-- Выводим строку и выходим без добавления операции
+				&debug(' Метод IsMethReg не прошел проверку. Операция  ['||p_oper||'] , [Короткое наименование отчета]=['|| p_prof.[REP].[CODE]||'] приложение с кодом ['||v_pril||'] не зарегистрировано',dp)
+				return false;
+			end if;
+		end if;
+		-- добавляем новую операцию в конфигурацию профиля
+		return SetDefineOper(p_prof, p_oper, p_err);
+	else
+		p_err := 'Операция ' ||p_oper|| ' не добавлена, отсутствует операция подобного типа в конфигурации профиля ' ||to_char(p_prof.[CODE]);
+		return false;
+	end if;
+end;
+
+-- удалить операцию/операции в конфигурацию профиля
+-- p_oper - перечисление операций к удалению через "#",к примеру #oper1#oper2#oper3#
+public procedure DelDefineOper
+		(	p_prof		ref [REPS_PROF_TUN]
+		,	p_oper			varchar2(32767)
+		)
+is
+	vApp	ref [LIST_APP];
+begin
+	for (
+		select	x
+			(
+				x.[DEFINE].[LIST_APP]%id			: ID
+			,	x.[DEFINE].[SRC_APP]				: SRC_APP
+			,	x.[CODE]							: PROF
+			)
+		in		::[REPS_PROF_TUN]
+		where	x = p_prof
+			and	instr(p_oper, '#'||x.[DEFINE].[LIST_APP].[CODE]||'#')>0
+		)
+	loop
+		vApp%id := x.ID;
+		vApp.[DELETE#AUTO];
+
+		&debug('	из конфигурации профиля "'||x.PROF||'" удалена операция "'||p_oper||'"',dp)
+	end loop;
+end;
+
+
+-- возвращает справочник приложений (данных) для указанного отчета
+public function GetSrcAPP
+		(	p_rep		ref [REPS]
+		,	p_code			::[REPS].[CODE]%type default null
+		)
+	return varchar2(32767)
+is
+	v_src	varchar2(128);
+	v_code	varchar2(128);
+begin
+	-- определяем короткое имя отчёта v_code
+	v_code := coalesce(p_code, p_rep.[CODE]);
+
+	-- для отчётов у которых нельзя сформировать наименование справочника приложений
+	if		v_code like 'FOR%'
+		and	v_code not like 'FOR_753%'
+	then
+		v_src := 'FOR_2_DATA';
+	elsif v_code = 'F_115' then
+		v_src := 'F_115_DATA_1881';
+	elsif v_code = 'F_118' then
+		v_src := 'H6_DATA';
+	elsif v_code = 'I_110' then
+		v_src := 'I_110_DATA';
+	elsif v_code = 'F_122' then	-- Ф-122 использует операции справочника NORM_DATA, там же хранит свои данные
+		v_src := 'NORM_DATA';
+	elsif v_code = 'F_155' then
+		v_src := 'F_155_DATA_1881';
+	elsif v_code = 'F_250_OLD' then
+		v_src := 'F_250_DATA';
+	elsif v_code = 'F_250' then
+		v_src := 'F_250_DT';
+	elsif v_code = 'F_251' then
+		v_src := 'F_251_DATA_1660U';
+	elsif v_code = 'F_401_APP' then
+		v_src := 'F_401_DATA_REP';
+	elsif v_code = 'F_744' then
+		v_src := 'F_201_202_DATA';
+	elsif v_code = 'F_808_SPR' then
+		v_src := 'F_808_DATA_SPR';
+	elsif v_code = 'F_901' then
+		v_src := 'F_901_TUNING';
+	elsif v_code like 'PRIL_9%' then
+		v_src := 'PRIL_9_DATA';
+	elsif v_code like 'M_%' then
+		v_src := 'REPS_MEASURES';
+	elsif v_code like 'NORM_LIQ_COR' then
+		v_src := 'NORM_LIQ_AGR';
+	elsif v_code  = 'CALC_FACTORING' then
+		v_src := 'FACTORING_DATA';
+	elsif v_code = 'CALC_VHO' then
+		v_src := 'VHO_DATA';
+	elsif v_code = 'CALC_DM' then
+		v_src := 'DM_DATA';
+	elsif v_code = 'FUNDED' then -- Расчет коэффициента фондирования использует операции справочника NORM_DATA, там же хранит свои данные
+		v_src := 'NORM_DATA';
+	elsif v_code like 'F_303' then
+		v_src := 'F_303_JOURNAL';
+	elsif v_code like 'RT' then
+		v_src := 'REPS_JOURNAL_RT';
+	elsif v_code like 'F_302' then
+		v_src := 'F_302_DATA_4927';
+	elsif v_code like 'F_260' then
+		v_src := 'F_260_DATA_4927';
+	elsif v_code like 'F_316' then
+		v_src := 'F_316_DATA_V2';
+	elsif v_code like 'RT_ZB' then
+		v_src := 'RP_ZALOG_BODY_RT';
+	else
+		-- если справочник для хранения операций не определили
+		-- формируем его название
+		for	(
+				select m(1)
+				in		::[METACLASS] all
+				where m%id = v_code||'_DATA'
+				fetch 1
+			)
+		loop
+			v_src := v_code||'_DATA';
+			exit;
+		end loop;
+	end if;
+
+	-- если справочник для хранения операций не определили
+	if v_src is null then
+		-- выводим сообщение
+		&debug('Для отчета "'||v_code||'" не определен справочник приложений!', dp)
+	end if;
+
+	return v_src;
+end;
+
+
+/** deprecated
+ * Процедура ничего не делает, оставлена из-за участия в интерфейсе REPS_INTERFACE INT_REPS_002
+ * Было: Проверка метода, в зарегистрируемых приложениях, и далее run этого метода. Нигде не используется
+*/
+public function call_app
+		(
+			method		varchar2(100)			-- операция приложение
+		,	kind_oper	varchar2(100)
+		)
+	return varchar2(32767)
+is
+
+begin
+	null;
+end;
+
+public function run_app
+		(	method		varchar2(100)
+		,	p_part		varchar2(32767)
+		)
+	return varchar2(32767)
+is
+	vRet 			varchar2(32767);
+begin
+--Башкиров В.Г. 19.11.2023 После наката LIB_DEFINE -> PSB_LIB_DEFINE
+if p_part = '1' then
+vRet := '
+	v_prof		ref [REPS_PROF_TUN];
+	v_define	ref [REPS_DEFINE];
+	v_src_app		::[REPS_DEFINE].[SRC_APP]%type;
+	v_list_app		::[REPS_DEFINE].[LIST_APP]%type;
+	v_run			varchar2;
+	v_app			varchar2;
+	v_wasExec		boolean;
+	v_rep			ref [REPS];
+	vDataTable		varchar2;
+begin
+	for	(	select u( u.[DATE1]					: C_DATE1
+					, u.[DATE2]					: C_DATE2
+					, u.[BRANCH].[CODE]			: C_BR_CODE
+					, u.[INFO]					: C_INFO
+					, u.[PROF]					: C_PROF
+					)
+				in	::[REPS_PARAMS]
+			Where	u = P_PARAM
+		)
+	Loop
+		&debug(''<<< Запуск приложений...''
+		||LF$||TB$||''Реализация id: ''		||to_char(P_PARAM)
+		||LF$||TB$||TB$||''филиал:''		||nvl(u.C_BR_CODE, ''(пусто)'')
+		||LF$||TB$||TB$||''дата(1):''		||to_char(u.C_DATE1, ''dd/mm/yyyy'')
+		||LF$||TB$||TB$||''дата(2):''		||to_char(u.C_DATE2, ''dd/mm/yyyy'')
+		||LF$||TB$||TB$||''переменные:''	||u.C_INFO, 0);
+		v_prof := nvl(P_PROF, u.C_PROF);
+	End Loop;
+'||'
+	if v_prof is null then
+		pragma error(''Не указан профиль настроек!'');
+	end if;
+
+	&debug(TB$||''Профиль "''||v_prof.[CODE]||''" id:''||to_char(v_prof)
+		||LF$||TB$||''Переменные вывода: ''||P_STR, 0);
+
+	-- определяем конфигурацию
+	select u( u.[DEFINE]
+			, u.[DEFINE].[SRC_APP]
+			, u.[DEFINE].[LIST_APP]
+			, u.[REP]
+			)
+		in	::[REPS_PROF_TUN]
+	where	u = v_prof
+	into	v_define, v_src_app, v_list_app, v_rep;
+
+	v_Rep:= ::[REPS]([%id] = v_Rep%id);
+	vDataTable := [REPS_DATA].[LIB_DEFINE].GetSrcAPP(v_Rep);
+
+	if v_define is null then
+		&debug(''В профиле "''||v_prof.[CODE]||''" не определена конфигурация, создаем умолчательную'', 0);
+		v_src_app := ::[REPS_DATA].[LIB_DEFINE].GetSrcAPP(v_prof.[REP]);
+		if v_src_app is not null then
+			::[REPS_PROF_TUN].[CREATE_DEFINE](v_prof, v_src_app, false);
+			v_define := v_prof.[DEFINE];
+			v_list_app := v_prof.[DEFINE].[LIST_APP];
+		end if;
+		if v_define is null then
+			pragma error(''В профиле "''||v_prof.[CODE]||''" не определена конфигурация'');
+		end if;
+	end if;
+	v_wasExec	:= false;
+
+	v_run := null;
+	if P_STR is not null then
+		[STR].Get_Par(P_STR, ''P_RUN'', v_run);
+	end if;
+'||'
+
+	if v_run = ''PRN'' then
+		&debug(''## Запуск печати на экран ##'', 0);
+		for	(	select
+					app	( app.[CODE]		: METHOD
+						, app.[NAME]		: NAME
+						)
+					in	v_list_app
+				where	app.[CODE] like ''PRN_%''
+			)
+		loop
+			'||::[REPS_DATA].[PSH_LIB_DEFINE].call_app(method,'PRN')||' -- updated CHANGE_SHORT_NAME PSB_LIB_DEFINE->PSH_LIB_DEFINE 14/10/25
+			v_wasExec	:= true;
+		end loop;
+		&debug(''## печать закончена ##'', 0);
+'||'
+	elsif v_run = ''EXP'' then	-- запуск вывода в файл
+		&debug(''## Запуск вывода в файл ##'', 0);
+		[STR].Get_Par(P_STR, ''P_APP'', v_app);
+		for	(	select
+					app	( app.[CODE]		: METHOD
+						, app.[NAME]		: NAME
+						)
+					in	v_list_app
+				where	app.[CODE] like ''EXP_%''
+			)
+		loop
+			if v_app is null or v_app = app.method then
+				'||::[REPS_DATA].[PSH_LIB_DEFINE].call_app(method,'EXP')||' -- updated CHANGE_SHORT_NAME PSB_LIB_DEFINE->PSH_LIB_DEFINE 14/10/25
+				v_wasExec	:= true;
+			end if;
+		end loop;
+		&debug(''## вывод в файл завершен ##'', 0);
+	/*Длинна подстановки макроса:"';
+	vRet := vRet||length(vRet)||'"*/
+'
+;
+else
+vRet := '
+	elsif v_run = ''CLC'' or v_run is null then-- запуск расчёта
+		&debug(''## Начали расчет ##'', 0);
+		&debug(''	Удаляем данные по реализации'', 0);
+		::[REPS_DATA].[DELETE_ALL]
+				( P_PARAM			-- Реализация отчета
+				, false				-- Удалить все
+				, null				-- отчёт
+				, true				-- Сохранять реализации
+				);
+		&debug(''	данные удалены...'', 0);
+		::[REPS_DATA].[LIB_FILE].init_param;
+		for	(	select
+					app	( app.[CODE]		: METHOD
+						, app.[NAME]		: NAME
+						)
+					in	v_list_app
+			where substr(app.[CODE],1,4) not in (''PRN_'',''EXP_'')
+			order by decode(substr(app.[CODE],1,4),''CLF_'',100,nvl(to_number([STR].GET_STR_PAR([REPS_DATA].[LIB_DEFINE].GetCoreInfo(vDataTable, app.[CODE]), ''P_ORDER'')),1))
+			)
+		loop
+			'||::[REPS_DATA].[PSH_LIB_DEFINE].call_app(method,'CLC')||' -- updated CHANGE_SHORT_NAME PSB_LIB_DEFINE->PSH_LIB_DEFINE 14/10/25
+			v_wasExec	:= true;
+		end loop;
+		&debug(''## Расчет закончен ##'', 0);
+'||'
+	elsif v_run = ''CLF'' then-- запуск расчёта
+		&debug(''## Начали расчет формульных настроек ##'', 0);
+		&debug(''	Удаляем данные по реализации'', 0);
+		::[REPS_DATA].[DELETE_ALL]
+					( P_PARAM			-- Реализация отчета
+					, false				-- Удалить все
+					, null				-- отчёт
+					, true				-- Сохранять реализации
+					, P_ONLY_FORMULA == true	-- удалить только формульные настройки
+					);
+		&debug(''	данные удалены...'', 0);
+		::[REPS_DATA].[LIB_FILE].init_param;
+		for	(	select
+					app	( app.[CODE]		: METHOD
+						, app.[NAME]		: NAME
+						)
+					in	v_list_app
+			where substr(app.[CODE],1,4) = ''CLF_''
+		)loop
+			'
+			||::[REPS_DATA].[PSH_LIB_DEFINE].call_app(method,'CLF')|| -- updated CHANGE_SHORT_NAME PSB_LIB_DEFINE->PSH_LIB_DEFINE 14/10/25
+			'
+			v_wasExec	:= true;
+		end loop;
+		&debug(''## Расчет формульных настроек закончен ##'', 0);
+
+	else
+			&debug(''## Команда вывода не опрделена ##'', 0);
+			&debug(''## Поддерживаемые команды: EXP, PRN ##'', 0);
+			&debug(''## Ваша команда(P_RUN): ''||nvl(v_run,''<не определена>'')||''##'', 0);
+	end if;
+
+	if v_wasExec then
+		&debug(''>>> все приложения выполнены...'', 0);
+	else
+		&debug(''>>> Не найдено приложенний. Проверте правильность конфигурации профиля "''||p_param.[PROF].[NAME]||''" (''||p_param.[PROF].[CODE]||'')'', 0);
+	end if;
+	/*Длинна подстановки макроса:"';
+	vRet := vRet||length(vRet)||'"*/
+end;
+';
+end if;
+if length(vRet) > 12000 then
+	pragma error('Длинна подстановки макроса: '||length(vRet)||' (ограничение 12000 символов)');
+end if;
+return vRet;
+end;
+
+/** deprecated
+ * Процедура ничего не делает, оставлена из-за участия в интерфейсе REPS_INTERFACE INT_REPS_002
+ * Было: перекомпиляция пакета Run_App в справочнике данных
+ * есть проверка на наличие операции в Run_App в справочнике данных
+ */
+public procedure Compile_Run_App(p_class varchar2(32767))
+is
+begin
+	null;
+end;
+
+
+-- копировать операцию/операции из одной конфигурации профиля во второй
+public procedure CopyConfig
+		(	p_in_prof		ref [REPS_PROF_TUN]
+		/*Профиль-источник*/
+		,	p_out_prof	ref [REPS_PROF_TUN]
+		/*Целевой профиль*/
+		,	p_chng_prils		varchar2(4000)	default null
+		/*
+		Строка изменяемых приложений.
+		Формат: '#<код1 изменяемого приложения в целевом профиле>#<код2 изменяемого приложения в целевом профиле>#'.
+		*/
+		,	p_flg				integer			default 1
+		/*
+		Характер изменений, применяется в случае ненулевой строки изменяемых приложений.
+		Возможные варианты:
+			- 1 - замена версии (в p_chng_prils указывается код новой версии), например, PRN_001 -> PRN_002 (в p_chng_prils - #PRN_002#);
+			- 2 - удаление (в p_chng_prils указывается код удаляемого приложения, например, #PRN_001#);
+			- 3 - добавление (в p_chng_prils указывается код добавляемого приложения, например, #PRN_002#);
+			- 4 - замена версии c добавлением (в p_chng_prils указывается код добавляемого/новой версии приложения, например, #PRN_002#CLC_BASE_001#).
+		*/
+		)
+is
+	vListApp		varchar2(4000);				--список приложений целевого профиля
+	type StrTable is table of varchar2(100);
+	tiChangeApp		StrTable;					--таблица изменяемых приложений (идекс -целое, в строках лежат короткие имена приложений к изменению)
+
+	type tabAppList_v is table of varchar2(100) index by varchar2(100);
+	tvExistsApp		tabAppList_v;				--таблица приложений конфигурации профиля (индекс- тип приложения CLC_BASE, INI, CLC_CRED и пр.)
+	iIdx			integer := 1;				--индекс по таблице изменяемых приложений
+	vApp			varchar2(100);				--временная переменная для короткого имени приложения
+	vAppType		varchar2(100);				--переменная для типа приложения (CLC_BASE, INI, CLC_CRED и пр.)
+begin
+	&debug('Копирование конфигурации из ['||p_in_prof.[NAME]||'] в ['||p_out_prof.[NAME]||']',dp)
+
+	-- заполнение таблицы изменяемых приложений
+	if p_chng_prils is not null then
+		p_chng_prils := substr(p_chng_prils, 2);
+		&debug('	Список изменяемых приложений:',dp10)
+		loop
+			vApp := fd.GetStrGroup(p_chng_prils, iIdx, '#', false, false);
+			exit when vApp is null;
+			&debug('		'||iIdx||' : '||vApp,dp10)
+			tiChangeApp(iIdx) := vApp;
+			iIdx := iIdx + 1;
+		end loop;
+	else
+		&debug('	Изменяемых приложений нет',dp10)
+	end if;
+
+	-- заполнение таблицы приложений из изменяемой конфигурации (проход по приложениям профиля-источника)
+	&debug('	Список приложений профиля источника:',dp10)
+	for (
+		select	op(op.[CODE] 	: C_CODE)
+		in		p_in_prof.[DEFINE].[LIST_APP]
+		)
+	loop
+		vAppType := substr(op.C_CODE, 1, instr(op.C_CODE, '_', -1) - 1);
+		&debug('		'||vAppType||' : '||op.C_CODE,dp10)
+		tvExistsApp(vAppType) := op.C_CODE;
+	end loop;
+
+	-- цикл по изменяемым приложениям
+	iIdx := tiChangeApp.first;
+	while iIdx is not null loop
+		--определяем тип изменяемого приложения
+		vAppType := substr(tiChangeApp(iIdx), 1, instr(tiChangeApp(iIdx), '_', -1) - 1);
+		--если приложение данного типа есть в конфигурации
+		if tvExistsApp.exists(vAppType) then
+			--если замена или замена с добавлением
+			if p_flg in (1,4) then
+				tvExistsApp(vAppType) := tiChangeApp(iIdx);
+			--если удаление, проверяем на точное совпадение	имени операции
+			elsif p_flg = 2 and  tvExistsApp(vAppType) = tiChangeApp(iIdx) then
+				tvExistsApp.delete(vAppType);
+			end if;
+		--если приложения данного типа нет в конфигурации
+		--и операции добавление или замена с добавлением
+		elsif p_flg in (3,4) then
+			tvExistsApp(vAppType) := tiChangeApp(iIdx);
+		end if;
+		iIdx := tiChangeApp.next(iIdx);
+	end loop;
+
+	--собираем получившуюся конфигурацию
+	&debug('	Список приложений целевого профиля :',dp10)
+	vListApp := '#';
+	vAppType := tvExistsApp.first;
+	while vAppType is not null loop
+		vListApp := vListApp||tvExistsApp(vAppType)||'#';
+		&debug('		'||vAppType||' : '||tvExistsApp(vAppType),dp10)
+		vAppType := tvExistsApp.next(vAppType);
+	end loop;
+
+	&debug('	Строка приложений целевого профиля :'||vListApp,dp10)
+	--создаем конфигурацию целевого профиля
+	if vListApp <> '#' then
+		p_out_prof.[CREATE_DEFINE]
+			(
+				p_out_prof						--P_PROF		--Профиль
+			,	nvl(p_in_prof.[DEFINE].[SRC_APP], GetSrcAPP(p_out_prof.[REP]))	--P_SRC_APP		--Справочник приложений по умолчанию определяем с профиля источника
+			,	true							--P_DELETE		--Удалить текущую конфигурацию
+			,	vListApp						--P_APP_LIST	--Список приложений нового профиля
+			);
+	end if;
+
+	&debug('Окончено копирование конфигурации...',dp)
+end;
+end;

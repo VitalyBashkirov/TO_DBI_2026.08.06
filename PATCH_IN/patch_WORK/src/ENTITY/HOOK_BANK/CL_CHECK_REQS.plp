@@ -1,0 +1,135 @@
+class HOOK_BANK;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('Клиенты. Проверка параметров. Вер.01')
+@tag('COPIED')
+static method CL_CHECK_REQS is
+--pragma include ('APPAUX_CALLPOINT.COMPILE_LIB');
+pragma include(::[RUNTIME].[DEBUG_MACRO]);
+dp integer:=0;	--управление debug_pipe
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+fmt	   string(10):='dd/mm/yyyy';
+CL_CHECK_REQS (
+	@name('Операция')                  P_METH        in     [STRING_128],
+	@name('Тип вызова')                P_CALL        in     [STRING_64],
+	@name('Вид изменения')             P_OP_INFO     in     [STRING_128],
+	@name('Клиент, ссылка')            P_CLIENT      in     [CLIENT_REF],
+	@name('Физическое лицо')           P_CL_PRIV     in     [CL_PRIV],
+	@name('Юридическое лицо')          P_CL_ORG      in     [CL_ORG],
+	@name('Дополнительные параметры')  P_ADDS        in     [STRING_32000]    default null,
+	@name('Адреса')                    P_ADDRESS     in     [ADDRESSES]       default null,
+	@name('Удостоверение')             P_DOC         in     [CERTIFICATE]     default null,
+	@name('Доп. удостоверения')        P_DOCS        in     [CERTIFICATE_ARR] default null,
+	@name('Регистрация')               P_REGISTER    in     [REGISTRATION]    default null,
+	@name('Связи с другими клиентами') P_LINKS_OTHER in     [LINKS_CL_ARR]    default null,
+	@name('Должностные лица')          P_ALL_BOSS    in     [PERSONS_POS_ARR] default null,
+	@name('Клиент-скрипт')             P_VB          in out [STRING_32000]
+) is
+
+execute is
+msg string(200):='Редактирование запрещено. Пользователь не входит в группу доступа "PSH_KLI_EDIT-PSH. Клиенты редактирование"';
+belong_grp	string(16);
+
+FlErr boolean:=false;
+vSiName [SBRF_NAME];
+vIName [SBRF_NAME];
+tmpName [SBRF_NAME];
+OneChar string(3);
+OnlyRu string(66):='АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя';
+msgErr string(2000); 
+begin
+	&debug('P_CALL        ='||P_CALL,dp)
+	&debug('P_OP_INFO     ='||P_OP_INFO,dp)
+
+	if P_CALL='DEFAULT' then
+		&debug('P_METH        ='||P_METH,dp)
+		&debug('P_CLIENT      ='||P_CLIENT.[NAME],dp)
+		&debug('P_CL_PRIV     ='||P_CL_PRIV.[NAME],dp)
+		&debug('P_CL_ORG      ='||P_CL_ORG.[NAME],dp)
+		&debug('P_ADDS        ='||P_ADDS,dp)
+		&debug('P_ADDRESS     ='||P_ADDRESS%collection,dp)
+		&debug('P_DOC         ='||P_DOC.[SER]||' №'||P_DOC.[NUM],dp)
+		&debug('P_DOCS        ='||P_DOCS,dp)
+		&debug('P_REGISTER    ='||P_REGISTER%id,dp)
+		&debug('P_LINKS_OTHER ='||P_LINKS_OTHER%collection,dp)
+		&debug('P_ALL_BOSS    ='||P_ALL_BOSS%collection,dp)
+		&debug('>P_VB         ='||P_VB,dp)
+	end if;
+
+	if P_CALL='DEFAULT' and P_METH='CL_ORG.EDIT#AUTO' then
+		--belong_grp	string(16);
+		for r in [RKO] all where r.[CLIENT]=P_CLIENT
+			and r.[DATE_CLOSE] is null
+		loop
+			&debug('У клиента есть действующий договор РКО №'||r.[NUM_DOG]||' '||r.[ACCOUNT].[MAIN_V_ID],dp)
+			/** /
+			&debug(SubStr('SECURITY.Check_BelongGroup(''''PSH_KLI_EDIT'''')='||SECURITY.Check_BelongGroup('PSH_KLI_EDIT'),1,2000),dp)
+			if SECURITY.Check_BelongGroup('PSH_KLI_EDIT')=0 then -- PSH. Клиенты редактирование
+				P_VB:='OK.Enable = false;';
+			else
+				null;
+				&debug(msg,dp)	
+			end if;
+			/**/
+			exit;
+		end loop;
+	end if;
+	&debug('<P_VB         ='||P_VB         ,dp)
+	
+	-- 18/08/2022 Башкиров В.Г.
+	--Абрамова Ю.С. Для минимизации риска некорретного внесения данных в карточку клиента-юридического лица в поля: ?Интернациональное наименование? и ?Краткое интернац. наименование?, просим при сохранении данных при наличии русских букв в наименовании на латинице:
+	-- создать выпадающее напоминание о том, что данные должны вноситься только на латинице/ не позволять сохранить данные.
+	if P_CALL='EXECUTE' and P_OP_INFO is null then
+		FlErr=msgErr:=null;
+		vIName:=P_CLIENT.[I_NAME];
+
+		if regexp_like(vIName, '[А-Яа-яЁё]') then --vIName is not null then
+			 &debug('Ищем русские в интернаименовании:'||vIName,dp)
+			 for i in 1..Length(vIName)	loop
+			 	OneChar:=Substr(vIName,i,1);
+			 	if InStr(OnlyRu,OneChar)>0 then
+			 		FlErr:=true;
+			 		OneChar:='~'||OneChar||'~';
+			 	end if;
+			 	tmpName:=tmpName||OneChar;
+			 end loop;
+			 if FlErr then
+			 	msgErr:=msgErr||'В интернациональном наименовании есть русские символы'||LF$||tmpName||LF$||LF$;
+			 end if;
+			 FlErr:=false; tmpName:='';
+		end if;
+		
+		vSiName:=P_CLIENT.[SI_NAME];
+		if regexp_like(vSiName, '[А-Яа-яЁё]') then --vSiName is not null then
+			 &debug('Ищем русские в кратком интернаименовании:'||vSiName,dp)
+			 for i in 1..Length(vSiName)	loop
+			 	OneChar:=Substr(vSiName,i,1);
+			 	if InStr(OnlyRu,OneChar)>0 then
+			 		FlErr:=true;
+			 		OneChar:='~'||OneChar||'~';
+			 	end if;
+			 	tmpName:=tmpName||OneChar;
+			 end loop;
+			 if FlErr then
+			 	msgErr:=msgErr||'В кратком интернациональном наименовании есть русские символы'||LF$||tmpName||LF$||LF$;
+			 end if;
+			 FlErr:=false; tmpName:='';
+		end if;
+		
+		if msgErr is not null then
+			pragma error(msgErr||'Русские символы выделены ~~');
+		end if;
+	end if;
+    
+    /*by smith 04/12/24 via http://jira.bank.local:8080/browse/CFT-22*/	
+    if P_CALL = 'EXECUTE' then
+ 	   ::[HOOK_BANK].[DEPN_ACC_OPEN].Fincert_Check(P_CLIENT);
+	end if;
+    
+end;
+end;
+end;

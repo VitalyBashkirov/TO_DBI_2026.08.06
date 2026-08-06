@@ -1,0 +1,897 @@
+class MAIN_DOCUM;
+
+@name('[ПСБ] Противодействие легализации. Печать запроса клиенту')
+@tag('COPIED')
+method PSH_PRNT_ZAPROS is
+
+@name('V_DATA') public V_DATA [STRING_32000];
+pragma macro('word', '::[RUNTIME].[WORD]', substitute);
+
+LV_TEMPLATE			ref [SHABLON_DOC];
+
+LC_DT_KASSA	const integer	:= 0; -- кассовый документ
+LC_DT_SWIFT	const integer	:= 1; -- SWIFT-документ
+LC_DT_NCASH	const integer	:= 2; -- безнал
+
+LC_SF_103	const ::[TYPE_DOC_RC].[SFORM]%type	:= '103'; -- 103 тип SWIFT-сообщения
+LC_SF_202	const ::[TYPE_DOC_RC].[SFORM]%type	:= '202'; -- 202 тип SWIFT-сообщения
+
+LC_CB_EMPTY		const string(11)	:= 'ChrW(9744)';
+LC_CB_CHECKED	const string(11)	:= 'ChrW(9745)';
+
+LC_DT_YL_INPUT	const ref [NAME_PAYDOC] := ::[NAME_PAYDOC]([CODE] = 'КАСС_ОБЪЯВ_ВЗНОС');	-- Объявление на взнос наличными
+LC_DT_YL_OUTPUT	const ref [NAME_PAYDOC] := ::[NAME_PAYDOC]([CODE] = 'КАСС_ЧЕК_ВЫДАЧА');		-- Чек на выдачу наличных
+
+PAYER_BIC [STRING_2000];
+PAYER_B_NAME [STRING_2000];
+PAYEE_BIC [STRING_2000];
+PAYEE_B_NAME [STRING_2000];
+PAYER_NAME string(160); -- 15052024 asankulov string поставил 160;
+CLIENT_DIR string(160); -- 15052024 asankulov string поставил 160;
+CLIENT_NAME string:= null;
+PAYER_INN string:= null;
+CLIENT_INN string:= null;
+PAYEE_NAME string:= null;
+PAYEE_INN string:= null;
+PAYER_REQ_ACC string:= null;
+PAYEE_REQ_ACC string:= null;
+CLIENT_REQ_ACC string:= null;
+
+-- Шаблон адреса
+V_ADR_MASK		varchar2(100):= 'POST_CODE,REGION_NCT,DISTRICT,CITY,STREET,HOUSE,KORPUS,FLAT';
+-- Реквизиты клиента
+V_CITY_C		ref [NAMES_CITY];--"Населенный пункт"
+V_OKATO_C		[STRING_2000];--"ОКАТО_клиент"
+V_ADRESS_C		[STRING_2000];--"Адрес (клиент)"
+V_ADRESS_C_POST	[STRING_2000];--"Почтовый адрес (клиент)"
+
+
+Procedure GetClientReq(IdClient ref [CLIENT]) is
+Begin
+	-- Адреса клиента
+	::[DEPN_INTERFACE].[PRX_CLIENT].GetAddressClient(IdClient
+												,V_ADR_MASK
+												,V_CITY_C												
+												,V_ADRESS_C
+												,V_ADRESS_C_POST
+												,V_OKATO_C);
+end;											
+												
+function priz_6001(doc ref [DOCUMENT]) return string is
+	res	string;
+begin
+	select	re(re: CODE)
+	in		(
+		select	r(substr(max(sys_connect_by_path(r.[CODE], ',')), 2): CODE)
+		in		(
+			select		hc(hc.[UNUS_CODE].[CODE]: CODE, rownum: RN, rownum - 1: PREV)
+			in			::[HISTORY_CHECK]
+			where		hc.[DOCUMENT]	= doc
+						and hc.[VID_OP]	= ::[VID_OPER_PRED]([CODE] = '6001')
+						and hc.[STATE]	= ::[COM_STATUS_PRD]([CODE] = 'CONFIRM')
+						and hc.[DATE]	= (
+							select		hc2(max(hc2.[DATE]))
+							in			::[HISTORY_CHECK]
+							where		hc2.[DOCUMENT]		= doc
+										and hc2.[VID_OP]	= ::[VID_OPER_PRED]([CODE] = '6001')
+										and (hc2.[UNUS_CODE]	= hc.[UNUS_CODE])
+						)
+		)
+		connect by r.[PREV] = prior r.[RN]
+		start r.[RN] = 1
+	)
+	into	res;
+	return res;
+exception
+	when NO_DATA_FOUND then return null;
+end;
+
+/****************************** было
+pragma macro('word', '::[RUNTIME].[WORD]', substitute);
+
+LC_TEMPLATE_CODE	const string(11)	:= 'PSH_OPER';
+LV_TEMPLATE			ref [SHABLON_DOC];
+
+LC_DT_KASSA	const integer	:= 0; -- кассовый документ
+LC_DT_SWIFT	const integer	:= 1; -- SWIFT-документ
+LC_DT_NCASH	const integer	:= 2; -- безнал
+
+LC_SF_103	const ::[TYPE_DOC_RC].[SFORM]%type	:= '103'; -- 103 тип SWIFT-сообщения
+LC_SF_202	const ::[TYPE_DOC_RC].[SFORM]%type	:= '202'; -- 202 тип SWIFT-сообщения
+
+LC_CB_EMPTY		const string(11)	:= 'ChrW(9744)';
+LC_CB_CHECKED	const string(11)	:= 'ChrW(9745)';
+
+LC_DT_YL_INPUT	const ref [NAME_PAYDOC] := ::[NAME_PAYDOC]([CODE] = 'КАСС_ОБЪЯВ_ВЗНОС');	-- Объявление на взнос наличными
+LC_DT_YL_OUTPUT	const ref [NAME_PAYDOC] := ::[NAME_PAYDOC]([CODE] = 'КАСС_ЧЕК_ВЫДАЧА');		-- Чек на выдачу наличных
+
+PAYER_BIC string;
+PAYER_B_NAME string;
+
+function priz_6001(doc ref [DOCUMENT]) return string is
+	res	string;
+begin
+	select	re(re: CODE)
+	in		(
+		select	r(substr(max(sys_connect_by_path(r.[CODE], ',')), 2): CODE)
+		in		(
+			select		hc(hc.[UNUS_CODE].[CODE]: CODE, rownum: RN, rownum - 1: PREV)
+			in			::[HISTORY_CHECK]
+			where		hc.[DOCUMENT]	= doc
+						and hc.[VID_OP]	= ::[VID_OPER_PRED]([CODE] = '6001')
+						and hc.[STATE]	= ::[COM_STATUS_PRD]([CODE] = 'CONFIRM')
+						and hc.[DATE]	= (
+							select		hc2(max(hc2.[DATE]))
+							in			::[HISTORY_CHECK]
+							where		hc2.[DOCUMENT]		= doc
+										and hc2.[VID_OP]	= ::[VID_OPER_PRED]([CODE] = '6001')
+										and (hc2.[UNUS_CODE]	= hc.[UNUS_CODE])
+						)
+		)
+		connect by r.[PREV] = prior r.[RN]
+		start r.[RN] = 1
+	)
+	into	res;
+	return res;
+exception
+	when NO_DATA_FOUND then return null;
+end;
+***********************/
+PSH_PRNT_ZAPROS (
+	@name('Вид сделки')   P_DEAL_TYPE in [ONE_FROM_THREE],
+	@name('Пользователь') P_USER      in [USER_REF],
+	@name('Должность')    P_POST      in [CASTA_REF]
+) is
+
+validate is
+md		[MAIN_DOCUM];
+drc		[DOCUM_RC];
+dt		integer;						-- Тип документа: Кассовый, SWIFT, Безнал
+sf		[TYPE_DOC_RC].[SFORM]%type;		-- Тип SWIFT-сообщения: 103, 202
+LV_7001	::[HISTORY_CHECK].[STATE].[CODE]%type;
+is_in	boolean;						-- Входящий SWIF-документ
+is_deb boolean:=false; --наш клиент по дебету
+is_cred boolean:=false; --наш клиент по кредиту
+
+s STRING;
+
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		[WORD].Init_Wrd;
+		P_USER	:= stdlib.userid;
+		P_POST	:= stdlib.userid.[CASTA];
+	elsif P_MESSAGE = 'VALIDATE' then
+		if P_INFO = 'OK' then
+			if &word.f_click then
+				&word.f_click	:= false;
+				V_DATA			:= null;
+				-- Текущий платежный документ
+				md				:= this;
+				-- Документ РЦ, связанный с текущим платежным документом (может отсутствовать)
+				drc				:= ::[LEGAL_INTERFACE].[PRX_DOCUMENT].DOCUM_RC_GETDOCRC(this);
+				-- Определение типа документа (для дальнейшего использования в case-выражениях)
+				dt				:= case
+					when md.[VID_DOC].[TYPE_DOC].[CODE] = 'KASSA_DOCUM' then	LC_DT_KASSA
+					when drc%id is not null and drc.[MT103] is not null then	LC_DT_SWIFT
+					else														LC_DT_NCASH
+				end;
+				-- Определение типа SWIFT-сообщения (для дальнейшего использования в case-выражениях)
+				if dt = LC_DT_SWIFT then
+					begin
+						select	x(x.[SFORM])
+						in		::[TYPE_DOC_RC]
+						where	x.[NUM_CODE] = drc.[TYPE_DOC] and  nvl(x.[UT], '*') = nvl(drc.[SUB_TYPE], '*') and nvl(x.[FOR_VAL], '*') = '1'
+						into	sf;
+					exception
+						when NO_DATA_FOUND then sf	:= null;
+						when TOO_MANY_ROWS then sf	:= null;
+					end;
+				end if;
+				is_in	:= dt = LC_DT_SWIFT and ::[LEGAL_INTERFACE].[PRX_DOCUMENT].DOCUM_RC_IS_IN(drc%id);
+				begin
+					locate	LV_TEMPLATE
+					in		::[SHABLON_DOC]
+					where	LV_TEMPLATE.[CODE]		= case when P_DEAL_TYPE.[0] = 1 then 'PSH_ZAPROS_FM' 
+					                                       when P_DEAL_TYPE.[0] = 2 then 'PSH_ZAPROS_FM1' 
+					                                       when P_DEAL_TYPE.[0] = 3 then 'PSH_ZAPROS_FM2' 
+					                                        else 'PSH_ZAPROS_FM1' 
+					       
+                                				       end
+						and	LV_TEMPLATE.[GRP_CODE]	= 'LEGAL';
+				exception
+					when NO_DATA_FOUND then
+						pragma error('В справочнике "Справочник шаблонов документов" отсутствует шаблон с кодом PSH_ZAPROS_FM%');
+
+					when TOO_MANY_ROWS then
+						pragma error(
+							'В справочнике "Справочник шаблонов документов" в группе LEGAL обнаружено несколько шаблонов с кодом PSH_ZAPROS_FM%'
+
+						);
+				end;
+
+				&word.open_file(::[SYSTEM_PARAMS].[GET]('PATH_PRINT_DOC') || LV_TEMPLATE.[FILE_NAME]);
+				
+				&word.cmd(
+					'b = wrd.Selection.Find.Execute("[CB_REQ_CNTRL]", False, False, False, False, False, True, 1, False, '
+					|| case when P_DEAL_TYPE.[0] = 1 then LC_CB_CHECKED else LC_CB_EMPTY end
+					|| ' & " Операция (сделка), подлежащая обязательному контролю", 2, False, False, False, False)'
+				);
+				&word.cmd(
+					'b = wrd.Selection.Find.Execute("[CB_DOUBT]", False, False, False, False, False, True, 1, False, '
+					|| case when P_DEAL_TYPE.[0] = 2 then LC_CB_CHECKED else LC_CB_EMPTY end
+					|| ' & " Необычная операция (сделка)", 2, False, False, False, False)'
+				);
+				begin
+					select h(h.[ST].[CODE]) in
+						(select distinct x(
+							x.[VID_OP]											: VID_OP,
+							x.[VID_OP].[CODE]									: CODE,
+							analytic(
+								first_value(x.[STATE]),
+								'over (partition by [1] order by [2] desc)',
+								x.[VID_OP].[CODE],
+								x.[DATE]
+							)													: ST,
+							nvl(x.[VID_OP].[PRIORITET],3)						: PRIORITET
+						)
+						in ::[HISTORY_CHECK] all
+						where x.[DOCUMENT] = md%id
+							and x.[VID_OP].[VID_TYPE] != 3
+						)
+					where
+						h.[VID_OP].[CODE] = '7001'
+						and rownum < 2
+					into LV_7001;
+				exception
+					when NO_DATA_FOUND then
+						LV_7001	:= null;
+				end;
+				&word.cmd(
+					'b = wrd.Selection.Find.Execute("[CB_LEGAL]", False, False, False, False, False, True, 1, False, '
+					|| case when LV_7001 = 'CONFIRM' then LC_CB_CHECKED else LC_CB_EMPTY end
+					|| ' & " Одной из сторон операции (сделки) является лицо, в отношении которого имеются сведения об участии в террористической деятельности", 2, False, False, False, False)'
+				);
+
+				&word.put_into_prepared_lines('NAZN', md.[NAZN]);
+				&word.put_into_prepared_lines('DATE_DOC', to_char(md.[DATE_DOC], 'dd.mm.yyyy'));
+				&word.put_into_prepared_lines('DATE_VAL', to_char(md.[DATE_VAL], 'dd.mm.yyyy'));
+				&word.put_into_prepared_lines('DOCUMENT_NUM', md.[DOCUMENT_NUM]);
+				&word.put_into_prepared_lines('SROK_DOC', to_char([PRODUCT].[LIB_01].DeleyWorkDays(md.[DATE_PROV],3,true,null,null),'dd.mm.yyyy'));
+
+--				debug_pipe('sum '||md.[SUM]||'sum_nt '||md.[SUM_NT]||'sum_po '||md.[SUM_PO]||'валюта кред '||md.[VALUTA_PO] ,0);
+				
+				&word.put_into_prepared_lines('AMOUNT', md.[SUM]);
+					
+				if(md.[VALUTA]<>md.[VALUTA_PO]) then --but для валютных печатаем 2 суммы
+				      &word.put_into_prepared_lines('AMOUNT_CRED', '('||md.[SUM_PO]||' '||md.[VALUTA_PO].[CUR_SHORT]||')');
+                else  &word.put_into_prepared_lines('AMOUNT_CRED','');
+				end if;
+				
+
+				--AMOUNT_CB
+				declare
+					md_cur	ref [FT_MONEY];
+					ft_rub	const ref [FT_MONEY] := ::[SYSTEM].[VARIABLES].NatCur;
+				begin
+					md_cur := md.[VALUTA];
+					if md_cur <> ft_rub then
+						&word.put_into_prepared_lines('AMOUNT_CB', ::[DOCUMENT].[LIB_CUR].Cur2Cur(md.[SUM], md_cur, ft_rub, md.[DATE_DOC]));
+					else
+						&word.put_into_prepared_lines('AMOUNT_CB', md.[SUM]);
+					end if;
+				end;
+				
+				&word.put_into_prepared_lines('CURR_NUMB', md.[VALUTA].[CODE_ISO]);
+				&word.put_into_prepared_lines('CURR_LTRS', md.[VALUTA].[CUR_SHORT]);
+				&word.put_into_prepared_lines('CURR_NAME', md.[VALUTA].[NAME]);
+               PAYER_NAME:=case
+						when dt = LC_DT_KASSA then
+							case md.[VID_DOC]
+								when LC_DT_YL_INPUT then nvl(md.[KL_KT].[2].[2], md.[KL_KT].[1].[1].[NAME])
+								when LC_DT_YL_OUTPUT then nvl(md.[KL_DT].[2].[2], md.[KL_DT].[1].[1].[NAME])
+								else md.[REQ_MAN].[NAME]
+							end
+						when dt = LC_DT_SWIFT then case
+							when is_in = true then drc.[PAYER].[NAME]
+							else nvl(md.[KL_DT].[2].[2], md.[KL_DT].[1].[1].[NAME])
+						end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_DT].[2].[2], md.[KL_DT].[1].[1].[NAME])
+					end;
+
+				&word.put_into_prepared_lines('PAYER_NAME',PAYER_NAME);
+
+				PAYER_INN:=case
+						when dt = LC_DT_KASSA then
+							case md.[VID_DOC]
+								when LC_DT_YL_INPUT then nvl(md.[KL_KT].[2].[INN], md.[KL_KT].[1].[1].[INN])
+								when LC_DT_YL_OUTPUT then nvl(md.[KL_DT].[2].[INN], md.[KL_DT].[1].[1].[INN])
+								else md.[REQ_MAN].[CLIENTREF].[INN]
+							end	
+						when dt = LC_DT_SWIFT then case
+							when is_in = true then ''
+							else nvl(md.[KL_DT].[2].[INN], md.[KL_DT].[1].[1].[INN])
+						end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_DT].[2].[INN], md.[KL_DT].[1].[1].[INN])
+					end;
+				&word.put_into_prepared_lines('PAYER_INN',PAYER_INN);
+
+				&word.put_into_prepared_lines('PAYER_ACC', md.[ACC_DT].[MAIN_V_ID]);
+				&word.put_into_prepared_lines('PAYER_REQ_ACC'
+				    , case
+		                 when dt = LC_DT_KASSA then	''	
+				         else nvl(md.[KL_DT].[2].[1], md.[KL_DT].[1].[2].[MAIN_V_ID])
+				         end
+				);
+
+--but
+				PAYER_BIC:=case
+						when dt = LC_DT_KASSA then nvl(md.[KL_DT].[2].[3].[BIC], md.[KL_DT].[1].[2].[FILIAL].[BANK].[BIC])
+						when dt = LC_DT_SWIFT then
+							case
+								when is_in = true then drc.[PAYER].[BCODE]
+								else nvl(md.[KL_DT].[2].[3].[BIC], md.[KL_DT].[1].[2].[FILIAL].[BANK].[BIC])
+							end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_DT].[2].[3].[BIC], md.[KL_DT].[1].[2].[FILIAL].[BANK].[BIC])
+					
+					end;
+
+                PAYER_B_NAME:= case
+               		when dt = LC_DT_KASSA then nvl(md.[KL_DT].[2].[3].[NAME], md.[KL_DT].[1].[2].[FILIAL].[BANK].[NAME])
+						when dt = LC_DT_SWIFT then
+							case
+								when is_in = true then drc.[PAYER].[BANK]
+								else nvl(md.[KL_DT].[2].[3].[NAME], md.[KL_DT].[1].[2].[FILIAL].[BANK].[NAME])
+							end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_DT].[2].[3].[NAME], md.[KL_DT].[1].[2].[FILIAL].[BANK].[NAME])
+					end;
+
+--debug_pipe('PAYER_BIC='||PAYER_BIC,0);
+       if PAYER_BIC IN ('044579771', '046375892', '044525771') then
+          PAYER_BIC:='';
+          PAYER_B_NAME:='';
+
+          CLIENT_NAME:=PAYER_NAME; --наш клиент по дебету;
+          CLIENT_INN:=PAYER_INN;
+          CLIENT_REQ_ACC:=md.[ACC_DT].[MAIN_V_ID]; --PAYER_REQ_ACC;
+          is_deb:=true;
+       else PAYER_BIC:=CONCAT('БИК ',PAYER_BIC);
+          is_deb:=false;
+       end if;
+
+       &word.put_into_prepared_lines('PAYER_BANK_NAME',PAYER_B_NAME);
+       &word.put_into_prepared_lines('PAYER_BANK_BIC',PAYER_BIC);
+--but адрес плательщика
+                -- V_ADRESS_C:=md.[REQ_MAN].[ADDR]; --можно так
+				if dt = LC_DT_KASSA    then
+					GetClientReq(md.[REQ_MAN].[CLIENTREF]);
+    			else GetClientReq(md.[KL_DT].[1].[1]);
+				end if;
+
+/********
+             --is_in	:= dt = LC_DT_SWIFT and ::[LEGAL_INTERFACE].[PRX_DOCUMENT].DOCUM_RC_IS_IN(drc%id);
+             if is_in=false then				 --для swift и входящих РЦ адрес плательщика не заполняем
+             	V_ADRESS_C:='';
+             	V_ADRESS_C_POST:='';
+             else
+             	GetClientReq(md.[KL_DT].[1].[1]);
+             end if;
+*******/
+       &word.put_into_prepared_lines('ADR_R_CL',V_ADRESS_C );
+       &word.put_into_prepared_lines('ADR_P_CL',V_ADRESS_C_POST );
+       
+       
+
+--but адрес получателя
+
+             if dt = LC_DT_SWIFT and ::[LEGAL_INTERFACE].[PRX_DOCUMENT].DOCUM_RC_IS_IN(drc%id)=false then --для исходящих swift адреса получателя не заполняем
+             	V_ADRESS_C:='';
+             	V_ADRESS_C_POST:='';
+             else
+	             GetClientReq(md.[KL_KT].[1].[1]);
+             end if;
+
+       &word.put_into_prepared_lines('ADR_R_REC',V_ADRESS_C );
+       &word.put_into_prepared_lines('ADR_P_REC',V_ADRESS_C_POST );
+
+                    PAYEE_NAME:= case
+						when dt = LC_DT_KASSA then
+							case md.[VID_DOC]
+								when LC_DT_YL_INPUT then nvl(md.[KL_KT].[2].[2], md.[KL_KT].[1].[1].[NAME])
+								when LC_DT_YL_OUTPUT then nvl(md.[KL_DT].[2].[2], md.[KL_DT].[1].[1].[NAME])
+								else nvl(md.[KL_KT].[2].[2], md.[KL_KT].[1].[1].[NAME])
+							end	
+						when dt = LC_DT_SWIFT then
+							case
+								when is_in = true then nvl(md.[KL_KT].[2].[2], md.[KL_KT].[1].[1].[NAME])
+								else case
+									when sf = LC_SF_103 then drc.[RECEIVER].[ACC] || ' ' ||drc.[RECEIVER].[NAME]
+									when sf = LC_SF_202 then drc.[BEN].[NAME]
+									else ''
+								end
+							end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_KT].[2].[2], md.[KL_KT].[1].[1].[NAME])
+					end;
+
+                &word.put_into_prepared_lines('PAYEE_NAME', PAYEE_NAME);--but
+
+                 PAYEE_INN:=case
+						when dt = LC_DT_KASSA then
+							case md.[VID_DOC]
+								when LC_DT_YL_INPUT then nvl(md.[KL_KT].[2].[INN], md.[KL_KT].[1].[1].[INN])
+								when LC_DT_YL_OUTPUT then nvl(md.[KL_DT].[2].[INN], md.[KL_DT].[1].[1].[INN])
+								else nvl(md.[KL_KT].[2].[INN], md.[KL_KT].[1].[1].[INN])
+							end
+						when dt = LC_DT_SWIFT then
+							case
+								when is_in = true then nvl(md.[KL_KT].[2].[INN], md.[KL_KT].[1].[1].[INN])
+								else ''
+							end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_KT].[2].[INN], md.[KL_KT].[1].[1].[INN])
+					end;
+
+                &word.put_into_prepared_lines('PAYEE_INN', PAYEE_INN);--but
+				&word.put_into_prepared_lines('PAYEE_ACC', md.[ACC_KT].[MAIN_V_ID]);
+--but				&word.put_into_prepared_lines('PAYEE_REQ_ACC', nvl(md.[KL_KT].[2].[1], md.[KL_KT].[1].[2].[MAIN_V_ID]));
+
+                 PAYEE_REQ_ACC:=case
+		                 when dt = LC_DT_KASSA then	''	
+				         else nvl(md.[KL_KT].[2].[1], md.[KL_KT].[1].[2].[MAIN_V_ID])
+				         end;
+								
+					PAYEE_B_NAME:= case
+						when dt = LC_DT_KASSA then nvl(md.[KL_KT].[2].[3].[NAME], md.[KL_KT].[1].[2].[FILIAL].[BANK].[NAME])
+						when dt = LC_DT_SWIFT then
+							case
+								when is_in = true then nvl(md.[KL_KT].[2].[3].[NAME], md.[KL_KT].[1].[2].[FILIAL].[BANK].[NAME])
+								else case
+									when sf = LC_SF_103 then drc.[RECEIVER].[BANK]
+									else ''
+								end
+							end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_KT].[2].[3].[NAME], md.[KL_KT].[1].[2].[FILIAL].[BANK].[NAME])
+					end;
+
+
+                  	PAYEE_BIC:= case
+						when dt = LC_DT_KASSA then nvl(md.[KL_KT].[2].[3].[BIC], md.[KL_KT].[1].[2].[FILIAL].[BANK].[BIC])
+						when dt = LC_DT_SWIFT then
+							case
+								when is_in = true then nvl(md.[KL_KT].[2].[3].[BIC], md.[KL_KT].[1].[2].[FILIAL].[BANK].[BIC])
+								else case
+									when sf = LC_SF_103 then drc.[RECEIVER].[BCODE]
+									when sf = LC_SF_202 then drc.[BEN].[CODE]
+									else ''
+								end
+							end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_KT].[2].[3].[BIC], md.[KL_KT].[1].[2].[FILIAL].[BANK].[BIC])
+					end;
+		
+
+       if PAYEE_BIC IN ('044579771', '046375892', '044525771') and (PAYER_BIC!='' or md.[ACC_DT].[MAIN_V_ID] like ('3%'))
+       then
+          PAYEE_BIC:='';
+          PAYEE_B_NAME:='';
+          CLIENT_NAME:=PAYEE_NAME;
+          CLIENT_INN:=PAYEE_INN;
+          CLIENT_REQ_ACC:=md.[ACC_KT].[MAIN_V_ID]; --PAYEE_REQ_ACC;
+          is_cred:=true;
+       else PAYEE_BIC:=CONCAT('БИК ',PAYEE_BIC);
+          is_cred:=false;
+       end if;
+		-- 15052024 asankulov
+			begin
+					for (select 
+						x(x.[ACC_KT].[CLIENT_V].[LINKS_OTHER].[PARTNER].[NAME] :name)
+							in ::[MAIN_DOCUM]
+						 		where x.[VID_DOC].[CODE] = 'БЕЗН_ПЛ_ПОРУЧ'
+								 and x%id=md%id
+						  )	 		
+					loop
+					
+						CLIENT_DIR:= x.name;
+					
+					end loop;
+			end;	
+		--
+--параметры продукта
+                declare			
+					prod ref	[PRODUCT];
+				begin
+					if is_deb then	
+					     locate prod in ::[PRODUCT] where prod%id = md.[PRODUCT_DT].[ACC_PROD]%id;
+					elsif is_cred then
+ 					     locate prod in ::[PRODUCT] where prod%id = md.[PRODUCT_CT].[ACC_PROD]%id;
+					end if;
+				&word.put_into_prepared_lines('DATE_BEGIN', to_char(prod.[DATE_BEGIN]));
+				&word.put_into_prepared_lines('NUM_DOG', prod.[NUM_DOG]);				
+				
+
+
+				exception
+					when NO_DATA_FOUND then null;
+				end;
+
+
+				&word.put_into_prepared_lines('CLIENT_NAME',CLIENT_NAME);
+				&word.put_into_prepared_lines('CLIENT_INN',CLIENT_INN);
+				&word.put_into_prepared_lines('CLIENT_REQ_ACC',CLIENT_REQ_ACC);
+				&word.put_into_prepared_lines('CLIENT_DIR',CLIENT_DIR);
+
+				&word.put_into_prepared_lines('PAYEE_BANK_NAME',PAYEE_B_NAME);
+                &word.put_into_prepared_lines('PAYEE_BANK_BIC',PAYEE_BIC);
+				
+				&word.put_into_prepared_lines('USER_NAME', P_USER.[NAME]);
+				&word.put_into_prepared_lines('USER_POSITION', P_POST.[VALUE]);
+				&word.put_into_prepared_lines('DATE', to_char(sysdate, 'dd.mm.yyyy'));
+				&word.put_into_prepared_lines('TIME', to_char(sysdate, 'hh24:mi:ss'));
+				
+				&word.put_into_prepared_lines('VO', ::[LEGAL_161P].[NEW#AUTO_NEW].P207_VID_OPER(md%id).[CODE]);
+				&word.put_into_prepared_lines('VO_NAME', ::[LEGAL_161P].[NEW#AUTO_NEW].P207_VID_OPER(md%id).[NAME]);
+				&word.put_into_prepared_lines('VO_PRIZ', priz_6001(md%id));
+				&word.put_into_prepared_lines('VO_DOP', ::[LEGAL_161P].[NEW#AUTO_NEW].P207_VID_OPER_DOP(md%id));
+
+
+
+				&word.put_into_prepared_lines('VO_STR'
+					, case
+					       when   md.[ACC_DT].[MAIN_V_ID] like '20202%'
+					          and md.[ACC_KT].[MAIN_V_ID] like '20202%'
+					          and md.[VALUTA]<>md.VALUTA_PO
+					                          then
+					                                case when  md.[ACC_DT].[MAIN_V_ID] like '20202810%' then
+					                                --'Продажа ('||md.[SUM]||' '||md.[VALUTA].[CUR_SHORT]||', '||md.[SUM_PO]||' '||md.[VALUTA_PO].[CUR_SHORT]||' )'
+					                                -- Коды по сторонам сделкм Утверждены 'Елемешина Елена Анатольевна' 28.07.2015
+					                                '1003: Покупка иностранной валюты физ.лицом'
+					                                     else
+					                                --'Покупка ('||md.[SUM]||' '||md.[VALUTA].[CUR_SHORT]||', '||md.[SUM_PO]||' '||md.[VALUTA_PO].[CUR_SHORT]||' )'
+					                                '1004: Продажа иностранной валюты физ.лицом'
+					                                 end
+	                       else  '' 			
+				      end
+				   );
+
+				
+				--&word.update_fields;
+				&word.visible;
+				&word.exec_script(V_DATA);
+				&word.release;
+			else
+				&word.exec_script(V_DATA);
+			end if; -- &word.f_click
+		elsif P_INFO = 'P_USER' then
+			P_POST	:= P_USER.[CASTA];
+		end if; -- P_INFO
+	end if; -- P_MESSAGE
+end;
+
+
+/**********************************
+md		[MAIN_DOCUM];
+drc		[DOCUM_RC];
+dt		integer;						-- Тип документа: Кассовый, SWIFT, Безнал
+sf		[TYPE_DOC_RC].[SFORM]%type;		-- Тип SWIFT-сообщения: 103, 202
+LV_7001	::[HISTORY_CHECK].[STATE].[CODE]%type;
+is_in	boolean;						-- Входящий SWIF-документ
+
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		[WORD].Init_Wrd;
+		P_USER	:= stdlib.userid;
+		P_POST	:= stdlib.userid.[CASTA];
+	elsif P_MESSAGE = 'VALIDATE' then
+		if P_INFO = 'OK' then
+			if &word.f_click then
+				&word.f_click	:= false;
+				V_DATA			:= null;
+				-- Текущий платежный документ
+				md				:= this;
+				-- Документ РЦ, связанный с текущим платежным документом (может отсутствовать)
+				drc				:= ::[LEGAL_INTERFACE].[PRX_DOCUMENT].DOCUM_RC_GETDOCRC(this);
+				-- Определение типа документа (для дальнейшего использования в case-выражениях)
+				dt				:= case
+					when md.[VID_DOC].[TYPE_DOC].[CODE] = 'KASSA_DOCUM' then	LC_DT_KASSA
+					when drc%id is not null and drc.[MT103] is not null then	LC_DT_SWIFT
+					else														LC_DT_NCASH
+				end;
+				-- Определение типа SWIFT-сообщения (для дальнейшего использования в case-выражениях)
+				if dt = LC_DT_SWIFT then
+					begin
+						select	x(x.[SFORM])
+						in		::[TYPE_DOC_RC]
+						where	x.[NUM_CODE] = drc.[TYPE_DOC] and  nvl(x.[UT], '*') = nvl(drc.[SUB_TYPE], '*') and nvl(x.[FOR_VAL], '*') = '1'
+						into	sf;
+					exception
+						when NO_DATA_FOUND then sf	:= null;
+						when TOO_MANY_ROWS then sf	:= null;
+					end;
+				end if;
+				is_in	:= dt = LC_DT_SWIFT and ::[LEGAL_INTERFACE].[PRX_DOCUMENT].DOCUM_RC_IS_IN(drc%id);
+				
+				begin
+					locate	LV_TEMPLATE
+					in		::[SHABLON_DOC]
+					where	LV_TEMPLATE.[CODE]		= LC_TEMPLATE_CODE
+						and	LV_TEMPLATE.[GRP_CODE]	= 'LEGAL';
+				exception
+					when NO_DATA_FOUND then
+						pragma error('В справочнике "Справочник шаблонов документов" отсутствует шаблон с кодом ' || LC_TEMPLATE_CODE);
+					when TOO_MANY_ROWS then
+						pragma error(
+							'В справочнике "Справочник шаблонов документов" в группе LEGAL обнаружено несколько шаблонов с кодом '
+							|| LC_TEMPLATE_CODE
+						);
+				end;
+				&word.open_file(::[SYSTEM_PARAMS].[GET]('PATH_PRINT_DOC') || LV_TEMPLATE.[FILE_NAME]);
+				--&word.prepare_doc_to_put;
+				
+				&word.cmd(
+					'b = wrd.Selection.Find.Execute("[CB_REQ_CNTRL]", False, False, False, False, False, True, 1, False, '
+					|| case when P_DEAL_TYPE.[0] = 1 then LC_CB_CHECKED else LC_CB_EMPTY end
+					|| ' & " Операция (сделка), подлежащая обязательному контролю", 2, False, False, False, False)'
+				);
+				&word.cmd(
+					'b = wrd.Selection.Find.Execute("[CB_DOUBT]", False, False, False, False, False, True, 1, False, '
+					|| case when P_DEAL_TYPE.[0] = 2 then LC_CB_CHECKED else LC_CB_EMPTY end
+					|| ' & " Необычная операция (сделка)", 2, False, False, False, False)'
+				);
+				begin
+					select h(h.[ST].[CODE]) in
+						(select distinct x(
+							x.[VID_OP]											: VID_OP,
+							x.[VID_OP].[CODE]									: CODE,
+							analytic(
+								first_value(x.[STATE]),
+								'over (partition by [1] order by [2] desc)',
+								x.[VID_OP].[CODE],
+								x.[DATE]
+							)													: ST,
+							nvl(x.[VID_OP].[PRIORITET],3)						: PRIORITET
+						)
+						in ::[HISTORY_CHECK] all
+						where x.[DOCUMENT] = md%id
+							and x.[VID_OP].[VID_TYPE] != 3
+						)
+					where
+						h.[VID_OP].[CODE] = '7001'
+						and rownum < 2
+					into LV_7001;
+				exception
+					when NO_DATA_FOUND then
+						LV_7001	:= null;
+				end;
+				&word.cmd(
+					'b = wrd.Selection.Find.Execute("[CB_LEGAL]", False, False, False, False, False, True, 1, False, '
+					|| case when LV_7001 = 'CONFIRM' then LC_CB_CHECKED else LC_CB_EMPTY end
+					|| ' & " Одной из сторон операции (сделки) является лицо, в отношении которого имеются сведения об участии в террористической деятельности", 2, False, False, False, False)'
+				);
+				&word.put_into_prepared_lines('NAZN', md.[NAZN]);
+				&word.put_into_prepared_lines('DATE_DOC', to_char(md.[DATE_DOC], 'dd.mm.yyyy'));
+				&word.put_into_prepared_lines('DATE_VAL', to_char(md.[DATE_VAL], 'dd.mm.yyyy'));
+				&word.put_into_prepared_lines('AMOUNT', md.[SUM]);
+				&word.put_into_prepared_lines('AMOUNT_NAT', md.[SUM_NT]);
+				--AMOUNT_CB
+				declare
+					md_cur	ref [FT_MONEY];
+					ft_rub	const ref [FT_MONEY] := ::[SYSTEM].[VARIABLES].NatCur;
+				begin
+					md_cur := md.[VALUTA];
+					if md_cur <> ft_rub then
+						&word.put_into_prepared_lines('AMOUNT_CB', ::[DOCUMENT].[LIB_CUR].Cur2Cur(md.[SUM], md_cur, ft_rub, md.[DATE_DOC]));
+					else
+						&word.put_into_prepared_lines('AMOUNT_CB', md.[SUM]);
+					end if;
+				end;
+				&word.put_into_prepared_lines('CURR_NUMB', md.[VALUTA].[CODE_ISO]);
+				&word.put_into_prepared_lines('CURR_LTRS', md.[VALUTA].[CUR_SHORT]);
+				&word.put_into_prepared_lines('CURR_NAME', md.[VALUTA].[NAME]);
+				&word.put_into_prepared_lines('PAYER_NAME'
+					, case
+						when dt = LC_DT_KASSA then
+							case md.[VID_DOC]
+								when LC_DT_YL_INPUT then nvl(md.[KL_KT].[2].[2], md.[KL_KT].[1].[1].[NAME])
+								when LC_DT_YL_OUTPUT then nvl(md.[KL_DT].[2].[2], md.[KL_DT].[1].[1].[NAME])
+								else md.[REQ_MAN].[NAME]
+							end
+						when dt = LC_DT_SWIFT then case
+							when is_in = true then drc.[PAYER].[NAME]
+							else nvl(md.[KL_DT].[2].[2], md.[KL_DT].[1].[1].[NAME])
+						end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_DT].[2].[2], md.[KL_DT].[1].[1].[NAME])
+					end
+				);
+				&word.put_into_prepared_lines('PAYER_INN'
+					, case
+						when dt = LC_DT_KASSA then
+							case md.[VID_DOC]
+								when LC_DT_YL_INPUT then nvl(md.[KL_KT].[2].[INN], md.[KL_KT].[1].[1].[INN])
+								when LC_DT_YL_OUTPUT then nvl(md.[KL_DT].[2].[INN], md.[KL_DT].[1].[1].[INN])
+								else md.[REQ_MAN].[CLIENTREF].[INN]
+							end	
+						when dt = LC_DT_SWIFT then case
+							when is_in = true then ''
+							else nvl(md.[KL_DT].[2].[INN], md.[KL_DT].[1].[1].[INN])
+						end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_DT].[2].[INN], md.[KL_DT].[1].[1].[INN])
+					end
+				);
+				&word.put_into_prepared_lines('PAYER_ACC', md.[ACC_DT].[MAIN_V_ID]);
+				&word.put_into_prepared_lines('PAYER_REQ_ACC', nvl(md.[KL_DT].[2].[1], md.[KL_DT].[1].[2].[MAIN_V_ID]));
+/**********but				
+				&word.put_into_prepared_lines('PAYER_BANK_NAME'
+					, case
+						when dt = LC_DT_KASSA then nvl(md.[KL_DT].[2].[3].[NAME], md.[KL_DT].[1].[2].[FILIAL].[BANK].[NAME])
+						when dt = LC_DT_SWIFT then
+							case
+								when is_in = true then drc.[PAYER].[BANK]
+								else nvl(md.[KL_DT].[2].[3].[NAME], md.[KL_DT].[1].[2].[FILIAL].[BANK].[NAME])
+							end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_DT].[2].[3].[NAME], md.[KL_DT].[1].[2].[FILIAL].[BANK].[NAME])
+					end
+				);
+				&word.put_into_prepared_lines('PAYER_BANK_BIC'
+					, case
+						when dt = LC_DT_KASSA then nvl(md.[KL_DT].[2].[3].[BIC], md.[KL_DT].[1].[2].[FILIAL].[BANK].[BIC])
+						when dt = LC_DT_SWIFT then
+							case
+								when is_in = true then drc.[PAYER].[BCODE]
+								else nvl(md.[KL_DT].[2].[3].[BIC], md.[KL_DT].[1].[2].[FILIAL].[BANK].[BIC])
+							end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_DT].[2].[3].[BIC], md.[KL_DT].[1].[2].[FILIAL].[BANK].[BIC])
+					end
+				);
+***************/
+/*************************
+--but
+				PAYER_BIC:=case
+						when dt = LC_DT_KASSA then nvl(md.[KL_DT].[2].[3].[BIC], md.[KL_DT].[1].[2].[FILIAL].[BANK].[BIC])
+						when dt = LC_DT_SWIFT then
+							case
+								when is_in = true then drc.[PAYER].[BCODE]
+								else nvl(md.[KL_DT].[2].[3].[BIC], md.[KL_DT].[1].[2].[FILIAL].[BANK].[BIC])
+							end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_DT].[2].[3].[BIC], md.[KL_DT].[1].[2].[FILIAL].[BANK].[BIC])
+					
+					end;
+
+                PAYER_B_NAME:= case
+               		when dt = LC_DT_KASSA then nvl(md.[KL_DT].[2].[3].[NAME], md.[KL_DT].[1].[2].[FILIAL].[BANK].[NAME])
+						when dt = LC_DT_SWIFT then
+							case
+								when is_in = true then drc.[PAYER].[BANK]
+								else nvl(md.[KL_DT].[2].[3].[NAME], md.[KL_DT].[1].[2].[FILIAL].[BANK].[NAME])
+							end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_DT].[2].[3].[NAME], md.[KL_DT].[1].[2].[FILIAL].[BANK].[NAME])
+					end;
+
+       if PAYER_BIC='044579771'  or PAYER_BIC='046375892' then
+          PAYER_BIC:='';
+          PAYER_B_NAME:='';
+       else PAYER_BIC:=CONCAT('БИК ',PAYER_BIC);
+       end if;
+
+       &word.put_into_prepared_lines('PAYER_BANK_NAME',PAYER_B_NAME);
+       &word.put_into_prepared_lines('PAYER_BANK_BIC',PAYER_BIC);
+
+--
+
+				&word.put_into_prepared_lines('PAYEE_NAME'
+					, case
+						when dt = LC_DT_KASSA then
+							case md.[VID_DOC]
+								when LC_DT_YL_INPUT then nvl(md.[KL_KT].[2].[2], md.[KL_KT].[1].[1].[NAME])
+								when LC_DT_YL_OUTPUT then nvl(md.[KL_DT].[2].[2], md.[KL_DT].[1].[1].[NAME])
+								else nvl(md.[KL_KT].[2].[2], md.[KL_KT].[1].[1].[NAME])
+							end	
+						when dt = LC_DT_SWIFT then
+							case
+								when is_in = true then nvl(md.[KL_KT].[2].[2], md.[KL_KT].[1].[1].[NAME])
+								else case
+									when sf = LC_SF_103 then drc.[RECEIVER].[ACC] || ' ' ||drc.[RECEIVER].[NAME]
+									when sf = LC_SF_202 then drc.[BEN].[NAME]
+									else ''
+								end
+							end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_KT].[2].[2], md.[KL_KT].[1].[1].[NAME])
+					end
+				);
+				&word.put_into_prepared_lines('PAYEE_INN'
+					, case
+						when dt = LC_DT_KASSA then
+							case md.[VID_DOC]
+								when LC_DT_YL_INPUT then nvl(md.[KL_KT].[2].[INN], md.[KL_KT].[1].[1].[INN])
+								when LC_DT_YL_OUTPUT then nvl(md.[KL_DT].[2].[INN], md.[KL_DT].[1].[1].[INN])
+								else nvl(md.[KL_KT].[2].[INN], md.[KL_KT].[1].[1].[INN])
+							end
+						when dt = LC_DT_SWIFT then
+							case
+								when is_in = true then nvl(md.[KL_KT].[2].[INN], md.[KL_KT].[1].[1].[INN])
+								else ''
+							end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_KT].[2].[INN], md.[KL_KT].[1].[1].[INN])
+					end
+				);
+				&word.put_into_prepared_lines('PAYEE_ACC', md.[ACC_KT].[MAIN_V_ID]);
+				&word.put_into_prepared_lines('PAYEE_REQ_ACC', nvl(md.[KL_KT].[2].[1], md.[KL_KT].[1].[2].[MAIN_V_ID]));
+				&word.put_into_prepared_lines('PAYEE_BANK_NAME'
+					, case
+						when dt = LC_DT_KASSA then nvl(md.[KL_KT].[2].[3].[NAME], md.[KL_KT].[1].[2].[FILIAL].[BANK].[NAME])
+						when dt = LC_DT_SWIFT then
+							case
+								when is_in = true then nvl(md.[KL_KT].[2].[3].[NAME], md.[KL_KT].[1].[2].[FILIAL].[BANK].[NAME])
+								else case
+									when sf = LC_SF_103 then drc.[RECEIVER].[BANK]
+									else ''
+								end
+							end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_KT].[2].[3].[NAME], md.[KL_KT].[1].[2].[FILIAL].[BANK].[NAME])
+					end
+				);
+				&word.put_into_prepared_lines('PAYEE_BANK_BIC'
+					, case
+						when dt = LC_DT_KASSA then nvl(md.[KL_KT].[2].[3].[BIC], md.[KL_KT].[1].[2].[FILIAL].[BANK].[BIC])
+						when dt = LC_DT_SWIFT then
+							case
+								when is_in = true then nvl(md.[KL_KT].[2].[3].[BIC], md.[KL_KT].[1].[2].[FILIAL].[BANK].[BIC])
+								else case
+									when sf = LC_SF_103 then drc.[RECEIVER].[BCODE]
+									when sf = LC_SF_202 then drc.[BEN].[CODE]
+									else ''
+								end
+							end
+						-- dt = LC_DT_NCASH
+						else nvl(md.[KL_KT].[2].[3].[BIC], md.[KL_KT].[1].[2].[FILIAL].[BANK].[BIC])
+					end
+				);
+				&word.put_into_prepared_lines('USER_NAME', P_USER.[NAME]);
+				&word.put_into_prepared_lines('USER_POSITION', P_POST.[VALUE]);
+				&word.put_into_prepared_lines('DATE', to_char(sysdate, 'dd.mm.yyyy'));
+				&word.put_into_prepared_lines('TIME', to_char(sysdate, 'hh24:mi:ss'));
+				
+				&word.put_into_prepared_lines('VO', ::[LEGAL_161P].[NEW#AUTO_NEW].P207_VID_OPER(md%id).[CODE]);
+				&word.put_into_prepared_lines('VO_NAME', ::[LEGAL_161P].[NEW#AUTO_NEW].P207_VID_OPER(md%id).[NAME]);
+				&word.put_into_prepared_lines('VO_PRIZ', priz_6001(md%id));
+				&word.put_into_prepared_lines('VO_DOP', ::[LEGAL_161P].[NEW#AUTO_NEW].P207_VID_OPER_DOP(md%id));
+				
+				--&word.update_fields;
+				&word.visible;
+				&word.exec_script(V_DATA);
+				&word.release;
+			else
+				&word.exec_script(V_DATA);
+			end if; -- &word.f_click
+		elsif P_INFO = 'P_USER' then
+			P_POST	:= P_USER.[CASTA];
+		end if; -- P_INFO
+	end if; -- P_MESSAGE
+end;
+***************************/
+
+
+execute is
+/*********************************************************************
+Назначение:
+
+fedoseev, последнее изменение 8 Ноябрь 2012 г.
+*********************************************************************/
+begin
+	null;
+end;
+end;
+end;

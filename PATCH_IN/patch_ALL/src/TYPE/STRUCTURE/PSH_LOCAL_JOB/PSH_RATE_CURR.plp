@@ -1,0 +1,46 @@
+class PSH_LOCAL_JOB;
+
+@name('[ПСБ] Загрузить курсы валют с сайта ЦБ (служебная)')
+@tag('COPIED')
+method PSH_RATE_CURR is
+dp  number:=0;	--управление debug_pipe
+dp2 number:=0;	--управление debug_pipe
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+fmt	   string(10):='dd/mm/yyyy';
+fmtHMS string(22):='dd/mm/yyyy HH24:MI:SS';
+PSH_RATE_CURR (
+	@name('С даты') P_DATE_BEG in [DATE],
+	@name('По')     P_DATE_END in [DATE]
+) is
+
+validate is
+rRecountCurList ref [RECONT_CUR_LIST]; --Список валют для переоценки
+ft_USD ref [FT_MONEY]:=::[FT_MONEY]([CUR_SHORT]='USD'); 
+begin
+	if p_message = 'DEFAULT' then
+		select t(t%id) in  ::[RECONT_CUR_LIST] all where t.[CURRENCY]=ft_USD into rRecountCurList;
+		P_DATE_BEG  :=least(rRecountCurList.[DATE_BEGIN]+1,[SYSTEM].[OP_DATE]+1);
+		P_DATE_END	:=[SYSTEM].[OP_DATE]+1;
+	end if;
+end;
+
+execute is
+pDate [DATE];
+begin
+	if P_DATE_BEG is null 				then pragma error('Укажите дату "C" !'); end if;
+	if P_DATE_END is null 				then pragma error('Укажите дату "По" !'); end if;
+  --if P_DATE_END>[SYSTEM].[OP_DATE]	then pragma error('Дата "По" не должна быть больше даты операционного дня!'); end if;
+	if P_DATE_BEG>P_DATE_END			then pragma error('Дата "По" не должна быть больше даты "С"!'); end if;
+
+	pDate:=P_DATE_BEG;
+	while pDate<=P_DATE_END	loop
+		debug_pipe('Смотрим курс за '||to_char(pDate,fmt),dp);
+		::[PSH_LOCAL_JOB].[PSH_LIB_V2].IMP_VAL_CBRF(pDate); -- updated CHANGE_QUALIFIER PSB_LOCAL_JOB->PSH_LOCAL_JOB 09/10/25 -- updated CHANGE_SHORT_NAME PSB_LIB_V2->PSH_LIB_V2 15/10/25
+		pDate:=pDate+1;
+	end loop;
+end;
+end;
+end;

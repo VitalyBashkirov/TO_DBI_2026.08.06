@@ -1,0 +1,46 @@
+class PSH_LOCAL_JOB;
+
+@name('[ПСБ] Изменить')
+@tag('CREATED')
+method PSH_EDIT is
+PSH_EDIT (
+	@name('Код')              P_CODE        in [NAME],
+	@name('Наименование')     P_NAME        in [NAME],
+	@name('Список адресатов') P_CLIENT_LIST in [PSH_LOCAL_JO_ARR],
+	@name('Журнал сообщений') P_TEXT_LIST   in [PSH_LOCAL_JO_ARR],
+	@name('Код операции')     P_OPER_CODE   in [MEMO_BIG],
+	@name('Ссылка на джоб')   P_JOB_REF     in [PSH_TEXT_JOB_REF]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_CODE := this.[CODE];
+	P_NAME := this.[NAME];
+	P_CLIENT_LIST := this.[CLIENT_LIST];
+	P_TEXT_LIST := this.[TEXT_LIST];
+	P_OPER_CODE := this.[OPER_CODE];
+	P_JOB_REF := this.[JOB_REF];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+rec ref [TEXT_JOBS];
+
+begin
+	-- Установка значения реквизита "Код"
+	[CODE] := P_CODE;
+	-- Установка значения реквизита "Наименование"
+	[NAME] := P_NAME;
+	-- Установка значения реквизита "Код операции"
+	[OPER_CODE] := P_OPER_CODE;
+	
+	
+/*	 rec := this.[JOB_REF];
+     this.[JOB_REF] := null; commit;
+     rec.[DELETE#AUTO];*/
+end;
+end;
+end;

@@ -1,0 +1,685 @@
+class PSH_ON_OFF_SOFT;
+
+@import_plsql(true)
+@name('[ПСБ] Обновить справочник')
+@tag('KUP_OUR_OPER_VW')
+method PSH_INIT_RECS is
+PRAGMA INCLUDE ([DEBUG_TRIGGER]::[MACRO_LIB]);
+dp integer:=0;	--управление debug_pipe
+user_creat [MEMO_32767];
+
+function iif(u boolean, v1 varchar2, v2 varchar2) return varchar2 is begin if u then return v1; end if; return v2; end;
+
+Function rtf2txt(c_InStr varchar2) return varchar2(32000) is
+s_tmp string;
+s_InStr varchar2(32000);
+s_OutStr varchar2(32000);
+b_tag boolean;
+begin
+ s_InStr := c_InStr;
+ b_tag := false;
+ s_OutStr := '';
+ s_tmp := '';
+
+ if ( length(s_InStr) = 0 ) then -- пусто на входе
+  null;
+
+ elsif ( substr(s_InStr, 1, 6) <> '{\rtf1' ) then -- не rtf
+   s_OutStr := 'не rtf!';
+
+  else
+   s_InStr := replace(replace(s_InStr, chr(13)), chr(10));
+   for i in 1..length(s_InStr) loop -- ЦИКЛ ПО ТЕКСТУ
+
+    if ( substr(s_InStr, i, 1) in ( '\', '}', '{' ) ) then -- управляющий
+     b_tag := true;
+    end if;
+
+    if ( substr(s_InStr, i+1, 1) in ( '\', '}', '{' ) ) then -- управляющий следующий
+     b_tag := false;
+
+     if ( length(s_tmp) > 0 ) then
+
+      if ( s_tmp = 'par' ) then -- перевод каретки
+       s_OutStr := s_OutStr || chr(13) || chr(10);
+
+      elsif ( ( substr(s_tmp, 1, 1) = '''' ) and ( length(s_tmp) >= 3 ) ) then  -- заполняем по существу !!! пробел, процент и знаки после русской
+       s_OutStr := s_OutStr || chr(to_number(substr(s_tmp, 2, 2), 'xx')) || substr(s_tmp, 4);
+
+      elsif ( ( ( instr(s_tmp, ' ') > 0 ) or ( ( substr(s_tmp, 1, 3) = 'par' ) and ( s_tmp <> 'pard' ) ) )
+          and ( substr(s_tmp, length(s_tmp), 1) <> ';' )
+            ) then
+       s_tmp := replace(s_tmp, chr(13));
+       s_tmp := replace(s_tmp, chr(10));
+
+       if substr(s_tmp, 1, 3) = 'par' then -- заполняем... !!! пробел
+        s_OutStr := s_OutStr || chr(13) || chr(10) || substr(s_tmp, 5, length(s_tmp) - 3);
+       else
+        s_OutStr := s_OutStr || substr(s_tmp, instr(s_tmp, ' ')+1, length(s_tmp)-instr(s_tmp, ' '));
+       end if;
+      end if;
+     end if;
+
+     s_tmp := '';
+    end if;
+
+    if ( b_tag ) then    	
+      s_tmp := s_tmp || substr(s_InStr, i+1, 1);
+    end if;
+   end loop;
+
+   s_OutStr := convert(s_OutStr, 'CL8ISO8859P5', 'CL8MSWIN1251');
+
+ end if;
+
+ return s_OutStr;
+exception when OTHERS then
+	debug_pipe(' ОШИБКА. При разборе комментария ',0);
+	return ' ОШИБКА. При разборе комментария ';
+end;
+
+function GetMethodRemark(p_method ref [METHOD]) return varchar2(32000) is
+   v_ex   varchar2(32767);
+   v$ret   varchar2(32767);
+   v_pos   number;
+begin
+
+ v_ex :=
+'declare m varchar2(32767); v$tmp long raw; v$ret varchar2(32767);
+begin
+   m := '||p_method||';
+   for i in (select data from lraw where id in (select id from topics t where t.owner = m and t.class = ''METHOD'' and t.topic = ''DESCRIPTION'')) loop
+         v$tmp := i.data;
+   end loop;
+	
+   v$ret := substr(v$tmp,0,4000);
+
+   :res := v$ret;
+end;';
+	
+   if rtl.exec_sql_out(v_ex,'res',v$ret) <> 0 then
+      return null;
+   end if;
+     	      	
+   return v$ret;
+
+exception when OTHERS then
+	debug_pipe(' ОШИБКА. При разборе комментария ',0);
+	return ' ОШИБКА. При разборе комментария ';
+end;
+
+function avto_text(met ref [METHOD]) return [MEMO_32767] is
+	teg1 string;
+	teg2 string;
+	pnt number;
+	text [MEMO_32767]:=null;
+	rez_text [MEMO_32767]:=null;
+begin
+	
+	teg1:='АВТОДОК_НАЧАЛО';
+	teg2:='АВТОДОК_СТОП';
+	
+	for (select x(x.text :text)
+		 in SOURCES%rowtype
+		 where x.name = met
+		 order by x.line		
+	) loop		
+		text:=substr(text||chr(10)||x.text,0,32767);
+	end loop;	
+	
+	if instr(upper(text), teg1) > 0 AND instr(upper(text), teg2) > 0 then
+	
+		pnt := instr(upper(text), teg1);
+		rez_text := substr(upper(text), pnt + length(teg1) + length(' **/ '));
+		
+		pnt := instr(rez_text, teg2);
+		rez_text := substr(rez_text, 0, pnt - length(' /** '));
+		
+		return rez_text;
+	end if;
+	
+end;
+PSH_INIT_RECS (
+	@name('Сформировать по алгоритму ЦФТ') P_CALC_CFT in [BOOLEAN]
+) is
+
+validate is
+begin
+
+if p_message = 'DEFAULT' then
+	
+	user_creat :=null;	
+	user_creat :=::[FP_TUNE].[LIB].get_str_value('PSB_ADMIN_US', null, '0');	
+	P_CALC_CFT := true;
+	
+end if;
+
+end;
+
+execute is
+/*********************************************************************
+Назначение:
+
+Bashkirov_VG, последнее изменение 19 Июнь 2013 г.
+*********************************************************************/
+nn integer:=0;
+nn_ins integer:=0;
+fl_ins boolean;
+vMAG	[PSH_MAG_ARR]; -- updated CHANGE_QUALIFIER PSB_MAG_ARR->PSH_MAG_ARR 10/10/25
+vClassName string(16);
+met ref [METHOD];
+comm [MEMO_32767];
+avtodoc [MEMO_32767];
+soft ref [PSH_ON_OFF_SOFT]; -- updated CHANGE_QUALIFIER PSB_ON_OFF_SOFT->PSH_ON_OFF_SOFT 09/10/25
+
+	---Выборка операций
+	type PSB_OPER is
+		/*for m in ::[METHOD]
+	where met.[SHORT_NAME] like 'PSB%' or
+		  met.[SHORT_NAME] like 'VND%' or
+		  met.[SHORT_NAME] like 'PSH%' or
+		  met.[SHORT_NAME] like 'ALR%' or
+		  met.[SHORT_NAME] like 'ALEM%' or
+		  met.[SHORT_NAME] like '%EXT' or
+		  met.[NAME] like '%ПСБ%' or
+		  met.[NAME] like '%ПСХ%' or
+		  met.[NAME] like '%Внедрение%' or
+		  met.[NAME] like 'СКБ%'*/
+	/*Если меняются условия в селекте, то поменяй условия в селект операции PSB_MOD_OP_STAT*/
+		select m(m.id				:id	
+				  ,cl.ENTITY_ID		:ENTITY_ID	-- код БП
+				  ,ent.name			:e_name		-- название БП
+				  ,m.CLASS_ID		:class		-- код ТБП
+				  ,cl.NAME			:cl_name	-- название ТБП
+				  ,m.SHORT_NAME		:shname		-- код метода
+				  ,m.NAME			:name		-- название метода
+				  ,m.CREATED		:created	-- создан (дата)
+				  ,m.user_created	:user_cr	-- создан (юзер)
+				  ,m.MODIFIED		:modif		-- изменен (дата)
+				  ,m.USER_MODIFIED	:user_mod	-- изменен (юзер)
+				  ,m.FLAGS			:flags		-- тип метода ?
+				  ,m.TEXT_TYPE		:text		-- ?
+				  ,m.status			:status		--  статус
+				  ,m.TAG			:metka)		--  метка
+			in (methods%rowtype :m), (classes%rowtype :cl), (entities%rowtype :ent)
+		where m.CLASS_ID = cl.id AND cl.ENTITY_ID = ent.id AND
+			  (upper(m.short_name) like 'PSB%'	OR
+			   upper(m.short_name) like 'PSH%'	OR
+			   --upper(m.short_name) like 'ITG%'	OR  --26/10/2016 Дианков А.В. есть одна операция ITG_DEL_NOREASON без PSB!!!
+			   --upper(m.short_name) like 'MRU%'	OR --нет таких 26/10/2016 Дианков А.В.
+			   --24/10/2016 Башкиров В.Г. Обновлять VND%-PSB%
+			  (upper(m.short_name) like 'VND%'	and upper(m.NAME) like 'PSB%') OR
+			   --upper(m.short_name) like 'ALR%'	OR --нет таких 26/10/2016 Дианков А.В.
+			   --upper(m.short_name) like 'ALEM%'	OR --нет таких 26/10/2016 Дианков А.В.
+			   upper(m.NAME) like 'PSB%'		OR
+			   upper(m.NAME) like 'PSH%'		OR
+			   (upper(m.NAME) like '%РАСШИРЕНИЕ%' AND upper(m.TAG) = 'EXTENSION') OR -- TAG-NAME 26/10/2016 Дианков А.В.
+			   upper(m.TAG) = 'EXTENSION'		OR			
+			   upper(m.NAME) like '%ПСБ%'		OR
+			   upper(m.NAME) like '%ПСХ%'		OR
+			 --upper(m.NAME) like 'УСБ%'		OR	--26/10/2016 Дианков А.В.
+			 --upper(m.[NAME]) like 'СИБКУП%'	OR
+			 --upper(m.[NAME]) like '!СИБКУП%'	OR
+			   upper(m.CLASS_ID) like 'PSB%'    OR
+			   upper(m.CLASS_ID) like 'PSH%'    OR
+			   upper(m.CLASS_ID) like 'HOOK_BANK')
+			 --AND (instr(user_creat,upper(m.USER_CREATED))>0 OR user_creat is null)
+					/*('1','123','A.PRIVALOV','ABALOV','ADMINISTRATOR','ALEUT','ANANNASKA',
+          				'ANANYEV','ARTKO','AVO','BASHKIROV','BASHKIROVVG','BASHKIROV_VG','CB2','CFT','CFT1','
+                        CFT2','CFT4','CFT_VNEDR1','DEMO','DIANKOV_AV','EVSTAFIEV_EN','FTCEBG\GOSHA','GAVRILOV','GIA','
+                        GORELOVA_EP','GOSHA','GRUSHOVSKIY','HMYROVA','HSBC','IAE','IBSO1','
+                        IBSO2','IBSO6','IKOSTENKO','INFLIGHT','ITKALIN','IVANOV_AV','KALUGINALEXEI','
+                        KAMBALIN','KARTESHKINA','KAZACHENKO','KULICHKOV','KURMAZOVA','LIHACHEV_AA','LUSCHENKOSY','MNIKOL',
+                        'MOSCOW1','MOSCOW12','MOSCOW29','MOSCOW4','MOSCOW41','NESTEROVA-GA','
+                        NESTEROVA_GA','NNOV15','NOVOSIB','NSK-BASHKIROVVG','NSK-PROTOPOPOVAV','OKISELEV','PAHUTIN','PIT','
+                        SHIPICYN','SILVIA','SIVB','STEPANENKOVV','TANUSHKA','TIRSKIH','TIRSKIH1','
+                        TOSS','USER','USER3','USER937','USOV','V.VORONCOV','VORONEZH1','ZAK')*/
+		order by 2,4,6;
+
+
+		---Выборка представлений
+	type PSB_VW is
+		select vw(	cl.NAME			:cl_name,	-- название ТБП
+					vw.[CLASS_ID] 	:class_id,
+					vw.[SHORT_NAME] :sname,
+					vw.[NAME]		:name,
+					vw.[MODIFIED]   :modif,
+					vw.[TAG]		:TAG)
+		in (CRITERIA%rowtype :vw), (classes%rowtype :cl), (entities%rowtype :ent)
+		where vw.CLASS_ID = cl.id AND cl.ENTITY_ID = ent.id AND
+			  (upper(vw.[TAG]) = 'EXTENSION'
+			  OR vw.[SHORT_NAME] like '%PSB%'
+			  OR vw.[SHORT_NAME] like '%PSH%'
+			   --01.11.2016 Дианков А.В. Много попадается дистрибутивных VND - EXTENSION
+			  OR (vw.[SHORT_NAME] like '%VND%' AND upper(vw.[TAG]) = 'EXTENSION')
+			  OR upper(vw.[NAME]) like 'PSB%'
+			  OR upper(vw.[NAME]) like 'PSH%'
+			  OR upper(vw.[NAME]) like '%ПСБ%'
+			  OR upper(vw.[NAME]) like '%ПСХ%'
+			  OR upper(vw.[NAME]) like 'СКБ%'
+			  OR upper(vw.CLASS_ID) like 'PSB%'
+			  OR upper(vw.CLASS_ID) like 'PSH%'
+			  OR upper(vw.[NAME]) like 'СИБКУП%'
+			  OR upper(vw.[NAME]) like '!СИБКУП%') 			
+		order by 2,3;
+
+		---Выборка ТБП
+	type PSB_CLASS is
+		select cl(	cl.[id]			:CLASS_ID,
+					cl.[NAME]		:CL_NAME,	-- название ТБП
+					cl.[MODIFIED]   :modif)
+		in (classes%rowtype :cl)
+		where cl.id like 'PSB%'
+		order by 1,2;
+		
+	---Выборка ЦФТ
+	type CFT_SELECT is
+	   select a1 (a1.ID          :id
+	   			  ,a1.OBJ_TYPE   :obj
+	   			  ,a1.CLASS_ID   :CLASS_ID
+	   			  ,a1.SHORT_NAME :SHORT_NAME
+	   			  ,a1.name 		 :name
+	   			  ,a1.created	 :created
+	   			  ,a1.user_cr	 :user_cr
+	   			  ,a1.modif		 :modif
+	   			  ,a1.user_mod	 :user_mod
+	   			  ,a1.FLAGS		 :flags
+	   			  ,a1.metka		 :metka
+	   			  ,a1.tbp_name	 :tbp_name)
+         in ((select  cl(b1.ID ID, 'CLASSES' OBJ_TYPE, b1.ID CLASS_ID, b1.id SHORT_NAME,
+                            1 ord, b1.name NAME, null created, null user_cr,
+                            null modif, null user_mod,null flags,null metka,
+                            b1.NAME	tbp_name)
+                in (CLASS_TABLES%rowtype :c1), (CLASSES%rowtype :b1)
+                where b1.ID = cl.CLASS_ID
+                union
+                select  cl(cl.ID ID, 'METHODS' OBJ_TYPE, cl.CLASS_ID CLASS_ID, cl.short_name,
+                    decode(cl.FLAGS,'R',3,4) ord, cl.name NAME, cl.CREATED created, cl.user_created user_cr,
+                    cl.MODIFIED	modif, cl.USER_MODIFIED	user_mod,cl.FLAGS flags,cl.TAG metka,
+                    null	tbp_name)
+                in (METHODS%rowtype :cl)
+                where cl.FLAGS not in ('Z','A')
+                union
+                select  cl(cl.ID ID, 'METHODS' OBJ_TYPE, cl.CLASS_ID CLASS_ID, cl.short_name,
+                			3 ord, cl.name NAME, cl.CREATED	created, cl.user_created user_cr,
+                			cl.MODIFIED	modif, cl.USER_MODIFIED	user_mod,cl.FLAGS flags,cl.TAG metka
+                			,null	tbp_name)
+                in (METHODS%rowtype :cl)
+                where cl.FLAGS = 'Z' and not  exists (
+                    select  f1(1 A$1)
+                    in (CRITERIA%rowtype :f1)
+                    where f1.ID = cl.ID)
+                union
+                select  cl(cl.ID ID, 'CRITERIA' OBJ_TYPE, cl.CLASS_ID CLASS_ID, cl.short_name,
+                			 2 ord, cl.name NAME, null created, null user_cr,null modif, null user_mod,
+                			 null flags,null metka,clas.NAME	tbp_name)
+                in (CRITERIA%rowtype :cl), (classes%rowtype :clas)
+                where clas.id = cl.CLASS_ID
+         ) )
+             where not  exists (
+                select  h1 (1 A$1)
+                in (OBJECTS_OPTIONS%rowtype :h1)
+                where h1.OBJ_TYPE = a1.OBJ_TYPE
+                		and h1.CLASS_ID = a1.CLASS_ID
+                		and (h1.SHORT_NAME = a1.SHORT_NAME or a1.SHORT_NAME like h1.SHORT_NAME)
+	   )order by a1.class_id, a1.ord, a1.short_name;
+
+sBaseName varchar2(32):=::[PSH_ON_OFF_SOFT].[PSH_L].getBaseName; -- updated CHANGE_QUALIFIER PSB_ON_OFF_SOFT->PSH_ON_OFF_SOFT 09/10/25 -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+begin
+	debug_pipe('-= '||sBaseName||' Обновление справочника "PSB. Администрирование функционала, разработанного Банком" =-',dp);
+
+	-->-снимаем метку "операция на схеме"
+	for ad in ::[PSH_ON_OFF_SOFT] all loop ad.[OPER_ON_BASE] := false; end loop; -- updated CHANGE_QUALIFIER PSB_ON_OFF_SOFT->PSH_ON_OFF_SOFT 09/10/25
+	--<-снимаем метку "операция на схеме"
+
+	-->--таблица операций
+	if P_CALC_CFT = false then
+	  For rec in CURSOR PSB_OPER loop
+		nn:=nn+1;
+		met := rec.id;
+
+		debug_pipe('['||lpad(nn,5)||'] met='||met||' '||vClassName||'.'||met.[SHORT_NAME]||'-'||met.[NAME],dp);
+
+		-->-поле комментарий
+		comm:=null;
+		comm:=GetMethodRemark(met);
+		if comm is not null AND instr(upper(comm), 'ОШИБКА') = 0 then comm:= Rtf2Txt(utils.raw_str(comm)); end if;
+		--<-поле комментарий
+
+		-->-автодокументация (комментарий в операциях /** АВТОДОК_НАЧАЛО **/ /** АВТОДОК_СТОП **/)
+		avtodoc:=null;
+		avtodoc:=avto_text(met);
+		--<-автодокументация (комментарий в операциях /** АВТОДОК_НАЧАЛО **/ /** АВТОДОК_СТОП **/)
+
+		begin vClassName:=::[PSH_ON_OFF_SOFT].[PSH_L].GetClassName(met); -- updated CHANGE_QUALIFIER PSB_ON_OFF_SOFT->PSH_ON_OFF_SOFT 09/10/25 -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+		exception when others then
+			debug_pipe('Ош. при вычислении ТПБ для '||met.[SHORT_NAME]||'-'||met.[NAME],dp);
+			debug_pipe('met.[CLASS_ID].[PARENT]                 ='||met.[CLASS_ID].[PARENT] ,dp);
+			debug_pipe('met.[CLASS_ID].[PARENT].[HAS_INSTANCES] ='||met.[CLASS_ID].[PARENT].[HAS_INSTANCES] ,dp);
+			debug_pipe('met.[CLASS_ID].[PARENT].[KERNEL]        ='||met.[CLASS_ID].[PARENT].[KERNEL]        ,dp);
+			debug_pipe('met.[CLASS_ID].[PARENT].[DATA_PRECISION]='||met.[CLASS_ID].[PARENT].[DATA_PRECISION],dp);
+			debug_pipe('met.[CLASS_ID].[PARENT].[DATA_SIZE]     ='||met.[CLASS_ID].[PARENT].[DATA_SIZE]     ,dp);
+			debug_pipe('met.[CLASS_ID].[PARENT].[BASE_CLASS]    ='||met.[CLASS_ID].[PARENT].[BASE_CLASS]    ,dp);
+			debug_pipe('met.[CLASS_ID].[PARENT].[ENTITY]        ='||met.[CLASS_ID].[PARENT].[ENTITY]        ,dp);
+			debug_pipe('met.[CLASS_ID].[PARENT].[NAME]          ='||met.[CLASS_ID].[PARENT].[NAME]          ,dp);
+			debug_pipe('met.[CLASS_ID].[PARENT].[INTERFACE]     ='||met.[CLASS_ID].[PARENT].[INTERFACE]     ,dp);
+
+			debug_pipe('met.[CLASS_ID].[TARGET_CLASS]                 ='||met.[CLASS_ID].[TARGET_CLASS]                 ,dp);
+			debug_pipe('met.[CLASS_ID].[TARGET_CLASS].[HAS_INSTANCES] ='||met.[CLASS_ID].[TARGET_CLASS].[HAS_INSTANCES] ,dp);
+			debug_pipe('met.[CLASS_ID].[TARGET_CLASS].[KERNEL]        ='||met.[CLASS_ID].[TARGET_CLASS].[KERNEL]        ,dp);
+			debug_pipe('met.[CLASS_ID].[TARGET_CLASS].[DATA_PRECISION]='||met.[CLASS_ID].[TARGET_CLASS].[DATA_PRECISION],dp);
+			debug_pipe('met.[CLASS_ID].[TARGET_CLASS].[DATA_SIZE]     ='||met.[CLASS_ID].[TARGET_CLASS].[DATA_SIZE]     ,dp);
+			debug_pipe('met.[CLASS_ID].[TARGET_CLASS].[BASE_CLASS]    ='||met.[CLASS_ID].[TARGET_CLASS].[BASE_CLASS]    ,dp);
+			debug_pipe('met.[CLASS_ID].[TARGET_CLASS].[ENTITY]        ='||met.[CLASS_ID].[TARGET_CLASS].[ENTITY]        ,dp);
+			debug_pipe('met.[CLASS_ID].[TARGET_CLASS].[NAME]          ='||met.[CLASS_ID].[TARGET_CLASS].[NAME]          ,dp);
+			debug_pipe('met.[CLASS_ID].[TARGET_CLASS].[INTERFACE]     ='||met.[CLASS_ID].[TARGET_CLASS].[INTERFACE]     ,dp);
+
+			debug_pipe('met.[CLASS_ID].[HAS_INSTANCES] ='||met.[CLASS_ID].[HAS_INSTANCES] ,dp);
+			debug_pipe('met.[CLASS_ID].[KERNEL]        ='||met.[CLASS_ID].[KERNEL]        ,dp);
+			debug_pipe('met.[CLASS_ID].[DATA_PRECISION]='||met.[CLASS_ID].[DATA_PRECISION],dp);
+			debug_pipe('met.[CLASS_ID].[DATA_SIZE]     ='||met.[CLASS_ID].[DATA_SIZE]     ,dp);
+			debug_pipe('met.[CLASS_ID].[BASE_CLASS]    ='||met.[CLASS_ID].[BASE_CLASS]    ,dp);
+			debug_pipe('met.[CLASS_ID].[ENTITY]        ='||met.[CLASS_ID].[ENTITY]        ,dp);
+			debug_pipe('met.[CLASS_ID].[NAME]          ='||met.[CLASS_ID].[NAME]          ,dp);
+			debug_pipe('met.[CLASS_ID].[INTERFACE]     ='||met.[CLASS_ID].[INTERFACE]     ,dp);
+
+			debug_pipe('met.[NAME]        ='||met.[NAME]        ,dp);
+			debug_pipe('met.[PACKAGE_NAME]='||met.[PACKAGE_NAME],dp);
+			debug_pipe('met.[SHORT_NAME]  ='||met.[SHORT_NAME]  ,dp);
+			debug_pipe('met.[STATUS]      ='||met.[STATUS]      ,dp);
+			debug_pipe('met.[REPORT]      ='||met.[REPORT]      ,dp);
+			debug_pipe('met.[REPORT_TYPE] ='||met.[REPORT_TYPE] ,dp);
+			goto nnn;
+		end;
+
+		fl_ins:=true;
+		for k in ::[PSH_ON_OFF_SOFT] -- updated CHANGE_QUALIFIER PSB_ON_OFF_SOFT->PSH_ON_OFF_SOFT 09/10/25
+		where k.[CODE_TBP]  =vClassName and
+		 	  k.[SHORT_NAME]=met.[SHORT_NAME]
+		loop
+			fl_ins:=false;
+
+			if comm is not null 	 then k.[COMMENT] := comm; end if;
+			if avtodoc is not null   then k.[AVTODOC] := avtodoc; end if;
+			if rec.created is not null then k.[DATE_CREATED] := rec.created; end if;
+			if rec.user_cr is not null then k.[USER_CREAT] := upper(rec.user_cr); end if;
+			if rec.modif is not null   then k.[ACCESS_EDIT_DATE] := rec.modif; end if;
+			if rec.user_mod is not null then k.[USER_ACCESS_EDIT] := upper(rec.user_mod); end if;
+			if rec.metka is not null   then k.[METKA] := rec.metka; end if;
+			k.[DATE_PROV] := sysdate;
+			k.[OPER_ON_BASE] := true;
+			if rec.flags is not null   then k.[FLAG] := rec.flags; end if;
+			k.[CFT_BOOL] := false;
+			k.[NAME_M] := met.[NAME];
+
+		end loop;
+
+		if fl_ins then
+			::[PSH_ON_OFF_SOFT].[PSH_NEW_AUTO]( -- updated CHANGE_QUALIFIER PSB_ON_OFF_SOFT->PSH_ON_OFF_SOFT 09/10/25 -- updated CHANGE_SHORT_NAME NEW_AUTO->PSH_NEW_AUTO 15/10/25
+			vClassName				--Код ТПБ
+			,met.[CLASS_ID].[NAME]	--Наименование ТБП
+			,met.[SHORT_NAME]		--Имя объекта
+			,met.[NAME]				--Наименование объекта
+			,null					--Создатель
+			,null					--Зачем разработано, кто заказчик
+			,null					--Что сделано
+			,sysdate				--Дата, Время включения в справочник
+			,upper(rec.user_mod)	--Пользователь изменивший
+			,rec.modif				--Дата, Время изменения
+			,null					--Обоснование изменение доступа
+			
+			--Башкиров В.Г. 07.11.2016 При добавлении записи в справочник по умолчанию пишем режим работы "0"-Журналировать
+			,0     --Режим работы (0-Только журналировать вызов,1-Журналировать и предупреждать,2-Журналировать и запрещать использовать)
+			
+			,null  --До какой даты разрешать пользоваться
+			,vMAG  --Журнал вызовов
+			,null  --Рекомендуемая дистрибутивная операция
+			,null  --Контроль встроен в операцию
+			,null  --Размер журнала
+			,null  --Принято сопровождением
+			,null  --Пользователь протестировавший функционал
+			,rec.created			--Дата создания			
+			,upper(rec.user_cr)		--Пользователь создавший операцию
+			,comm					--Комментарий
+			,avtodoc				--Автодокументирование
+			,rec.metka				--Метка
+			,null					--удалить операцию
+			,null					--пользователь, рекомендующий удаление
+			,null					--обоснование удаления
+			,true					--операция на схеме
+			,sysdate				--дата проверки
+			,rec.flags				--тип операции
+			,false	--ЦФТ операция
+			--,null	--Тестирование(кто тестировал, результат)
+			--,null	--Дата тестирования
+			);
+			debug_pipe('Добавлено '||vClassName||'.'||met.[SHORT_NAME]||'-'||met.[NAME],dp);
+			nn_ins:=nn_ins+1;
+		end if;
+		<<nnn>>
+	end loop;
+
+	-->--таблица представлений
+	For rec in CURSOR PSB_VW loop
+
+		nn:=nn+1;
+			
+		begin
+			locate soft in ::[PSH_ON_OFF_SOFT] all where soft.[CODE_TBP]=rec.CLASS_ID -- updated CHANGE_QUALIFIER PSB_ON_OFF_SOFT->PSH_ON_OFF_SOFT 09/10/25
+															AND soft.[SHORT_NAME] = rec.SNAME;
+
+				debug_pipe(nn||' Представление '||rec.CLASS_ID||'.'||rec.[SNAME]||'-'||rec.[NAME],dp);
+
+				soft.[ACCESS_EDIT_DATE] := rec.modif;
+				soft.[METKA] := rec.tag;
+				soft.[OPER_ON_BASE] := true;
+				soft.[DATE_PROV] := sysdate;
+				soft.[NAME_TBP] := rec.cl_name;
+				soft.[FLAG] := 'W';
+				soft.[NAME_M] := rec.NAME;
+				soft.[CFT_BOOL] := false;
+				
+		exception
+			when TOO_MANY_ROWS then
+				debug_pipe(' ОШИБКА. В ТБП есть две операции с одинаковым названием. '||rec.CLASS_ID||' '||rec.SNAME||' '||rec.name,0);
+			when NO_DATA_FOUND then
+
+				nn_ins:=nn_ins+1;
+
+				::[PSH_ON_OFF_SOFT].[PSH_NEW_AUTO]( -- updated CHANGE_QUALIFIER PSB_ON_OFF_SOFT->PSH_ON_OFF_SOFT 09/10/25 -- updated CHANGE_SHORT_NAME NEW_AUTO->PSH_NEW_AUTO 15/10/25
+												rec.class_id	--Код ТПБ
+												,rec.cl_name	--Наименование ТБП
+												,rec.SNAME		--Имя объекта
+												,rec.NAME		--Наименование объекта
+												,null			--Создатель
+												,null			--Зачем разработано, кто заказчик
+												,null			--Что сделано
+												,sysdate		--Дата, Время включения в справочник
+												,null			--Пользователь изменивший
+												,rec.modif		--Дата, Время изменения
+												,null			--Обоснование изменение доступа
+												,1				--Режим работы (0-Только журналировать вызов,1-Журналировать и предупреждать,2-Журналировать и запрещать использовать)
+												,null			--До какой даты разрешать пользоваться
+												,null			--Журнал вызовов
+												,null			--Рекомендуемая дистрибутивная операция
+												,null			--Контроль встроен в операцию
+												,null			--Размер журнала
+												,null			--Принято сопровождением
+												,null			--Пользователь протестировавший функционал
+												,null			--Дата создания
+												,null			--Пользователь создавший операцию
+												,null			--Комментарий
+												,null			--Автодокументирование
+												,rec.tag		--Метка
+												,null			--удалить операцию
+												,null			--пользователь, рекомендующий удаление
+												,null			--обоснование удаления
+												,true			--операция на схеме
+												,sysdate		--дата проверки
+												,'W'			--тип операции
+												,false); 		--цфт операция
+				debug_pipe('Добавлено '||rec.CLASS_ID||'.'||rec.[SNAME]||'-'||rec.[NAME],dp);
+		end;
+	end loop;
+
+
+	-->--таблица представлений
+	For rec in CURSOR PSB_CLASS loop
+
+		nn:=nn+1;
+
+		begin
+			locate soft in ::[PSH_ON_OFF_SOFT] all where soft.[CODE_TBP]=rec.CLASS_ID -- updated CHANGE_QUALIFIER PSB_ON_OFF_SOFT->PSH_ON_OFF_SOFT 09/10/25
+															AND soft.[SHORT_NAME] is null and soft.[FLAG] = 'Q';
+
+				debug_pipe(nn||' ТБП '||rec.CLASS_ID||'-'||rec.[CL_NAME],dp);
+
+				soft.[ACCESS_EDIT_DATE] := rec.modif;
+				soft.[OPER_ON_BASE] := true;
+				soft.[DATE_PROV] := sysdate;
+				soft.[NAME_TBP] := rec.cl_name;
+				soft.[FLAG] := 'Q';	
+				soft.[CFT_BOOL] := false;			
+
+		exception
+			when TOO_MANY_ROWS then
+				debug_pipe(' ОШИБКА. ТБП уже есть. '||rec.CLASS_ID||' '||rec.[CL_NAME],0);
+			when NO_DATA_FOUND then
+
+				nn_ins:=nn_ins+1;
+
+				::[PSH_ON_OFF_SOFT].[PSH_NEW_AUTO]( -- updated CHANGE_QUALIFIER PSB_ON_OFF_SOFT->PSH_ON_OFF_SOFT 09/10/25 -- updated CHANGE_SHORT_NAME NEW_AUTO->PSH_NEW_AUTO 15/10/25
+												rec.class_id	--Код ТПБ
+												,rec.cl_name	--Наименование ТБП
+												,null			--Имя объекта
+												,null			--Наименование объекта
+												,null			--Создатель
+												,null			--Зачем разработано, кто заказчик
+												,null			--Что сделано
+												,sysdate		--Дата, Время включения в справочник
+												,null			--Пользователь изменивший
+												,rec.modif		--Дата, Время изменения
+												,null			--Обоснование изменение доступа
+												--24/10/2016 Башкиров В.Г. по умолчанию режим работы 0-Журналировать вызов
+												,0				--Режим работы (0-Только журналировать вызов,1-Журналировать и предупреждать,2-Журналировать и запрещать использовать)
+												,null			--До какой даты разрешать пользоваться
+												,null			--Журнал вызовов
+												,null			--Рекомендуемая дистрибутивная операция
+												,null			--Контроль встроен в операцию
+												,null			--Размер журнала
+												,null			--Принято сопровождением
+												,null			--Пользователь протестировавший функционал
+												,null			--Дата создания
+												,null			--Пользователь создавший операцию
+												,null			--Комментарий
+												,null			--Автодокументирование
+												,null			--Метка
+												,null			--удалить операцию
+												,null			--пользователь, рекомендующий удаление
+												,null			--обоснование удаления
+												,true			--операция на схеме
+												,sysdate		--дата проверки
+												,'Q'			--тип операции
+												,false);		--цфт операция
+
+				debug_pipe('Добавлено '||rec.CLASS_ID||'-'||rec.[CL_NAME],dp);
+
+		end;
+
+	end loop;
+	
+	---цфт селект
+	elsif P_CALC_CFT then
+		
+		for rec in CURSOR CFT_SELECT loop
+			
+			nn:=nn+1;
+			if rec.[obj] = 'METHODS' then met := rec.id;
+			else met := null;
+			end if;
+			
+		debug_pipe(nn||' '||rec.id||' '||rec.obj||' '||rec.CLASS_ID||' '||rec.SHORT_NAME||' '||rec.name||' met='||met,0);	
+
+		-->-поле комментарий
+		comm:=null;
+		comm:=GetMethodRemark(met);
+		if comm is not null AND instr(upper(comm), 'ОШИБКА') = 0 then comm:= Rtf2Txt(utils.raw_str(comm)); end if;
+		--<-поле комментарий
+
+		-->-автодокументация (комментарий в операциях /** АВТОДОК_НАЧАЛО **/ /** АВТОДОК_СТОП **/)
+		avtodoc:=null;
+		avtodoc:=avto_text(met);
+		--<-автодокументация (комментарий в операциях /** АВТОДОК_НАЧАЛО **/ /** АВТОДОК_СТОП **/)
+		
+		fl_ins:=true;
+		for k in ::[PSH_ON_OFF_SOFT] -- updated CHANGE_QUALIFIER PSB_ON_OFF_SOFT->PSH_ON_OFF_SOFT 09/10/25
+		where k.[CODE_TBP]  = rec.[CLASS_ID] and
+		 	  k.[SHORT_NAME]=rec.[SHORT_NAME]
+		loop
+			fl_ins:=false;
+
+			if comm is not null 	 then k.[COMMENT] := comm; end if;
+			if avtodoc is not null   then k.[AVTODOC] := avtodoc; end if;
+			if rec.created is not null then k.[DATE_CREATED] := rec.created; end if;
+			if rec.user_cr is not null then k.[USER_CREAT] := upper(rec.user_cr); end if;
+			if rec.modif is not null   then k.[ACCESS_EDIT_DATE] := rec.modif; end if;
+			if rec.user_mod is not null then k.[USER_ACCESS_EDIT] := upper(rec.user_mod); end if;
+			if rec.metka is not null   then k.[METKA] := rec.metka; end if;
+			k.[DATE_PROV] := sysdate;
+			k.[OPER_ON_BASE] := true;
+			if rec.flags is not null   then k.[FLAG] := rec.flags; end if;
+			k.[CFT_BOOL] := false;
+			k.[NAME_M] := met.[NAME];
+
+		end loop;
+
+		if fl_ins then
+			::[PSH_ON_OFF_SOFT].[PSH_NEW_AUTO]( -- updated CHANGE_QUALIFIER PSB_ON_OFF_SOFT->PSH_ON_OFF_SOFT 09/10/25 -- updated CHANGE_SHORT_NAME NEW_AUTO->PSH_NEW_AUTO 15/10/25
+			rec.CLASS_ID	--Код ТПБ
+			,nvl(rec.tbp_name, met.[CLASS_ID].[NAME])	--Наименование ТБП
+			,rec.[SHORT_NAME]							--Имя объекта
+			,rec.[NAME]								--Наименование объекта
+			,null  --Создатель
+			,null  --Зачем разработано, кто заказчик
+			,null  --Что сделано
+			,sysdate  --Дата, Время включения в справочник
+			,upper(rec.user_mod)  --Пользователь изменивший
+			,rec.modif  --Дата, Время изменения
+			,null  --Обоснование изменение доступа
+			
+			--Башкиров В.Г. 07.11.2016 При добавлении записи в справочник по умолчанию пишем режим работы "0"-Журналировать
+			,0     --Режим работы (0-Только журналировать вызов,1-Журналировать и предупреждать,2-Журналировать и запрещать использовать)
+			
+			,null  --До какой даты разрешать пользоваться
+			,vMAG  --Журнал вызовов
+			,null  --Рекомендуемая дистрибутивная операция
+			,null  --Контроль встроен в операцию
+			,null  --Размер журнала
+			,null  --Принято сопровождением
+			,null  --Пользователь протестировавший функционал
+			,rec.created			--Дата создания
+			,upper(rec.user_cr)		--Пользователь создавший операцию
+			,comm					--Комментарий
+			,avtodoc				--Автодокументирование
+			,rec.metka				--Метка
+			,null					--удалить операцию
+			,null					--пользователь, рекомендующий удаление
+			,null					--обоснование удаления
+			,true					--операция на схеме
+			,sysdate				--дата проверки
+			,rec.flags				--тип операции
+			,false);				--цфт операция
+
+			debug_pipe('Добавлено '||vClassName||'.'||met.[SHORT_NAME]||'-'||met.[NAME],dp);
+			nn_ins:=nn_ins+1;
+		end if;
+			
+			
+		end loop;
+	
+	end if;
+
+	debug_pipe('ИТОГО просмотрено '||nn||' добавлено в справочник '||nn_ins,dp);
+end;
+end;
+end;

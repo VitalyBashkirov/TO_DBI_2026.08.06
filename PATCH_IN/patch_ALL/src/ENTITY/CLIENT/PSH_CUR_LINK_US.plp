@@ -1,0 +1,39 @@
+class CLIENT;
+
+@import_plsql(true)
+@name('[ПСБ] Привязать валютного контролера (списочная)')
+batch method PSH_CUR_LINK_US is
+PSH_CUR_LINK_US (
+	@name('Дата начала работы')             P_DATE    in [DATE],
+	@name('Категория валютного контролера') P_CAT_VAL in [CL_GROUP_REF]
+) is
+
+validate is
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		P_DATE := ::[SYSTEM].[OP_DATE];
+	end if;
+end;
+
+execute is
+begin
+	if P_DATE is null or P_CAT_VAL is null then
+		pragma error('Необходимо заполнить все значения на экранной форме!');
+	end if;
+	
+	for i in 1..this.count
+	loop
+		for (select cl(cl obj)
+			in this(i).[VIDS_CL]
+			where cl.[CATEGORY].[GRP] = 'CUR_CONTR_USERS'
+				and (cl.[DATE_END] is null or cl.[DATE_END] >= ::[SYSTEM].[OP_DATE])  
+		)
+		loop
+			cl.obj.[DATE_END] := (::[SYSTEM].[OP_DATE] - 1);
+		end loop;
+		
+		this(i).[VIDS_CL].[NEW#AUTO](P_DATE, null, P_CAT_VAL, false);
+	end loop;
+end;
+end;
+end;

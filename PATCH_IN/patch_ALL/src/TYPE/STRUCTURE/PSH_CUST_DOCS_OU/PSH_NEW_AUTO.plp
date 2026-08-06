@@ -1,0 +1,63 @@
+class PSH_CUST_DOCS_OU;
+
+@import_plsql(true)
+@name('[ПСБ] Добавить')
+@tag('COPIED')
+constructor PSH_NEW_AUTO is
+PSH_NEW_AUTO (
+	@name('Имя файла')               P_FILE_NAME    in [FILE$PATH],
+	@name('Содержимое файла')        P_FILE_CONTENT in [CLOB],
+	@name('Дата создания файла')     P_FILE_CR_DATE in [DATE_TIME],
+	@name('Дата создания документа') P_DOC_CR_DATE  in [DATE_TIME],
+	@name('Версия формата')          P_VERSION      in [STRING_16],
+	@name('Тип документа')           P_DOC_TYPE     in [PSH_CUST_DOC_REF],
+	@name('Филиал')                  P_BRANCH       in [BRANCH_REF]
+) return ref [PSH_CUST_DOCS_OU] is
+
+validate is
+begin
+	if p_message = 'DEFAULT' then
+		P_FILE_NAME := this.[FILE_NAME];
+		P_FILE_CR_DATE := this.[FILE_CR_DATE];
+		P_DOC_CR_DATE := this.[DOC_CR_DATE];
+		P_VERSION := this.[VERSION];
+		P_DOC_TYPE := this.[DOC_TYPE];
+		P_BRANCH := this.[BRANCH];
+	end if;
+end;
+
+execute is
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB_TC]);
+
+v_doc_state varchar2(16);
+v_st_doc	&libfun.TFileStates;
+
+begin
+	v_doc_state := ::[PSH_CUST_DOCS].[PSH_LIB_TC].stNew;
+
+	if ::[PSH_CUST_DOCS].[PSH_LIB_FUN].checkApp('1B028090') is null then
+		v_doc_state := ::[PSH_CUST_DOCS].[PSH_LIB_TC].stCheckXSD;	-- ставим на проверку по XSD
+	end if;
+
+	-- Установка значения реквизита "Имя файла"
+	[FILE_NAME] := P_FILE_NAME;
+	-- Установка значения реквизита "Содержимое файла"
+	[FILE_CONTENT] := P_FILE_CONTENT;
+	-- Установка значения реквизита "Дата создания файла"
+	[FILE_CR_DATE] := P_FILE_CR_DATE;
+	-- Установка значения реквизита "Дата создания документа"
+	[DOC_CR_DATE] := P_DOC_CR_DATE;
+	-- Установка значения реквизита "Версия формата"
+	[VERSION] := P_VERSION;
+	-- Установка значения реквизита "Состояние"
+	[DOC_STATE] := v_doc_state;
+	-- Установка значения реквизита "Тип документа"
+	[DOC_TYPE] := P_DOC_TYPE;
+	-- Установка значения реквизита "Филиал"
+	[BRANCH] := P_BRANCH;
+	
+	&libfun.addDoc(v_st_doc, this, v_doc_state);
+	::[HOOK].[PSB_CUST_CH_ST](v_st_doc);
+end;
+end;
+end;

@@ -1,0 +1,225 @@
+class AC_FIN;
+
+@import_plsql(true)
+@this(plsql_lock:=false)
+@name('[ПСБ] 311-П.  Контроль сообщений об открытых и закрытых счетах')
+static method PSH_311P_CHK is
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma macro (xl,'::[OOXML].[API_XL]');
+
+type prev_opened_acc_type is
+record (new_acc_id	varchar2(16), status integer);
+type prev_opened_acc_tbl is table of prev_opened_acc_type index by varchar2(16);
+									
+procedure Draw(P_DATE_START	date, P_DATE date)
+is
+	type tbl_sheet_rows	is table of integer index by  binary_integer;
+	row_idx				tbl_sheet_rows;
+
+	sh					integer;
+	RowOffset			integer :=4;
+	ColOffset			integer :=0;
+	prev_opened_accs	prev_opened_acc_tbl;
+	s_idx				varchar2(16);
+begin	
+		for I in 1..4  -- 4 страниц, счетчики строк начинаются с 1
+		loop
+			row_idx(I) := 1;
+			&xl.Open_Sheet(I);
+			&xl.put(4, 2, to_char(P_DATE, 'dd/mm/yyyy')); -- Дата отчета на каждой странице
+		end loop;
+		
+		for CloseOpen in reverse 0..1 /*от 1 - сообщение от открытии к, 0 - сообщение о закрытии*/
+		loop
+			for (
+					select  ac (	ac%id 															: id
+								,	ac.[MAIN_V_ID] 													: main_v_id
+								,	ac.[ACCS_ARR] 													: ACCS_ARR
+								,	ac.[CLIENT_V].[NAME]											: ClientName
+								,	ac.[DATE_OP]													: OpDate
+								,	ac.[DATE_CLOSE]													: ClDate
+								,	gj.[WORKING_DATETIME]										  	: WrkDate
+								, 	st.tm															: AnswDate
+								, 	st.val															: RESULT
+								, 	gj.[FILENAME]													: FILENAME
+								)
+					in ::[AC_FIN]
+					,	(	select gj(	  gj.[WORKING_DATETIME] : WORKING_DATETIME
+										, gj.[FILENAME] 		: FILENAME
+										, gj.[ACCOUNT]			: ACCOUNT
+										, gj.[IN_FILE_HISTORY]	: IN_FILE_HISTORY
+										)
+								 in [GNI_JOUR]
+							where
+							(	
+								(CloseOpen = 1 /*Открыт							or 			Прологгирован*/
+								and (   coalesce(gj.[FILENAME],'SBC0') like 'SBC0%' or coalesce(gj.[FILENAME],'SBC1') like 'SBC1%'	 -- Юрики
+									 or coalesce(gj.[FILENAME],'SFC0') like 'SFC0%' or coalesce(gj.[FILENAME],'SFC1') like 'SFC1%') -- Физики 
+								)
+							or	/*Закрыт*/
+								(CloseOpen = 0 
+								 and (coalesce(gj.[FILENAME],'SBC2') like 'SBC2%' or coalesce(gj.[FILENAME],'SFC2') like 'SFC2%')
+								)
+							)
+						)
+
+					,	(	select distinct st(	  st%collection : collection_id
+								, analytic(first_value(substr(st.[TO_FILENAME], 3, 1)), 'over (partition by [1] order by [2] desc)', st%collection, st.[IN_FILE_DATETIME]) : val  --'F'- 'Принят НО', 'E'- 'Забракован НО', 'K'- 'Требуется корректировка в НО'
+								, analytic(first_value(st.[IN_FILE_DATETIME]), 'over (partition by [1] order by [2] desc)', st%collection, st.[IN_FILE_DATETIME]) : tm
+						)
+						in	::[GNI_JOUR_HISTORY] collections
+						where st.[SOC_FUND] is null and st.[IN_FILE_DATETIME] <  (P_DATE + 1)
+					)	
+					where
+						 	ac%id = gj.[ACCOUNT](true)
+				 		and gj.[IN_FILE_HISTORY] = st.collection_id(true)
+						and	( 
+								(ac.[TO_PRODUCT] is null or ac.[TO_PRODUCT] <> ::[ACC_PRODUCT]([CODE] = 'RKO_CUR_LOCK'))
+								and exists(select pat(1)
+											in ::[ACC_PATTERN] all
+											where pat%collection = ::[ANALYTIC_CODE]([CODE] = 'PSB_AC_FIN_311P').[ACC_PATT_CORR]%collection
+												and ac.[MAIN_V_ID] like pat.[PATTERN] || '%'
+						   				  )
+							) 
+						and coalesce(ac.[COM_STATUS], 0) <> ::[COM_STATUS_PRD]([CODE]='TO_OPEN') -- НЕ помечен к открытию
+						and (	
+								(CloseOpen = 1  and  ac.[DATE_OP] >= P_DATE_START  and  ac.[DATE_OP] <= CALENDAR.next_date('HOLIDAYS','0', (P_DATE-1), -1))
+							  or
+							 	(CloseOpen = 0 and  ac.[DATE_CLOSE] >= P_DATE_START and  ac.[DATE_CLOSE] <= CALENDAR.next_date('HOLIDAYS','0', (P_DATE-1), -1))
+							)
+				)
+			loop
+				s_idx := null;
+				if ac.WrkDate is null then  -- отсутствует сообщение об отправке в налоговый Орган (НО);
+					if 	CloseOpen = 1 then /*Открыт */
+						sh := 1;
+					elsif CloseOpen = 0 then					
+						if prev_opened_accs.exists(ac.id) /*Послали сообщение об открытии пролонгирующего счета*/
+							then
+							if prev_opened_accs(ac.id).status = 0 /*успешно, вовремя*/ then
+								continue;
+							elsif prev_opened_accs(ac.id).status = 1 /*неуспешно */ then
+								sh := 3;
+							elsif prev_opened_accs(ac.id).status = 2 /*поздно*/ then
+								sh := 4;
+							else
+								pragma error('Не может быть!');
+							end if;
+						else
+							-- не послали сообщение о пролонгации
+							sh := 3;
+						end if;
+					end if;
+				elsif 	CloseOpen = 1 then
+					if ac.[ACCS_ARR] is not null --реальная строка
+						then
+						Begin
+							select u(u.[ACCOUNT])
+							in [LINK_ACCS] all
+							where
+								 u%collection = ac.ACCS_ARR
+									and u.[VID] = ::[ACC_LINK]([CODE] = 'CHANGE_NUM')
+							into s_idx;
+	
+							if prev_opened_accs.exists(s_idx) then
+								pragma error ('Ссылка на счет id = ' || s_idx
+								|| ' обнаружена в нескольких массивах связанных счетов: id in ('
+										||prev_opened_accs(s_idx).new_acc_id  ||
+									',' || ac.id || ')' );
+							else
+								prev_opened_accs(s_idx).new_acc_id := ac.id;
+							end if;
+	
+						exception
+							when NO_DATA_FOUND Then
+								s_idx := null;
+							when TOO_MANY_ROWS Then
+								pragma error (' У счета id = ' || ac.id || ' найдено несколько записей с типом "'
+										|| ::[ACC_LINK]([CODE] = 'CHANGE_NUM').[NAME] || '" в массиве связанных счетов');
+						End;
+					end if;
+					if ac.RESULT <> 'F' /*Неуспешно*/ then
+						--DEBUG_PIPE(&METHOD$ || 'Неуспешно' || '' , 5);
+						sh := 1;
+						if s_idx is not null then
+							prev_opened_accs(s_idx).status := 1;
+						end if;
+					elsif (CALENDAR.GetDaysCount('HOLIDAYS',ac.WrkDate, ac.OpDate, '0') - 1 ) > 2 /* Остались успешные об открытии */then
+						--DEBUG_PIPE(&METHOD$ || 'Поздно' || '' , 5);
+						sh := 2;
+						if s_idx is not null then
+							prev_opened_accs(s_idx).status := 2;
+						end if;
+					else
+						--DEBUG_PIPE(&METHOD$ || ' Все хорошо =' || '' , 5);
+						if s_idx is not null then
+							prev_opened_accs(s_idx).status := 0;
+						end if;
+						continue; -- Не выводим
+					end if;
+				elsif CloseOpen = 0 /*and &isClosedMsg*/  then
+					--DEBUG_PIPE(&METHOD$ || 'Было сообщение о закрытии' || '' , 5);
+					if ac.RESULT <> 'F' /*Неуспешно*/ then
+						--DEBUG_PIPE(&METHOD$ || 'Неуспешно' || '' , 5);
+						sh := 3;
+					elsif (CALENDAR.GetDaysCount('HOLIDAYS',ac.WrkDate, ac.ClDate, '0') - 1 ) > 2 /* Остались успешные о закрытии */then
+						--DEBUG_PIPE(&METHOD$ || 'Поздно' || '' , 5);
+						sh := 4;
+					else
+						--DEBUG_PIPE(&METHOD$ || ' Все хорошо =' || '' , 5);
+						continue; -- Не выводим
+					end if;
+				else
+					--DEBUG_PIPE(&METHOD$ || ' Все хорошо =' || '' , 5);
+					continue; -- Не выводим
+				end if;
+				row_idx(sh) := row_idx(sh) + 1 ;
+	
+				&xl.Open_Sheet(sh);
+				&xl.Ins_Row(RowOffset + row_idx(sh));
+
+				&xl.put(RowOffset + row_idx(sh), ColOffset + 1 , ac.main_v_id);
+				&xl.put(RowOffset + row_idx(sh), ColOffset + 2 , ac.ClientName);
+				&xl.put(RowOffset + row_idx(sh), ColOffset + 3 , to_char(case when CloseOpen = '1' then ac.OpDate else ac.ClDate end, 'dd/mm/yyyy'));	
+				&xl.put(RowOffset + row_idx(sh), ColOffset + 4 , to_char(ac.WrkDate, 'dd/mm/yyyy'));	
+				&xl.put(RowOffset + row_idx(sh), ColOffset + 5 , to_char(ac.AnswDate, 'dd/mm/yyyy'));	
+				&xl.put(RowOffset + row_idx(sh), ColOffset + 6 , case when 	ac.RESULT='F' then 'Принят НО'
+																	when 	ac.RESULT='E' then  'Забракован НО'
+																	when 	ac.RESULT='K' then  'Требуется корректировка в НО'
+																	else  	null
+																	end);
+				if sh = 7 then
+					&xl.put(RowOffset + row_idx(sh), ColOffset + 7 , case when CloseOpen=1 then 'Открыт' when CloseOpen=0 then 'Закрыт' else 'Null' end  );
+				end if;
+			end loop;
+		end loop;
+		&xl.Open_Sheet(1);
+end;
+PSH_311P_CHK (
+	@name('Дата отчета')          P_DATE       in [DATE],
+	@name('Выбрать счета с даты') P_DATE_START in [DATE]
+) is
+
+validate is
+l_file	const	varchar2  := ::[REPS].[SLIB].GetPath('PATH_PRINT_EXCEL', 'PSB_311P_CHECK.XLSX');
+v_blob_body	blob;
+begin
+	if P_MESSAGE = 'DEFAULT' Then
+		P_DATE := [SYSTEM]::[OP_DATE];
+		P_DATE_START	  := to_date('01/01/2024','dd/mm/yyyy');
+		::[SHABLON_DOC].[LIB_OOXML].load_blob('PSB_311P_CHK', v_blob_body, null, null, null, null);
+		&xl.init_xls;
+		     
+		if not &xl.open_file(v_blob_body) then
+			pragma error('Не найден шаблон "PSB_311P_CHK" в справочнике шаблонов документов!');           
+		end if; 			
+	elsif P_MESSAGE = 'VALIDATE' Then
+		if P_INFO = 'OK' Then
+			draw (P_DATE_START, P_DATE);
+			&xl.finish(v_blob_body);
+			[OOXML]::[API_ORSA].putReport2RunExtProc(v_blob_body,'xlsx', '[' || &METHOD$CLASS || '] "'|| &METHOD$NAME || '"');
+		end If;
+	end If;
+end;
+end;
+end;

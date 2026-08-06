@@ -1,0 +1,234 @@
+class CIT_INTERFACE;
+
+@import_plsql(true)
+@name('[ПСБ] ЕТО. Интерфейс закрытия счёта')
+library PSH_ETO_A_CL_INT is
+
+cv_result_accept const varchar2(6) := 'accept';
+cv_result_reject const varchar2(6) := 'reject';
+
+type action_data_rec_type is record (id_int						varchar2(36)
+									,id_ext						varchar2(36)
+									,account					varchar(32)
+									,closureDate				date
+									);
+
+cv_tag_request	const varchar2(17) := 'ETO_ACC_CLOSE_REQ';
+cv_tag_response	const varchar2(18) := 'ETO_ACC_CLOSE_RESP';
+
+cv_tag_ID_INT		const varchar2(50) := '//CIT_REQUEST/DATA/' || cv_tag_request || '/ID_INT/@Value';
+cv_tag_ID_EXT		const varchar2(50) := '//CIT_REQUEST/DATA/' || cv_tag_request || '/ID_EXT/@Value';
+cv_tag_account		const varchar2(51) := '//CIT_REQUEST/DATA/' || cv_tag_request || '/Account/@Value';
+cv_tag_closureDate	const varchar2(55) := '//CIT_REQUEST/DATA/' || cv_tag_request || '/closureDate/@Value';
+
+function processAction(p_action_data in out nocopy action_data_rec_type, p_msg_struct [CIT_BO].[TLIB].data2pack_type) return integer;
+function tryCloseAccount(p_action_data in out nocopy action_data_rec_type, p_msg_struct [CIT_BO].[TLIB].data2pack_type) return integer;
+function getActionDataFromRequest(p_cit_req xmltype) return action_data_rec_type;
+function processAndGetResponse(p_cit_req xmltype, p_cit_res in out nocopy clob, p_msg_struct [CIT_BO].[TLIB].data2pack_type) return integer;
+function getResponse(p_action_data action_data_rec_type, p_result varchar2, p_message varchar2 := null) return clob;
+function getResponse4Exception(p_req clob, p_result varchar2, p_message varchar2 := null) return clob;
+function getTagValue(p_xmlclob in out nocopy clob, p_tag varchar2) return varchar2;
+function action_data_to_char(p_action_data action_data_rec_type) return clob;
+
+/*********************************************************************
+Таблица кодов ошибок интерфейса обработки запроса
+----------------------------------------------------------------------
+  Код  |  Описание ошибки
+----------------------------------------------------------------------
+null   | Передача отклика не предусмотрена настройками
+0      | Успешная обработка
+1      | Непредусмотренная ошибка интерфейса
+2      | *Ошибка разбора запроса
+3      | Счёт не найден среди открытых счетов
+4      | Счёт не принадлежит подсистеме ETO
+*********************************************************************/
+
+pragma include(::[RUNTIME].[MACRO_LIB]);
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma include(::[INTERFACE].[COMPILE_LIB]);
+
+public function interface(p_msg_struct in out [CIT_BO].[TLIB].data2pack_type, p_reqres in out clob) return integer is
+	cit_req			xmltype;
+	cit_res			clob := empty_clob();
+	ret_val			integer;
+	error_message	[STRING_2000];
+begin
+	&debug('.interface Begin:', 0)
+	&debug('.interface: p_reqres = ' || p_reqres, 0)
+	&sp(start_int)
+
+	cit_req := xmltype(p_reqres);
+	&debug('.interface: p_reqres parsed successfully', 0)
+
+	ret_val := processAndGetResponse(cit_req, cit_res, p_msg_struct);
+	p_reqres := cit_res;
+
+	&debug('.interface End: ret_val = ' || ret_val, 0)
+	return ret_val;
+exception when others then
+	--Причина перехвата others: при возникновении любой ошибки необходимо корректно завершить обработку (записать ответ, вернуть результат обработки в точку вызова)
+	&rb(start_int)
+	&debug('.interface: exception = ' || utils.error_stack, 0)
+	error_message := substr('Ошибка "' || &METHOD$NAME || '": ' || utils.error_stack, 1, error_message%size);
+
+	p_reqres := getResponse4Exception(p_reqres, cv_result_reject, error_message);
+
+	&debug('.interface End: with exception, retVal = 1', 0)
+	return 1;
+end;
+
+
+function processAndGetResponse(p_cit_req xmltype, p_cit_res in out nocopy clob, p_msg_struct [CIT_BO].[TLIB].data2pack_type) return integer is
+	action_data	action_data_rec_type;
+	v_retval	integer;
+begin
+	&debug('.processAndGetResponse Begin:', 0)
+
+	action_data := getActionDataFromRequest(p_cit_req);
+	&debug('.processAndGetResponse: action_data = ' || action_data_to_char(action_data), 0)
+
+	v_retval := processAction(action_data, p_msg_struct);
+
+	p_cit_res :=
+		case
+		when v_retval = 0 then getResponse(action_data, cv_result_accept)
+		when v_retval = 3 then getResponse(action_data, cv_result_reject, 'Счёт account = "' || action_data.account || ' не найден среди открытых счетов')
+		when v_retval = 4 then getResponse(action_data, cv_result_reject, 'Счёт account = "' || action_data.account || ' не принадлежит подсистеме ETO')
+		end;
+
+	&debug('.processAndGetResponse End: v_retval = ' || v_retval, 0)
+	return v_retval;
+end;
+
+function processAction(p_action_data in out nocopy action_data_rec_type, p_msg_struct [CIT_BO].[TLIB].data2pack_type) return integer is
+	v_retval	integer;
+begin
+	&debug('.processAction Begin:', 0)
+	v_retval := tryCloseAccount(p_action_data, p_msg_struct);
+	&debug('.processAction End: v_retval = ' || v_retval, 0)
+	return v_retval;
+end;
+
+function tryCloseAccount(p_action_data in out nocopy action_data_rec_type, p_msg_struct [CIT_BO].[TLIB].data2pack_type) return integer is
+	v_ac_fin ref [AC_FIN];
+	v_is_eto_account boolean := false;
+	v_retval integer;
+begin
+	&debug('.tryCloseAccount Begin: ', 0)
+	for (select x(x :c_id)
+		 in ::[AC_FIN]
+		 where x.[MAIN_V_ID] = p_action_data.account
+		 and x.[DATE_CLOSE] is null
+		)
+	loop
+		v_ac_fin := x.c_id;
+	end loop;
+
+	if v_ac_fin is not null then
+		if not v_is_eto_account then
+			for (select x(x.[OPERATIONS]	:c_card_operations)
+				 in ::[PSH_ETO_CARD]
+				 where x.[CARD_ACCOUNT] = v_ac_fin
+				)
+			loop
+				v_is_eto_account := true;
+				::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].writeCardOperation(x.c_card_operations, pCitInRequest == p_msg_struct.in_req_ref);
+			end loop;
+		end if;
+	
+		if not v_is_eto_account then
+			for (select x(1)
+				 in ::[PSH_ETO_CARD_ACC] all
+				 where x.[ACCOUNT] = v_ac_fin
+				)
+			loop
+				v_is_eto_account := true;
+			end loop;
+		end if;
+	end if;
+
+	if v_ac_fin is null then
+		v_retval := 3;
+	elsif not v_is_eto_account then
+		v_retval := 4;
+	else
+		&call_int(FIN_ACCOUNT_INT, INT_ACC_FIN, 2).ac_fin_close(v_ac_fin, 'Закрыто в ETO', p_action_data.closureDate);
+		v_retval := 0;
+	end if;
+	&debug('.tryCloseAccount End: v_retval = ' || v_retval, 0)
+	return v_retval;
+end;
+
+function getActionDataFromRequest(p_cit_req xmltype) return action_data_rec_type is
+	v_action_data	action_data_rec_type;
+begin
+	&debug('.getActionDataFromRequest Begin:', 0)
+	v_action_data.id_int		:= [XT].get_xstring(p_cit_req, cv_tag_ID_INT);
+	v_action_data.id_ext		:= [XT].get_xstring(p_cit_req, cv_tag_ID_EXT);
+	v_action_data.account		:= [XT].get_xstring(p_cit_req, cv_tag_account);
+	v_action_data.closureDate	:= [XT].get_xdatetime(p_cit_req, cv_tag_closureDate);
+	&debug('.getActionDataFromRequest End: p_cit_req parsed successfully', 0)
+	return v_action_data;
+end;
+
+function getResponse(p_action_data action_data_rec_type, p_result varchar2, p_message varchar2 := null) return clob is
+	resp	clob := empty_clob();
+begin
+	&debug('.getResponse Begin: p_action_data.id_int = ' || p_action_data.id_int || ', p_result = ' || p_result || ', p_message = "' || p_message || '"', 0)
+	resp := to_clob(
+'
+<' || cv_tag_response || '>
+  <ID_INT Value="'		|| '' || '"/>
+  <ID_EXT Value="'		|| p_action_data.id_int || '"/>
+  <RESULT Value="'		|| p_result || '"/>
+  <MESSAGE Value="'		|| [XT].escape_string(p_message) || '"/>
+</' || cv_tag_response || '>
+');
+	&debug('.getResponse End: resp = ' || resp, 0)
+	return resp;
+end;
+
+function getResponse4Exception(p_req clob, p_result varchar2, p_message varchar2 := null) return clob is
+	resp	clob := empty_clob();
+begin
+	&debug('.getResponse4Exception Begin: ', 0)
+	resp := to_clob(
+'
+<' || cv_tag_response || '>
+  <ID_INT Value=""/>
+  <ID_EXT Value="'		|| getTagValue(p_req, 'ID_INT') || '"/>
+  <RESULT Value="'		|| p_result || '"/>
+  <MESSAGE Value="'		|| [XT].escape_string(p_message) || '"/>
+</' || cv_tag_response || '>
+');
+	&debug('.getResponse4Exception End: resp = ' || resp, 0)
+	return resp;
+end;
+
+function getTagValue(p_xmlclob in out nocopy clob, p_tag varchar2) return varchar2 is
+begin
+	return regexp_substr(p_xmlclob, '<' || p_tag || ' Value="(.*?)"/>', 1, 1, 'c', 1);
+end;
+/*
+public procedure start_timer(p_timer_code varchar2(64)) is 
+begin
+	&call_int(CIT_INT, INT_TLIB, 2).start_timer(p_timer_code);
+end;
+
+public procedure finish_timer(p_timer_code varchar2(64)) is 
+begin
+	&call_int(CIT_INT, INT_TLIB, 2).finish_timer(p_timer_code);
+end;
+*/
+
+function action_data_to_char(p_action_data action_data_rec_type) return clob is
+begin
+	return to_clob(nl$
+|| 'id_int = ['					|| p_action_data.id_int						|| '], ' || nl$
+|| 'id_ext = ['					|| p_action_data.id_ext						|| '], ' || nl$
+|| 'account = ['				|| p_action_data.account					|| '], ' || nl$
+|| 'closureDate = ['			|| p_action_data.closureDate				|| ']'
+);
+end;
+
+end;

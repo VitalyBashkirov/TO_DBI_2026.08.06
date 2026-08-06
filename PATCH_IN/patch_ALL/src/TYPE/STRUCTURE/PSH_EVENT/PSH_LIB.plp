@@ -1,0 +1,469 @@
+class PSH_EVENT;
+
+@import_plsql(true)
+@name('[ПСБ] Библиотека')
+library PSH_LIB is
+
+
+C_STATUS_NEW		constant	string(1) := '0';	-- при создании
+C_STATUS_READY		constant	string(1) := '1';	-- готов к обработке
+C_STATUS_WAIT_VAL	constant	string(1) := '2';	-- ожидать валютирования (даты опердня DATE_VAL)
+C_STATUS_WAIT_NEXT	constant	string(1) := '3';	-- ожидать обработки
+C_STATUS_HALT		constant	string(1) := '8';	-- обработка прервана (нет доступа в прошлый день и пр.)
+C_STATUS_END		constant	string(1) := null;	-- событие обработано
+
+public c_date_format	const string := 'YYYY-MM-DD HH24:MI:SS';
+--public c_max_prioritet	const pls_integer := 100;
+
+
+public function get_pipe(
+	p_job_number	pls_integer
+) return string is
+begin
+	return 'PSH_PRIOR_' || p_job_number;
+end;
+
+public procedure put_pipe(
+	 p_priority		pls_integer
+	,p_pipe			string
+) is
+begin
+	stdio.put_line_pipe(p_priority || ';' || to_char(sysdate, c_date_format), p_pipe);
+end;
+
+public function get_max_prioritet(
+	 p_pipe		string
+	--,p_date		out string
+) return number is
+	v_str			string(4000);
+	v_num			number;
+	v_max_priority	pls_integer := 0;
+begin
+	loop
+		stdio.get_line_pipe(v_str, p_pipe);
+
+		exit when v_str is null;
+		
+		v_num := null;
+		begin
+			v_num := to_number(substr(v_str, 1, 1));
+		exception
+			when others then null;
+		end;
+		
+		v_num := nvl(v_num, 0);
+		
+		v_max_priority := greatest(v_max_priority, v_num);
+	end loop;
+	
+	return v_max_priority;
+end;
+
+
+---------------------------
+-- функции, возвращающие состояние
+public function get_status_new			return string is 
+begin
+	return C_STATUS_NEW;
+end;
+
+public function get_status_ready		return string is 
+begin
+	return C_STATUS_READY;
+end;
+
+public function get_status_wait_val	return string is 
+begin
+	return C_STATUS_WAIT_VAL;
+end;
+
+public function get_status_wait_next	return string is 
+begin
+	return C_STATUS_WAIT_NEXT;
+end;
+
+public function get_status_halt		return string is 
+begin
+	return C_STATUS_HALT;
+end;
+
+public function get_status_end			return string is 
+begin
+	return C_STATUS_END;
+end;
+---------------------------
+
+
+-- наименование состояния
+public function status_name(
+	p_status	string
+) return string is 
+begin
+	if p_status = C_STATUS_NEW then
+		return p_status || ':Не обработано';
+	elsif p_status = C_STATUS_READY then
+		return p_status || ':Готов к обработке';
+	elsif p_status = C_STATUS_WAIT_VAL then
+		return p_status || ':Ожидает валютирования';
+	elsif p_status = C_STATUS_WAIT_NEXT then
+		return p_status || ':Ожидает обработки';
+	elsif p_status = C_STATUS_HALT then
+		return p_status || ':Обработка остановлена';
+	elsif p_status is null then --= C_STATUS_END then
+		return p_status || 'Обработано';
+	end if;
+end;
+pragma restrict_references(status_name, WNDS, WNPS);
+
+
+public function get_last_err(
+	p_text	string
+) return string is 
+	i	pls_integer;
+	j	pls_integer;
+begin
+	i := instr(p_text, nl$, 1);
+	j := length(p_text);
+	
+	if i > 0 then
+		if i + 2 < j then
+			--return substr(p_text, i+2);
+			return substr(p_text, 1, i);
+		--else
+		--	return p_text;
+		end if;
+	--else
+	--	return p_text;
+	end if;
+	
+	return p_text;	
+end;
+pragma restrict_references(get_last_err, WNDS, WNPS);
+
+
+-- сохранение последних ошибок
+procedure add_text(
+	 p_main	in out string
+	,p_add	string
+) is
+	v_date	string(20);
+	v_instr	pls_integer;
+begin
+	-- нечего добавлять
+	if p_add is null then
+		return;
+	end if;
+	
+	v_date := to_char(sysdate, 'YYYY-MM-DD HH24:MI:SS ');
+	
+	-- добавим текст p_add, и оставим последние 2000 символов
+	--p_main := substr(p_main || nl$ || p_add, -2000);
+
+	if p_main is null then
+		-- если слишком длинный - оставим последние 2000 символов
+		if length(p_add) + length(v_date) > 2000 then
+			p_main := substr(v_date || p_add, -2000);
+		else
+			p_main := v_date || p_add;
+		end if;
+	else
+		-- запишем, если такая ошибка - не последняя в списке
+		v_instr := instr(p_main, p_add);
+		if v_instr = 0 -- нет в списке
+		or v_instr > 21
+		then
+			-- если слишком длинный - оставим последние 2000 символов
+			if length(p_main) + length(p_add) + length(v_date) + length(nl$) > 2000 then
+				--p_main := substr(p_main || nl$ || v_date || p_add, -2000);
+				p_main := substr(v_date || p_add || nl$ || p_main, 1, 2000);
+			else
+				--p_main := p_main || nl$ || v_date || p_add;
+				p_main := v_date || p_add  || nl$ || p_main;
+			end if;
+		end if;
+	end if;
+	
+end;
+
+
+procedure err_trans(
+	p_event	in out [PSH_EVENT],
+	p_status_to		string
+--	p_status_from	string,
+--	p_error_msg	in out string
+) is
+begin
+	to_halt(
+		p_event,
+		'Нет перехода у события из состояния "' || status_name(p_event.[STATUS]) || '" в состояние "' || status_name(p_status_to) || '"'
+	);
+--	p_event.[TEXT_VOZV]	:= substr(p_event.[TEXT_VOZV] || nl$ || ' Нет перехода у события из состояния "' || status_name(p_event.[STATUS]) || '" в состояние "' || status_name(p_status_to) || '"', - p_event.[TEXT_VOZV]%size);
+--	pragma error('Нет перехода из состояния "' || status_name(p_status_from) || '" в состояние "' || status_name(p_status_to) || '"' );
+end;
+
+/*
+Хождение по статусам:
+
+                   -> C_STATUS_NEW		При создании события
+
+    C_STATUS_NEW   -> C_STATUS_READY	После назначения обработчика
+
+    C_STATUS_READY -> C_STATUS_END		После успешной обработки
+    C_STATUS_READY -> C_STATUS_WAIT_VAL	На ожидание валютирования (заполняется DATE_VAL, FILIAL)
+    C_STATUS_READY -> C_STATUS_WAIT_NEXT	На ожидание обработки (заполняется DATE_NEXT)
+    C_STATUS_READY -> C_HALT			Обработка остановлена (Текст ошибки в TEXT_VOZV)
+
+    C_STATUS_WAIT_VAL  -> C_STATUS_NEW	Наступил опердень DATE_VAL в филиале FILIAL
+    C_STATUS_WAIT_NEXT -> C_STATUS_NEW	Наступила системная дата DATE_NEXT
+*/
+
+
+--
+
+-- хождения по состояниям
+public procedure to_new(
+	p_event	in out [PSH_EVENT]
+) is 
+begin
+	-- обработчики стереть
+	p_event.[JOB]	:= null;
+	p_event.[STATUS]:= C_STATUS_NEW;
+end;
+
+
+public procedure to_ready(
+	p_event	in out [PSH_EVENT], 
+	p_job	number
+) is 
+begin
+	-- только из NEW
+	if p_event.[STATUS] = C_STATUS_NEW then
+		-- назначить обработчик
+		p_event.[JOB]	:= p_job;
+		p_event.[STATUS]:= C_STATUS_READY;
+	else
+		err_trans(p_event, C_STATUS_READY);
+	end if;
+end;
+
+
+
+public procedure to_end(
+	p_event	in out [PSH_EVENT] 
+) is 
+begin
+	-- только из READY
+	if p_event.[STATUS] = C_STATUS_READY then
+		p_event.[STATUS]:= C_STATUS_END;
+		p_event.[JOB]	:= null;
+	else
+		err_trans(p_event, C_STATUS_END);
+	end if;
+end;
+
+
+public procedure to_wait_val(
+	p_event		in out [PSH_EVENT], 
+	p_date_val	date,
+	p_filial	ref [BRANCH]
+) is 
+begin
+	-- только из READY
+	if p_event.[STATUS] = C_STATUS_READY then
+
+		p_event.[STATUS]    := C_STATUS_WAIT_VAL;
+		p_event.[DATE_VAL]  := p_date_val;
+		p_event.[FILIAL]	:= p_filial;
+		p_event.[JOB]		:= null;	-- отдали менеджеру
+		
+		add_text(p_event.[TEXT_VOZV], 'Ожидание валютирования: ' || to_char(p_date_val, 'dd.mm.yyyy'));
+		--p_event.[TEXT_VOZV] := 'Ожидание валютирования: ' || to_char(p_date_val, 'dd.mm.yyyy');
+	else
+		err_trans(p_event, C_STATUS_WAIT_VAL);
+	end if;
+end;
+
+
+
+public procedure to_wait_next(
+	p_event		in out [PSH_EVENT], 
+	p_date_next	date,
+	p_text		string default null
+) is 
+begin
+	-- только из READY
+	if p_event.[STATUS] = C_STATUS_READY then
+
+		p_event.[STATUS]	:= C_STATUS_WAIT_NEXT;
+		p_event.[DATE_NEXT] := p_date_next;
+		p_event.[JOB]		:= null;	-- отдали менеджеру
+
+		add_text(p_event.[TEXT_VOZV], nvl(p_text, 'Ожидание проводки: ' || to_char(p_date_next, 'dd.mm.yyyy')));
+		--p_event.[TEXT_VOZV] := nvl(p_text, 'Ожидание проводки: ' || to_char(p_date_next, 'dd.mm.yyyy'));
+	else
+		err_trans(p_event, C_STATUS_WAIT_NEXT);
+	end if;
+end;
+
+
+
+public procedure to_halt(
+	p_event	in out [PSH_EVENT], 
+	p_text	string
+) is 
+begin
+	-- в HALT - из любого состояния
+	--/*-- только из READY*/
+--	if p_event.[STATUS] = C_STATUS_READY then
+
+		p_event.[STATUS]	:= C_STATUS_HALT;
+		
+		add_text(p_event.[TEXT_VOZV], p_text);
+		--p_event.[TEXT_VOZV] := p_text;
+		p_event.[JOB]		:= null;
+--	else
+--		err_trans(p_event, C_STATUS_HALT);
+--	end if;
+end;
+
+
+
+-- Вернуть TRUE, если событие закрыто/закончено
+public function close_unactual_event(
+	p_event		ref [PSH_EVENT] 
+) return boolean is
+	v_obj_class		[PSH_EVENT].[OBJ_CLASS]%type; 
+	v_obj_id		[PSH_EVENT].[OBJ_ID]%type; 
+begin
+	v_obj_class	:= p_event.[OBJ_CLASS];
+	v_obj_id	:= p_event.[OBJ_ID];
+	
+	-- Экземпляр не найден - закончить обработку
+	if V_OBJ_CLASS = 'MAIN_DOCUM' then
+		begin
+			::[MAIN_DOCUM]%locate(z where z = V_OBJ_ID);
+		exception
+			when NO_DATA_FOUND then
+				p_event.[STATUS] := get_status_end;
+				return true;
+		end;
+	
+	elsif V_OBJ_CLASS = 'SALE' then
+		begin
+			::[SALE]%locate(z where z = V_OBJ_ID);
+		exception
+			when NO_DATA_FOUND then
+				p_event.[STATUS] := get_status_end;
+				return true;
+		end;
+	
+	elsif V_OBJ_CLASS = 'PR_CRED' then
+		begin
+			::[PR_CRED]%locate(z where z = V_OBJ_ID);
+		exception
+			when NO_DATA_FOUND then
+				p_event.[STATUS] := get_status_end;
+				return true;
+		end;
+	end if;
+
+	return false;
+end;
+
+
+
+
+
+
+public function GetXMLData(
+	p_event	ref [PSH_EVENT] 
+) return string is 
+begin
+	null;
+/*	
+-- begin pl/sql
+	declare
+		cursor c_obj is
+			select  a1.C_XML.XMLData XML
+			from Z#PSH_EVENT a1
+			where a1.ID = P_EVENT;
+		C	c_obj%rowtype;
+	begin
+		for plp$c_obj in c_obj loop
+			C := plp$c_obj;
+			return C.XML;
+		end loop;
+	end;
+-- end pl/sql	
+*/	
+end;
+pragma restrict_references(GetXMLData, WNDS, WNPS);
+
+
+public procedure SetXMLData(
+	p_event	ref [PSH_EVENT], 
+	p_xml	string
+) is 
+begin
+	null;
+/*	
+-- begin pl/sql
+	update z#psh_event
+	set c_xml = P_XML
+	where ID = p_event;
+-- end pl/sql	
+*/
+end;
+
+
+
+public function ExtractValue(
+	p_event	ref [PSH_EVENT],
+	p_node	string
+) return string is 
+begin
+	null;
+/*	
+-- begin pl/sql
+	declare
+		cursor c_obj is
+			select extract(a1.C_XML, p_node).getStringVal() value
+			from Z#PSH_EVENT a1
+			where a1.ID = P_EVENT;
+		C	c_obj%rowtype;
+	begin
+		for plp$c_obj in c_obj loop
+			C := plp$c_obj;
+			return C.value;
+		end loop;
+	end;
+-- end pl/sql	
+*/
+end;
+
+
+/*
+function ExistsNode(
+	p_event	ref [PSH_EVENT], 
+	p_node	string
+) return boolean is
+begin
+-- begin pl/sql
+	declare
+		cursor c_obj is
+			select extract(a1.C_XML, p_node).getStringVal() value
+			from Z#PSH_EVENT a1
+			where a1.ID = P_EVENT;
+		C	c_obj%rowtype;
+	begin
+		for plp$c_obj in c_obj loop
+			C := plp$c_obj;
+			return C.value;
+		end loop;
+	end;
+-- end pl/sql	
+end;
+
+
+*/
+end;

@@ -1,0 +1,42 @@
+class MAIN_DOCUM;
+
+@name('[ПСБ] Подтвердить все свои документы БОС')
+static method PSH_CONF_BOS_ALL is
+PSH_CONF_BOS_ALL (
+	@name('В каком дне?') P_DATA in [DATE]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATA := [SYSTEM]::[OP_DATE];
+end if;
+-- End initialization of parameters and variables
+begin
+	if p_message = 'DEFAULT' then
+			null;
+		
+	elsif p_message = 'VALIDATE' then
+		if p_info = 'OK' then
+			if P_DATA is null then	
+				pragma error('Не указана дата для подтверждения');
+			end if;
+
+		end if;	
+	end if;
+end;
+end;
+
+execute is
+/*********************************************************************
+Назначение:
+
+kurganov, последнее изменение 28 Май 2014 г.
+*********************************************************************/
+begin
+	update x (x.[COMMENT]=x.[COMMENT]||'; '||'CONFIRM '||::[RUNTIME].[STDLIB].UserId().NAME) in ::[MAIN_DOCUM]
+		where trunc(x.[DATE_DOC])=trunc(P_DATA) and upper(x.[COMMENT]) not like ('%CONFIRM%') and x.[COMMENT] like ::[RUNTIME].[STDLIB].UserId().USERNAME||'%';
+end;
+end;
+end;

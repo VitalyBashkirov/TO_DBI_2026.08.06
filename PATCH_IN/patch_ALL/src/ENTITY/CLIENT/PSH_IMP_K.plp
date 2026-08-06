@@ -1,0 +1,320 @@
+class CLIENT;
+
+@import_plsql(true)
+@name('[ПСБ] Импорт категории клиента из Excel')
+@tag('COPIED')
+static method PSH_IMP_K is
+
+@name('Данные при импорте с клиент-скрипта') public V_DATA [STRING_32000];
+@name('V_DEST')                              public V_DEST [STRING_32000];
+public pragma include('[UNIVERS_IMP]::[VND_CASH_LIB]');
+public pragma include('[RUNTIME]::[MACRO_LIB]');
+--pragma include ('APPAUX_CALLPOINT.COMPILE_LIB');
+pragma include(::[RUNTIME].[DEBUG_MACRO]);
+pragma macro(nvl_part, 'CL_PART_OLD.[1] := nvl(CL_PART_STR.[1], CL_PART_OLD.[1]);', substitute);
+pragma macro(nvl_dog,  'DOG_OLD.[1] := nvl(DOG_STR.[1], DOG_OLD.[1]);', substitute);
+
+dp integer:=0;	--управление debug_pipe Err
+dp2 integer:=0;	--управление debug_pipe Msg
+dp3 integer:=0;	--управление debug_pipe
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+fmt	   string(10):='dd/mm/yyyy';
+fmtt   string(10):='dd.mm.yyyy';
+fmtHMS string(22):='dd/mm/yyyy HH24:MI:SS';
+
+row_cnt			integer;
+err_cnt			integer;
+msg_cnt			integer;
+
+vNN			string(100);    --№ п/п
+vName 	    string(300);    --Клиент
+vCategory   string(100);    --Категория
+vINN  	    string(100);    --ИНН
+vDateR 		string(100);	--Дата включения в реестр
+
+vDateReestr [DATE];			--Дата включения в реестр
+rClGrour ref [CL_GROUP]; 	--Категории клиентов
+
+function create_script (P_FILE 			varchar(200)
+					   ,P_COLUMN_CNT	integer
+					   ,P_INFO			varchar2
+					   ,P_START_LINE	integer
+					   ,P_START_COL		integer
+					   ) return varchar(32000) is
+begin
+	return 'Set fso = CreateObject("Scripting.FileSystemObject")
+			If Not fso.FileExists( "' || P_FILE ||' ") Then
+				MsgBox "Не найден файл " &  "' || P_FILE ||' " & "!"
+				Set fso = Nothing
+			Else
+				Set e = Createobject("Excel.Application")
+				e.Workbooks.Open ( "' || P_FILE ||' ")
+				
+				i     		= '|| P_START_LINE ||'
+				LineStr		= "AAA"
+		
+				if ' || P_COLUMN_CNT || ' >= 0 then			
+					Do While LineStr <> ""
+						LineStr = ""
+						TextData = ""
+						For j = ' || P_START_COL || ' to ' || P_COLUMN_CNT || ' + ' || P_START_COL || ' - 1
+							Value = e.Worksheets(1).Cells(i, j).Value
+							TextData = TextData & Trim(Value) & "~"
+							LineStr = LineStr & Trim(Value)
+						Next
+						if LineStr <> "" Then
+							Call Form1.ScriptServerValidate(OK, "' || P_INFO || '")
+						End if
+						i = i + 1
+					Loop
+				end if			
+				e.ActiveWorkbook.Close	
+			End	If			
+					
+			Set e = Nothing
+			Set fso = Nothing';	
+end;
+PSH_IMP_K (
+	@name('Дата установки категории')     P_DATE           in [DATE],
+	@name('Локальный путь к файлу')       P_LOCAL_PATH     in [FILE$LOAD],
+	@name('Количество полей для импорта') P_CNT_FIELDS     in [SHORT5],
+	@name('Первая строка сверху')         P_FIRST_LINE_UP  in [SHORT5],
+	@name('Первый столбец слева')         P_FIRST_COL_LEFT in [SHORT5]
+) is
+
+validate is
+m string(1000);
+pref string(1000);
+
+V_VAR	varchar2(128);
+temp 	varchar2(32767);
+tmpStr	varchar2(32767);
+DATA 	date;
+
+rClOrg ref [CL_ORG];
+rClBankN ref [CL_BANK_N];
+rClPriv ref [CL_PRIV];
+
+cntOrg integer;
+cntBankN integer;
+cntPriv integer;
+
+clCategories ref [CL_CATEGORIES];
+ClGroupRef ref [CL_GROUP];
+Begin
+	if P_MESSAGE = 'DEFAULT' then
+		vNN=vName=vCategory=vINN=vDateR:=null;
+		vDateReestr=rClGrour=clCategories:=null;
+
+		P_LOCAL_PATH.[SRC_TYPE] := false;
+		P_LOCAL_PATH.[SRC_PATH] := 'C:\Категории Клиентов\';
+		P_LOCAL_PATH.[SRC_NAME] := 'rsmp_16.05.2022.xlsx'; --'rsmp_12.05.2021.xlsx'; --'rsmp_11.09.2020.xlsx'; --'rsmp_11.01.2019.xlsx';
+		P_LOCAL_PATH.[SRC_MASK] := null; --'*.xlsx';
+		
+		P_FIRST_LINE_UP 	:= 4; 	--Первая строка сверху
+		P_FIRST_COL_LEFT 	:= 1; 	--Первый столбец слева
+		P_CNT_FIELDS		:= 13;  --Количество полей для импорта
+		row_cnt				:= 0;
+		err_cnt				:= 0;
+		msg_cnt				:= 0;
+	
+	elsif P_MESSAGE = 'VALIDATE' then
+		debug_pipe('p_info='||p_info,dp3);
+		
+		if p_info = 'OK' then
+			for ii in 1..4 loop
+				if    ii=1 then ClGroupRef:=::[CL_GROUP]([CODE]='MICRO');
+				elsif ii=2 then ClGroupRef:=::[CL_GROUP]([CODE]='MIDDLE');
+				elsif ii=3 then ClGroupRef:=::[CL_GROUP]([CODE]='SMALL');
+				else            ClGroupRef:=::[CL_GROUP]([CODE]='PSB_NOT_MSP');
+				end if;
+				debug_pipe('Удаляем устаревшие данные для "'||ClGroupRef.[NAME]||'"',dp);
+				for clc in ::[CL_CATEGORIES] all where clc.[CATEGORY]=ClGroupRef loop
+
+				::[CL_PRIV].[PSH_DATE_DEATH].UniLog(
+					Substr('Удаляем '||clc%id||'.'||clc%collection||' '||clc.[CATEGORY].[NAME]||' '
+					||to_char(clc.[DATE_BEGIN],fmt)||'-'||to_char(clc.[DATE_END],fmt)||' '||iif(clc.[IT_MAIN],'Основная категория',''),1,350),
+					Rpad('DEL_'||ClGroupRef.[CODE],10),			--тема
+					'_'||&METHOD$SNAME||'.log');	--log
+					
+					clc.DELETE#AUTO;
+					commit;
+				end loop;
+			end loop;
+						
+			if P_CNT_FIELDS=0 then pragma error('Должна быть хоть одна колонка!'); end if;
+			if P_CNT_FIELDS<5 then pragma error('Должны быть минимум 5 колонок (ID кредитного дог-ра, Стадия обесченения (DetalCode), Процент обесценения в %% (DetalPrc), Зафиксировано Пользователем (Fix), МСФО. Рейтинг клиента)'); end if;
+			if upper(P_LOCAL_PATH.[SRC_NAME]) not like ('%.XLS%') then pragma error('Файл должен быть Excel!');end if;
+			
+			/** /
+			--20190101. Стадии,проценты обесценения,рейтиги клиентов.xlsx
+			StrDate:=::[CL_PRIV].[PSH_DATE_DEATH].wbn(P_LOCAL_PATH.[SRC_NAME],'.',1);
+			debug_pipe('StrDate='||StrDate,dp);
+			
+			vDate:=to_date(StrDate,fmtt);
+			if vDate is null then pragma error('Не удалось вычислить "Дата загрузки (хранится в имени файла. Здесь приведена информационно):"'); end if;
+			/**/
+			
+			V_DEST := create_script(P_LOCAL_PATH.[SRC_PATH] || P_LOCAL_PATH.[SRC_NAME]
+								   ,P_CNT_FIELDS
+								   ,'XLS'
+								   ,nvl(P_FIRST_LINE_UP, 1)
+								   ,nvl(P_FIRST_COL_LEFT, 1)
+								   );
+			debug_pipe('V_DEST='||V_DEST,dp3);
+
+		elsif p_info = 'XLS' then
+			&inc(row_cnt)
+		    debug_pipe('row_cnt='||row_cnt||' P_CNT_FIELDS='||P_CNT_FIELDS,dp3);
+
+			begin
+				&GetNextStr(temp, V_DATA, '~')
+				debug_pipe('row_cnt='||row_cnt||'. V_DATA('||Length(V_DATA)||')='||temp||'~'||V_DATA,dp3);
+
+				vNN=vName=vCategory=vINN=vDateR:=null;
+				vDateReestr=rClGrour=clCategories:=null;
+				
+				for i in 1..P_CNT_FIELDS loop
+					if    i= 1 then vNN:=temp;                                                   debug_pipe(row_cnt||'.'||Rpad(i,4)||'№ п/п                  :'||vNN,dp3);
+				    elsif i= 2 then vName      :=::[CL_PRIV].[PSH_DATE_DEATH].wbn(V_DATA,'~',i); debug_pipe(row_cnt||'.'||Rpad(i,4)||'Клиент                 :'||vName,dp3);
+				    elsif i= 3 then vCategory  :=::[CL_PRIV].[PSH_DATE_DEATH].wbn(V_DATA,'~',i); debug_pipe(row_cnt||'.'||Rpad(i,4)||'Категория              :'||vCategory ,dp3);
+				    elsif i= 5 then vINN       :=::[CL_PRIV].[PSH_DATE_DEATH].wbn(V_DATA,'~',i); debug_pipe(row_cnt||'.'||Rpad(i,4)||'ИНН                    :'||vINN,dp3);
+					elsif i=12 then vDateR	   :=::[CL_PRIV].[PSH_DATE_DEATH].wbn(V_DATA,'~',i); debug_pipe(row_cnt||'.'||Rpad(i,4)||'Дата включения в реестр:'||vDateR,dp3);
+				    end if;
+				end loop;
+				pref:='-- №'||Rpad(vNN,5)||' '||vName||' '||vCategory||' '||vINN||' '||vDateR||LF$;
+				
+				vDateReestr:=to_date(vDateR,fmtt);
+				if vDateReestr is null or vDateReestr<to_date('01.01.1900',fmtt) or vDateReestr>sysdate then
+					m:=pref||'Не определена Дата включения в реестр: '||vDateR;
+					debug_pipe(m,dp); pragma error(m);
+				end if;
+				
+				
+				if vCategory='Микропредприятие'    								then vCategory:='Микропредприятия'; end if;
+				if vCategory='Юридическое лицо Микропредприятие'				then vCategory:='Микропредприятия'; end if;
+				if vCategory='Индивидуальный предприниматель Микропредприятие'	then vCategory:='Микропредприятия'; end if;
+				
+				if vCategory='Малое предприятие'   								then vCategory:='Субъект малого предпринимательства'; end if;
+				if vCategory='Юридическое лицо Малое предприятие'				then vCategory:='Субъект малого предпринимательства'; end if;
+				
+				if vCategory='Среднее предприятие' 								then vCategory:='Субъект среднего предпринимательства'; end if;
+				if vCategory='Юридическое лицо Среднее предприятие'				then vCategory:='Субъект среднего предпринимательства'; end if;
+				
+				for (select g(g%id : C_ID) in ::[CL_GROUP] all where Upper(g.[NAME])=Upper(vCategory)) loop
+					rClGrour:=g.C_ID;
+					exit;
+				end loop;
+				if rClGrour is null then
+					m:=pref||'Не найдена Категория клиента: '||vCategory;
+					debug_pipe(m,dp); pragma error(m);
+				end if;
+				
+				cntOrg=cntPriv=cntBankN:=0;
+				for (select o(o%id : C_ID, o.[NAME] C_NAME) in ::[CL_ORG] all where o.[INN]=vINN) loop
+					debug_pipe('ИНН:'||vINN||' Найдена Организация ID:'||o.C_ID||' '||o.C_NAME,dp3);
+					rClOrg:=o.C_ID;
+					cntOrg:=cntOrg+1;
+				end loop;
+				if cntOrg>1 then
+					m:=pref||'Найдено несколько Организаций с ИНН:'||vINN;
+					debug_pipe(m,dp); pragma error(m);
+				end if;
+				
+				for (select b(b%id : C_ID, b.[NAME] C_NAME) in ::[CL_BANK_N] all where b.[INN]=vINN) loop
+					debug_pipe('ИНН:'||vINN||' Найден Банк         ID:'||b.C_ID||' '||b.C_NAME,dp3);
+					rClBankN:=b.C_ID;
+					cntBankN:=cntBankN+1;
+				end loop;
+				if cntBankN>1 then
+					m:=pref||'Найдено несколько Банков с ИНН:'||vINN;
+					debug_pipe(m,dp); pragma error(m);
+				end if;
+
+				for (select c(c%id : C_ID, c.[NAME] C_NAME) in ::[CL_PRIV] all where c.[INN]=vINN) loop
+					debug_pipe('ИНН:'||vINN||' Найдено физлицо     ID:'||c.C_ID||' '||c.C_NAME,dp3);
+					rClPriv:=c.C_ID;
+					cntPriv:=cntPriv+1;
+				end loop;
+				if cntPriv>1 then
+					m:=pref||'Найдено несколько физлиц с ИНН:'||vINN;
+					debug_pipe(m,dp); pragma error(m);
+				end if;
+
+				if cntOrg=1 then
+					debug_pipe('Добавляем Организации Категорию клиента',dp3);
+					begin
+						savepoint SaveClient;
+						clCategories:=rClOrg.[VIDS_CL].NEW#AUTO(vDateReestr,null,rClGrour,null);
+					exception when others then
+						rollback to SaveClient;
+						if InStr(&sqlerrm2str,'Имеется действующая запись такой же категории')>0 then
+							&inc(msg_cnt)
+							debug_pipe(pref||'Предупреждение на строке '||row_cnt||': '||&sqlerrm2str, dp2);
+						else
+							&inc(err_cnt)
+							debug_pipe(pref||'Ошибка на строке '||row_cnt||': '||LF$||&sqlerrm2str,dp);   --|| utils.call_stack, dp);
+						end if;
+					end;
+				end if;
+
+				if cntBankN=1 then
+					debug_pipe('Добавляем Банку       Категорию клиента',dp3);
+					begin
+						savepoint SaveClient;
+						clCategories:=rClBankN.[VIDS_CL].NEW#AUTO(vDateReestr,null,rClGrour,null);
+					exception when others then
+						rollback to SaveClient;
+						if InStr(&sqlerrm2str,'Имеется действующая запись такой же категории')>0 then
+							&inc(msg_cnt)
+							debug_pipe(pref||'Предупреждение на строке '||row_cnt||': '||&sqlerrm2str, dp2);
+						else
+							&inc(err_cnt)
+							debug_pipe(pref||'Ошибка на строке '||row_cnt||': '||LF$||&sqlerrm2str,dp);   --|| utils.call_stack, dp);
+						end if;
+					end;
+				end if;
+
+				if cntPriv=1 then
+					debug_pipe('Добавляем Физлицу     Категорию клиента',dp3);
+					begin
+						savepoint SaveClient;
+						clCategories:=rClPriv.[VIDS_CL].NEW#AUTO(vDateReestr,null,rClGrour,null);
+					exception when others then
+						rollback to SaveClient;
+						if InStr(&sqlerrm2str,'Имеется действующая запись такой же категории')>0 then
+							&inc(msg_cnt)
+							debug_pipe(pref||'Предупреждение на строке '||row_cnt||': '||&sqlerrm2str, dp2);
+						else
+							&inc(err_cnt)
+							debug_pipe(pref||'Ошибка на строке '||row_cnt||': '||LF$||&sqlerrm2str,dp);   --|| utils.call_stack, dp);
+						end if;
+					end;
+				end if;
+
+				if P_CNT_FIELDS !=1 then &GetNextStr(temp, V_DATA, '~')
+				else temp:=null;
+				end if;
+		
+			exception when others then
+				if InStr(&sqlerrm2str,'Имеется действующая запись такой же категории')>0 then
+					&inc(msg_cnt)
+					debug_pipe(pref||'Предупреждение на строке '||row_cnt||': '||&sqlerrm2str, dp3);
+				else
+					&inc(err_cnt)
+					debug_pipe(pref||'Ошибка на строке '||row_cnt||': '||LF$||&sqlerrm2str,dp);   --|| utils.call_stack, dp);
+				end if;
+			end;
+		end if;
+	end if;
+End;
+
+execute is
+begin
+	debug_pipe('ИТОГО обработали: '||row_cnt||' записей, из них с ошибками: ' || err_cnt||' предупреждений: ' || msg_cnt, 0);
+end;
+end;
+end;

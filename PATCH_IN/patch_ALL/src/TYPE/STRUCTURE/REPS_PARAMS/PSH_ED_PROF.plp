@@ -1,0 +1,29 @@
+class REPS_PARAMS;
+
+@name('[PSH] Редактировать профиль настроек')
+@tag('COPIED')
+method PSH_ED_PROF is
+PSH_ED_PROF (
+	@name('Профиль настроек') P_PROF in [REPS_PROF_TU_REF]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_PROF := this.[PROF];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+/*********************************************************************
+Назначение:
+
+kokorin, последнее изменение 6 Август 2014 г.
+*********************************************************************/
+begin
+	[PROF] :=P_PROF;
+end;
+end;
+end;

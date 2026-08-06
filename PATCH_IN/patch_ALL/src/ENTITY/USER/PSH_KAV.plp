@@ -1,0 +1,261 @@
+class USER;
+
+@name('[ПСБ] КАВ мои функции')
+library PSH_KAV is
+-- обертка для ораклового пакета ibs.padegi для использования в операциях PL+
+public function get_padegi(FIO varchar2(160), padeg varchar2(1) ) return varchar2(160) is 
+rezult varchar2(160);
+begin
+-- begin pl/sql
+rezult:=padegi.get_fio_case(FIO,padeg);
+-- end pl/sql
+return (rezult);	
+end;
+
+/*------------*/
+
+-- Дата прописью в разныъ извращённых формах
+public function kav_data_propis(data IN DATE default sysdate, format IN VARCHAR2(8) default 'DMYYYY')
+return varchar2(300) is 
+
+DAY_PR varchar2(100);
+MONTH_PR varchar2(100);
+GOD_VEK_PR varchar2(100);
+GOD_PR varchar2(100);
+
+begin
+
+GOD_VEK_PR :='Добавте век в библиотеку BNT_KAV_ALL';
+
+if 			substr(to_char(data,'YYYY'),1,2)=19 then GOD_VEK_PR :='Тысяча девятсот';
+   elsif	substr(to_char(data,'YYYY'),1,2)=20 then GOD_VEK_PR :='Две тысячи';
+end if;
+
+if 			to_char(data,'DD')=1 then DAY_PR:='Первое';
+	elsif	to_char(data,'DD')=2 then DAY_PR:='Второе';
+	elsif	to_char(data,'DD')=3 then DAY_PR:='Третье';
+	elsif	to_char(data,'DD')=4 then DAY_PR:='Четвёртое';
+	elsif	to_char(data,'DD')=5 then DAY_PR:='Пятое';
+	elsif	to_char(data,'DD')=6 then DAY_PR:='Шестое';
+	elsif	to_char(data,'DD')=7 then DAY_PR:='Седьмое';
+	elsif	to_char(data,'DD')=8 then DAY_PR:='Восьмое';
+	elsif	to_char(data,'DD')=9 then DAY_PR:='Девятое';
+	elsif	to_char(data,'DD')=10 then DAY_PR:='Десятое';
+	elsif	to_char(data,'DD')=11 then DAY_PR:='Одиннадцатое';
+	elsif	to_char(data,'DD')=12 then DAY_PR:='Двенадцатое';
+	elsif	to_char(data,'DD')=13 then DAY_PR:='Тринадцатое';
+	elsif	to_char(data,'DD')=14 then DAY_PR:='Четырнадцатое';
+	elsif	to_char(data,'DD')=15 then DAY_PR:='Пятнадцатое';
+	elsif	to_char(data,'DD')=16 then DAY_PR:='Шестнадцатое';
+	elsif	to_char(data,'DD')=17 then DAY_PR:='Семнадцатое';
+	elsif	to_char(data,'DD')=18 then DAY_PR:='Восемнадцатое';
+	elsif	to_char(data,'DD')=19 then DAY_PR:='Девятнадцатое';
+	elsif	to_char(data,'DD')=20 then DAY_PR:='Двадцатое';
+	elsif	to_char(data,'DD')=21 then DAY_PR:='Двадцать первое';
+	elsif	to_char(data,'DD')=22 then DAY_PR:='Двадцать второе';
+	elsif	to_char(data,'DD')=23 then DAY_PR:='Двадцать третье';
+	elsif	to_char(data,'DD')=24 then DAY_PR:='Двадцать четвёртое';
+	elsif	to_char(data,'DD')=25 then DAY_PR:='Двадцать пятое';
+	elsif	to_char(data,'DD')=26 then DAY_PR:='Двадцать шестое';
+	elsif	to_char(data,'DD')=27 then DAY_PR:='Двадцать седьмое';
+	elsif	to_char(data,'DD')=28 then DAY_PR:='Двадцать восьмое';
+	elsif	to_char(data,'DD')=29 then DAY_PR:='Двадцать девятое';
+	elsif	to_char(data,'DD')=30 then DAY_PR:='Тридцатое';
+	elsif	to_char(data,'DD')=31 then DAY_PR:='Тридцать первое';
+end if;
+
+if 			to_char(data,'MM')=01 then MONTH_PR:='Января';
+	elsif	to_char(data,'MM')=02 then MONTH_PR:='Февраля';
+	elsif	to_char(data,'MM')=03 then MONTH_PR:='Марта';
+	elsif	to_char(data,'MM')=04 then MONTH_PR:='Апреля';
+	elsif	to_char(data,'MM')=05 then MONTH_PR:='Мая';
+	elsif	to_char(data,'MM')=06 then MONTH_PR:='Июня';
+	elsif	to_char(data,'MM')=07 then MONTH_PR:='Июля';
+	elsif	to_char(data,'MM')=08 then MONTH_PR:='Августа';
+	elsif	to_char(data,'MM')=09 then MONTH_PR:='Сентября';
+	elsif	to_char(data,'MM')=10 then MONTH_PR:='Октября';
+	elsif	to_char(data,'MM')=11 then MONTH_PR:='Ноября';
+	elsif	to_char(data,'MM')=12 then MONTH_PR:='Декабря';
+end if;
+
+if 			to_char(data,'YY')=01 then GOD_PR:='Первого';
+	elsif	to_char(data,'YY')=02 then GOD_PR:='Второго';
+	elsif	to_char(data,'YY')=03 then GOD_PR:='Третьего';
+	elsif	to_char(data,'YY')=04 then GOD_PR:='Четвёртого';
+	elsif	to_char(data,'YY')=05 then GOD_PR:='Пятого';
+	elsif	to_char(data,'YY')=06 then GOD_PR:='Шестого';
+	elsif	to_char(data,'YY')=07 then GOD_PR:='Седьмого';
+	elsif	to_char(data,'YY')=08 then GOD_PR:='Восьмого';
+	elsif	to_char(data,'YY')=09 then GOD_PR:='Девятого';
+	elsif	to_char(data,'YY')=10 then GOD_PR:='Десятого';
+	elsif	to_char(data,'YY')=11 then GOD_PR:='Одиннадцатого';
+	elsif	to_char(data,'YY')=12 then GOD_PR:='Двенадцатого';
+	elsif	to_char(data,'YY')=13 then GOD_PR:='Тринадцатого';
+	elsif	to_char(data,'YY')=14 then GOD_PR:='Четырнадцатого';
+	elsif	to_char(data,'YY')=15 then GOD_PR:='Пятнадцатого';
+	elsif	to_char(data,'YY')=16 then GOD_PR:='Шестнадцатого';
+	elsif	to_char(data,'YY')=17 then GOD_PR:='Семнадцатого';
+	elsif	to_char(data,'YY')=18 then GOD_PR:='Восемнадцатого';
+	elsif	to_char(data,'YY')=19 then GOD_PR:='Девятнадцатого';
+	elsif	to_char(data,'YY')=20 then GOD_PR:='Двадцатого';
+	elsif	to_char(data,'YY')=21 then GOD_PR:='Двадцать первого';
+	elsif	to_char(data,'YY')=22 then GOD_PR:='Двадцать второго';
+	elsif	to_char(data,'YY')=23 then GOD_PR:='Двадцать третьего';
+	elsif	to_char(data,'YY')=24 then GOD_PR:='Двадцать четвёртого';
+	elsif	to_char(data,'YY')=25 then GOD_PR:='Двадцать пятого';
+	elsif	to_char(data,'YY')=26 then GOD_PR:='Двадцать шестого';
+	elsif	to_char(data,'YY')=27 then GOD_PR:='Двадцать седьмого';
+	elsif	to_char(data,'YY')=28 then GOD_PR:='Двадцать восьмого';
+	elsif	to_char(data,'YY')=29 then GOD_PR:='Двадцать девятого';
+	elsif	to_char(data,'YY')=30 then GOD_PR:='Тридцатого';
+	elsif	to_char(data,'YY')=31 then GOD_PR:='Тридцать первого';
+end if;
+
+if 			format = 'D'	 	then return(DAY_PR);
+	elsif   format = 'M'	 	then return(MONTH_PR);
+	elsif   format = 'YY'	 	then return(GOD_PR||' '||'года');
+	elsif   format = 'YYYY'	 	then return(GOD_VEK_PR||' '||lower(GOD_PR)||' '||'года');
+	elsif   format = 'DM'	 	then return(DAY_PR||' '||lower(MONTH_PR));
+	elsif   format = 'DMYYYY'	then return(DAY_PR||' '||lower(MONTH_PR||' '||GOD_VEK_PR||' '||GOD_PR)||' '||'года');
+	elsif   format = 'DMYY'		then return(DAY_PR||' '||lower(MONTH_PR||' '||GOD_PR)||' '||'года');
+	elsif   format = 'DMONYYYY'	then return( to_char(data,'DD')||' '||lower(MONTH_PR)||' '||to_char(data,'YYYY'));
+end if;
+
+end;
+
+/*------------*/
+
+-- Срок договора прописью
+public function kav_srok_dogovora(data_beg IN DATE, data_end IN DATE, format IN VARCHAR2(3) default 'D')
+return varchar2(300) is 
+dney number;
+mes number;
+text varchar2(300);
+
+begin
+
+dney := trunc(data_end)-trunc(data_beg);
+mes := round((trunc(data_end)-trunc(data_beg))/30);
+
+if format='D' then
+			if (dney - trunc(dney/10)*10) = 1 and (dney - trunc(dney/100)*100)<>11 then text:=dney||' день';
+			elsif (dney - trunc(dney/10)*10) in (2,3,4) and (dney - trunc(dney/100)*100) not in (12,13,14) then text:=dney||' дня';
+			else text:=dney||' дней';
+			end if;
+elsif format='M' then
+			if (mes - trunc(mes/10)*10) = 1 and (mes - trunc(mes/100)*100)<>11 then text:=mes||' месяц';
+			elsif (mes - trunc(mes/10)*10) in (2,3,4) and (mes - trunc(mes/100)*100) not in (12,13,14) then text:=mes||' месяца';
+			else text:=mes||' месяцев';
+			end if;
+end if;
+
+return text;
+end;
+
+/*------------*/
+-- Остаток по счету кассы по буквенному коду валюты
+public function ost_kass_val(kas ref [NOTRADE], val varchar2(3) ) return number is 
+ost number:=0;
+begin
+for acc_kas in ::[KASSES] where acc_kas.[KASSA]=kas and acc_kas.[3].[FINTOOL].[CUR_SHORT]=val
+loop
+ost:=ost+abs(acc_kas.[3].[SALDO]);
+end loop;
+return ost;
+end;
+
+/*------------*/
+-- Разварачиваем строку в столбец beg - количество пробелов перед, dlinna обрезать слова по
+-- Начальник отдела РКО в:
+-- Начальник
+-- отдела
+-- РКО
+public function str_razvorot(stroka varchar2(500),dlinna number,beg number default 0) return varchar is 
+iLen	integer;
+stroka_vozvr varchar2(600);
+temp varchar2(600);
+beg_probel varchar2(100);
+j number:=0;
+dlinna_temp number:=dlinna;
+begin
+if beg >0 then beg_probel:=rpad(' ',beg); else beg_probel:=null; end if;
+stroka:=replace(replace(trim(stroka),CHR(10)),CHR(13));
+stroka:=replace(stroka,'  ',' ');
+	if stroka is not null then
+		iLen := length(stroka);
+		for x in 1 .. iLen loop
+			if substr(stroka, x, 1)!=' '
+			then j:=j+1;
+			else dlinna_temp:=j; j:=0;
+			end if;
+			if j<=dlinna_temp and j>0 and substr(stroka, x, 1)!=' ' then temp:=temp||substr(stroka, x, 1);
+			elsif j=0 and x!=iLen then stroka_vozvr:=stroka_vozvr||beg_probel||rpad(temp,dlinna)||CHR(10); temp:=null;dlinna_temp:=dlinna;
+			end if;
+		end loop;
+		
+	stroka_vozvr:=stroka_vozvr||beg_probel||rpad(temp,dlinna);
+	end if;	
+return(nvl(stroka_vozvr,rpad(' ',dlinna+beg)));
+end;
+
+-- Остаток по счету 47411
+public function ost_47411(kli ref [CLIENT], fil ref [BRANCH], dat date ) return number is 
+ost number;
+begin
+select y (sum(::[RUNTIME].[F_5].A('И'||y%id||'СН',dat+1)) ) in ::[AC_FIN] where substr(y.[MAIN_V_ID],1,5) in ('47411') and y.[CLIENT_R]=kli and y.[FILIAL]=fil into ost;
+return (ost);
+end;
+
+-- Информация о депозите по номеру счёта
+public function get_depn(acc ref [AC_FIN], ZNACH IN VARCHAR2(8) default 'ID' ) return varchar2(300) is 
+text varchar2(300):='';
+depozit ref [DEPN];
+begin
+
+for dep in ::[DEPN] where dep.[ACCOUNT]=acc loop
+depozit:=dep;
+end loop;
+
+if depozit is not null then
+	if upper(ZNACH)='ID' then text:=depozit%id;
+	elsif upper(ZNACH)='VID_NAME' then text:=depozit.[VID_DOG].[NAME];
+	elsif upper(ZNACH)='LAST_PRC' then 		for prc in depozit.[JOUR_CALC_PRC] order by prc.[DATE_BEG] desc
+											loop
+											 text:=prc.[PRC];
+											exit;
+											end loop;
+	
+	end if;
+end if;	
+
+return(text);
+end;
+
+-- Информация о счёте
+public function get_acc(acc ref [AC_FIN], ZNACH IN VARCHAR2(8) default 'ID' ) return varchar2(300) is 
+text varchar2(300):='';
+summa number;
+data date:=null;
+ost_na_datu number;
+begin
+
+if upper(ZNACH) like('VIP%') then
+	if 		upper(ZNACH) in ('VIP_MAXS','VIP_MAXD') then summa:=::[RUNTIME].[F_5].A('И'||acc%id||'СВ',nvl(acc.[DATE_CLOSE],sysdate)); data:=nvl(acc.[DATE_CLOSE],sysdate);  --null; --0;
+	elsif 	upper(ZNACH) in ('VIP_MINS','VIP_MIND') then summa:=null; --100000000000;
+	end if;
+
+	for vipiska in acc.[ARC_MOVE] where trunc(vipiska.[DATE])>trunc(acc.[DATE_OP]) order by vipiska.[DATE] loop
+		ost_na_datu:=::[RUNTIME].[F_5].A('И'||acc%id||'СВ',trunc(vipiska.[DATE])); --vipiska.[START_SUM_NAT]
+		if 		upper(ZNACH) in ('VIP_MAXS','VIP_MAXD') and ost_na_datu>nvl(summa,0) then summa:=ost_na_datu;data:=vipiska.[DATE];
+		elsif 	upper(ZNACH) in ('VIP_MINS','VIP_MIND') and ost_na_datu<nvl(summa,100000000000) then summa:=ost_na_datu;data:=vipiska.[DATE];
+		end if;
+	end loop;
+	
+	if 		upper(ZNACH) in ('VIP_MAXS','VIP_MINS') then text:=summa;
+	elsif 	upper(ZNACH) in ('VIP_MAXD','VIP_MIND') then text:=to_char(data,'DD.MM.YYYY');
+	end if;	
+end if;
+
+return(text);
+end;
+end;

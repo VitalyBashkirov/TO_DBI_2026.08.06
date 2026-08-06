@@ -1,0 +1,248 @@
+class DEPN;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@optimize(declarations:=true,this:=false,code:=true,descriptions:=true)
+@name('[ПСБ] МСФО. Расчет журнала стоимости')
+@tag('COPIED')
+method PSH_CALC_PRC_IFR is
+PRAGMA INCLUDE([DEPN]::[LIB_MACRO]);
+PRAGMA INCLUDE([RUNTIME]::[MACRO_LIB]);
+PRAGMA INCLUDE(::[DEPN].[DEBUG_MACRO]);
+
+pragma macro(fN,'LPAD([1],[2])||[3]',substitute);
+pragma macro(fD,'to_char([1], ''dd.mm.yyyy'')||[2]',substitute);
+
+SysOpDate		DATE;
+PSH_CALC_PRC_IFR (
+	@name('По дату')                                                        P_DATE_END         in [DATE],
+	@name('Доп. параметры')                                                 P_ADDS             in [STRING_32000] default null,
+	@name('Признак необходимости объединять периоды в журнал')              P_MERGE_PERIOD     in [BOOLEAN]      default null,
+	@name('С даты')                                                         P_DATE_BEG         in [DATE]         default null,
+	@name('Использовать предыдущую ставку при расчете % (для модификации)') P_USE_PREVIOS_RATE in [BOOLEAN]      default null
+) is
+
+validate is
+	o_ind				[IFRS_INDICATORS];
+	v_LastProl			DATE;
+Begin
+	if p_message = 'DEFAULT' then
+		::[DEPN].[LIB_APPLICATION].check_application_extra('1B400085', true );
+		
+		&Cash_Depn(this)
+		
+		if &Depn.CLASS_ID = 'DEPOSIT_MULT' then
+			pragma error('Операция не обрабатывает мультивалютные депозитные договоры!');
+		end if;
+		
+		if &DEPN.[COM_STATUS] not in (&L.ComStatus_Work, &L.ComStatus_Prol, &L.ComStatus_TO_CLOSE) then
+			pragma error('Операция не обрабатывает договоры в состояниях отличных от "Работает", "Пролонгирован" или "Помечен к закрытию"!');
+		end if;
+		
+		if &Depn.[DATE_ENDING] is null then
+			pragma error('Расчет %% по МСФО для бессрочных договоров невозможен!');
+		end if;
+		
+		SysOpDate := ::[SYSTEM].[VARIABLES].Br2OpDate( &Depn.[FILIAL] );
+		
+		P_DATE_END := least( SysOpDate, &Depn.[DATE_ENDING] );
+
+		::[DEPN_INTERFACE].[PRX_DEPN_TO_IFRS].Get_Indicators( P_OBJ_REF			== &Depn.ID					-- экземпляр финансового инструмента
+			 												, P_OBJ_CLASS		== &Depn.CLASS_ID			-- Класс ТБП экземпляра финансового инструмента
+													 		, P_IND_DATE		== P_DATE_END				-- Дата, на которую производится определение характеристик
+													 		, P_PN				== &Depn.[CLIENT].[PN]		-- Номер раздела: значение поля PN с клиента
+													 	    , P_DATE_BEGIN		== &Depn.[DATE_BEGINING]		-- Дата начала действия ФИ: параметр необходим для уменьшения количества просматриваемых секций при поиске существующих характеристик
+													 		, p_oIndicators		== o_ind					-- Значения характеристик МСФО
+													 		);
+		
+		if coalesce( o_ind.[IS_EIR_METHOD], false ) = false then
+			pragma error('Расчет %% по МСФО невозможен, т.к. для договора не применяется расчет стоимости по методу ЭПС!');
+		end if;
+		
+		if o_ind.[FAIR_COST] is null then
+			pragma error('Расчет %% по МСФО невозможен, т.к. по договору не определена справедливая стоимость при первоначальном признании!');
+		end if;
+			
+		&Del_Depn
+	end if;
+Exception when others then
+	&Del_Depn
+	raise;
+End;
+
+execute is
+/*
+ * Дата	    Автор       BFS         Описание
+ * -------- ----------- ----------- -----------------------------------------------------------------------------
+ * 22.10.18	mgavrilenko	RP0596929	Добавлен параметр P_MERGE_PERIOD
+ * 25.12.18	poljakova	RP0600668	МСФО. Эффект при корректировке
+ * 08.05.19 mgavrilenko	RP0595537	добавлен режим формирования ДП 7
+ */
+	v_tJournal 				::[DEPN_INTERFACE].[PRX_DEPN_TO_IFRS].TStringPrcTable;
+	IFRSMoneyStream			boolean;
+	v_tblFlow				::[DEPN_INTERFACE].[PRX_DEPN_TO_IFRS].TFlowTable;
+	v_Err					varchar2(32000);
+	v_idx					number;
+	dOpDate					date;
+	o_ind					[IFRS_INDICATORS];
+	v_LastProl				DATE;
+	v_FirstDateBeg			DATE;
+	DontCheckIsEIRMethod	boolean;
+	v_IsModification		boolean := false; --признак запуска расчета %% из модификации
+	v_FIDateBegin			[DATE] := null;--предыдущая дата начала дейстия ДД для модификации при пролонгации
+	r_BusProcess			ref [BUS_PROCESS] := null;	
+	v_CalcOperPrc			boolean := null; -- признак расчета %% МСФО для операционных корректировок (передается из операции  ADJUSTMENT_TO_AC)
+	vStreamForCalc			number := 1;
+Begin
+	if ::[DEPN].[LIB_APPLICATION].check_application_extra( '1B400085', false ) then
+		&debug('+++++++++++++МСФО. РАСЧЕТ ПРОЦЕНТОВ+++++++++++++', 0)
+		&debug('DEPN ' || this, 0)
+		&debug('DATE_END ' || &d2cf(P_DATE_END), 0)
+		&debug('P_ADDS:	'||P_ADDS, 0)
+		&debug('P_MERGE_PERIOD:'||P_MERGE_PERIOD,0)
+	
+		&debug('BODY',0)	
+		
+		
+		&nvl(P_MERGE_PERIOD,false)
+		-- Кешируем
+		&Cash_Depn(this)
+		&debug('&Depn.[DATE_ENDING]='||&d2cf(&Depn.[DATE_ENDING]),5)
+		
+		if &Depn.CLASS_ID = 'DEPOSIT_MULT' then
+			pragma error('Операция не обрабатывает мультивалютные депозитные договоры!');
+		end if;
+		
+		if &DEPN.[COM_STATUS] not in (&L.ComStatus_Work, &L.ComStatus_Prol, &L.ComStatus_TO_CLOSE) then
+			pragma error('Операция не обрабатывает договоры в состояниях отличных от "Работает", "Пролонгирован" или "Помечен к закрытию"!');
+		end if;
+		
+		if &Depn.[DATE_ENDING] is null then
+			pragma error('Расчет %% по МСФО для бессрочных договоров невозможен!');
+		end if;
+		
+		dOpDate := ::[SYSTEM].[VARIABLES].Br2OpDate(coalesce(&Depn.[FILIAL], ::[SYSTEM].[VARIABLES].OurBranch));
+
+		if not coalesce( &GET_BOOL(FROM_GROUP, &DEPN.ID, null, null), false ) then
+			::[DEPN_INTERFACE].[PRX_DEPN_TO_IFRS].Get_Indicators( P_OBJ_REF			== &Depn.ID					-- экземпляр финансового инструмента
+				 												, P_OBJ_CLASS		== &Depn.CLASS_ID			-- Класс ТБП экземпляра финансового инструмента
+														 		, P_IND_DATE		== P_DATE_END				-- Дата, на которую производится определение характеристик
+														 		, P_PN				== &Depn.[CLIENT].[PN]		-- Номер раздела: значение поля PN с клиента
+														 	    , P_DATE_BEGIN		== &Depn.[DATE_BEGINING]	-- Дата начала действия ФИ: параметр необходим для уменьшения количества просматриваемых секций при поиске существующих характеристик
+														 		, p_oIndicators		== o_ind					-- Значения характеристик МСФО
+														 		);
+			
+			--DontCheckIsEIRMethod := coalesce([STR].get_bool_par(P_ADDS,'DONT_CHECK_IS_EIR_METHOD'),false);
+			DontCheckIsEIRMethod := coalesce([STR].get_bool_par(P_ADDS,'DONT_CHECK_IS_EIR_METHOD'),true);
+			
+			if not DontCheckIsEIRMethod and coalesce( o_ind.[IS_EIR_METHOD], false ) = false then
+				pragma error('Расчет %% по МСФО невозможен, т.к. для договора не применяется расчет стоимости по методу ЭПС!');
+			end if;
+			
+			if o_ind.[FAIR_COST] is null then
+				pragma error('Расчет %% по МСФО невозможен, т.к. по договору не определена справедливая стоимость при первоначальном признании!');
+			end if;
+		end if;
+		
+		if P_DATE_END is null then
+			pragma error('Дата окончания расчета по договору не может быть пустой!');
+		end if;		
+
+		v_LastProl := coalesce( &GET_DATE( LAST_PROL, &Depn.ID, P_DATE_END, null ), &Depn.[DATE_BEGIN]);
+	
+		&debug('&Depn.[DATE_BEGIN] ' || &Depn.[DATE_BEGIN], 0)
+		&debug('v_LastProl ' || v_LastProl, 0)
+		
+		v_IsModification := coalesce([STR].get_bool_par( P_ADDS, 'IsModification' ),false);
+		r_BusProcess := [STR].get_str_par( P_ADDS, 'BUS_PROCESS' );
+		&debug('r_BusProcess='||r_BusProcess||' v_IsModification='||v_IsModification,0)		
+		
+		if r_BusProcess = &L.bus_proc_prol	then
+			if v_IsModification = true then
+				v_FIDateBegin := coalesce([STR].get_date_par(P_ADDS,'vPrevDateBegin'), &depn.[DATE_BEGIN]);	
+			else
+				v_FIDateBegin := coalesce( &GET_DATE( PROL_PREV_BEG, &Depn.ID, P_DATE_END, null ), &Depn.[DATE_BEGIN]);
+			end if;		
+		else
+			if [STR].get_num_par( P_ADDS, 'StreamForCalc') = 7 then
+				vStreamForCalc := 7;
+				v_FIDateBegin := null;
+			end if;
+		end if;
+		
+		&debug('v_FIDateBegin='||&d2cf(v_FIDateBegin),0)	
+		
+		
+		IFRSMoneyStream := ::[DEPN].[LIB_IFRS].GetIFRSFutureMoneyStream(p_Depn      == &Depn.ID											--Депозитный договор
+															 		  , p_DateBeg	== coalesce(v_FIDateBegin, greatest( &Depn.[DATE_BEGIN], v_LastProl ))		--Дата начала периода расчета
+																	  , p_DateEnd	== trunc(P_DATE_END)								--Дата окончания периода расчета
+																	  , p_date		== case when v_IsModification then [STR].get_date_par(P_ADDS,'DateOpModification') else null end
+																	  , p_tblFlow	== v_tblFlow										--Сформированный денежный поток
+																	  , p_Err		== v_Err											--Расшифровка ошибки, возникшей при формировании потока
+																	  , p_AddPar	== P_ADDS
+																	  , p_StreamForCalc == vStreamForCalc
+																	  );
+																	
+		if IFRSMoneyStream then
+			for	(	select x( x.[PREV_DATE_BEGIN] : C_PREV_DATE_BEGIN )
+					in ::[PROL_CONTRACT], (::[DEPN] all: dep) all
+					where	dep%id = &Depn.ID
+						and x%collection = dep.[LIST_PROL]
+						and x.[ADD_AGREEMENT]
+					order by x.[PROL_BEGIN], x.[PROL_END] desc)
+			loop
+				v_FirstDateBeg := x.C_PREV_DATE_BEGIN;
+				exit;
+			end loop;
+			&debug('v_FirstDateBeg='||&d2cf(v_FirstDateBeg),5)
+			&debug('v_FIDateBegin='||&d2cf(v_FIDateBegin),5)
+			&debug('p_dFToolDateBeg = '||coalesce( v_FIDateBegin, v_FirstDateBeg, &Depn.[DATE_BEGIN]),5)
+			
+			v_CalcOperPrc :=  [STR].get_bool_par( P_ADDS, 'CALC_EIR_OPER_PRC' );			
+			&debug('v_CalcOperPrc ='||v_CalcOperPrc,5)
+						
+			&debug('Рассчитаем журнал %% по сформированному денежному потоку',0)			
+			::[DEPN_INTERFACE].[PRX_DEPN_TO_IFRS].calcJournalPrc(  p_iPN			== &Depn.[CLIENT].[PN]									-- Номер раздела
+																 , p_nObjRef		== &Depn.ID												-- Ссылка на объект (ФИ) 			
+																 , p_rObjClass		== &Depn.CLASS_ID										-- Ссылка на класс объекта
+																 , p_dDateBeg		== p_date_beg													-- Дата начала периода расчета
+																 , p_dDateEnd		== P_DATE_END											-- Дата окончания периода расчета
+																 , p_tJournal		== v_tJournal											-- Таблица с рассчитанным журналом МСФО
+																 , p_tFlows			== v_tblFlow											-- Таблица денежных потоков
+															 	 , p_tRates			== null													-- Таблица процентных ставок
+																 , p_dFToolDateBeg	== coalesce(v_FIDateBegin, coalesce( v_FirstDateBeg, &Depn.[DATE_BEGIN] ))		-- Дата начала действия ФИ
+																 , p_dFToolDateEnd	== &Depn.[DATE_ENDING]									-- Дата окончания действия ФИ
+																 , p_bSaveToDB		== true													-- Признак необходимости сохранения журнала в базу данных
+																 , p_bGenErr		== false												-- Признак необходимости генерации сообщения об ошибке
+																 , p_bCalcFuture	== true													-- Признак расчета журнала по будущим денежным потокам
+																 , p_dOpDate		== dOpDate												-- Дата операционного дня филиала ФИ
+																 , p_bMergePeriods	== P_MERGE_PERIOD										-- Признак необходимости объединения периодов расчета
+																 , p_bCalcOperPrc	== v_CalcOperPrc										-- Произвести расчет суммы операционных процентов ЭПС:
+																 , p_bUsePreviousRate == P_USE_PREVIOS_RATE									-- Признак использования предыдущей ставки для расчета процентов ЭПС
+																 );
+			&debug('Количество записей в журнале %%:' || v_tJournal.count,0)
+			&IF_DEBUG2
+				&debug('---[  Вывод рассчитанного журнала МСФО  ]----', 0)
+				v_idx := v_tJournal.first;
+				if v_idx is not null then
+					&debug(&fN('#',5,' | ')|| &fN('ДатаНачала',10,' | ')||&fN('ДатаОконч.',10,' | ')||&fN('Дней',10,' | ')||&fN('Сумма АС/СС до ДП',20,' | ')||&fN('Сумма АС/СС после ДП',20,' | ')||&fN('Сумма %% по мет. ЭПС',20,' | ')||&fN('%% ставка',10,' | ')||&fN('РПС',3,''),0)
+					while v_idx is not null loop
+						&debug(&fN(v_idx,5,' | ')|| &fD(v_tJournal(v_idx).DATE_BEG,' | ')|| &fD(v_tJournal(v_idx).DATE_END,' | ')|| &fN(v_tJournal(v_idx).DAYS,10,' | ') || &fN(v_tJournal(v_idx).SUM_COST_BEFORE,20,' | ') || &fN(v_tJournal(v_idx).SUM_COST_AFTER,20,' | ') || &fN(v_tJournal(v_idx).SUM_PRC,20,' | ') || &fN(v_tJournal(v_idx).RATE,10,' | ')|| &fN(v_tJournal(v_idx).IS_MARKET,3,' ;'), 0)
+						v_idx := v_tJournal.next(v_idx);
+					end loop;
+				end if;
+				&debug('------+------------+---------------------', 0)
+			&END_IF_DEBUG2
+			--#ENDIF
+		end if;
+	
+		&debug('+++++++++++++МСФО. КОНЕЦ РАСЧЕТА ПРОЦЕНТОВ+++++++++++++', 0)
+				
+		&Del_Depn
+	end if;
+exception when others then
+	&Del_Depn
+	raise;
+End;
+end;
+end;

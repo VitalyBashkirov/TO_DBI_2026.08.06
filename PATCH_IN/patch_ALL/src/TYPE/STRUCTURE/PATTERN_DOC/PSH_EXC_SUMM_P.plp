@@ -1,0 +1,50 @@
+class PATTERN_DOC;
+
+@import_plsql(true)
+@name('[ПСБ] Изменение полей сумм в шаблонах (служебная)')
+@tag('COPIED')
+batch method PSH_EXC_SUMM_P is
+PSH_EXC_SUMM_P (
+	@name('Что заменяем СУММА  ДТ')    P_TEXT_OLD_DT in [STRING_200],
+	@name('На что заменяем СУММА ДТ')  P_TEXT_NEW_DT in [STRING_200],
+	@name('Что заменяем СУММА  КТ')    P_TEXT_OLD_KT in [STRING_200],
+	@name('На что заменяем СУММА KТ')  P_TEXT_NEW_KT in [STRING_200],
+	@name('Что заменяем СУММА  НАЦ')   P_TEXT_OLD_NT in [STRING_200],
+	@name('На что заменяем СУММА НАЦ') P_TEXT_NEW_NT in [STRING_200]
+) is
+
+execute is
+Begin
+	for t in this.first..this.last loop
+		for tmpPatt in this(t).[PATTERN_ARRAY] loop
+
+			-- Сумма ДТ
+			if  tmpPatt.[DOC].[DOC].[SUM_PAY] like '%'||P_TEXT_OLD_DT||'%' then
+				tmpPatt.[DOC].[DOC].[SUM_PAY] := replace(tmpPatt.[DOC].[DOC].[SUM_PAY],P_TEXT_OLD_DT,P_TEXT_NEW_DT);
+			elsif P_TEXT_OLD_DT = 'del' then
+				tmpPatt.[DOC].[DOC].[SUM_PAY] := null;
+			elsif P_TEXT_OLD_DT is null and tmpPatt.[DOC].[DOC].[SUM_PAY] is null then
+				tmpPatt.[DOC].[DOC].[SUM_PAY] := P_TEXT_NEW_DT;
+			end if;			
+			-- Сумма КТ
+			if  tmpPatt.[DOC].[DOC].[SUM_REC] like '%'||P_TEXT_OLD_KT||'%' then
+				tmpPatt.[DOC].[DOC].[SUM_REC] := replace(tmpPatt.[DOC].[DOC].[SUM_REC],P_TEXT_OLD_KT,P_TEXT_NEW_KT);
+			elsif P_TEXT_OLD_KT = 'del' then
+				tmpPatt.[DOC].[DOC].[SUM_REC] := null;
+			elsif P_TEXT_OLD_KT is null and tmpPatt.[DOC].[DOC].[SUM_REC] is null then
+				tmpPatt.[DOC].[DOC].[SUM_REC] := P_TEXT_NEW_KT;
+			end if;			
+			-- Сумма НАЦ
+			if  tmpPatt.[DOC].[DOC].[SUM_NAZ] like '%'||P_TEXT_OLD_NT||'%' then
+				tmpPatt.[DOC].[DOC].[SUM_NAZ] := replace(tmpPatt.[DOC].[DOC].[SUM_NAZ],P_TEXT_OLD_NT,P_TEXT_NEW_NT);
+			elsif P_TEXT_OLD_NT = 'del' then
+				tmpPatt.[DOC].[DOC].[SUM_NAZ] := null;
+			elsif P_TEXT_OLD_NT is null and tmpPatt.[DOC].[DOC].[SUM_NAZ] is null then
+				tmpPatt.[DOC].[DOC].[SUM_NAZ] := P_TEXT_NEW_NT;
+			end if;			
+
+		end loop;
+	end loop;
+End;
+end;
+end;

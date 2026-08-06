@@ -1,0 +1,39 @@
+class PSH_CUST_DO_QUIT;
+
+@import_plsql(true)
+@name('[ПСБ] Добавить')
+@tag('COPIED')
+constructor PSH_NEW_AUTO is
+PSH_NEW_AUTO (
+	@name('Имя файла')               P_FILE_NAME    in [FILE$PATH],
+	@name('Содержимое файла')        P_FILE_CONTENT in [CLOB],
+	@name('Дата создания файла')     P_FILE_CR_DATE in [DATE_TIME],
+	@name('Дата создания документа') P_DOC_CR_DATE  in [DATE_TIME]
+) return ref [PSH_CUST_DO_QUIT] is
+
+validate is
+begin
+	if p_message = 'DEFAULT' then
+		P_FILE_NAME := this.[FILE_NAME];
+		P_FILE_CR_DATE := this.[FILE_CR_DATE];
+		P_DOC_CR_DATE := this.[DOC_CR_DATE];
+	end if;
+end;
+
+execute is
+
+begin
+	-- Установка значения реквизита "Имя файла"
+	[FILE_NAME] := P_FILE_NAME;
+	-- Установка значения реквизита "Содержимое файла"
+	[FILE_CONTENT] := P_FILE_CONTENT;
+	-- Установка значения реквизита "Дата создания файла"
+	[FILE_CR_DATE] := P_FILE_CR_DATE;
+	-- Установка значения реквизита "Дата создания документа"
+	[DOC_CR_DATE] := P_DOC_CR_DATE;
+	
+	[DOC_STATE] := ::[PSH_CUST_DOCS].[PSH_LIB_TC].stFinish;
+	[DOC_TYPE] := ::[PSH_CUST_DOCS].[PSH_LIB_TC].typeKVT;
+end;
+end;
+end;

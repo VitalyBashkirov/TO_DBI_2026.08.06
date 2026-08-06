@@ -1,0 +1,119 @@
+class PSH_GNI_ERROR;
+
+@name('[ПСБ] Библиотека')
+@tag('COPIED')
+library PSH_LIB is
+
+				
+					
+type arr_error is table of [PSH_GNI_ERROR]%rowtype; -- updated CHANGE_QUALIFIER PSB_GNI_ERROR->PSH_GNI_ERROR 09/10/25
+tbl_error arr_error;
+
+bUseAudit		boolean;
+dDateForm		date;
+gStage			::[PSH_GNI_ERROR].[STAGE]%type; -- updated CHANGE_QUALIFIER PSB_GNI_ERROR->PSH_GNI_ERROR 09/10/25
+
+
+-- инициализация
+public procedure init_error(p_jour 		ref [GNI_JOUR]
+					,p_date_form 		date
+					,p_stage			integer
+					) is 
+begin
+
+	bUseAudit := false;
+	dDateForm = gStage := null;
+	
+	if true then --coalesce(::[FP_TUNE].[LIB].get_bool_value('1B010048', null, '0'), false) then
+		bUseAudit 	:= true;
+		dDateForm 	:= p_date_form;
+		gStage.[0] 	:= p_stage;
+		
+		tbl_error.delete;
+		
+		if p_stage = 1 then
+			delete err
+				in ::[PSH_GNI_ERROR] -- updated CHANGE_QUALIFIER PSB_GNI_ERROR->PSH_GNI_ERROR 09/10/25
+			where 	err.[GNI_JOUR_REF] 	= p_jour and
+					err.[DATE_FORM] 	= p_date_form and
+					err.[STAGE].[0]		= p_stage;
+		end if;	
+
+	end if;		
+end;
+
+
+-- добавляем ошибку в массив ошибок
+-- добавление ошибки в массив ошибок				
+public procedure add_error(p_code_error   	varchar2
+					,p_detail_error	varchar2 default null
+					,p_critical		varchar2 default '0'
+					,p_jr_hist	ref [GNI_JOUR_HISTORY]  default null
+					) is 
+	i				number;
+	vError		ref [PSH_GNI_CODE_ERR]; --[GNI_CODE_ERROR]; --Не лицензировано -- updated CHANGE_QUALIFIER PSB_GNI_CODE_ERR->PSH_GNI_CODE_ERR 09/10/25
+	vCritical		varchar2(1);
+begin
+	
+	if bUseAudit then
+		begin	
+			select a(a
+					,a.[CRITICAL])
+				in ::[PSH_GNI_CODE_ERR] all --::[GNI_CODE_ERROR] all -- updated CHANGE_QUALIFIER PSB_GNI_CODE_ERR->PSH_GNI_CODE_ERR 09/10/25
+			where a.[CODE] = p_code_error and
+				  	(dDateForm >= a.[DATE_BEGIN] or a.[DATE_BEGIN] is null) and
+				  	(dDateForm <= a.[DATE_END] or a.[DATE_END] is null)
+			into vError, vCritical;
+			
+		exception
+			when NO_DATA_FOUND then
+				pragma error ('В справочнике "' ||::[PSH_GNI_CODE_ERR]%classname ||'" не найдена ошибка с кодом '||p_code_error || ' на дату формирования ' || to_char(dDateForm) ); -- updated CHANGE_QUALIFIER PSB_GNI_CODE_ERR->PSH_GNI_CODE_ERR 09/10/25
+		end;	
+		
+		i := tbl_error.count+1;
+		
+		tbl_error(i).[DATE_CREATED] := sysdate;
+		tbl_error(i).[DATE_FORM]	:= dDateForm;
+		tbl_error(i).[STAGE].[0] 	:= gStage.[0];
+		tbl_error(i).[ERROR] 		:= vError;
+		tbl_error(i).[DETAIL]		:= p_detail_error;
+		
+		if gStage.[0] = 1 then
+			tbl_error(i).[CRITICAL]			:= vCritical;
+		else
+			tbl_error(i).[CRITICAL]			:= p_critical;
+			tbl_error(i).[GNI_JR_HIST_REF]	:= p_jr_hist;
+		end if;	
+		
+		tbl_error(i).[USER_CREATED] := stdlib.user_id;
+	
+	end if;
+	
+exception
+	when no_data_found then
+		null;
+end;
+
+-- сохранения массива ошибок в структуру
+-- сохранения ошибок в структуру
+public procedure save_error(p_jour 	ref [GNI_JOUR]) is 
+begin
+	if bUseAudit then
+		insert into ::[PSH_GNI_ERROR] -- updated CHANGE_QUALIFIER PSB_GNI_ERROR->PSH_GNI_ERROR 09/10/25
+				for i in tbl_error loop
+					e(e.[DATE_CREATED] 	= tbl_error(i).[DATE_CREATED]
+			 		,e.[DATE_FORM]  	= tbl_error(i).[DATE_FORM]	
+				 	,e.[STAGE].[0] 	   	= tbl_error(i).[STAGE].[0] 		
+		       		,e.[ERROR] 			= tbl_error(i).[ERROR] 		
+		            ,e.[DETAIL] 		= tbl_error(i).[DETAIL]		
+		            ,e.[CRITICAL] 		= tbl_error(i).[CRITICAL]
+		            ,e.[USER_CREATED] 	= tbl_error(i).[USER_CREATED]
+		            ,e.[GNI_JR_HIST_REF]= tbl_error(i).[GNI_JR_HIST_REF]
+		            ,e.[GNI_JOUR_REF] 	= p_jour
+		
+				);
+				
+		tbl_error.delete;	
+	end if;	
+end;
+end;

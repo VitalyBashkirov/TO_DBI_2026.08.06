@@ -1,0 +1,464 @@
+class REPS_DATA;
+
+@import_plsql(true)
+@name('[ПСБ] Библиотека функций для печати (OOXML)')
+@tag('COPIED')
+library PSH_LIB_PRINT is
+
+@name('Содержимое файла') public V_BLOB [BLOB];
+dp number:=0; --управление debug_pipe
+/*****************************************************************************
+ *
+ *  БИБЛИОТЕКА ДЛЯ ФОРМИРОВАНИЯ ФАЙЛОВ (ПЕЧАТИ) ЧЕРЕЗ OOXML.
+ *
+ *     Стандартный механизм формирования печатной формы таков:
+ *
+ *         -- 1. инициализируем печать одновременно с открытием шаблона:
+ *         ::[REPS_DATA].[LIB_PRINT].xl_init(v_template);
+ *         --    где v_template - это наименование шаблона из профиля или
+ *         --    просто зашитое в коде, например "F_116_2332.xltx"
+ *
+ *         -- 2. собственно печать, например:
+ *         &xl.put(1, 1, 'test');
+ *
+ *         -- 3. завершаем вызовом finish:
+ *         ::[REPS_DATA].[LIB_PRINT].xl_finish;
+ *
+ *     Некоторые уточнения:
+ *
+ *         1) При указании в xl_init шаблона, происходит получение кода шаблона для
+ *            справочника ::[SHABLON_DOC] - код получаем отсечением расширения файла
+ *            и приведением к верхнему регистру. По этому коду и происходит поиск в
+ *            справочнике, поэтому там должен быть шаблон с соответствующим кодом.
+ *            Если нужно получить такой код, то можно воспользоваться функцией
+ *            xl_template_code.
+ *
+ *         2) Если нужна печать без шаблона, то можно вызвать xl_init без параметров.
+ *
+ *         3) xl_finish помимо отображения файла на экране умеет сохранять его на
+ *            локальной машине (см. параметры).
+ *
+ *         4) xl_finish вызывает сохранение файла и печать ПОСЛЕ завершения операции
+ *            (через CALL-синтаксис), поэтому никаких действий с файлом после xl_finish
+ *            быть не может.
+ *
+ *			5) xl_finish имеет параметр "описание отчета" (p_description), можно задать наименование
+ *            отчёта для корректного отображения при выполнении через сервер отчётов.
+ *            (для отчетов, выполняемых через RUN_APP описание формируется автоматически)
+ *****************************************************************************/
+
+
+pragma include (::[INTERFACE].[COMPILE_LIB]);
+
+pragma macro(xl, '::[OOXML].[API_XL]');
+pragma macro(lib, '::[SHABLON_DOC].[LIB_OOXML]');
+
+
+procedure check_api is
+begin
+     &check_api
+end;
+
+
+public procedure read_from_file
+/* Чтение файла в BLOB */
+			( p_blob	in out	blob
+			/* Содержимое файла (BLOB) */
+			, p_dir				varchar
+			/* Путь к файлу на сервере */
+			, p_fname			varchar
+			/* Имя файла на сервере */
+			, p_delete			boolean		default false
+			/* Удаление файла на сервере после чтения */
+			) is
+begin
+	&lib.read_from_file
+		( p_blob	== p_blob	-- Содержимое файла (BLOB)
+		, p_dir		== p_dir	-- Путь к файлу на сервере
+		, p_fname	== p_fname	-- Имя файла на сервере
+		, p_delete	== p_delete	-- Удаление файла на сервере после чтения
+		);
+end;
+
+
+public procedure write_to_file
+/* Запись BLOBa в файл */
+			( p_blob	in	out	blob
+			/* Содержимое файла (BLOB) */
+			, p_dir				varchar2(128)
+			/* Путь к файлу на сервере */
+			, p_fname			varchar2(128)
+			/* Имя файла на сервере */
+			) is
+begin
+	&lib.write_to_file
+		( p_blob	== p_blob	-- Содержимое файла (BLOB)
+		, p_dir		== p_dir	-- Путь к файлу на сервере
+		, p_fname	== p_fname	-- Имя файла на сервере
+		);
+end;
+
+
+public procedure xl_init
+/* Инициализация шаблона для вывода в EXCEL */
+			( p_template		varchar2	default null
+			/* Наименование файла шаблона, если не указано, то инициализация пройдет без шаблона */
+			, p_stop_on_error	boolean		default true
+			/* Останавливать выполнение с ошибкой, если шаблон не удается сохранить */
+			) is
+begin
+	debug_pipe('.xl_init -- p_template='||p_template,dp);
+	if p_template is null then
+		&lib.xl_init
+			( p_stop_on_error	== p_stop_on_error			-- Останавливать выполнение с ошибкой, если шаблон не удается сохранить
+			);
+	else
+		&lib.xl_init
+			( p_shablon_grp		== 'REPS'					-- Код для группировки
+			, p_shablon_ref		== xl_template(p_template)	-- Ссылка на шаблон. Если код и ссылка не указаны, то инициализация пройдет без шаблона
+			, p_stop_on_error	== p_stop_on_error			-- Останавливать выполнение с ошибкой, если шаблон не удается сохранить
+			);
+	end if;
+end;
+
+
+public function xl_finish	/* Вывод отчета в EXCEL (сохранение файла на локальной машине) */
+		( p_save_path		varchar2	default null		/* путь к файлу на локальной машине для сохранения (если требуется) */
+		, p_save_filename	varchar2	default null		/* имя файла на локальной машине для сохранения (если требуется) */
+		, p_stop_on_error	boolean		default true		/* Останавливать выполнение с ошибкой, если шаблон не удается сохранить */
+		, p_show			boolean		default true		/* открывать (отображать) сформированный файл на машине пользователя */
+		, p_description     varchar2(500)  default null		/* описание отчета */
+		, p_protected		boolean		default false		/* признак формирования защищённого файла */
+		)
+	return blob
+is
+	xlsx 			blob;					-- результат печати (BLOB с содержимым xlsx-файла)
+	v_srv_fname		varchar2(32767);		-- имя для сохранения на сервере
+	v_srv_fpath		varchar2(32767);		-- путь для сохранения файла на сервре
+	v_description	varchar2(500);
+	tiSheets		&xl.getSheetsList%type;
+	iSheet			integer;
+begin
+	debug_pipe('.xl_finish -- p_save_path		='||p_save_path		,dp);
+	debug_pipe('.xl_finish -- p_save_filename	='||p_save_filename	,dp);
+	debug_pipe('.xl_finish -- p_stop_on_error	='||p_stop_on_error	,dp);
+	debug_pipe('.xl_finish -- p_show			='||p_show			,dp);
+	debug_pipe('.xl_finish -- p_description     ='||p_description     ,dp);
+	debug_pipe('.xl_finish -- p_protected		='||p_protected		,dp);
+
+	v_description := p_description;
+	
+	-- ели описание для отчёта не указано
+	if v_description is null then
+		-- определяем описание для отчёта из контекста
+		v_description := sys_context(user_context, '$REPS_REP_DESCRIPTION$');
+	end if;
+	debug_pipe('.xl_finish -- 1',dp);
+
+	-- Если необходимо формирование защищенного файла
+	if p_protected then
+		debug_pipe('.xl_finish -- 2',dp);
+		-- Получаем список листов
+		tiSheets	:= &xl.getSheetsList();
+		-- Проходим по списку листов
+		iSheet		:= tiSheets.first;
+		debug_pipe('.xl_finish -- 3',dp);
+		while iSheet is not null loop
+			debug_pipe('.xl_finish -- 4',dp);
+			-- И для каждого устанавливаем защиту со случайным паролем
+			&xl.SetSheetProtection
+						( P_SHEET				== &xl.getSheetNum(tiSheets(iSheet))
+						, P_PASS				== dbms_random.string('P', dbms_random.value(8, 16))
+						, p_selectLockedCells	== true		-- разрешить выделение заблокированных ячеек
+					  	, p_selectUnlockedCells	== true		-- разрешить выделение неразблокированных ячеек
+					  	, p_FormatCells 		== false	-- разрешить форматирование ячеек
+					  	, p_FormatColumns 		== false	-- разрешить форматирование колонок
+					  	, p_FormatRows 			== false	-- разрешить форматирование строк
+					  	, p_InsertColumns 		== false	-- разрешить вставку колонок
+					  	, p_InsertRows 			== false	-- разрешить вставку строк
+					  	, p_InsertHyperlinks 	== false	-- разрешить вставку гиперссылок
+					  	, p_DeleteColumns    	== false	-- разрешить удаление колонок
+					  	, p_DeleteRows 	   		== false	-- разрешить удаление строк
+					  	, p_Sort 			   	== false	-- разрешить сортировку
+					  	, p_AutoFilter 	   		== false	-- разрешить использование автофильтра
+					  	, p_PivotTables 	   	== false	-- разрешить использование отчетов сводной таблицы
+					  	, p_objects				== false	-- разрешить изменение объектов
+					  	, p_scenarios			== false	-- разрешить изменение сценариев
+						);
+			iSheet	:= tiSheets.next(iSheet);
+		end loop;
+	end if;
+
+	debug_pipe('.xl_finish -- 5 p_show='||p_show||' v_description='||v_description,dp);
+	-- завершаем формирование файла
+	xlsx := &lib.xl_finish
+				-- Открывать (отображать) сформированный файл на машине пользователя (если нужен защищенный файл, то пока не отображаем)
+				( p_show		== p_show
+				-- Описание отчета
+				, p_description == v_description
+				);
+	debug_pipe('.xl_finish -- 6',dp);
+
+	-- Если указаны путь или имя файла для сохранения, то
+	if  p_save_path 	is not null
+	and p_save_filename is not null
+	then
+		debug_pipe('.xl_finish -- 7',dp);
+		-- Формируем имя файла на сервере
+		v_srv_fpath	:= ::[SYSTEM_PARAMS].[GET]('PATH', null);
+		v_srv_fname := 'reps_xl_' || to_char(SYSDATE, 'yymmdd_hh24miss') ||'_'|| to_char(stdlib.userid) || '_tmp.xslx';
+		debug_pipe('.xl_finish -- 8',dp);
+		-- записываем в файл на сервере
+		write_to_file
+				( p_blob	== xlsx
+				, p_dir		== v_srv_fpath
+				, p_fname	== v_srv_fname
+				);
+		debug_pipe('.xl_finish -- 9',dp);
+		-- копируем с сервера на локальную машину
+		pragma macro(cp, '::[DOCUMENT].[COPYFILES]');
+		&cp.tbl_F$L.delete;
+		&cp.tbl_F$L(1).[SRC_NAME]	:= v_srv_fname;
+	    &cp.tbl_F$L(1).[SRC_PATH]	:= v_srv_fpath;
+	    &cp.tbl_F$L(1).[SRC_TYPE]	:= true;
+		&cp.tbl_F$L(1).[SRC_DELETE]	:= true;
+	    &cp.tbl_F$L(1).[DST_NAME]	:= p_save_filename;
+	    &cp.tbl_F$L(1).[DST_PATH]	:= p_save_path;
+		&cp.tbl_F$L(1).[DST_TYPE]	:= false;
+	    &cp.tbl_F$L(1).[DST_DELETE]	:= false;
+		&cp.idx := 0;
+		debug_pipe('.xl_finish -- 10',dp);
+	    stdio.put_line_buf('<% CALL DOCUMENT COPYFILES '||nvl(::[SYSTEM]%id, 1)||' %>');
+	end if;
+	debug_pipe('.xl_finish -- 11',dp);
+	return xlsx;
+end;
+
+
+public function xl_template_code
+/* Получение кода шаблона по наименованию */
+			( p_filename 		varchar2
+			/* Наименование файла шаблона */
+			)
+	/* Возвращает код шаблона */
+	return varchar2 is
+	-- позиция последней точки в наименовании файла шаблона (расширение файла)
+	iPointPos integer;
+begin
+	iPointPos := instr(p_filename, '.', -1);  -- самое правое вхождение точки
+	if iPointPos > 0 then
+		-- если точка найдена, то обрезаем имя до нее (то есть получаем имя файла без расширения)
+		p_filename := substr(p_filename, 1, iPointPos - 1);
+	end if;
+	-- переводим в верхний регистр и возвращаем
+	return upper(p_filename);
+end;
+
+
+/*****************************************************************************/
+public function xl_template
+/* Получение ссылки на шаблон по наименованию */
+			( p_template		varchar2
+			/* Наименование файла шаблона */
+			)
+	/* Возвращает ссылку на шаблон  из "Справочника шаблонов документов" */
+	return ref [SHABLON_DOC] is
+	-- Код шаблона
+	vTemplateCode	varchar2;
+begin
+	-- получаем код шаблона
+	vTemplateCode := xl_template_code(p_template);
+	-- ищем шаблон с указанным кодом и возвращаем его
+	for	(	select 	t(t: id)
+			in ::[SHABLON_DOC]
+			where	t.[GRP_CODE] = 'REPS'
+				and upper(t.[CODE]) = vTemplateCode
+		)
+	loop
+		return t.id;
+	end loop;
+
+	return null;
+end;
+
+
+/*****************************************************************************/
+public procedure xl_template_blob
+/* Получение содержимого файла шаблона (блоба) по наименованию */
+			( p_template		varchar2
+			/* Наименование файла шаблона */
+			, p_blob	in out	blob
+			/* Исходящий параметр: содержимое файла шаблона */
+			) is
+	-- Ссылка на найденный шаблон в справочнике
+	rTemplate	ref [SHABLON_DOC];
+begin
+	-- Ищем шаблон по указанному наименованию
+	rTemplate := xl_template(p_template);
+	-- Если нашли, то возвращаем BLOB с него
+	if rTemplate is not null then
+		p_blob := rTemplate.[RPT_TMPL];
+	end if;
+end;
+
+
+-- НЕ НУЖНО ИСПОЛЬЗОВАТЬ ЭТУ ФУНКЦИЮ (генерация текста описания для сервера отчётов происходит автоматически в [REPS_PARAMS].[SLIB])
+-- после удаления зависимостей от этой функции, она будет удалена
+public function get_description
+/* Получить описание для сервера отчетов */
+			( p_method_name		varchar2	default null
+			/* Имя метода вывода (можно использовать макрос &METHOD$NAME) */
+			, p_rep_code		varchar2	default null
+			/* Код формы */
+			, p_rep			ref [REPS]		default null
+			/* Ссылка на форму */
+			)
+	/* Возвращает описание для сервера отчетов */
+	return varchar2 is
+v_description varchar2(2000);
+begin
+	-- определяем описание для отчёта из контекста
+	v_description := sys_context(user_context, '$REPS_REP_DESCRIPTION$');
+	if v_description is null then
+		pragma hint('first_rows(1)');
+		for	(	select rep( rep.[NAME]: c_name )
+				in ::[REPS]
+				where 	rep = p_rep
+					or	rep.[CODE] = p_rep_code
+			)
+		loop
+			if p_method_name is not null then
+				return rep.c_name;
+			else
+				return rep.c_name || '(' || p_method_name || ')';
+			end if;
+		end loop;
+	end if;
+	return nvl(v_description, p_method_name);
+end;
+
+
+public subtype tp_tabPlaceholders_v is &xl.STRING_TABLE_S;
+/* Таблица подстановочных значений (индексируется наименованиями переменных) */
+
+
+public procedure fill_xl_placeholders
+/* Запись подстановочных значений для списка переменных ({{ПЕРЕМЕННАЯ}}) шаблона */
+		( p_values in out nocopy tp_tabPlaceholders_v
+		/* Список подстановочных значений переменных шаблона */
+		)
+is
+begin
+	if p_values.count = 0 then
+		return;
+	end if;
+	&xl.PutVars(p_values);
+end;
+
+public function xl_finish_1
+/* Вывод отчета в EXCEL (сохранение файла на локальной машине) */
+		( p_save_path		varchar2	default null
+		/* путь к файлу на локальной машине для сохранения (если требуется) */
+		, p_save_filename	varchar2	default null
+		/* имя файла на локальной машине для сохранения (если требуется) */
+		, p_stop_on_error	boolean		default true
+		/* Останавливать выполнение с ошибкой, если шаблон не удается сохранить */
+		, p_show			boolean		default true
+		/* открывать (отображать) сформированный файл на машине пользователя */
+		, p_description     varchar2(500)  default null
+		/* описание отчета */
+		, p_protected		boolean		default false
+		/* признак формирования защищённого файла */
+			, p_file_idx	integer
+			/* PSB порядковый номер файла, необходим для копирования на докальнй комп
+					Внимание!!! При p_file_idx=1 очищаем таблицу
+			*/
+			
+			) return blob 
+is
+	xlsx 			blob;					-- результат печати (BLOB с содержимым xlsx-файла)
+	v_srv_fname		varchar2(32767);		-- имя для сохранения на сервере
+	v_srv_fpath		varchar2(32767);		-- путь для сохранения файла на сервре
+	v_description	varchar2(500);
+	tiSheets		&xl.getSheetsList%type;
+	iSheet			integer;
+	v_rep_id      	varchar2;
+begin
+	v_description := p_description;
+	-- ели описание для отчёта не указано
+	if v_description is null then
+		-- определяем описание для отчёта из контекста
+		v_description := sys_context(user_context, '$REPS_REP_DESCRIPTION$');
+	end if;
+
+	-- Если необходимо формирование защищенного файла
+	if p_protected then
+		-- Получаем список листов
+		tiSheets	:= &xl.getSheetsList();
+		-- Проходим по списку листов
+		iSheet		:= tiSheets.first;
+		while iSheet is not null loop
+			-- И для каждого устанавливаем защиту со случайным паролем
+			&xl.SetSheetProtection
+						( P_SHEET				== &xl.getSheetNum(tiSheets(iSheet))
+						, P_PASS				== dbms_random.string('P', dbms_random.value(8, 16))
+						, p_selectLockedCells	== true		-- разрешить выделение заблокированных ячеек
+					  	, p_selectUnlockedCells	== true		-- разрешить выделение неразблокированных ячеек
+					  	, p_FormatCells 		== false	-- разрешить форматирование ячеек
+					  	, p_FormatColumns 		== false	-- разрешить форматирование колонок
+					  	, p_FormatRows 			== false	-- разрешить форматирование строк
+					  	, p_InsertColumns 		== false	-- разрешить вставку колонок
+					  	, p_InsertRows 			== false	-- разрешить вставку строк
+					  	, p_InsertHyperlinks 	== false	-- разрешить вставку гиперссылок
+					  	, p_DeleteColumns    	== false	-- разрешить удаление колонок
+					  	, p_DeleteRows 	   		== false	-- разрешить удаление строк
+					  	, p_Sort 			   	== false	-- разрешить сортировку
+					  	, p_AutoFilter 	   		== false	-- разрешить использование автофильтра
+					  	, p_PivotTables 	   	== false	-- разрешить использование отчетов сводной таблицы
+					  	, p_objects				== false	-- разрешить изменение объектов
+					  	, p_scenarios			== false	-- разрешить изменение сценариев
+						);
+			iSheet	:= tiSheets.next(iSheet);
+		end loop;
+	end if;
+
+	-- завершаем формирование файла
+	xlsx := &lib.xl_finish
+				-- Открывать (отображать) сформированный файл на машине пользователя (если нужен защищенный файл, то пока не отображаем)
+				( p_show		== p_show
+				-- Описание отчета
+				, p_description == v_description
+				);
+
+	-- Если указаны путь или имя файла для сохранения, то
+	if  p_save_path 	is not null
+	and p_save_filename is not null
+	then
+		-- Формируем имя файла на сервере
+		v_srv_fpath	:= ::[SYSTEM_PARAMS].[GET]('PATH', null);
+		v_srv_fname := 'reps_xl_' || lpad( to_char(p_file_idx), 6, '0' ) ||'_'|| to_char(systimestamp, 'yymmdd_hh24mi_Ssssssssss') ||'_'|| to_char(stdlib.userid) || '_tmp.xlsx';
+		-- записываем в файл на сервере
+		write_to_file
+				( p_blob	== xlsx
+				, p_dir		== v_srv_fpath
+				, p_fname	== v_srv_fname
+				);
+		-- копируем с сервера на локальную машину
+		pragma macro(cp, '::[DOCUMENT].[COPYFILES]');
+		if p_file_idx = 1 then
+		&cp.tbl_F$L.delete;
+		&cp.idx := 0;
+		end if;
+		&cp.tbl_F$L(p_file_idx).[SRC_NAME]	:= v_srv_fname;
+	    &cp.tbl_F$L(p_file_idx).[SRC_PATH]	:= v_srv_fpath;
+	    &cp.tbl_F$L(p_file_idx).[SRC_TYPE]	:= true;
+		&cp.tbl_F$L(p_file_idx).[SRC_DELETE]	:= false/*true*/; -- Не удаляем на сервере, т.к. "глючит"
+	    &cp.tbl_F$L(p_file_idx).[DST_NAME]	:= p_save_filename;
+	    &cp.tbl_F$L(p_file_idx).[DST_PATH]	:= p_save_path;
+		&cp.tbl_F$L(p_file_idx).[DST_TYPE]	:= false;
+	    &cp.tbl_F$L(p_file_idx).[DST_DELETE]	:= false;
+	    --stdio.put_line_buf('<% CALL DOCUMENT COPYFILES '||nvl(::[SYSTEM]%id, 1)||' %>');
+	end if;
+	return xlsx;
+end;
+end;

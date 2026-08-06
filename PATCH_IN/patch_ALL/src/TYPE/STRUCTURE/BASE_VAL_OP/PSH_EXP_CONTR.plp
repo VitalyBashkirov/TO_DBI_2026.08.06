@@ -1,0 +1,582 @@
+class BASE_VAL_OP;
+
+@import_plsql(true)
+@name('[ПСБ] Сформировать XML файл для загрузки в БД "ТБСВК Контракты"')
+@tag('COPIED')
+batch method PSH_EXP_CONTR is
+
+@name('V_VB')         public V_VB     [STRING_32000];
+@name('Путь к файлу') public V_PATH   [FILE$PATH];
+@name('Путь к файлу') public V_PATH_C [FILE$PATH];
+@name('Путь к файлу') public V_PATH_V [FILE$PATH];
+delim   const string(1) := '$' ;
+
+--public type FieldTblRec is record ( 	  num		::[PSB_BASE_VAL_EXP].[NUM]%type
+--								, code		::[PSB_BASE_VAL_EXP].[CODE]%type
+--								, name		::[PSB_BASE_VAL_EXP].[NAME]%type
+--								, requied	varchar2(1)
+--								, meth		::[PSB_BASE_VAL_EXP].[FMETHOD]%type
+--								, ftype		::[PSB_BASE_VAL_EXP].[TYPE_FIELD]%type
+--							);	
+--public type FieldTblType is table of FieldTblRec;
+--
+---- Функция формирует таблицу с полями для файла с типом p_file
+--public function GetFields(p_file ::[PSB_BASE_VAL_EXP].[TYPE_FILE]%type) return FieldTblType is
+--tbl FieldTblType;
+--begin
+--	select t(	  t.[NUM]			: num
+--				, t.[CODE]			: code
+--				, t.[NAME]			: name
+--				, t.[REQUIED]		: requied
+--				, t.[FMETHOD]	: meth
+--				, t.[TYPE_FIELD]	: ftype
+--			)
+--	in		::[PSB_BASE_VAL_EXP]
+--	where	t.[TYPE_FILE] = p_file
+--			and t.[NUM] is not null
+--	order by t.[NUM]
+--	into 	tbl;
+--
+--	return tbl;	
+--end;
+--
+---------------------------
+
+
+
+guid	[PSH_SR].[GUID]%type; -- updated CHANGE_QUALIFIER SR->PSH_SR 09/10/25
+
+procedure writeln(p_file	integer, p_line varchar2(32000))
+is
+begin
+	stdio.put_line(p_file, p_line||CR$, false, null, stdio.WINTEXT);
+end;
+
+procedure WriteCaption(	  p_TYPE_FILE	::[PSH_BASE_VAL_EXP].[TYPE_FILE]%type
+						, p_fields		::[PSH_BASE_VAL_EXP].[PSH_LIB].FieldTblType
+						, p_file		integer
+						)
+is
+	v_href varchar2(128);
+	v_title varchar2(128);
+	v_table varchar2(128);
+	idx integer;
+begin
+	if p_TYPE_FILE = 'TBSVK_TOplata' then
+		v_href := 'Uk_toplata.xsl';
+		v_title := 'Сведения о платежах по контрактам, принятым на учет УБ';
+		v_table := 'Uk_toplata';
+	elsif p_TYPE_FILE = 'TBSVK_KOplata' then
+		v_href := 'Uk_koplata.xsl';
+		v_title := 'Сведения о платежах по кредитным договорам, принятым на учет УБ';
+		v_table := 'Uk_koplata';
+	elsif p_TYPE_FILE = 'TBSVK_Valoper' then
+		v_href := 'Valoper.xsl';
+		v_title := 'Сведения об операциях клиентов УБ (филиала)';
+		v_table := 'Valoper';
+	end if;
+	
+	writeln(p_file,	'<?xml version="1.0" encoding="WINDOWS-1251"?>');
+	writeln(p_file, '<?xml-stylesheet type=''text/xsl'' href=''' || v_href || '''?>');
+	writeln(p_file, '<CURSOR>');
+	writeln(p_file, '<CURSORFIELD>');
+	writeln(p_file, '<TITLE>' || v_title || '</TITLE>');
+	writeln(p_file, '<TABLE>' || v_table || '</TABLE>');
+	
+	idx := p_fields.first;
+	while idx is not null loop
+		WriteLn(p_file, '<FIELD'||p_fields(idx).num||' NAME='''||p_fields(idx).code||''' FORMAT='''||p_fields(idx).ftype||'''>'||p_fields(idx).name||'</FIELD'||p_fields(idx).num||'>');
+		idx := p_fields.next(idx);
+	end loop;
+
+	writeln(p_file, '</CURSORFIELD>');
+	writeln(p_file, '</CURSOR>');
+end;
+
+function WriteStr(	  p_fields	::[PSH_BASE_VAL_EXP].[PSH_LIB].FieldTblType  -- Поля для расчета
+					, p_file	integer									-- Файл для записи
+					, p_val_op	ref [BASE_VAL_OP]						-- Валютная операция
+					, p_contr	ref [BASE_VAL_CONTR]					-- Инструкция 117-И. Контракты
+				)return boolean
+is
+idx			integer;
+str			varchar2(32000);
+vFieldVal	varchar2(32000);
+begin
+	str := '<RECORD>'||NL$;
+	idx := p_fields.first;
+	while idx is not null loop
+		vFieldVal := ::[PSH_BASE_VAL_EXP].[PSH_LIB].CalcField(p_fields(idx).code, p_fields(idx).meth, char_bool(p_fields(idx).requied), p_val_op, p_contr);
+		debug_pipe('vFieldVal = '||vFieldVal, 0);
+		if vFieldVal is not null then
+			str := str || '<POLE'||p_fields(idx).num||'>'||vFieldVal||'</POLE'||p_fields(idx).num||'>' || NL$;
+		end if;
+		idx := p_fields.next(idx);
+	end loop;
+	str := str ||'</RECORD>';
+	writeln(p_file, str);
+	return true;
+	
+exception when message.app_exception then
+	debug_pipe('Запись ID = '||p_val_op%id||' пропущена. Причина: '||[PRINTFUN].SQLERRM_inf, 0);
+	return false;
+end;
+
+procedure normalize_path
+/*Корректировка строки путем добавления требуемого слеша.*/
+(
+	P_PATH in out nocopy [FILE$PATH]
+	, P_FILE_ON_SERVER boolean
+)
+is
+	v_def_slash string(1);
+begin
+	if P_PATH is not null then
+		if P_FILE_ON_SERVER then
+			v_def_slash := SysInfo.GetValue('DEF_SLASH');
+		else
+			v_def_slash := '\'; --на клиенте такой слеш
+		end if;
+		--добавляем слеш в конец, если его там ещё нет.
+		P_PATH := P_PATH || case when substr(P_PATH, -1, 1) = v_def_slash then null else v_def_slash end;
+	end if;
+end;
+
+function chk_dir
+/*Проверка каталога на существование.*/
+(
+	P_PATH [FILE$PATH]
+	, P_PATH_DESCR string(4000)
+	, P_QUIET boolean default false
+	, P_IGNORE_NULL_PATH boolean default false
+)
+return integer
+is
+	v_err_num integer;
+begin
+	if P_PATH is null then
+		if not nvl(P_IGNORE_NULL_PATH, false) then
+			pragma error('Не указан '||P_PATH_DESCR);
+		end if;
+	else
+		v_err_num := stdio.OPENDIR(P_PATH);
+		if v_err_num > 0 then
+			stdio.CLOSEDIR(v_err_num);
+		else
+			if P_QUIET then
+				return v_err_num;
+			else
+				pragma error('При попытке проверить ' || P_PATH_DESCR ||' "'||P_PATH||'" возникла ошибка: '|| stdio.ERROR_MESSAGE(v_err_num));
+			end if;
+		end if;
+	end if;
+end;
+
+procedure move_file
+/*Перенос файла между папками на сервере.*/
+(
+	P_SRC_PATH [FILE$PATH]
+	, P_DST_PATH [FILE$PATH]
+	, P_FILENAME string(512)
+)
+is
+begin
+	begin
+		debug_pipe('Перемещение файла из [' ||P_SRC_PATH||P_FILENAME|| '] в [' ||P_DST_PATH||P_FILENAME|| ']', 0);
+		stdio.MOVE_FILE(P_SRC_PATH||P_FILENAME, P_DST_PATH||P_FILENAME);
+	exception when others then
+		stdio.put_line_buf('Ошибка перемещения файла "' ||P_FILENAME|| '". Текст ошибки: ' ||::[RUNTIME].[PRINTFUN].SQLERRM_inf);
+	end;
+end;
+
+--------------------------------------------------------------------------------------------- procedure kill
+-- ВНИМАНИЕ!	Процедура предназначена для вызова из Oracle Report сессий!
+procedure kill
+			( p_session_uniqum		::[PSH_SR].[GUID]%type -- updated CHANGE_QUALIFIER SR->PSH_SR 09/10/25
+			, del_all				boolean				:= FALSE
+			)
+is
+	iErr	integer;
+Begin
+	if del_all then
+		p_session_uniqum := substr(p_session_uniqum, 1, INSTR(p_session_uniqum,delim));
+		iErr	:= execute_sql('delete from Z#SR a where a.C_GUID like '''||p_session_uniqum||'%''');
+	else
+		iErr	:= execute_sql('delete from Z#SR a where a.C_GUID = '''||p_session_uniqum||'''');
+	end if;
+End;
+
+function session_uniqum return ::[PSH_SR].[GUID]%type is -- updated CHANGE_QUALIFIER SR->PSH_SR 09/10/25
+Begin
+	return utils.session_id || delim || next_value('SEQ_ID');
+End;
+PSH_EXP_CONTR (
+	@name('Выбор данных')                   P_CHOICE in [CASE_BETWEEN_TWO],
+	@name('Филиал')                         P_FILIAL in [BRANCH_REF],
+	@name('Файл платежей контрактов')       P_FILE   in [FILE$LOAD],
+	@name('Дата выгрузки')                  P_DATE   in [DATE_TIME],
+	@name('Файл платежей кредитов')         P_FILE_C in [FILE$LOAD],
+	@name('Файл валютных операций клиента') P_FILE_V in [FILE$LOAD]
+) is
+
+validate is
+rSR		ref [PSH_SR]; -- updated CHANGE_QUALIFIER SR->PSH_SR 09/10/25
+v_filial_code ::[BRANCH].[CODE]%type;
+
+procedure set_default_paht is
+begin
+	V_PATH := ::[DEFVALS].[SLIB].RestoreStr(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME, 'V_PATH');
+	P_FILE.[DST_PATH] := V_PATH;
+	if substr(nvl(V_PATH, '.'), 1, 1) = '.' then
+		P_FILE.[DST_TYPE] := true;
+		csmd.Command(V_VB,'Button_dir.visible = false' );
+	else
+		P_FILE.[DST_TYPE] := false;
+		csmd.Command(V_VB,'Button_dir.visible = true' );
+	end if;
+
+	V_PATH_C := ::[DEFVALS].[SLIB].RestoreStr(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME, 'V_PATH_C');
+	P_FILE_C.[DST_PATH] := V_PATH_C;
+	if substr(nvl(V_PATH_C, '.'), 1, 1) = '.' then
+		P_FILE_C.[DST_TYPE]	:= true;
+		csmd.Command(V_VB,'Button_dir_C.visible = false' );
+	else
+		P_FILE_C.[DST_TYPE]	:= false;
+		csmd.Command(V_VB,'Button_dir_C.visible = true' );
+	end if;
+	
+	V_PATH_V := ::[DEFVALS].[SLIB].RestoreStr(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME, 'V_PATH_V');
+	P_FILE_V.[DST_PATH] := V_PATH_V;
+	if substr(nvl(V_PATH_V, '.'), 1, 1) = '.' then
+		P_FILE_V.[DST_TYPE]	:= true;
+		csmd.Command(V_VB,'Button_dir_V.visible = false' );
+	else
+		P_FILE_V.[DST_TYPE]	:= false;
+		csmd.Command(V_VB,'Button_dir_V.visible = true' );
+	end if;
+end;
+
+begin
+	if p_message = 'DEFAULT' then
+		csmd.Init_Form(V_VB, &METHOD$CLASS, &METHOD$SNAME );
+		csmd.Command(V_VB,'filial.visible = false');
+		csmd.Command(V_VB,'filial_code.visible = false');
+		csmd.Command(V_VB,'filial_name.visible = false');
+		
+		csmd.Command(V_VB,'Button_dir.visible = false' );
+		csmd.Command(V_VB,'Button_dir_C.visible = false' );
+		csmd.Command(V_VB,'Button_dir_V.visible = false' );
+		p_filial := ::[SYSTEM].[VARIABLES].OurBranch;
+
+		P_FILE.[SRC_TYPE]   := true;
+		P_FILE.[DST_TYPE]   := false;
+		P_FILE.[SRC_DELETE] := true;
+		P_FILE.[DST_DELETE] := false;
+		P_FILE.[SRC_PATH]   := ::[SYSTEM_PARAMS].[GET]('PATH', null);
+		P_FILE.[DST_PATH]   := 'C:\';
+		P_FILE.[DST_MASK]	:= '*.xml';
+		P_FILE.[SRC_MASK]	:= '*.xml';
+		
+		P_DATE := SYSDATE;
+		P_FILE.[DST_NAME]	:= 'RVK'||to_char(P_DATE,'YYMMDD')||'.xml';
+		
+
+		P_FILE_C.[SRC_TYPE]   := true;
+		P_FILE_C.[DST_TYPE]   := false;
+		P_FILE_C.[SRC_DELETE] := true;
+		P_FILE_C.[DST_DELETE] := false;
+		P_FILE_C.[SRC_PATH]   := ::[SYSTEM_PARAMS].[GET]('PATH', null);
+		P_FILE_C.[DST_PATH]   := 'C:\';
+		P_FILE_C.[DST_MASK]	:= '*.xml';
+		P_FILE_C.[SRC_MASK]	:= '*.xml';
+		
+		P_FILE_C.[DST_NAME]	:= 'RVKC'||to_char(P_DATE,'YYMMDD')||'.xml';
+		
+
+		P_FILE_V.[SRC_TYPE]   := true;
+		P_FILE_V.[DST_TYPE]   := false;
+		P_FILE_V.[SRC_DELETE] := true;
+		P_FILE_V.[DST_DELETE] := false;
+		P_FILE_V.[SRC_PATH]   := ::[SYSTEM_PARAMS].[GET]('PATH', null);
+		P_FILE_V.[DST_PATH]   := 'C:\';
+		P_FILE_V.[DST_MASK]	:= '*.xml';
+		P_FILE_V.[SRC_MASK]	:= '*.xml';
+		
+		P_FILE_V.[DST_NAME]	:= 'RVKV'||to_char(P_DATE,'YYMMDD')||'.xml';
+		
+		
+		guid := session_uniqum; --[PSH_SR]::[SLIB].session_uniqum; -- 23.1.06 -- updated CHANGE_QUALIFIER SR->PSH_SR 09/10/25
+		-- [PSH_SR]::[SLIB].kill(guid, True); 23.1.06 -- updated CHANGE_QUALIFIER SR->PSH_SR 09/10/25
+		kill(guid, True);
+		for x in this.[first]..this.[last] loop
+			rSR := [PSH_SR]::[PSH_ADD](guid, this(x)%id); -- updated CHANGE_QUALIFIER SR->PSH_SR 09/10/25 -- updated CHANGE_SHORT_NAME ADD->PSH_ADD 15/10/25
+		end loop;
+
+		set_default_paht;
+		
+		normalize_path(P_FILE.[SRC_PATH], P_FILE.[SRC_TYPE]);
+		normalize_path(P_FILE_C.[SRC_PATH], P_FILE_C.[SRC_TYPE]);
+		normalize_path(P_FILE_V.[SRC_PATH], P_FILE_V.[SRC_TYPE]);
+	else
+		csmd.Init_Form(V_VB, null, null );
+		if p_info = 'P_CHOICE.0' then
+			if P_CHOICE.[0] = 2 then
+				csmd.Command(V_VB,'filial.visible = true' );
+				csmd.Command(V_VB,'filial_code.visible = true');
+				csmd.Command(V_VB,'filial_name.visible = true');
+				if P_FILIAL is not null then
+					v_filial_code:= trim(P_FILIAL.[CODE]);
+					P_FILE.[DST_NAME]	:= 'RVK'||to_char(P_DATE,'YYMMDD')||v_filial_code||'.xml';
+					P_FILE_C.[DST_NAME]	:= 'RVKC'||to_char(P_DATE,'YYMMDD')||v_filial_code||'.xml';
+					P_FILE_V.[DST_NAME] := 'RVKV'||to_char(P_DATE,'YYMMDD')||v_filial_code||'.xml';
+				else
+					P_FILE.[DST_NAME]	:= 'RVK'||to_char(P_DATE,'YYMMDD')||'.xml';
+					P_FILE_C.[DST_NAME]	:= 'RVKC'||to_char(P_DATE,'YYMMDD')||'.xml';
+					P_FILE_V.[DST_NAME] := 'RVKV'||to_char(P_DATE,'YYMMDD')||'.xml';
+				end if;
+			elsif P_CHOICE.[0] = 1 then
+				csmd.Command(V_VB,'filial.visible = false' );
+				csmd.Command(V_VB,'filial_code.visible = false');
+				csmd.Command(V_VB,'filial_name.visible = false');
+				P_FILE.[DST_NAME]	:= 'RVK'||to_char(P_DATE,'YYMMDD')||'.xml';
+				P_FILE_C.[DST_NAME]	:= 'RVKC'||to_char(P_DATE,'YYMMDD')||'.xml';
+				P_FILE_V.[DST_NAME] := 'RVKV'||to_char(P_DATE,'YYMMDD')||'.xml';
+			end if;
+		elsif p_info = 'P_FILIAL' then
+			if P_FILIAL is not null then
+				v_filial_code:= trim(P_FILIAL.[CODE]);
+				P_FILE.[DST_NAME]	:= 'RVK'||to_char(P_DATE,'YYMMDD')||v_filial_code||'.xml';
+				P_FILE_C.[DST_NAME]	:= 'RVKC'||to_char(P_DATE,'YYMMDD')||v_filial_code||'.xml';
+				P_FILE_V.[DST_NAME] := 'RVKV'||to_char(P_DATE,'YYMMDD')||v_filial_code||'.xml';
+			else
+				P_FILE.[DST_NAME]	:= 'RVK'||to_char(P_DATE,'YYMMDD')||'.xml';
+				P_FILE_C.[DST_NAME]	:= 'RVKC'||to_char(P_DATE,'YYMMDD')||'.xml';
+				P_FILE_V.[DST_NAME] := 'RVKV'||to_char(P_DATE,'YYMMDD')||'.xml';
+			end if;
+			
+		elsif p_info = 'OK' then
+			if P_CHOICE.[0] = 2 and P_FILIAL is null then
+				pragma error('Не заполнен филиал');
+			end if;
+			
+			if P_FILE.[DST_NAME] is null or P_FILE.[DST_PATH] is null then
+				pragma error ('Необходимо указать путь и наименование файла платежей контрактов');
+			end if;
+			
+			normalize_path(P_FILE.[DST_PATH], P_FILE.[DST_TYPE]);
+
+			if nvl(P_FILE.[DST_TYPE], false) then -- файл на сервере - ничего передавать не надо
+				P_FILE.[SRC_TYPE] := null;
+				P_FILE.[DST_TYPE] := null;
+			end if;
+
+			if P_FILE_C.[DST_NAME] is null or P_FILE_C.[DST_PATH] is null then
+				pragma error ('Необходимо указать путь и наименование файла платежей кредитов');
+			end if;
+
+			normalize_path(P_FILE_C.[DST_PATH], P_FILE_C.[DST_TYPE]);
+			
+			if nvl(P_FILE_C.[DST_TYPE], false) then -- файл на сервере - ничего передавать не надо
+				P_FILE_C.[SRC_TYPE] := null;
+				P_FILE_C.[DST_TYPE] := null;
+			end if;
+			
+			if P_FILE_V.[DST_NAME] is null or P_FILE_V.[DST_PATH] is null then
+				pragma error ('Необходимо указать путь и наименование файла операций клиента');
+			end if;
+			
+			normalize_path(P_FILE_V.[DST_PATH], P_FILE_V.[DST_TYPE]);
+
+			if nvl(P_FILE_V.[DST_TYPE], false) then -- файл на сервере - ничего передавать не надо
+				P_FILE_V.[SRC_TYPE] := null;
+				P_FILE_V.[DST_TYPE] := null;
+			end if;
+			
+			P_FILE.[SRC_NAME] := P_FILE.[DST_NAME];
+			P_FILE_C.[SRC_NAME] := P_FILE_C.[DST_NAME];
+			P_FILE_V.[SRC_NAME] := P_FILE_V.[DST_NAME];
+			
+			::[DEFVALS].[SLIB].SaveStr(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'V_PATH', P_FILE.[DST_PATH]);
+			::[DEFVALS].[SLIB].SaveStr(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'V_PATH_C', P_FILE_C.[DST_PATH]);
+			::[DEFVALS].[SLIB].SaveStr(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'V_PATH_V', P_FILE_V.[DST_PATH]);
+			
+		elsif p_info = 'CANCEL' then
+			-- [PSH_SR]::[SLIB].kill(guid, True); 23.1.06 -- updated CHANGE_QUALIFIER SR->PSH_SR 09/10/25
+			kill(guid, True);
+			
+		elsif p_info = 'STOP' then
+			set_default_paht;
+			
+		elsif p_info = 'P_FILE.DST_TYPE' then
+			if P_FILE.[DST_TYPE] = true then
+				P_FILE.[DST_PATH] := ::[SYSTEM_PARAMS].[GET]('PATH', null);
+				csmd.Command(V_VB,'Button_dir.visible = false' );
+			else
+				P_FILE.[DST_PATH]   := 'C:\';
+				csmd.Command(V_VB,'Button_dir.visible = true' );
+			end if;
+			normalize_path(P_FILE.[DST_PATH], P_FILE.[DST_TYPE]);
+		elsif p_info = 'P_FILE_C.DST_TYPE' then
+			if P_FILE_C.[DST_TYPE] = true then
+				P_FILE_C.[DST_PATH] := ::[SYSTEM_PARAMS].[GET]('PATH', null);
+				csmd.Command(V_VB,'Button_dir_C.visible = false' );
+			else
+				P_FILE_C.[DST_PATH]   := 'C:\';
+				csmd.Command(V_VB,'Button_dir_C.visible = true' );
+			end if;
+			normalize_path(P_FILE_C.[DST_PATH], P_FILE_C.[DST_TYPE]);
+		elsif p_info = 'P_FILE_V.DST_TYPE' then
+			if P_FILE_V.[DST_TYPE] = true then
+				P_FILE_V.[DST_PATH] := ::[SYSTEM_PARAMS].[GET]('PATH', null);
+				csmd.Command(V_VB,'Button_dir_V.visible = false' );
+			else
+				P_FILE_V.[DST_PATH]   := 'C:\';
+				csmd.Command(V_VB,'Button_dir_V.visible = true' );
+			end if;
+			normalize_path(P_FILE_V.[DST_PATH], P_FILE_V.[DST_TYPE]);
+		end if;
+	end if;
+end;
+
+execute is
+/*********************************************************************
+Назначение:
+
+SEpov, последнее изменение 06 Октября 2008 г.
+*********************************************************************/
+file_f	integer;
+file_s	integer;
+file_v	integer;
+idx		integer;
+
+FieldsToplata ::[PSH_BASE_VAL_EXP].[PSH_LIB].FieldTblType;
+FieldsKoplata ::[PSH_BASE_VAL_EXP].[PSH_LIB].FieldTblType;
+FieldsValoper ::[PSH_BASE_VAL_EXP].[PSH_LIB].FieldTblType;
+
+type RecSelect is record (	  D_ID	ref [BASE_VAL_OP]
+							, D_CT	ref [BASE_VAL_CONTR]
+							, D_PS	string(23)
+							);
+type	TSelectTable is table of RecSelect;
+Tbl		TSelectTable;
+
+
+begin
+	if P_FILE.[DST_NAME] is null or P_FILE.[DST_PATH] is null then
+		pragma error ('Необходимо указать путь и наименование файла платежей контрактов');
+	end if;
+	
+	if P_FILE_C.[DST_NAME] is null or P_FILE_C.[DST_PATH] is null then
+		pragma error ('Необходимо указать путь и наименование файла палтежей кредитов');
+	end if;
+	
+	if P_FILE_V.[DST_NAME] is null or P_FILE_V.[DST_PATH] is null then
+		pragma error ('Необходимо указать путь и наименование файла валютных операций клиента');
+	end if;
+	
+	if P_FILE.[DST_NAME] =  P_FILE_C.[DST_NAME] then
+		pragma error ('Необходимо указать различные наименование файлов');
+	end if;
+	
+	debug_pipe('Проверим путь выгрузки...', 0);
+	if P_FILE.[SRC_TYPE] = true then
+		chk_dir(P_FILE.[SRC_PATH],'путь источник для файла платежей контрактов');
+	end if;
+	if P_FILE_C.[SRC_TYPE] = true then
+		chk_dir(P_FILE_C.[SRC_PATH],'путь источник для файла платежей кредитов');
+	end if;
+	if P_FILE_V.[SRC_TYPE] = true then
+		chk_dir(P_FILE_V.[SRC_PATH],'путь источник для файла валютных операций клиента');
+	end if;
+	
+	if P_FILE.[DST_TYPE] = true then
+		chk_dir(P_FILE.[DST_PATH],'путь приемник для файла платежей контрактов');
+	end if;
+	if P_FILE_C.[DST_TYPE] = true then
+		chk_dir(P_FILE_C.[DST_PATH],'путь приемник для файла платежей кредитов');
+	end if;
+	if P_FILE_V.[DST_TYPE] = true then
+		chk_dir(P_FILE_V.[DST_PATH],'путь приемник файла валютных операций клиента');
+	end if;
+	
+	debug_pipe('Формирование XML файлов для загрузки в БД "ТБ СВК  Контракты"', 0);
+	P_DATE := trunc(P_DATE);
+
+	file_f	:= stdio.open(P_FILE.[SRC_PATH], P_FILE.[SRC_NAME], 'w');
+	file_s	:= stdio.open(P_FILE_C.[SRC_PATH], P_FILE_C.[SRC_NAME], 'w');	
+	file_v	:= stdio.open(P_FILE_V.[SRC_PATH], P_FILE_V.[SRC_NAME], 'w');	
+	
+	FieldsToplata := ::[PSH_BASE_VAL_EXP].[PSH_LIB].GetFields('TBSVK_TOplata');
+	FieldsKoplata := ::[PSH_BASE_VAL_EXP].[PSH_LIB].GetFields('TBSVK_KOplata');
+	FieldsValoper := ::[PSH_BASE_VAL_EXP].[PSH_LIB].GetFields('TBSVK_Valoper');
+	
+	WriteCaption('TBSVK_TOplata', FieldsToplata, file_f);
+	WriteCaption('TBSVK_KOplata', FieldsKoplata, file_s);
+	WriteCaption('TBSVK_Valoper', FieldsValoper, file_v);
+	
+	Tbl.Delete;
+	
+	if P_CHOICE.[0] = 1 then
+		select bs(bs : id, bs.[CONTRACTS]%id, nvl(bs.[CONTRACTS]->(true)[PS], bs.[DOC].[DEAL_PASP]))
+		in ::[BASE_VAL_OP], (::[PSH_SR] all : sr) -- updated CHANGE_QUALIFIER SR->PSH_SR 09/10/25
+		where sr.[GUID] = guid and sr.[DOC_ID] = bs%Id
+		into Tbl;
+
+	elsif P_CHOICE.[0] = 2 then
+		select bs(bs : id, bs.[CONTRACTS]%id, nvl(bs.[CONTRACTS]->(true)[PS], bs.[DOC].[DEAL_PASP]))
+		in ::[BASE_VAL_OP]
+		where nvl(bs.[IS_EXP], false) = false
+		into Tbl;
+
+	end if;
+	
+	debug_pipe('Выбрано '||Tbl.count||' записей для обработки', 0);
+	idx := Tbl.first;
+	while idx is not null loop
+		if Tbl(idx).D_PS is not null then
+			if ::[PSH_BASE_VAL_EXP].[PSH_LIB].CalcField('BIDK', '[BIDK]', false, Tbl(idx).D_ID, Tbl(idx).D_CT) in ('5','6') then
+				if WriteStr(FieldsKoplata, file_s, Tbl(idx).D_ID, Tbl(idx).D_CT) then
+					update vOp(vOP.[IS_EXP] = true, vOp.[DATE_INFO] = P_DATE, vOp.[FILE_EXP] = P_FILE_C.[SRC_NAME]) in ::[BASE_VAL_OP] where vOp = Tbl(idx).D_ID;
+				end if;
+			else
+				if WriteStr(FieldsToplata, file_f, Tbl(idx).D_ID, Tbl(idx).D_CT) then
+					update vOp(vOP.[IS_EXP] = true, vOp.[DATE_INFO] = P_DATE, vOp.[FILE_EXP] = P_FILE.[SRC_NAME]) in ::[BASE_VAL_OP] where vOp = Tbl(idx).D_ID;
+				end if;
+			end if;
+		else
+			if WriteStr(FieldsValoper, file_v, Tbl(idx).D_ID, Tbl(idx).D_CT) then
+				update vOp(vOP.[IS_EXP] = true, vOp.[DATE_INFO] = P_DATE, vOp.[FILE_EXP] = P_FILE_V.[SRC_NAME]) in ::[BASE_VAL_OP] where vOp = Tbl(idx).D_ID;
+			end if;
+		end if;
+		if mod(idx, 100) = 0 then
+			debug_pipe('Обработано '||idx||' записей ', 0);
+		end if;
+		idx := Tbl.next(idx);
+	end loop;
+	
+	writeln(file_f, '</CURSOR>');
+	stdio.close(file_f);
+	if P_FILE.[SRC_TYPE] is null and P_FILE.[DST_TYPE] is null and P_FILE.[SRC_PATH] <> P_FILE.[DST_PATH] then
+		move_file(P_FILE.[SRC_PATH], P_FILE.[DST_PATH], P_FILE.[SRC_NAME]);
+	end if;
+
+	writeln(file_s, '</CURSOR>');
+	stdio.close(file_s);
+	if P_FILE_C.[SRC_TYPE] is null and P_FILE_C.[DST_TYPE] is null and P_FILE_C.[SRC_PATH] <> P_FILE_C.[DST_PATH] then
+		move_file(P_FILE_C.[SRC_PATH], P_FILE_C.[DST_PATH], P_FILE_C.[SRC_NAME]);
+	end if;
+	
+	writeln(file_v, '</CURSOR>');
+	stdio.close(file_v);
+	if P_FILE_V.[SRC_TYPE] is null and P_FILE_V.[DST_TYPE] is null and P_FILE_V.[SRC_PATH] <> P_FILE_V.[DST_PATH] then
+		move_file(P_FILE_V.[SRC_PATH], P_FILE_V.[DST_PATH], P_FILE_V.[SRC_NAME]);
+	end if;
+	
+	Tbl.Delete;
+
+	-- [PSH_SR]::[SLIB].kill(guid, True); -- 23.1.06 -- updated CHANGE_QUALIFIER SR->PSH_SR 09/10/25
+	kill(guid, True);
+	debug_pipe('Формирование XML файлов для загрузки в БД "ТБ СВК  Контракты" завершено', 0);
+end;
+end;
+end;

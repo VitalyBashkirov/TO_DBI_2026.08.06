@@ -1,0 +1,67 @@
+class CLIENT;
+
+@this(create_on_start:=true)
+@name('Противодействие легализации. Печать анкеты клиента (расширение)')
+@tag('EXTENSION')
+@speciality('choice')
+method PSH_WRD_CL_ANK is
+PSH_WRD_CL_ANK return [STRING] is
+
+validate is
+begin
+	&BASE$SETVARS;
+	&BASE$VALIDATE;
+	&BASE$GETVARS;
+end;
+
+execute is
+/*********************************************************************
+Назначение:
+
+Akupreev, последнее изменение 13 Сентябрь 2004 г.
+*********************************************************************/
+dolg_fase [PERSONS_POS];
+cl_org_ref ref [CL_ORG];
+
+begin
+	&BASE$SETVARS;
+
+	if this%class = 'CL_PRIV' then
+		return 'CL_PRIV'||'.PSH_WRD_FIZCLANK '||this%id;
+	elsif this%class = 'CL_ORG' then
+		cl_org_ref := this;
+		
+		--	Если это инд. предприн. то ищем для него ссылку на физ. лицо:
+--		if ((cl_org_ref.[PS_REF] is not null) and (cl_org_ref.[PS_REF].[PS_CODE] = 'F_П')) then --but добавила вид предприятия 'частная практика'
+		if ((cl_org_ref.[PS_REF] is not null) and ((cl_org_ref.[PS_REF].[PS_CODE] = 'F_П')or(cl_org_ref.[PS_REF].[PS_CODE] = 'F_Ч'))) then
+
+			-- ищем ссылку на инд. преприн.
+		    begin
+		        locate exact dolg_fase in cl_org_ref.[ALL_BOSS] where dolg_fase.[FASE] is not null and dolg_fase.[CHIEF] = true; -- для ИП должностных лиц может быть несколько и надо учитывать "Признак руководителя"
+			 	-- устанавливаем глоб. парам. - ссылку на должностное лицо
+			 	::[CL_PRIV].PSH_WRD_IPCLANK.cl_org_dolg_fase := dolg_fase%id;
+	    	    exception
+					when NO_DATA_FOUND then
+	            	   	pragma error ('Не найдено ни одной ссылки на физическое лицо с "Признаком руководителя" в массиве "Должностные лица" для данного индивидуального предпринимателя!');
+					when TOO_MANY_ROWS then
+		               	pragma error ('Найдено несколько ссылок на физическое лицо с "Признаком руководителя" в массиве "Должностные лица" для данного индивидуального предпринимателя!');
+		 	end;
+		 	-- устанавливаем глоб. парам. - ссылку на CL_ORG
+		 	::[CL_PRIV].PSH_WRD_IPCLANK.client_org_ref := this;
+	 		-- Вызываем операцию печати анкеты физ. лица
+			return dolg_fase.[FASE]%class||'.PSH_WRD_IPCLANK '||dolg_fase.[FASE]%id;
+		else
+			return 'CL_CORP'||'.PSH_WRD_JURCLNK '||this%id;
+		end if;
+		
+	elsif this%class in ('CL_BANK_N', 'CL_PART', 'CL_BANK_F') then
+		return 'CL_CORP'||'.WRD_JURCL_ANK '||this%id;
+	else
+		null;
+	end if;
+	
+	
+	return &BASE$EXECUTE;
+end;
+end;
+end;

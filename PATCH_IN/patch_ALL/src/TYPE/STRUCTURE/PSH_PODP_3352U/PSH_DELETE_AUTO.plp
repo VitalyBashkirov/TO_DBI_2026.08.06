@@ -1,0 +1,20 @@
+class PSH_PODP_3352U;
+
+@import_plsql(true)
+@name('[ПСБ] Удалить')
+@tag('CREATED')
+destructor PSH_DELETE_AUTO is
+PSH_DELETE_AUTO is
+
+validate is
+begin
+if P_MESSAGE = 'DEFAULT' then
+	if  Security.Check_Equal(STDLIB.USERID.USERNAME, 'PSH_PODPIS_3352U') ='1' and nvl(this.[USER],0)=0 then null;
+	elsif this.[USER]= STDLIB.USERID then null;
+	elsif Security.Check_Equal(STDLIB.USERID.USERNAME, 'ADMIN_GRP') ='1' then null;
+	else pragma error ('Вам запрещено удалять чужие записи!'||chr(10)||'Выберите запись со своим "Пользователем" в соответствующей колонке.');
+	end if;
+end if;
+end;	
+end;
+end;

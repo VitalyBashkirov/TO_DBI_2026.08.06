@@ -1,0 +1,591 @@
+class PSH_CUST_DOCS;
+
+@import_plsql(true)
+@name('[ПСБ] 1.Загрузить файлы')
+@tag('COPIED')
+static method PSH_LOAD_DOCS is
+pragma include (::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma include (::[RUNTIME].[MACRO_LIB]);
+pragma include (::[PSH_CUST_DOCS].[PSH_LIB_TC]); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+
+type r_file2quit is record(	f_file			ref [PSH_CUST_DOCS_OU] -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+							, f_inFile		ref [PSH_CUST_DOCS_IN]	 -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+							, f_docstate 	::[PSH_CUST_DOCS].[DOC_STATE]%type -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+							, f_indocstate 	::[PSH_CUST_DOCS].[DOC_STATE]%type); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+
+type t_file2quit is table of r_file2quit;
+
+v_states_tab &libfun.TFileStates;
+
+function checkApp(p_name ::[PSH_CUST_DOCS].[FILE_NAME]%type) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+return varchar2
+is
+v_type 		varchar2(3);
+v_appCode	varchar2(8);
+begin
+	v_type := substr(upper(p_name), 1, 3);
+	
+	case v_type of
+		:'TPO', 'TOO':
+			v_appCode := '1B028010';
+		:'UCO', 'CMO', 'TFO':
+			v_appCode := '1B028050';
+		:'UCC', 'CMC':
+			v_appCode := '1B028080';
+		:'CSO':
+			v_appCode := '1B028060';
+		:'STO':
+			v_appCode := '1B028070';
+		else
+			return null;
+	end;
+	
+	return &libfun.checkApp(v_appCode);
+end;
+
+function checkFileName(p_file varchar2)
+return varchar2 is
+v_doc_in 	ref [PSH_CUST_DOCS]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+v_onDate	date;
+v_strDate	varchar2(8);
+v_doc_type	varchar2(3);
+v_fileName	varchar2(32767);
+begin
+	v_fileName := upper(p_file);	
+	begin
+		-- проверка уникальности
+		locate v_doc_in in ::[PSH_CUST_DOCS] where upper(v_doc_in.[FILE_NAME]) = v_filename and v_doc_in%class = ::[PSH_CUST_DOCS_IN]%class; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25 -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+		
+		return 'Файл с именем <' || p_file || '> уже существует';
+	
+	exception when no_data_found then
+		v_doc_type := substr(v_filename, 1, 3);
+
+		-- такие файлы не загружаются, а только выгружаются
+		if v_doc_type not in ('TPO', 'TOO', 'CSO', 'CMO', 'CMC', 'UCO', 'UCC', 'TFO', 'STO') then
+			return 'Файл типа '||v_doc_type||' не может быть загружен';
+		end if;
+
+		-- проверка формата
+		if not regexp_like(v_filename, '^[[:alnum:]_]{3}[1-9]{1}[0-9]{7}_[0-9]{8}_[0-9]{8}_[0-9]{6}\.XML$') then
+			return 'Имя файла <'|| v_filename||'> не соответствует формату RRRabbbbbbb_КККККККК_DDDDDDDD_NNNNNN.www';
+		end if;
+		
+		v_strDate := substr(v_filename, 22, 8);
+		begin
+			v_onDate := to_date(v_strDate, 'YYYYMMDD');
+		exception when others then
+			return 'Некорректная дата <'|| v_strDate || '> в имени файла <'|| v_filename||'>';
+		end;
+		
+	end;
+end;
+
+-- возвращает входящий документ по исходящему документу. Используя иерархию связей.
+-- т.е. если будут связи
+-- ++++++++++++++++++++++++++++++++++++++++++++++++
+-- | тип связи 	        | причина    | следствие  |
+-- ++++++++++++++++++++++++++++++++++++++++++++++++
+-- | ответное сообщение | входящий   | исходящий1 |
+-- ------------------------------------------------
+-- | корректировка	    | исходящий1 | исходящий2 |
+-- ------------------------------------------------
+-- по запросу по документу "исходящий2" будет возвращен документ входящий
+	
+public function getInFile(p_out ref [PSH_CUST_DOCS_OU]) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+return ref [PSH_CUST_DOCS_IN] is -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+v_inFile ref [PSH_CUST_DOCS_IN]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+begin
+	select	x(x)
+	in		::[PSH_CUST_DOCS] all -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	where	x%class = ::[PSH_CUST_DOCS_IN]%class -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+		and x in	(
+						with recursive rec(DOC_ORIGIN) as
+							(
+							select cl(	cl.[DOC_ORIGIN] : DOC_ORIGIN) 
+								in	::[PSH_CUST_LINK] all  -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+								where cl.[DOC_RESULT] = p_out
+							union all
+							select cl( cl.[DOC_ORIGIN] : DOC_ORIGIN)
+								in	::[PSH_CUST_LINK] -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+									join (rec : r) on r.DOC_ORIGIN = cl.[DOC_RESULT] all
+							)
+						select r(r.DOC_ORIGIN : DOC_ORIGIN) in rec
+					)
+	into	v_inFile;	
+	
+	return v_inFile;
+exception
+	when NO_DATA_FOUND or TOO_MANY_ROWS then
+		return null;
+end;
+
+function processQuit(p_name ::[PSH_CUST_DOCS].[FILE_NAME]%type, p_clob clob, p_outFiles in out t_file2quit, p_outFile out ref [PSH_CUST_DOCS_OU]) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25 -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+return varchar2
+is
+
+v_code		varchar2(2);
+v_fileName	::[PSH_CUST_DOCS].[FILE_NAME]%type; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+v_outFile	ref [PSH_CUST_DOCS_OU]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+v_inFile	ref [PSH_CUST_DOCS_IN]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+n			pls_integer;
+v_repeatDoc	ref [PSH_CUST_DOCS]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+
+v_doc		&xml.DOMDocument;
+v_node		&xml.DOMNode;
+v_node1		&xml.DOMNode;
+v_nodeList	&xml.DOMNodeList;	
+v_nodeMap	&xml.DOMNamedNodeMap;
+v_attr_node &xml.DOMNode;
+
+v_nodeName	varchar2(128);	
+
+v_tmp_str	varchar2(32000);
+
+type tErrList is table of [TAX_ERROR];
+v_err_tab	tErrList;
+v_idx		pls_integer;
+begin
+	&debug('>> processQuit', 0)
+
+	if dbms_lob.instr(p_clob, 'КодРезПроверки="01"') = 0 then
+		-- RP0581070 почистим пустые строки в конце файла, в некоторых версиях oracle наличие строк с пробелами в конце файла может вызывать ошибку загрузки LPX-00245
+		declare
+			pos1 number;
+		begin
+			pos1 := regexp_instr(p_clob, '[[:space:]]{1,}$');
+			if pos1 > 0 then
+				dbms_lob.trim(p_clob, pos1-1);
+			end if;
+		end;
+
+		begin
+			v_doc := &xml.newDOMDocument(p_clob);
+		exception
+			when others then
+				-- при любой ошибке разбора нужно вернуть ошибку формата файла
+				&xml.freeDocument(v_doc);
+				return 'Некорректный формат файла';
+		end;
+		
+		v_node := &xml.makeNode(&xml.getDocumentElement(v_doc));
+		
+		if &xml.getNodeName(v_node) = 'Файл' then
+			
+			v_nodeList := &xml.getChildNodes(v_node);
+			
+			if not &xml.IsNull(v_nodeList) then
+				for i in 0..&xml.getLength(v_nodeList)-1 loop
+					v_node1 := &xml.item(v_nodeList, i);			
+					v_nodeName := &xml.getNodeName(v_node1);
+					if v_nodeName = 'РезПроверки' then
+						v_idx := v_err_tab.count;
+						v_code := null;
+
+						v_nodeMap := &xml.getAttributes(v_node1);
+						
+						for j in 0..&xml.getLength(v_nodeMap)-1 loop
+							v_attr_node := &xml.item(v_nodeMap, j);
+							v_nodeName := &xml.getNodeName(v_attr_node);
+							case v_nodeName of
+								:'КодРезПроверки':
+									v_tmp_str := &xml.getNodeValue(v_attr_node);
+
+									if v_tmp_str is null then
+										&xml.freeDocument(v_doc);
+										return 'Отсутствует обязательный атрибут "КодРезПроверки"';
+									end if;					
+									
+									if regexp_instr(v_tmp_str, '^[[:digit:]]{2}$') = 0 then
+										&xml.freeDocument(v_doc);
+										return 'Значение атрибута "КодРезПроверки" не соответствует формату';
+									end if;
+								
+									v_code := v_tmp_str;
+									v_err_tab(v_idx).[ERR_TYPE] := v_code;
+
+								:'Пояснение':
+									v_err_tab(v_idx).[ERR_TEXT] := &xml.getNodeValue(v_attr_node);
+									
+								else
+									&xml.freeDocument(v_doc);
+									return 'Тег "'||v_nodeName||'" не соответствует формату';																			
+							end;
+						end loop;
+						
+						if v_code is null then
+							&xml.freeDocument(v_doc);
+							return 'Отсутствует обязательный атрибут "КодРезПроверки"';
+						end if;					
+						
+					else
+						&xml.freeDocument(v_doc);
+						return 'Тег "'||v_nodeName||'" не соответствует формату';							
+					end if;
+				end loop;
+			end if;
+		else
+			&xml.freeDocument(v_doc);
+			return 'Не найден тег "Файл"';
+		end if;
+		
+		&xml.freeDocument(v_doc);
+	end if;
+
+	v_fileName := regexp_replace(upper(p_name), '(KVT_)(.*)', '\2');
+
+	&debug('v_code = ' || v_code, 0)
+	&debug('v_fileName = ' || v_fileName, 0)
+	
+	begin
+		-- найти исходящий файл
+		select x(x) in ::[PSH_CUST_DOCS] where x%class = ::[PSH_CUST_DOCS_OU]%class and upper(x.[FILE_NAME]) = v_fileName and x.[DOC_STATE] = &libtc.stSend into v_outFile; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25 -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+		
+		p_outFile := v_outFile;
+		
+		-- поищем входящий файл, если ничего не нашли, тогда его не было.
+		v_inFile := getInFile(v_outFile);
+			
+		-- если не нашли, тогда ошибка и файл не грузим
+	
+		n := p_outFiles.count;
+		
+		p_outFiles(n).f_file 		:= v_outFile;
+		p_outFiles(n).f_inFile 		:= v_inFile;
+		p_outFiles(n).f_indocstate 	:= v_inFile.[DOC_STATE];
+
+		if v_err_tab.count = 0 then -- положительный результат проверки
+			p_outFiles(n).f_docstate := &libtc.stFinish;
+			&libfun.addDoc(v_states_tab, p_outFiles(n).f_file, &libtc.stFinish);
+
+		else
+			p_outFiles(n).f_docstate := &libtc.stNAdopt;
+			&libfun.addDoc(v_states_tab, p_outFiles(n).f_file, &libtc.stNAdopt);
+			
+			-- запомним ошибку
+			v_outFile.[ERRORS]%insert(v_err_tab);
+		end if;
+
+		-- нужно посмотреть был ли запрос на повторное получение квитанции по документу и получена ли по нему квитанция.
+		-- если был, тогда меняем его состояние на "Обработка завершена"
+		-- istomin: RP0586076. По разъяснению налоговой, на BZ1 положительные квитанции не высылаются,
+		-- т.е. состояние BZ1 меняем сразу, квитанцию не ищем
+		begin	
+			-- запрос на повторное получение квитанции. 			
+			select	rq(rq.[DOC_RESULT])
+			in		::[PSH_CUST_LINK], (::[PSH_CUST_DOCS] : d) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25 -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+			where	rq.[LINK_TYPE] = &libtc.lnkRepeat 		-- repeat
+				and rq.[DOC_ORIGIN] = v_outFile				-- исходящий документ
+				and rq.[DOC_RESULT] = d%id									
+				and d%class = ::[PSH_CUST_DOCS_OU]%class -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+				and d.[DOC_STATE] = &libtc.stSend 		
+			into	v_repeatDoc;
+			
+			&inc(n)
+			
+			p_outFiles(n).f_file 		:= v_repeatDoc;
+			p_outFiles(n).f_inFile 		:= v_inFile;
+			p_outFiles(n).f_indocstate 	:= v_inFile.[DOC_STATE];
+			p_outFiles(n).f_docstate 	:= &libtc.stFinish;
+				
+			&libfun.addDoc(v_states_tab, p_outFiles(n).f_file, &libtc.stFinish);
+		exception
+			when no_data_found or too_many_rows then
+				null;
+		end;
+
+	exception
+		when no_data_found then
+			return 'Не найден исходный файл для квитанции <' ||p_name|| '>';
+		when too_many_rows then
+			return 'Найдено несколько исходных файлов для квитанции <' ||p_name|| '>';
+	end;
+end;
+PSH_LOAD_DOCS is
+
+execute is
+v_dir_in		string;
+v_dir_err		string;
+v_dir_arc		string;
+v_dir_log		string;
+
+v_dir_in_d		integer;
+v_dirName		string;
+v_resRead		integer;
+v_name   		string;
+v_attrs  		string;
+v_uowner 		string;
+v_gowner 		string;
+v_mdate  		string;
+v_fsize  		integer;
+v_defSlash		varchar2;
+v_chkErr		varchar2(32767);
+v_blob			blob;
+v_clob			clob;
+v_dest_offset	integer;
+v_src_offset	integer;
+v_warning		integer;
+v_lang_ctx		integer;
+
+v_csid			integer;
+
+v_all			integer;
+v_done			integer;
+v_err			integer;
+
+v_file2quit		t_file2quit;
+v_quit			ref [PSH_CUST_DO_QUIT]; -- updated CHANGE_QUALIFIER PSB_CUST_DO_QUIT->PSH_CUST_DO_QUIT 08/10/25
+v_onefile		ref [PSH_CUST_DOCS_OU]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+v_count 		integer;
+v_lockId		integer;
+n				integer;
+v_doc_in		ref [PSH_CUST_DOCS_IN]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+fileDelErr		integer;
+v_dog			ref [PSH_FTS_AGR]; -- updated CHANGE_QUALIFIER PSB_FTS_AGR->PSH_FTS_AGR 08/10/25
+
+-- макросы
+pragma macro (FullPath, '[1] || v_defSlash || [2]', substitute);
+pragma macro (WriteLog, 'debug_file(to_char(sysdate,''hh24:mi:ss'')||[1]||NL$,0)', substitute);
+--
+
+begin
+	&debug( '>> Load_files', 0)
+	
+	v_lockId := &lib.setLock(&METHOD$ID);
+
+	v_states_tab.delete;
+
+	v_dirName 	:= &libfun.getPath();
+	v_defSlash	:= stdio.SETTING('DEF_SLASH');
+	
+	v_dir_in 	:= &FullPath(v_dirName, 'IN');
+	v_dir_err	:= &FullPath(v_dirName, 'ERR');
+	v_dir_arc	:= &FullPath(v_dirName, 'ARC');
+	v_dir_log	:= &FullPath(v_dirName, 'LOG');
+	
+	v_dir_in_d 	:= stdio.opendir(v_dir_in, dir_flag == 1);
+	
+	&debug( ' v_defSlash = ' || v_defSlash, 0)
+	&debug( ' v_dirName  = ' || v_dirName, 0)
+	&debug( ' v_dir_in   = ' || v_dir_in, 0)
+	&debug( ' v_dir_err  = ' || v_dir_err, 0)
+	&debug( ' v_dir_arc  = ' || v_dir_arc, 0)
+	
+	v_all = v_done = v_err := 0;
+	
+	
+	set_debug_file(&FullPath(v_dir_log, 'CUST_LOAD_FILES_'||to_char(sysdate,'yyyymmdd_hh24miss')||'.log'));
+	
+	if v_dir_in_d > 0 then
+		dbms_lob.createtemporary(v_blob, true);
+		dbms_lob.createtemporary(v_clob, true);
+		loop
+			v_onefile := null;
+			v_name = v_attrs = v_uowner = v_gowner = v_mdate = v_fsize := null;
+			
+			v_resRead := stdio.readdir( v_dir_in_d
+										,v_name
+										,v_attrs
+										,v_uowner
+										,v_gowner
+										,v_mdate
+										,v_fsize
+										);
+			exit when v_resRead = 0;
+			
+			&debug( ' v_name  = ' || v_name, 0)
+			
+			if v_resRead < 0 then
+				pragma error('Произошла ошибка чтения каталога ' || v_dirname || ': ' || stdio.error_message(v_resRead));
+			end if;
+
+			begin
+				&sp(cr#1)			
+				v_file2quit.delete;	
+				v_all := v_all + 1;
+				
+				v_chkErr := null;
+				
+				if not regexp_like(upper(v_name), '^KVT.*') then
+					v_chkErr := checkFileName(v_name);
+					
+					if v_chkErr is null then
+						v_dog := &libfun.getDogFromName(v_name);
+						if v_dog is null then
+							v_chkErr := 'Для БИК из имени файла <'|| v_name || '> не найден действующий договор электронного обмена на дату из имени файла';
+						end if;
+					end if;
+					
+				end if;
+				
+				if v_chkErr is null then
+					
+					dbms_lob.trim(v_clob,0);
+					dbms_lob.trim(v_blob,0);
+				
+					[LOB_UTILS].file2blob(v_blob, v_dir_in, v_name);
+					
+					v_csid := [LOB_UTILS].get_csid([LOB_UTILS].xml_encoding_to_charset([LOB_UTILS].get_xml_encoding(v_blob)));
+						
+					v_csid := nvl(v_csid, [LOB_UTILS].get_csid('CL8MSWIN1251'));	-- по умолчанию считаем, что win1251
+					
+					v_dest_offset = v_src_offset := 1;
+					v_lang_ctx 	:= dbms_lob.default_lang_ctx;
+					v_warning 	:= null;
+						
+					dbms_lob.convertToClob(v_clob, v_blob, dbms_lob.lobmaxsize, v_dest_offset, v_src_offset, v_csid, v_lang_ctx, v_warning);
+					&xml.set_xml_encoding(v_clob, null);
+					
+					begin
+						v_clob := [XT].remove_namespaces(XMLType(v_clob)).GetCLOBVal();
+					exception when others then -- необходимо отловить все исключения при ошибках XML
+						v_chkErr := substr(utils.error_stack, 1, v_chkErr%size);
+					end;
+				end if;
+				
+				if v_chkErr is null then
+					if regexp_like(upper(v_name), '^KVT.*') then
+						
+						v_chkErr := processQuit(v_name, v_clob, v_file2quit, v_onefile);
+						
+						&debug('v_chkErr = ' || v_chkErr, 0)
+						
+						if v_chkErr is null then
+							-- квитанции в ::[PSH_CUST_DO_QUIT] -- updated CHANGE_QUALIFIER PSB_CUST_DO_QUIT->PSH_CUST_DO_QUIT 08/10/25
+							v_quit := ::[PSH_CUST_DO_QUIT].[PSH_NEW_AUTO]( -- updated CHANGE_QUALIFIER PSB_CUST_DO_QUIT->PSH_CUST_DO_QUIT 08/10/25
+														 v_name								--Имя файла
+														,v_clob								--Содержимое файла
+														,&libfun.curdate(v_dog.[FILIAL])	--Дата создания файла
+														,&libfun.curdate(v_dog.[FILIAL])	--Дата создания документа
+														);
+							&debug('v_quit = ' || v_quit%id, 0)							
+							
+							&lib.linkDoc(v_onefile, v_quit, &libtc.lnkQuit);
+						end if;
+						
+						-- изменение состояния исходящего документа, на который получена квитанция.
+						update for j in v_file2quit loop
+							d( d.[DOC_STATE] 	= v_file2quit(j).f_docstate)
+							in	::[PSH_CUST_DOCS] -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+							where	d = v_file2quit(j).f_file;							
+						
+						-- изменение состояния входящего документа, на ответы которого получена квитанция.
+						if v_file2quit.count > 0 then
+							n := v_file2quit.first;
+						
+							while n is not null loop
+								if v_file2quit(n).f_infile is not null and v_file2quit(n).f_indocstate = &libtc.stSendAnsw then
+									-- состояние изменится на обработка завершена, только если все связанные документы в состоянии "Обработка завершена"
+									select	x(count(x%id))
+									in		::[PSH_CUST_DOCS] all -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+									where	x%class = ::[PSH_CUST_DOCS_OU]%class -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+										and x.[DOC_STATE] <> &libtc.stFinish
+										and x in (
+													with recursive rec(DOC_RESULT) as
+														(
+														select cl(	cl.[DOC_RESULT] : DOC_RESULT) 
+															in	::[PSH_CUST_LINK] all  -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+															where cl.[DOC_ORIGIN] = v_file2quit(n).f_infile
+														union all
+														select cl( cl.[DOC_RESULT] : DOC_RESULT)
+															in	::[PSH_CUST_LINK] -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+																join (rec : r) on r.DOC_RESULT = cl.[DOC_ORIGIN] all
+														)
+													select r(r.DOC_RESULT : DOC_RESULT) in rec
+												)
+									into	v_count;
+									
+									if v_count = 0 then -- все завершены
+										&libfun.addDoc(v_states_tab, v_file2quit(n).f_infile, &libtc.stFinish);
+										v_file2quit(n).f_infile.[DOC_STATE] := &libtc.stFinish;
+									elsif v_file2quit(n).f_docstate = &libtc.stNAdopt then
+										&libfun.addDoc(v_states_tab, v_file2quit(n).f_infile, &libtc.stNAdoptAnsw);
+										v_file2quit(n).f_infile.[DOC_STATE] := &libtc.stNAdoptAnsw;
+									end if;
+									
+								end if;
+								
+								n := v_file2quit.next(n);
+							end loop;
+						end if;
+						
+						&libfun.addDoc(v_states_tab, v_quit, v_quit.[DOC_STATE]);
+					else
+						v_chkErr := checkApp(v_name);
+						
+						if v_chkErr is null then
+							-- входящие сообщения вставить в ::[PSH_CUST_DOCS_IN] -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+							v_doc_in := ::[PSH_CUST_DOCS_IN].[PSH_NEW_AUTO]( -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+																		 v_name								--Имя файла
+																		,v_clob								--Содержимое файла
+																		,&libfun.curdate(v_dog.[FILIAL])	--Дата создания файла
+																		,null								--Дата создания документа
+																	 );
+																	
+							&libfun.addDoc(v_states_tab, v_doc_in, v_doc_in.[DOC_STATE]);
+						end if;
+					end if;
+					
+				end if;
+				
+				if v_chkErr is null then 		
+					&inc(v_done)
+					
+					if &ft.get_bool_value('CUST_DEL_LOADED_FILES', null, '0') then
+						fileDelErr := stdio.fdelete(&FullPath(v_dir_in, v_name));
+						if fileDelErr < 0 then
+							&WriteLog(' Ошибка удаления файла <' || v_name || '>: '||stdio.error_message(fileDelErr)||'('||fileDelErr||')');
+						end if;						
+						
+					else					
+						begin
+							stdio.move_file(&FullPath(v_dir_in, v_name), &FullPath(v_dir_arc, v_name));						
+						exception
+							when others then
+								&WriteLog(' Ошибка перемещения файла <' || v_name || '> в архив: ' || sqlerrm );
+								raise;
+						end;
+					end if;
+						
+				else
+					&WriteLog(' Ошибка загрузки файла <' || v_name || '>: ' || v_chkErr );	
+					begin				
+						stdio.move_file(&FullPath(v_dir_in, v_name), &FullPath(v_dir_err, v_name));						
+					exception
+						when others then
+							&WriteLog(' Ошибка перемещения файла <' || v_name || '> в каталог ошибок: ' || sqlerrm );
+							raise;
+					end;
+					v_err := v_err + 1;
+				end if;
+			exception
+				when others then	-- не прерываем обработку документов
+					&WriteLog(' Ошибка при загрузке файла <' || v_name || '> : ' || utils.error_stack);
+					&rb(cr#1)
+			end;
+		
+		end loop;	
+		
+		dbms_lob.freetemporary(v_clob);
+		dbms_lob.freetemporary(v_blob);
+
+		&WriteLog(' Обработано: ' || v_all || ' файлов, из них с ошибками ' || v_err );
+		
+		if v_states_tab.count > 0 then
+			::[HOOK].[PSB_CUST_CH_ST](v_states_tab);
+		end if;
+
+		if stdio.closedir(v_dir_in_d) < 0 then
+			pragma error('Произошла ошибка закрытия каталога');
+		end if;
+
+	else
+		pragma error ('Произошла ошибка открытия каталога');
+	end if;
+	&lib.delLock(v_lockId);
+exception when others then
+	&lib.delLock(v_lockId);	
+	raise;
+end;
+end;
+end;

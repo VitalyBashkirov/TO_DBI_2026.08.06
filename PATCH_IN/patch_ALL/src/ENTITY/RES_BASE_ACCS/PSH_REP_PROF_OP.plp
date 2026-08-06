@@ -1,0 +1,393 @@
+class RES_BASE_ACCS;
+
+@import_plsql(true)
+@name('[ПСБ] Профессиональное суждение и опись ПОТ по РКО (Excel)')
+@tag('COPIED')
+static method PSH_REP_PROF_OP is
+
+pragma macro (xl,'[OOXML]::[API_XL]');
+pragma macro(lp, '::[SHABLON_DOC].[LIB_OOXML]');
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+
+li_cur_row				integer;
+li_start_row	const	integer	:= 7;
+li_cur_col				integer := 0;
+
+
+-- Функция получение категории качества и процента резервирования по 611-П
+public function get_req_prod_num(
+	  P_RES	  ref [RES_BASE_ACCS]
+	 ,P_DATE  date
+	 ,p_rekv  varchar2
+) return number is
+	v_cat		number;
+	v_cat_prc	number;
+begin
+	for (
+		 select zz(analytic(max(zz), 'keep (dense_rank last order by [1]) ', zz.[DATE_START]) obj)
+		 	in P_RES.[GR_RISK_HIST]
+			where zz.[DATE_START] <= P_DATE
+			order by zz.[DATE_START] desc
+		)
+	loop
+		v_cat := zz.obj.[RISK_GROUP].[GROUP_NUM];
+		v_cat_prc := zz.obj.[PRC_RESERV];
+		exit;
+	end loop;
+	
+	if p_rekv = 'M_CAT' then	-- Получение категории резервирования
+		return v_cat;
+	elsif p_rekv = 'M_CAT_PRC' then	-- Получение процента резервирования
+		return v_cat_prc;
+	end if;
+end;
+
+--	Расчет срока задолженности по выписке для счетов картотеки по РКО
+public function Get_Debt_By_Acc_Move_Only
+                  (in_date_op in [date]
+                  ,in_acc in ref [AC_FIN]
+                  ) return integer
+is
+     out_debt_period number := 0;
+     out_debt_date 	 date;
+	vUSE_OUT_SALDO 	 boolean;     
+begin
+	::[FP_TUNE].[LIB].get_value(vUSE_OUT_SALDO, 'USE_OUT_SALDO');
+	vUSE_OUT_SALDO := nvl(vUSE_OUT_SALDO, false);
+
+	if vUSE_OUT_SALDO then
+		 for (select x(x.[START_SUM] : IN_SUM
+		              ,x.[START_SUM] + (case when X.[DT] then - x.[SUMMA] else x.[SUMMA] end) : OUT_SUM
+		              ,x.[DATE] : DATE_IN
+		              ,analytic(LAG(x.[DATE]), 'over (order by nvl(c_stamp,c_date) desc, id desc)') : DATE_DZ
+		              )
+		          in ::[RECORDS] all
+		       where x%collection = in_acc.[ARC_MOVE]
+		         and x.[DATE] < in_date_op + interval('1','day')
+		        order by nvl(x.[STAMP], x.[DATE]) desc, x%id desc
+		     ) loop
+		
+		      if x.OUT_SUM >= 0 then
+		      	out_debt_date := trunc(x.DATE_DZ);
+		      	exit;
+		      elsif x.IN_SUM = 0 and x.OUT_SUM < 0 then
+		      	out_debt_date := trunc(x.DATE_IN);
+		      	exit;
+		      end if;
+		 end loop;
+
+	      if out_debt_date is not null then
+	      	out_debt_period := (trunc(in_date_op) - trunc(out_debt_date)) + 1;
+	      else out_debt_period := 0;
+	      end if;
+	
+	      &debug('Get_Debt_By_Acc_Move: Для счета ID "' || in_acc%id || '" дата возникновения ДЗ: "' || to_char(out_debt_date) || '" срок задолженности: "' || out_debt_period || '"', 0)
+	
+	      return out_debt_period * (-1);
+	else
+
+	     for (select x(x.[START_SUM] : IN_SUM
+	     			  ,x.[START_SUM] + (case when X.[DT] then - x.[SUMMA] else x.[SUMMA] end) : OUT_SUM
+	                  ,x.[DATE] : DATE_IN
+	                 )
+	              in ::[RECORDS] all
+	           where x%collection = in_acc.[ARC_MOVE]
+	             and x.[DATE] < in_date_op
+	            order by nvl(x.[STAMP], x.[DATE]) desc, x%id desc
+	         ) loop
+	
+	          if x.OUT_SUM >= 0 then
+	            out_debt_date := null;
+	            exit;
+	          elsif x.IN_SUM >= 0 and x.OUT_SUM < 0 then
+	            out_debt_date := trunc(x.DATE_IN) + 1;
+	            exit;
+	          end if;
+	     end loop;
+	
+	      if out_debt_date is not null and out_debt_date <= in_date_op then
+	      	out_debt_period := (trunc(in_date_op) - trunc(out_debt_date)) + 1;
+	      else out_debt_period := 0;
+	      end if;
+	
+	      &debug('Get_Debt_By_Acc_Move: Для счета ID "' || in_acc%id || '" дата возникновения ДЗ: "' || to_char(out_debt_date) || '" срок задолженности: "' || out_debt_period || '"', 0)
+	
+	      return out_debt_period * (-1);
+	end if;
+end;
+
+--	Расчет срока задолженности по выписке для счетов картотеки по РКО
+public function Get_Debt_By_Acc_Move
+                  (in_date_op in [date]
+                  ,in_acc in ref [AC_FIN]
+                  ) return integer
+is
+	ac_prev			ref [AC_FIN];
+	date_first		date;
+	period_prev		integer;
+	P_DEBT_PERIOD	integer;
+begin
+	P_DEBT_PERIOD := Get_Debt_By_Acc_Move_Only(in_date_op, in_acc);
+	&debug('BEG P_DEBT_PERIOD =' || P_DEBT_PERIOD, 0)
+	
+	for (select ac(ac.[DATE] dt)
+		in in_acc.[ARC_MOVE]
+			where ac.[SUMMA] <> 0
+			order by ac.[DATE]
+		)
+	loop
+		date_first := trunc(ac.dt);
+		&debug('date_first =' || date_first, 0)
+		exit;
+	end loop;
+
+	&debug('(in_date_op - date_first + 1) =' || -(in_date_op - date_first + 1), 0)
+	if -(in_date_op - date_first + 1) = P_DEBT_PERIOD then 	-- Проверяем, что входящий счет не обнулялся
+		-- Ищем предыдущий счет
+		for h in ::[HOZ_OP_ACC] all
+		where h.[ACCOUNT_DOG].[1].[2] = in_acc
+		loop
+			for (select g(analytic(max(g), 'keep (dense_rank last order by [1]) ', g.[DATE_BEG]) obj)
+				 in ::[HOZ_OP_ACC] all
+				where g%collection = h%collection
+				  and g.[ACCOUNT_DOG].[1].[2].[MAIN_V_ID] like '458%'
+				  and g.[NAME_ACCOUNT] = ::[TIP_ACC](COD = 'РКО_458')
+				  and g.[ACCOUNT_DOG].[1].[2] <> in_acc
+				  and g.[DATE_BEG] < in_date_op
+				  fetch 1
+				)
+			loop
+				ac_prev := g.obj.[ACCOUNT_DOG].[1].[2];
+				&debug('AC_PREV = ' || AC_PREV.[MAIN_V_ID], 0)
+				period_prev := in_date_op - g.obj.[DATE_BEG];	-- Находим период просрочки прошлого счета
+				&debug('period_prev = ' || period_prev, 0)
+			end loop;
+			
+			if ac_prev is not null then
+				exit;
+			end if;
+		end loop;
+		
+		if period_prev is not null then
+			P_DEBT_PERIOD := P_DEBT_PERIOD - period_prev;
+		end if;
+	end if;
+
+	&debug('END P_DEBT_PERIOD =' || P_DEBT_PERIOD, 0)
+	return coalesce(P_DEBT_PERIOD, 0);
+end;
+
+-- Вывод в Excel ------------------------------------------------------------------------
+procedure print_one (
+					n		integer
+					,P_DATE	date
+					,P_ACC	ref [AC_FIN]
+					,P_RES	ref [RES_BASE_ACCS] default null
+					,P_PORT ref [RES_PORT]		default null
+					,v_cat				number	default null
+					,v_cat_prc			number	default null
+					)
+is
+	i	integer;
+	v_debt_period integer;
+	v_prod_rko	ref [RKO];
+begin
+	&debug('P_ACC = '||P_ACC.[MAIN_V_ID],10)
+	&debug('P_RES = '||P_RES,10)
+	i:= 1;
+	li_cur_row := li_cur_row + 1;
+	
+	v_debt_period := Get_Debt_By_Acc_Move(P_DATE, P_ACC) * (-1);
+
+	for (select prd(prd obj)
+		in ::[RKO]
+		 ,(::[HOZ_OP_ACC] all : hoa) all
+		where prd.[ARRAY_DOG_ACC] = hoa%collection
+			and hoa.[NAME_ACCOUNT] = ::[TIP_ACC]([COD] = 'РКО_458' and [PRODUCT] = 'RKO')
+			and hoa = (select z(ANALYTIC(max(z%id), 'keep (dense_rank last order by [1] asc)', z.[DATE_BEG]))
+						in prd.[ARRAY_DOG_ACC]
+						where z.[ACCOUNT_DOG].[1].[2] = P_ACC
+						  and z.[DATE_BEG] <= P_DATE
+					   )
+		)
+	loop
+		v_prod_rko := prd.obj;
+	end loop;			
+
+	&xl.put(li_cur_row, i, n);  -- Номер по порядку
+	i := i + 1;
+	&xl.put(li_cur_row, i, P_PORT.[PORT_NAME]);  -- Продукт ИБСО
+	i := i + 1;
+	&xl.put(li_cur_row, i, P_ACC.[CLIENT_R].[INN]);  -- ИНН
+	i := i + 1;
+	&xl.put(li_cur_row, i, P_ACC.[CLIENT_R].[NAME]);  -- Клиент
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_prod_rko.[NUM_DOG]); -- Номер договора
+	i := i + 1;
+	&xl.put(li_cur_row, i, to_number(v_cat)); -- Категория качества
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_cat_prc); -- Ставка расчетного резерва (РВП)(%)
+	i := i + 1;
+	&xl.put(li_cur_row, i, P_ACC.[MAIN_V_ID]); -- Лицевой счет задолженности (АКТИВ)
+	i := i + 1;
+	&xl.put(li_cur_row, i, F.A('В' || P_ACC.[ARC_MOVE] || 'сН', P_DATE + 1)); -- Сумма задолженности (Актив)  (рубли)
+	i := i + 1;
+	&xl.put(li_cur_row, i, F.A('В' || P_ACC.[ARC_MOVE] || 'сН', P_DATE + 1) * v_cat_prc / 100); -- Расчётный РВП (рубли)
+	i := i + 1;
+	&xl.put(li_cur_row, i, P_RES.[RES_ACC].[MAIN_V_ID]); -- Лицевой счет РВП
+	i := i + 1;
+	&xl.put(li_cur_row, i, F.A('В' || P_ACC.[ARC_MOVE] || 'сН', P_DATE + 1) * v_cat_prc / 100); -- Фактический РВП (рубли)
+	i := i + 1;
+	&xl.cell(li_cur_row, i, case when v_debt_period > 0 then to_char(P_DATE - v_debt_period + 1, 'DD/MM/YYYY')
+							end);		-- Дата возникновения просрочки
+	i := i + 1;
+	&xl.cell(li_cur_row, i, v_debt_period);		-- Кол-во дней просрочки по картотеке по РКО
+
+	if li_cur_col < i then li_cur_col := i; end if;
+end;
+
+-- Поиск итогов по счетам по ПОРТФЕЛЮ ОДНОРОДНЫХ ТРЕБОВАНИЙ ------------------------------
+procedure calc_POT_itog(P_DATE date)
+is
+begin
+	-- debug_pipe('Начало обработки' ,10);
+	for (select port(
+						port 		obj_port,
+						sum(F.A('В' || ac.[ARC_MOVE] || 'сН', P_DATE + 1)) itog_bal,
+						res 		res
+					)
+			in ::[RES_PORT] 
+			 ,(::[RES_BASE_ACCS] all : res)
+			 ,(::[RES_ACC_VAL] all port_acc)	
+			 ,(::[AC_FIN] all ac) all		
+			 
+		  where
+		  	-- Условия по резервированию
+		  	res.[PROD_RES]%class = 'RES_PORT'
+		  	and res.[PROD_RES] = port
+		  	and  (port.[DATE_CLOSE] is null or port.[DATE_CLOSE] >= P_DATE - 32) 
+		  	and port.[TYPE_RES].[NAME] not like 'ПОТ по экспресс-гарантиям%'
+			-- Присоединяем к ПОТ счета
+			and port.[ACCRS] = port_acc%collection
+			and port_acc.[RES_ACC] = ac
+			and port_acc.[DATE_BEGIN] <= P_DATE
+			and (port_acc.[DATE_END] is null or port_acc.[DATE_END] > P_DATE)
+ 
+		  	-- Условия по финансовому счёту
+		    and (ac.[DATE_CLOSE] is null or ac.[DATE_CLOSE] >= P_DATE - 32)
+		    and  ac.[DATE_OP] <= P_DATE
+		
+		group by port, res		    
+		order by port
+		)
+	loop
+		if port.obj_port.[NUM_DOG] = 'ПОТ_КОМ_РКО_0_30' then
+			&xl.put(10, 3, get_req_prod_num(port.res, P_DATE, 'M_CAT'));
+			&xl.put(10, 4, get_req_prod_num(port.res, P_DATE, 'M_CAT_PRC') || '%');
+			&xl.put(10, 6, port.itog_bal);
+			&xl.put(10, 7, port.res.[RES_ACC].[MAIN_V_ID]);
+			&xl.put(10, 8, F.A('В' || port.res.[RES_ACC].[ARC_MOVE] || 'сН', P_DATE + 1));
+		elsif port.obj_port.[NUM_DOG] = 'ПОТ_КОМ_РКО_31' then
+			&xl.put(11, 3, get_req_prod_num(port.res, P_DATE, 'M_CAT'));
+			&xl.put(11, 4, get_req_prod_num(port.res, P_DATE, 'M_CAT_PRC') || '%');
+			&xl.put(11, 6, port.itog_bal);
+			&xl.put(11, 7, port.res.[RES_ACC].[MAIN_V_ID]);
+			&xl.put(11, 8, F.A('В' || port.res.[RES_ACC].[ARC_MOVE] || 'сН', P_DATE + 1));
+		end if;
+	end loop;
+end;
+
+-- Поиск нужных счетов по ПОРТФЕЛЮ ОДНОРОДНЫХ ТРЕБОВАНИЙ ------------------------------
+procedure calc_POT(P_DATE date)
+is
+	v_prev_port ref [RES_PORT];
+	v_cat		number;
+	v_cat_prc	number;
+	n			integer := 0;
+begin
+	-- debug_pipe('Начало обработки' ,10);
+	for (select port(port obj_port, res res, ac acc, port port)
+			in ::[RES_PORT] 
+			 ,(::[RES_BASE_ACCS] all : res)
+			 ,(::[RES_ACC_VAL] all port_acc)	
+			 ,(::[AC_FIN] all ac) all		
+			 
+		  where
+		  	-- Условия по резервированию
+		  	res.[PROD_RES]%class = 'RES_PORT'
+		  	and res.[PROD_RES] = port
+		  	and (port.[DATE_CLOSE] is null or port.[DATE_CLOSE] >= P_DATE - 32) 
+		  	and port.[TYPE_RES].[NAME] not like 'ПОТ по экспресс-гарантиям%'
+			-- Присоединяем к ПОТ счета
+			and port.[ACCRS] = port_acc%collection
+			and port_acc.[RES_ACC] = ac
+			and port_acc.[DATE_BEGIN] <= P_DATE
+			and (port_acc.[DATE_END] is null or port_acc.[DATE_END] > P_DATE)
+ 
+		  	-- Условия по финансовому счёту
+		    and (ac.[DATE_CLOSE] is null or ac.[DATE_CLOSE] >= P_DATE - 32)
+		    and  ac.[DATE_OP] <= P_DATE
+		    and F.A('В' || ac.[ARC_MOVE] || 'сН', P_DATE + 1) <> 0
+		    
+		order by port, ac.[MAIN_V_ID], ac.[NAME]
+		)
+	loop
+		n := n + 1; 
+		if v_prev_port is null or v_prev_port <> port.obj_port then
+			v_cat := get_req_prod_num(port.res, P_DATE, 'M_CAT');
+			v_cat_prc := get_req_prod_num(port.res, P_DATE, 'M_CAT_PRC');
+		end if;
+
+		print_one(n, P_DATE, port.acc, port.res, port.obj_port, v_cat, v_cat_prc);
+		v_prev_port := port.obj_port;
+	end loop;
+end;
+PSH_REP_PROF_OP (
+	@name('Дата отчёта')   P_DATE    in [DATE],
+	@name('Капитал банка') P_CAPITAL in [SUMMA]
+) is
+
+validate is
+begin
+	if p_message = 'DEFAULT' then
+		li_cur_col := 0;
+		-- P_DATE := trunc(::[SYSTEM].[OP_DATE], 'MM') - 1;
+		
+	elsif  P_MESSAGE = 'VALIDATE'  then
+		if P_INFO = 'OK' then
+				if P_DATE is null or P_CAPITAL is null then
+					pragma error('Необходимо заполнить все поля!');
+		    	end if;
+				
+				if not nvl(&xl.open_file(::[SHABLON_DOC]([CODE]= 'PSB_REP_PROF_OP').[RPT_TMPL]), False) then
+					pragma error('Ошибка открытия шаблона с кодом '||'PSB_REP_PROF_OP');
+		    	end if;
+				&lp.xl_init('PSB_REP_PROF_OP');
+		    	
+		    	&xl.open_sheet(1);
+				&xl.put(4, 2, to_char(P_DATE, 'DD.MM.YYYY') || ' г.'); 
+				&xl.put(4, 7, P_CAPITAL); 
+				&xl.put(7, 5, P_CAPITAL*1000*0.005);
+
+		    	calc_POT_itog(P_DATE);
+		    	
+		    	&xl.open_sheet(2);		    					
+				&xl.put(4, 4, to_char(P_DATE, 'DD.MM.YYYY') || ' г.'); 
+				&xl.put(5, 9, P_CAPITAL); 
+				
+				li_cur_row := li_start_row;
+				
+				-- Формирование отчёта
+				calc_POT(P_DATE);
+				
+				&debug('Закончена обработка',10)
+				&xl.Set_Format_Range(li_start_row, 1, li_cur_row, li_cur_col, p_borderId==&xl.get_border(p_top=='thin',p_bottom=='thin',p_left=='thin',p_right=='thin'));
+				&xl.Set_Format_Range(li_start_row, li_start_row, 1, li_cur_col, p_fillId == &xl.get_fill_back_color('C1C1C1'));
+				&xl.set_autofilter(li_start_row, li_start_row, 1, li_cur_col);
+				
+				&lp.xl_finish;				
+	    end if;
+	end if;
+end;
+end;
+end;

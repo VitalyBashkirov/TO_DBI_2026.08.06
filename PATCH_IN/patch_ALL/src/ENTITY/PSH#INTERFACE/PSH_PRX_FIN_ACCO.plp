@@ -1,0 +1,77 @@
+class PSH#INTERFACE;
+
+@name('[ПСБ] Вызовы подсистемы "Финансовый учет"')
+@tag('COPIED')
+library PSH_PRX_FIN_ACCO is
+
+pragma include ([INTERFACE].[COMPILE_LIB]);
+
+public procedure AccountGet
+/*Получить счет по справочнику настраиваемых счетов*/
+(
+	P_TYPE_ACC ref [TIP_ACC]
+		/*Код*/
+	,P_FINTOOL_EXT ref [FT_MONEY]
+		/*Валюта доп.настройки*/
+	,P_FINTOOL	ref [FT_MONEY]
+		/*Валюта счета*/
+	,P_ACC	in out ref [AC_FIN]
+		/*Счет*/
+	,P_PRODUCT_NAME	STRING_20		default null
+		/*Продукт*/
+	,P_TAIL	[ACCNUM]	default null
+		/*Номер для формирования счета*/
+	,P_CLIENT ref [CLIENT]	default null
+		/*Клиент для открытия счета*/
+	,P_DEPART ref [DEPART]	default null
+		/*Подразделение*/
+	,P_DATE_OPEN	date	default null
+		/*Дата открытия*/
+	,P_CHECK_ONLY	boolean	default null
+		/*Проверка без открытия*/
+	,P_ADDS	[STRING_32000]	default null
+		/*Дополнительные параметры*/
+	,P_PRODUCT	ref [PRODUCT] default null
+		/*Продукт*/
+) is 
+begin
+	&call_int(FIN_ACCOUNT_INT, INT_ACC_FIN, 1).AccountGet(
+									P_TYPE_ACC			--Код
+									, P_FINTOOL_EXT		--Валюта доп.настройки
+									, P_FINTOOL			--Валюта счета
+									, P_ACC				--Счет
+									, P_PRODUCT_NAME	--Продукт
+									, P_TAIL			--Номер для формирования счета
+									, P_CLIENT			--Клиент для открытия счета
+									, P_DEPART			--Подразделение
+									, P_DATE_OPEN		--Дата открытия
+									, P_CHECK_ONLY		--Проверка без открытия
+									, P_ADDS			--Дополнительные параметры
+									, P_PRODUCT
+									);
+end;
+
+public function AC_FIN_CHECK_KEY
+/*функция для проверки контрольного ключа введенного номера финансового счета, например, при создании внешних документов*/
+(
+	 P_ACC	[ACCNUM]
+		/*Номер счета*/
+	,P_BIC	string(9)
+		/*БИК*/
+	,P_EXCEPTION boolean default null
+		/*Генирировать ошибку*/
+)
+/*Если НЕ Генирировать ошибку, то
+	если ключ рассчитан верно - возвращает null
+	иначе возвращает правильный контрольный ключ счета*/
+return string is 
+begin
+	return  &call_int(FIN_ACCOUNT_INT, INT_ACC_FIN, 1).AC_FIN_CHECK_KEY
+	(
+		 P_ACC 			/*Номер счета*/
+		,P_BIC			/*БИК банка, в котором открыт счет*/
+		,P_EXCEPTION	/*Генерировать ошибку*/
+	);
+end;
+
+end;

@@ -1,0 +1,33 @@
+class TAX_CL_PR_D_REQ;
+
+@import_plsql(true)
+@name('[ПСБ] Создать запрос (отладка)')
+@tag('COPIED')
+static method PSH_REQUEST_DATA is
+PSH_REQUEST_DATA (
+	@name('Отчетный период') P_PERIOD in [NUMBER]
+) is
+
+validate is
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		P_PERIOD := 2021;
+	end if;
+end;
+
+execute is
+
+dataReq	ref [TAX_CL_PR_D_REQ];
+
+dateBeg		date;
+dateEnd		date;
+begin
+	dateBeg := to_date('01/01/'||P_PERIOD, 'dd/mm/yyyy');
+	dateEnd := to_date('31/12/'||P_PERIOD, 'dd/mm/yyyy');
+	
+	dataReq := ::[TAX_CL_PROFIT].[PSH_LIB].createDataRequest(0, dateBeg, dateEnd); -- updated CHANGE_SHORT_NAME PSB_LIB->PSH_LIB 15/10/25
+	
+	dataReq.[SEND];
+end;
+end;
+end;

@@ -1,0 +1,280 @@
+class MAIN_DOCUM;
+
+@import_plsql(true)
+@name('[ПСБ] Фин.мониторинг. Выписки платежей по фильтрам')
+@tag('COPIED')
+static method PSH_REP_FINM1 is
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma macro (xl,'::[OOXML].[API_XL]');
+
+procedure print_xls(doc ref [MAIN_DOCUM], dt varchar2(1), iRow integer) is
+iFillYell  number;
+iFillRed   number;
+reas	varchar2;
+begin
+	iFillYell := &xl.get_fill_back_color( 'FFFF00');
+	iFillRed  := &xl.get_fill_back_color( 'FFFF0000');
+	
+	if dt = '1' then
+		for (select risk(risk.[INN] inn, 
+						 case risk.[RISK_LEVEL].[0] when 1 then 'СРЕДНИЙ' when 2 then 'ВЫСОКИЙ' end risk_lev,
+						 risk.[RISK_DATE] r_date,
+						 risk	obj
+						 )
+				in ::[KYC_LIST_RISKS] all
+			 where risk.[INN] in (doc.[ACC_DT].[CLIENT_V].[INN], coalesce(doc.[KL_KT].[2].[INN], doc.[ACC_KT].[CLIENT_V].[INN]))
+				and risk.[DATE_EXCLUDE] is null			 	
+			)
+		loop
+			reas := null;
+			for sh in risk.obj.[REASONS]
+			loop
+				if reas is null then
+					reas := '|' ||sh.[TYPOLOGY].[CODE];
+				else reas := reas || ',' || sh.[TYPOLOGY].[CODE];
+				end if;
+			end loop;
+			
+			if risk.inn = doc.[ACC_DT].[CLIENT_V].[INN] then
+				&xl.put(iRow,8, case when reas is not null then risk.risk_lev || '|' || to_char(risk.r_date, 'DD.MM.YYYY') || reas
+									 else risk.risk_lev || '|' || to_char(risk.r_date, 'DD.MM.YYYY')
+									 end);
+			 	if risk.risk_lev = 'СРЕДНИЙ' then 
+			 			 &xl.Set_Format_Range(iRow,8,iRow,8, p_fillId == iFillYell);
+			 	elsif risk.risk_lev = 'ВЫСОКИЙ' then 
+			 			 &xl.Set_Format_Range(iRow,8,iRow,8, p_fillId == iFillRed);
+			 	end if;
+			elsif risk.inn = coalesce(doc.[KL_KT].[2].[INN], doc.[ACC_KT].[CLIENT_V].[INN]) then
+				&xl.put(iRow,15, case when reas is not null then risk.risk_lev || '|' || to_char(risk.r_date, 'DD.MM.YYYY') || reas
+									 else risk.risk_lev || '|' || to_char(risk.r_date, 'DD.MM.YYYY')
+									 end);
+			 	if risk.risk_lev = 'СРЕДНИЙ' then 
+			 			 &xl.Set_Format_Range(iRow,15,iRow,15, p_fillId == iFillYell);
+			 	elsif risk.risk_lev = 'ВЫСОКИЙ' then 
+			 			 &xl.Set_Format_Range(iRow,15,iRow,15, p_fillId == iFillRed);
+			 	end if;
+			end if;
+		end loop;			
+	
+		&xl.put(iRow,1,  to_char(doc.[DATE_PROV], 'DD/MM/YYYY'));
+		&xl.put(iRow,2,  doc.[SUM]);
+		&xl.put(iRow,3,  doc.[VALUTA].[CUR_SHORT]);
+		&xl.put(iRow,4,  doc.[SUM_NT]);
+		&xl.put(iRow,5,  substr(doc.[ACC_DT].[MAIN_V_ID],1,5));
+		&xl.put(iRow,6,  doc.[ACC_DT].[CLIENT_V].[NAME]);
+		&xl.put(iRow,7,  doc.[ACC_DT].[CLIENT_V].[INN]);
+	
+		&xl.put(iRow,9,  'Списание');
+		-- Вывод БИК и наименование головного банка
+	    if doc.[KL_KT].[2].[3].[BIC] is not null 
+	    	and coalesce(doc.[KL_KT].[2].[3].[BANK_TYPE].[ABBREVIATION], doc.[KL_KT].[2].[3].[BANK_TYPE].[CODE]) = 'ФБ' 
+	    	and instr(doc.[KL_KT].[2].[3].[REG_NUM],'/') > 0 then
+		    for (select gbank(gbank.[BIC]  b_bic,
+		    				  gbank.[NAME] b_name)
+		    		in ::[CL_BANK_N]
+		    		where gbank.[REG_NUM] is not null and substr(doc.[KL_KT].[2].[3].[REG_NUM], 1, instr(doc.[KL_KT].[2].[3].[REG_NUM], '/') - 1) = gbank.[REG_NUM]
+		    			and coalesce(gbank.[BANK_TYPE].[ABBREVIATION], gbank.[BANK_TYPE].[CODE]) = 'Б'
+		    			and rownum = 1
+		    )
+		    loop
+		    	&xl.put(iRow,10, gbank.b_bic);
+	    		&xl.put(iRow,11, gbank.b_name);
+		    end loop;
+	    else
+	    	&xl.put(iRow,10, coalesce(doc.[KL_KT].[2].[3].[BIC],  [SYSTEM]::[VARIABLES].OurBank.[BIC]));
+			&xl.put(iRow,11, coalesce(doc.[KL_KT].[2].[3].[NAME], [SYSTEM]::[VARIABLES].OurBank.[NAME]));
+	    end if;
+
+	    &xl.put(iRow,12, substr(coalesce(doc.[KL_KT].[2].[1], doc.[ACC_KT].[MAIN_V_ID]),1,5));	
+	    &xl.put(iRow,13, coalesce(doc.[KL_KT].[2].[2],   doc.[ACC_KT].[CLIENT_V].[NAME]));	
+	    &xl.put(iRow,14, coalesce(doc.[KL_KT].[2].[INN], doc.[ACC_KT].[CLIENT_V].[INN]));
+	    &xl.put(iRow,16, doc.[NAZN]);
+
+	elsif dt = '0' then
+		for (select risk(risk.[INN] inn, 
+						 case risk.[RISK_LEVEL].[0] when 1 then 'СРЕДНИЙ' when 2 then 'ВЫСОКИЙ' end risk_lev,
+						 risk.[RISK_DATE] r_date,
+						 risk	obj						 
+						 )
+				in ::[KYC_LIST_RISKS] all
+			 where risk.[INN] in (doc.[ACC_KT].[CLIENT_V].[INN], coalesce(doc.[KL_DT].[2].[INN], doc.[ACC_DT].[CLIENT_V].[INN]))
+				and risk.[DATE_EXCLUDE] is null	
+			)
+		loop
+			reas := null;
+			for sh in risk.obj.[REASONS]
+			loop
+				if reas is null then
+					reas := '|' ||sh.[TYPOLOGY].[CODE];
+				else reas := reas || ',' || sh.[TYPOLOGY].[CODE];
+				end if;
+			end loop;
+			
+			if risk.inn = doc.[ACC_KT].[CLIENT_V].[INN] then
+			 	&xl.put(iRow,8,  case when reas is not null then risk.risk_lev || '|' || to_char(risk.r_date, 'DD.MM.YYYY') || reas
+									 else risk.risk_lev || '|' || to_char(risk.r_date, 'DD.MM.YYYY')
+									 end);
+			 	if risk.risk_lev = 'СРЕДНИЙ' then 
+			 			 &xl.Set_Format_Range(iRow,8,iRow,8, p_fillId == iFillYell);
+			 	elsif risk.risk_lev = 'ВЫСОКИЙ' then 
+			 			 &xl.Set_Format_Range(iRow,8,iRow,8, p_fillId == iFillRed);
+			 	end if;
+			elsif risk.inn = coalesce(doc.[KL_DT].[2].[INN], doc.[ACC_DT].[CLIENT_V].[INN]) then
+			 	&xl.put(iRow,15, case when reas is not null then risk.risk_lev || '|' || to_char(risk.r_date, 'DD.MM.YYYY') || reas
+									 else risk.risk_lev || '|' || to_char(risk.r_date, 'DD.MM.YYYY')
+									 end);
+			 	if risk.risk_lev = 'СРЕДНИЙ' then 
+			 			 &xl.Set_Format_Range(iRow,15,iRow,15, p_fillId == iFillYell);
+			 	elsif risk.risk_lev = 'ВЫСОКИЙ' then 
+			 			 &xl.Set_Format_Range(iRow,15,iRow,15, p_fillId == iFillRed);
+			 	end if;
+			end if;
+		end loop;			
+	
+		&xl.put(iRow,1,  to_char(doc.[DATE_PROV], 'DD/MM/YYYY'));
+		&xl.put(iRow,2,  doc.[SUM]);
+		&xl.put(iRow,3,  doc.[VALUTA].[CUR_SHORT]);
+		&xl.put(iRow,4,  doc.[SUM_NT]);
+		&xl.put(iRow,5,  substr(doc.[ACC_KT].[MAIN_V_ID],1,5));
+		&xl.put(iRow,6,  doc.[ACC_KT].[CLIENT_V].[NAME]);
+		&xl.put(iRow,7,  doc.[ACC_KT].[CLIENT_V].[INN]);
+	
+		&xl.put(iRow,9,  'Зачисление');
+		-- Вывод БИК и наименование головного банка
+	    if doc.[KL_DT].[2].[3].[BIC] is not null 
+	    	and coalesce(doc.[KL_DT].[2].[3].[BANK_TYPE].[ABBREVIATION], doc.[KL_DT].[2].[3].[BANK_TYPE].[CODE]) = 'ФБ' 
+	    	and instr(doc.[KL_DT].[2].[3].[REG_NUM],'/') > 0 then
+		    for (select gbank(gbank.[BIC]  b_bic,
+		    				  gbank.[NAME] b_name)
+		    		in ::[CL_BANK_N]
+		    		where gbank.[REG_NUM] is not null and substr(doc.[KL_DT].[2].[3].[REG_NUM], 1, instr(doc.[KL_DT].[2].[3].[REG_NUM], '/') - 1) = gbank.[REG_NUM]
+		    			and coalesce(gbank.[BANK_TYPE].[ABBREVIATION], gbank.[BANK_TYPE].[CODE]) = 'Б'
+		    			and rownum = 1
+		    )
+		    loop
+		    	&xl.put(iRow,10, gbank.b_bic);
+	    		&xl.put(iRow,11, gbank.b_name);
+		    end loop;
+	    else
+	    	&xl.put(iRow,10, coalesce(doc.[KL_DT].[2].[3].[BIC],  [SYSTEM]::[VARIABLES].OurBank.[BIC]));
+			&xl.put(iRow,11, coalesce(doc.[KL_DT].[2].[3].[NAME], [SYSTEM]::[VARIABLES].OurBank.[NAME]));
+	    end if;
+	    &xl.put(iRow,12, substr(coalesce(doc.[KL_DT].[2].[1], doc.[ACC_DT].[MAIN_V_ID]),1,5));	
+	    &xl.put(iRow,13, coalesce(doc.[KL_DT].[2].[2],   doc.[ACC_DT].[CLIENT_V].[NAME]));	
+	    &xl.put(iRow,14, coalesce(doc.[KL_DT].[2].[INN], doc.[ACC_DT].[CLIENT_V].[INN]));
+	    &xl.put(iRow,16, doc.[NAZN]);
+	end if;
+end;
+PSH_REP_FINM1 (
+	@name('Дата начала')    P_DATE in [DATE] default null,
+	@name('Дата окончания') P_END  in [DATE] default null,
+	@name('Список ИНН')     P_INN  in [MEMO]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATE := [SYSTEM]::[OP_DATE];
+end if;
+-- End initialization of parameters and variables
+begin
+	
+	if P_MESSAGE = 'DEFAULT' then	    
+		P_DATE:= ::[SYSTEM].[OP_DATE]-1;
+		P_END:= ::[SYSTEM].[OP_DATE];
+	end if;
+
+	if P_MESSAGE = 'VALIDATE' then
+		if P_INFO = 'OK' then
+	  		null;
+		end if;
+	end if;
+End;
+end;
+
+execute is
+	iRow		number;
+	iBorder		integer;
+	v_blob_body	blob;
+begin
+	::[SHABLON_DOC].[LIB_OOXML].load_blob('PSB_REP_FINM1', v_blob_body, null, null, null, null);
+	&xl.init_xls;
+	     
+	if not &xl.open_file(v_blob_body) then
+		pragma error('Не найден шаблон "PSB_REP_FINM1" в справочнике шаблонов документов!');           
+	end if; 	  
+	   
+	&xl.Open_Sheet(1);			
+	&xl.RenameSheet(1,to_char(P_DATE,'dd.mm.yy')||'_'||to_char(P_END,'dd.mm.yy')); 			
+	
+	iRow := 1;
+	iBorder := &xl.get_border(p_top==&xl.xl_b_thin, p_bottom==&xl.xl_b_thin, p_left==&xl.xl_b_thin, p_right==&xl.xl_b_thin);
+	
+	for (
+	        select z(
+				      	z  																	: obj
+					    , z.[ACC_DT].[MAIN_V_ID]											: c_acc_dt
+					    , z.[ACC_KT].[MAIN_V_ID]											: c_acc_kt
+					    , z.[ACC_DT].[CLIENT_V].[INN]										: c_dt_inn
+					    , z.[ACC_KT].[CLIENT_V].[INN]										: c_kt_inn
+						
+		
+						) in ::[MAIN_DOCUM]
+						
+						where  z.[DATE_PROV] >= P_DATE 
+						  and z.[DATE_PROV] < P_END + 1
+						  and z%state = 'PROV'
+						  and (    substr(z.[ACC_DT].[MAIN_V_ID],1,3) in ('407', '408') 
+						  		or substr(z.[ACC_KT].[MAIN_V_ID],1,3) in ('407', '408'))
+						  and z.[SUM] > 0
+						  and z.[SUM_PO] > 0
+						  and ( (P_INN like '%'||coalesce(z.[ACC_DT].[CLIENT_V].[INN], '#')||'%' and substr(z.[ACC_DT].[MAIN_V_ID],1,3) in ('407', '408'))
+						  	   or
+						  	    (P_INN like '%'||coalesce(z.[ACC_KT].[CLIENT_V].[INN], '#')||'%' and substr(z.[ACC_KT].[MAIN_V_ID],1,3) in ('407', '408'))
+						  	   or 
+						  	   P_INN is null)
+						  --and z.[ACC_KT].[MAIN_V_ID] <> '40807810010000021135'
+						
+				order by z.[DATE_PROV]
+					
+	)loop
+	    
+		if	   substr(z.c_acc_dt, 1, 3) in ('407', '408') 
+		   and substr(z.c_acc_kt, 1, 3) in ('407', '408')
+			then
+				if substr(z.c_acc_dt, 1, 3) in ('407', '408')
+					and (P_INN is null or P_INN like '%'||coalesce(z.c_dt_inn, '#')||'%' ) 
+				then
+					iRow :=	iRow + 1;	
+					print_xls(z.obj, '1', iRow);
+				end if;
+				
+				if substr(z.c_acc_kt, 1, 3) in ('407', '408')
+					and (P_INN is null or P_INN like '%'||coalesce(z.c_kt_inn, '#')||'%' )
+				then
+					iRow :=	iRow + 1;
+					print_xls(z.obj, '0', iRow);
+				end if;
+		elsif  substr(z.c_acc_dt, 1, 3) in ('407', '408')
+			and (P_INN is null or P_INN like '%'||coalesce(z.c_dt_inn, '#')||'%' )
+		then 
+			iRow :=	iRow + 1;	 
+			print_xls(z.obj, '1', iRow);
+		elsif  substr(z.c_acc_kt, 1, 3) in ('407', '408')
+			and (P_INN is null or P_INN like '%'||coalesce(z.c_kt_inn, '#')||'%' )
+		then 
+			iRow :=	iRow + 1;
+			print_xls(z.obj, '0', iRow);			
+		end if;	
+	end loop;	
+	
+	&xl.Set_Format_Range(1, 1, iRow, 16, p_borderId == iBorder);
+	&xl.set_autofilter(1, 1, 1, 16);
+
+	&xl.finish(v_blob_body);
+	[OOXML]::[API_ORSA].putReport2RunExtProc(v_blob_body,'xlsx', '[' || &METHOD$CLASS || '] "'|| &METHOD$NAME || '"');
+
+end;
+end;
+end;

@@ -1,0 +1,1084 @@
+class TMC_DOCUM;
+
+@optimize(false)
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('Обработать')
+@tag('COPIED')
+batch method WORK_DOCUM_SPIS is
+
+@name('Признак определения курса')
+public V_SIGN_COURSE [BOOLEAN];
+@name('Код материальной операции')
+public V#CODE_OPER [STRING_16];
+@name('Признак наличия ссылки на Договор')
+public P_IS_TRUST_DOCUM_REF [BOOLEAN];
+@name('Номер счета-фактуры')
+public V_NUM_FACT [STRING_35];
+@name('Дата оплаты')
+public V_DATE_PAY [DATE];
+@name('Дата принятия на учет')
+public V_DATE_USAGE [DATE];
+@name('Тип счета-фактуры')
+public V_TYPE [ONE_FROM_THREE];
+@name('Дата создания счета-фактуры')
+public V_DATE_FACTURA [DATE];
+@name('Порождать первичный счет-фактуру')
+public V_SIGN_SF_INITION [BOOLEAN];
+@name('Порождать вторичный счет-фактуру')
+public V_SIGN_SF_INVOICE [BOOLEAN];
+@name('Обработка одного документа')
+public V_WORK_ONE [BOOLEAN];
+@name('Признак наличия хоз.договора')
+public V_SIGN_HOZ_DOG [BOOLEAN];
+@name('Признак создания СФ на покупку')
+public V_SIGN_SF_BUY [BOOLEAN];
+@name('Тип счета-фактуры')
+public V_CHOOSE [CASE_BETWEEN_TWO];
+@name('Переменная валидатора')
+public V_EXEC [STRING_32000];
+@name('Список электронных СФ')
+public V_ARR table of [TEMP_TABLE_S];
+@name('Тип документа СЭД')
+public V_TYPE_SED [CASE_BETWEEN_TWO];
+pragma include (::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma include (::[RUNTIME].[MACRO_LIB]);
+
+use_sed 						boolean := false;
+use_sed_utd 					boolean := false;
+idx								integer;
+factura_temp 				ref [FACTURA_DOC];
+tune_common_folder_for_docs		boolean	:= ::[TMC_IMPORT].[TUNE_PRODUCT].get_common_folder_for_docs;
+spisCreateSF					boolean;	-- если требуется создать СФ при списке документов
+idxValidate						integer;	-- на этом экземпляре запускаем валидатор с p_message = VALIDATE
+
+procedure check_controls(
+	type_sf_visible  boolean,
+	type_sed_visivle boolean
+) is
+begin
+	if nvl(type_sf_visible, false) then
+		[CSMD].Command(V_EXEC, 'TYPE_SF.Visible = True');
+		[CSMD].Command(V_EXEC, 'SedType_Frame.Visible = False');
+	else
+		[CSMD].Command(V_EXEC, 'TYPE_SF.Visible = False');
+		if type_sed_visivle then
+			[CSMD].Command(V_EXEC, 'SedType_Frame.Visible = True');	
+		else
+			[CSMD].Command(V_EXEC, 'SedType_Frame.Visible = False');
+		end if;	
+	end if;
+end;
+
+
+public procedure createIFRS_one(p_docum ref [TMC_DOCUM], p_date date, p_from_afpp_reval boolean default false)
+is
+	hoz_dog 		ref [AUR_DOCUM];
+	p_check 			boolean;
+	ac_m 			ref [TMC_LIST];
+	lv_canon_val 		varchar2(2000);
+	hoz_oper 		ref [HOZ_OPER];
+	cal_calc 		ref [CALENDAR_CALC];
+begin		
+	if nvl(::[FP_TUNE].[LIB].get_bool_value('1B580011'), false) = true
+		and (
+		(p_docum.[DOC_NAME_REF].[OPER].[CODE] like '%АМОРТИЗАЦИЯ%' and p_docum.[DOC_NAME_REF].[TYPE_SUP].[CODE] like '%АФПП%')
+		or 
+		p_from_afpp_reval)
+	then
+		begin
+			if p_docum.[HOZ_DOG_REF] is not null then
+				hoz_dog := p_docum.[HOZ_DOG_REF];
+				p_check := true;
+			else
+				locate ac_m in p_docum.[LIST_TMC]
+					where ac_m.[ACC_MAT_SUP] is not null and ac_m.[ACC_MAT_SUP].[GRUPPA].[TYPE].[CODE] = 'АФПП';
+				p_check := true;
+				for i in ac_m.[ACC_MAT_SUP].[TAB_MOVE]
+				loop
+					if i.[TMC_DOCUM_REF].[DOC_NAME_REF].[OPER].[CODE] = 'ПРИХОД' then
+						hoz_dog := i.[TMC_DOCUM_REF].[HOZ_DOG_REF];
+						EXIT;
+					end if;
+				end loop;
+			end if;
+		exception
+			when NO_DATA_FOUND then
+				p_check := false;
+				stdio.PUT_LINE_BUF('Не найден мат. счет с типом АФПП!');
+			end;
+		&debug('  мат.счет id ' || ac_m || ' №' || ac_m.[ACC_MAT],0)
+		&debug('  договор id ' || hoz_dog || ', №' || hoz_dog.[NUM_DOG] || ' от ' || to_char(hoz_dog.[DATE_BEGINING],'dd.mm.yyyy'),0)
+		&debug('  сумма для операции амортизации (с мат. документа) = ' || p_docum.[SUM_DEPR],0)
+			
+		if nvl(p_check, false) then
+			if hoz_dog is null then
+				stdio.PUT_LINE_BUF('По материальному счету №'||ac_m.[ACC_MAT_SUP].[ACC_MAT]||' не созданы экземпляры (АМОРТИЗАЦИЯ_АФПП) в календаре закрытий хозяйственного договора!');
+			elsif nvl(hoz_dog.[IFRS_16], false) then
+				declare
+					hoz_dog_cel		ref [AUR_DOCUM];
+				begin
+					&sp(CR_IFRS_ONE)
+					lv_canon_val := ::[FP_TUNE].[LIB].set_canons('VID_DOGOVOR', hoz_dog.[VID_DOG] , '<BP_IFRS16>', 'AM_AFPP');
+					hoz_oper := ::[FP_TUNE].[LIB].get_ref_value (code == 'IFRS16_HOZ_OPER', canon_vals == lv_canon_val);
+					
+					if p_docum.[SUM_DEPR] is null or p_docum.[SUM_DEPR] < 0 then
+						&debug('   В календарь закрытий хоз. договора №'||hoz_dog_cel.[NUM_DOG]||' от '|| to_char(hoz_dog_cel.[DATE_BEGIN], 'DD/MM/YYYY') 
+							||' экземпляр хоз. операции "' || hoz_oper.[NAME] || '" не добавляем, т.к. сумма амортизации в документе = ' ||p_docum.[SUM_DEPR] ,0)
+					--если договор - рамочный долевой собственности, то хоз операцию нужно создавать в каждом договоре нижнего уровня
+					elsif nvl(hoz_dog.[VID_DOG].[FRAME_DOG],false) and nvl(hoz_dog.[VID_DOG].[ARENDA_PART_OWN],false) then
+						for (Select sel(low_dog						: dog,
+							low_dog.[SUMMA_DOG] 	: summa_dog,
+							low_dog.[DATE_ENDING] 	: date_ending)
+							in ::[TMC_A_DOG_CONN], (::[AUR_DOCUM] low_dog) all
+							where sel%collection = hoz_dog.[CONN_TABLE]
+							    and sel.[KIND_CONNECT] = ::[TMC_KIND_CONNECT]([CODE] = 'ДОГ_НИЖ_УР')
+								and low_dog = sel.[CONNECT_DOG_REF])
+						loop
+							hoz_dog_cel := sel.dog;
+							cal_calc := ::[VHO_INTERFACE].[PRX_TMC].New_calc(
+															P_THIS == hoz_dog_cel.[CALEND_CLOSE]
+															, P_HOZ_OPER == hoz_oper
+															, P_DATE_OPER == p_docum.[DATE_DOC]
+															, P_SUMMA_OPER == p_docum.[SUM_DEPR]
+															, P_SUM_OPER_VAL_DOG == null
+															, P_DAYS == 0
+															, P_SUMMA_DAY == 0
+															, P_SUMMA_NORMA == 0
+															, P_SUMMA_NDS == 0
+															, P_SUMM_NDS_VAL == 0
+															, P_NDS == ::[SYSTEM].[VAL_ADD_TAX](3, P_DATE)
+															, P_KIND_NDS == false
+															, P_SUMMA_NSP == 0
+															, P_NSP == null
+															, P_KIND_NSP == false
+															, P_SUMMA_RBP == 0
+															, P_SUMMA_NDS_RBP == 0
+															, P_VALUTA == ::[SYSTEM].[VARIABLES].NatCur
+															, P_COURSE == null
+															, P_COURSE_DOG == null
+															, P_COURSE_DATE == false
+															, P_RATE_TYPE == hoz_dog_cel.[RATE_TYPE]
+															, P_NAZN == 0
+															, P_CLIENT_ACC == p_docum.[ACC_CLIENT]
+															, P_SUB_CLIENT == hoz_dog_cel.[CLIENT]
+															, P_SET_CLIENT_ACC == hoz_dog_cel.[SET_CLIENT_ACC]
+															, P_BANKS_ACC == hoz_dog_cel.[ACC_BANKS]
+															, P_NDS_ACC == null
+															, P_CAPITAL_ACC == hoz_dog_cel.[ACC_CAPITAL]
+															, P_RASHOD == null
+															, P_GRT_RASHOD == null
+															, P_ACC_ADD_RASHOD == null
+															, P_CLIENT_RBP == hoz_dog_cel.[CLIENT_RBP]
+															, P_ACC_RC == null
+															, P_KNP == null
+															, P_VID_DOC == null
+															, P_KIND_EXEC == null
+															, P_DATE_EXEC == p_docum.[DATE_DOC]
+															, P_TYPE_MESS == null
+															, P_DOC_SEND == null
+															, P_SYM_KS == null
+															, P_NUM_KASSA == null
+															, P_NUM_FACT == null
+															, P_DATE_FACT == null
+															, P_DATE_PAY == null
+															, P_DOG_PURPOSE == null
+															, P_CON_DOC_NUM == null
+															, P_CON_DOC_DATE == null
+															, P_BEG_DATE == null
+															, P_END_DATE == null
+															, P_DATE_COURSE_CALC == null
+															, P_BUD_REQS == null
+															, P_ACC_OTHER == null
+															);
+							cal_calc.[TMC_DOCUM_REF] := p_docum;
+							cal_calc.[FOLDER] := p_docum.[IN_FOLDER];
+							cal_calc%state := 'FACT';
+							stdio.PUT_LINE_BUF('В календаре закрытий хоз. договора №'||hoz_dog_cel.[NUM_DOG]||' от '|| to_char(hoz_dog_cel.[DATE_BEGIN], 'DD/MM/YYYY') 
+								||' создан экземпляр хоз. операции "' || hoz_oper.[NAME] || '"');
+							&debug('   В календаре закрытий хоз. договора №'||hoz_dog_cel.[NUM_DOG]||' от '|| to_char(hoz_dog_cel.[DATE_BEGIN], 'DD/MM/YYYY') 
+								||' создан экземпляр хоз. операции "' || hoz_oper.[NAME] || '"',0)
+						end loop;
+					else
+						hoz_dog_cel := hoz_dog;
+						cal_calc := ::[VHO_INTERFACE].[PRX_TMC].New_calc(
+															P_THIS == hoz_dog_cel.[CALEND_CLOSE]
+															, P_HOZ_OPER == hoz_oper
+															, P_DATE_OPER == p_docum.[DATE_DOC]
+															, P_SUMMA_OPER == p_docum.[SUM_DEPR]
+															, P_SUM_OPER_VAL_DOG == null
+															, P_DAYS == 0
+															, P_SUMMA_DAY == 0
+															, P_SUMMA_NORMA == 0
+															, P_SUMMA_NDS == 0
+															, P_SUMM_NDS_VAL == 0
+															, P_NDS == ::[SYSTEM].[VAL_ADD_TAX](3, P_DATE)
+															, P_KIND_NDS == false
+															, P_SUMMA_NSP == 0
+															, P_NSP == null
+															, P_KIND_NSP == false
+															, P_SUMMA_RBP == 0
+															, P_SUMMA_NDS_RBP == 0
+															, P_VALUTA == ::[SYSTEM].[VARIABLES].NatCur
+															, P_COURSE == null 
+															, P_COURSE_DOG == null
+															, P_COURSE_DATE == false
+															, P_RATE_TYPE == hoz_dog_cel.[RATE_TYPE]
+															, P_NAZN == 0
+															, P_CLIENT_ACC == p_docum.[ACC_CLIENT]
+															, P_SUB_CLIENT == hoz_dog_cel.[CLIENT]
+															, P_SET_CLIENT_ACC == hoz_dog_cel.[SET_CLIENT_ACC]
+															, P_BANKS_ACC == hoz_dog_cel.[ACC_BANKS]
+															, P_NDS_ACC == null
+															, P_CAPITAL_ACC == hoz_dog_cel.[ACC_CAPITAL]
+															, P_RASHOD == null
+															, P_GRT_RASHOD == null
+															, P_ACC_ADD_RASHOD == null
+															, P_CLIENT_RBP == hoz_dog_cel.[CLIENT_RBP]
+															, P_ACC_RC == null
+															, P_KNP == null
+															, P_VID_DOC == null
+															, P_KIND_EXEC == null
+															, P_DATE_EXEC == p_docum.[DATE_DOC]
+															, P_TYPE_MESS == null
+															, P_DOC_SEND == null
+															, P_SYM_KS == null
+															, P_NUM_KASSA == null
+															, P_NUM_FACT == null
+															, P_DATE_FACT == null
+															, P_DATE_PAY == null
+															, P_DOG_PURPOSE == null
+															, P_CON_DOC_NUM == null
+															, P_CON_DOC_DATE == null
+															, P_BEG_DATE == null
+															, P_END_DATE == null
+															, P_DATE_COURSE_CALC == null
+															, P_BUD_REQS == null
+															, P_ACC_OTHER == null
+															);
+						cal_calc.[TMC_DOCUM_REF] := p_docum;
+						cal_calc.[FOLDER] := p_docum.[IN_FOLDER];
+						cal_calc%state := 'FACT';
+						stdio.PUT_LINE_BUF('В календаре закрытий хоз. договора №'||hoz_dog_cel.[NUM_DOG]||' от '|| to_char(hoz_dog_cel.[DATE_BEGIN], 'DD/MM/YYYY') 
+							||' создан экземпляр хоз. операции "' || hoz_oper.[NAME] || '"');
+						&debug('   В календаре закрытий хоз. договора №'||hoz_dog_cel.[NUM_DOG]||' от '|| to_char(hoz_dog_cel.[DATE_BEGIN], 'DD/MM/YYYY') 
+							||' создан экземпляр хоз. операции "' || hoz_oper.[NAME] || '"',0)
+					end if;
+				exception
+					when others then
+						-- Причина перехвата others: перехватываем все возможнные исключения для вывода сообщения в буфер.
+						&rb(CR_IFRS_ONE)
+						stdio.put_line_buf ('--------------------------------');	
+						stdio.put_line_buf (sqlerrm || chr(13) || ::[RUNTIME].[UTILS].error_stack(true));
+						stdio.PUT_LINE_BUF('!!!ОШИБКА при формировании экземпляра в календаре закрытий по хоз договору ' ||
+							hoz_dog_cel.[NUM_DOG]||' от '|| to_char(hoz_dog_cel.[DATE_BEGIN], 'DD/MM/YYYY'));
+						stdio.put_line_buf ('--------------------------------');	
+				end;
+			end if;
+		end if;
+	end if;	
+end;
+	
+	
+--Создания календаря IFRS амортизации
+public procedure createIFRS_many_or_zero(p_docum ref [TMC_DOCUM], p_date date, p_from_afpp_reval boolean default false)
+is
+	sum_op 			[SUMMA];
+	p_check 		boolean;
+	hoz_dog 	ref [AUR_DOCUM];
+	lv_canon_val 	varchar2(2000);
+	hoz_oper 	ref [HOZ_OPER];
+	cal_calc 	ref [CALENDAR_CALC];
+	type t_ac_mat is table of ref [AC_MAT];
+	ac_mat_tb		t_ac_mat;
+	ac_m		ref [AC_MAT];
+begin	
+	if nvl(::[FP_TUNE].[LIB].get_bool_value('1B580011'), false) = true
+		and (
+			(p_docum.[DOC_NAME_REF].[OPER].[CODE] like '%АМОРТИЗАЦИЯ%' and p_docum.[DOC_NAME_REF].[TYPE_SUP].[CODE] like '%АФПП%')
+			or
+			p_from_afpp_reval)
+	then
+		
+		&debug('-->createIFRS_many_or_zero',0)	
+		
+		if p_docum.[LIST_TMC]%size(null) > 1 then
+			-- собираем мат счета из списка тмц
+			for tmc in p_docum.[LIST_TMC]
+				where tmc.[ACC_MAT_SUP] is not null
+					and tmc.[ACC_MAT_SUP].[GRUPPA].[TYPE].[CODE] = 'АФПП'
+			loop
+				ac_mat_tb(ac_mat_tb.count + 1) := tmc.[ACC_MAT_SUP];
+				&debug('  + мат счет (из массива) ' || tmc.[ACC_MAT_SUP],0)
+			end loop;
+			&debug('  собрали мат счета из списка тмц, всего ' || ac_mat_tb.count,0)
+		elsif p_docum.[LIST_TMC]%size(null) = 0 then
+			-- собираем матсчета по таблицам движений
+			for (select distinct x(x : ac_mat)
+					in [AC_MAT], (TMC_MOVE all : m)
+					where
+						x.[TAB_MOVE] = m%collection
+						and m.[TMC_DOCUM_REF] = p_docum
+				)
+			loop
+				ac_mat_tb(ac_mat_tb.count + 1) := x.ac_mat;
+				&debug('  + мат счет (из движений) ' || x.ac_mat,0)
+			end loop;
+			&debug('  собрали мат счета по таблицам движений, всего ' || ac_mat_tb.count,0)
+		else
+			-- createIFRS_one - оставлена превоначальная реализация в теле
+			null;
+			return;
+		end if;
+		
+		if ac_mat_tb.count = 0 then
+			return;
+		end if;
+		
+		p_check := false;
+		-- проходим выделенным мат счетам
+		for ind in 1..ac_mat_tb.last
+		loop
+			ac_m := ac_mat_tb(ind);
+			
+			&debug('  ------',0)
+			&debug('  мат.счет id ' || ac_m,0)
+			
+			p_check := true;
+			hoz_dog := null;
+			-- получаем хоз договор из прихода
+			for i in ac_m.[TAB_MOVE]
+			loop
+				if i.[TMC_DOCUM_REF].[DOC_NAME_REF].[OPER].[CODE] = 'ПРИХОД' then
+					hoz_dog := i.[TMC_DOCUM_REF].[HOZ_DOG_REF];
+					EXIT;
+				end if;
+			end loop;
+			
+			&debug('  договор id ' || hoz_dog,0)
+			
+			if hoz_dog is null then
+				stdio.PUT_LINE_BUF('По материальному счету №'||ac_m.[ACC_MAT]||' не созданы экземпляры (АМОРТИЗАЦИЯ_АФПП) в календаре закрытий хозяйственного договора! (договор не определен)');
+			elsif nvl(hoz_dog.[IFRS_16], false) then
+				declare
+					hoz_dog_cel		ref [AUR_DOCUM];
+				begin
+					&sp(CR_IFRS_MANY_ZERO)
+					lv_canon_val := ::[FP_TUNE].[LIB].set_canons('VID_DOGOVOR', hoz_dog.[VID_DOG] , '<BP_IFRS16>', 'AM_AFPP');
+					hoz_oper := ::[FP_TUNE].[LIB].get_ref_value (code == 'IFRS16_HOZ_OPER', canon_vals == lv_canon_val);
+					
+					sum_op := 0;
+					for (select  x (
+								sum (m.[PER_DEPR]) : SUM_DEPR
+								,  x : tmc
+							)
+					in [AC_MAT], (TMC_MOVE all : m)
+					where
+						x.[TAB_MOVE] = m%collection
+						and m.[TMC_DOCUM_REF] = p_docum
+						and x = ac_m
+					group by x
+					)
+					loop
+						sum_op := x.sum_depr;
+					end loop;
+					
+					&debug('  сумма для операции амортизации = ' || sum_op,0)
+					
+					--если договор - рамочный долевой собственности, то хоз операцию нужно создавать в каждом договоре нижнего уровня
+					if nvl(hoz_dog.[VID_DOG].[FRAME_DOG],false) and nvl(hoz_dog.[VID_DOG].[ARENDA_PART_OWN],false) then
+						for (Select sel(low_dog						: dog,
+								low_dog.[SUMMA_DOG] 	: summa_dog,
+								low_dog.[DATE_ENDING] 	: date_ending)
+								in ::[TMC_A_DOG_CONN], (::[AUR_DOCUM] low_dog) all
+								where sel%collection = hoz_dog.[CONN_TABLE]
+								    and sel.[KIND_CONNECT] = ::[TMC_KIND_CONNECT]([CODE] = 'ДОГ_НИЖ_УР')
+									and low_dog = sel.[CONNECT_DOG_REF])
+						loop
+							hoz_dog_cel := sel.dog;
+							if sum_op <= 0 then
+								stdio.PUT_LINE_BUF('В календаре закрытий хоз. договора №'||hoz_dog_cel.[NUM_DOG]||' от '|| to_char(hoz_dog_cel.[DATE_BEGIN], 'DD/MM/YYYY') 
+									||' экземпляр не создан, сумма операции ' || case when sum_op = 0 then '=' else '<' end ||' 0.');
+								&debug('В календаре закрытий хоз. договора №'||hoz_dog_cel.[NUM_DOG]||' от '|| to_char(hoz_dog_cel.[DATE_BEGIN], 'DD/MM/YYYY') 
+									||' экземпляр не создан, сумма операции '||case when sum_op = 0 then '=' else '<' end ||' 0.',0)
+								continue;
+							end if;
+							cal_calc := ::[VHO_INTERFACE].[PRX_TMC].New_calc(
+															P_THIS == hoz_dog_cel.[CALEND_CLOSE]
+															, P_HOZ_OPER == hoz_oper
+															, P_DATE_OPER == p_docum.[DATE_DOC]
+															, P_SUMMA_OPER == sum_op
+															, P_SUM_OPER_VAL_DOG == null
+															, P_DAYS == 0
+															, P_SUMMA_DAY == 0
+															, P_SUMMA_NORMA == 0
+															, P_SUMMA_NDS == 0
+															, P_NDS == ::[SYSTEM].[VAL_ADD_TAX](3, P_DATE)
+															, P_KIND_NDS == false
+															, P_SUMMA_NSP == 0
+															, P_NSP == null
+															, P_KIND_NSP == false
+															, P_SUMMA_RBP == 0
+															, P_SUMMA_NDS_RBP == 0
+															, P_VALUTA == hoz_dog_cel.[VALUTA_OPER]
+															, P_COURSE == hoz_dog_cel.[COURSE_OPER]
+															, P_COURSE_DOG == hoz_dog_cel.[COURSE]
+															, P_COURSE_DATE == false
+															, P_RATE_TYPE == hoz_dog_cel.[RATE_TYPE]
+															, P_NAZN == 0
+															, P_CLIENT_ACC == p_docum.[ACC_CLIENT]
+															, P_SUB_CLIENT == hoz_dog_cel.[CLIENT]
+															, P_SET_CLIENT_ACC == hoz_dog_cel.[SET_CLIENT_ACC]
+															, P_BANKS_ACC == hoz_dog_cel.[ACC_BANKS]
+															, P_NDS_ACC == null
+															, P_CAPITAL_ACC == hoz_dog_cel.[ACC_CAPITAL]
+															, P_RASHOD == null
+															, P_GRT_RASHOD == null
+															, P_ACC_ADD_RASHOD == null
+															, P_CLIENT_RBP == hoz_dog_cel.[CLIENT_RBP]
+															, P_ACC_RC == null
+															, P_KNP == null
+															, P_VID_DOC == null
+															, P_KIND_EXEC == null
+															, P_DATE_EXEC == p_docum.[DATE_DOC]
+															, P_TYPE_MESS == null
+															, P_DOC_SEND == null
+															, P_SYM_KS == null
+															, P_NUM_KASSA == null
+															, P_NUM_FACT == null
+															, P_DATE_FACT == null
+															, P_DATE_PAY == null
+															, P_DOG_PURPOSE == null
+															, P_CON_DOC_NUM == null
+															, P_CON_DOC_DATE == null
+															, P_BEG_DATE == null
+															, P_END_DATE == null
+															, P_DATE_COURSE_CALC == null
+															, P_BUD_REQS == null
+															, P_ACC_OTHER == null
+															);
+							cal_calc.[TMC_DOCUM_REF] := p_docum;
+							cal_calc.[FOLDER] := p_docum.[IN_FOLDER];
+							cal_calc%state := 'FACT';
+							stdio.PUT_LINE_BUF('В календаре закрытий хоз. договора №'||hoz_dog_cel.[NUM_DOG]||' от '|| to_char(hoz_dog_cel.[DATE_BEGIN], 'DD/MM/YYYY') 
+								||' создан экземпляр хоз. операции "' || hoz_oper.[NAME] || '"');
+							&debug('В календаре закрытий хоз. договора №'||hoz_dog_cel.[NUM_DOG]||' от '|| to_char(hoz_dog_cel.[DATE_BEGIN], 'DD/MM/YYYY') 
+								||' создан экземпляр хоз. операции "' || hoz_oper.[NAME] || '"',0)
+						end loop;
+					
+					else
+						hoz_dog_cel := hoz_dog;
+						if sum_op = 0 then
+							stdio.PUT_LINE_BUF('В календаре закрытий хоз. договора №'||hoz_dog_cel.[NUM_DOG]||' от '|| to_char(hoz_dog_cel.[DATE_BEGIN], 'DD/MM/YYYY') 
+								||' экземпляр хоз. операции "' || hoz_oper.[NAME] || '" не создан, сумма операции = 0.');
+							&debug('В календаре закрытий хоз. договора №'||hoz_dog_cel.[NUM_DOG]||' от '|| to_char(hoz_dog_cel.[DATE_BEGIN], 'DD/MM/YYYY') 
+								||' экземпляр хоз. операции "' || hoz_oper.[NAME] || '" не создан, сумма операции = 0.',0)
+							continue;
+						end if;
+					
+						cal_calc := ::[VHO_INTERFACE].[PRX_TMC].New_calc(
+															P_THIS == hoz_dog_cel.[CALEND_CLOSE]
+															, P_HOZ_OPER == hoz_oper
+															, P_DATE_OPER == p_docum.[DATE_DOC]
+															, P_SUMMA_OPER == sum_op
+															, P_SUM_OPER_VAL_DOG == null
+															, P_DAYS == 0
+															, P_SUMMA_DAY == 0
+															, P_SUMMA_NORMA == 0
+															, P_SUMMA_NDS == 0
+															, P_NDS == ::[SYSTEM].[VAL_ADD_TAX](3, P_DATE)
+															, P_KIND_NDS == false
+															, P_SUMMA_NSP == 0
+															, P_NSP == null
+															, P_KIND_NSP == false
+															, P_SUMMA_RBP == 0
+															, P_SUMMA_NDS_RBP == 0
+															, P_VALUTA == hoz_dog_cel.[VALUTA_OPER]
+															, P_COURSE == hoz_dog_cel.[COURSE_OPER]
+															, P_COURSE_DOG == hoz_dog_cel.[COURSE]
+															, P_COURSE_DATE == false
+															, P_RATE_TYPE == hoz_dog_cel.[RATE_TYPE]
+															, P_NAZN == 0
+															, P_CLIENT_ACC == p_docum.[ACC_CLIENT]
+															, P_SUB_CLIENT == hoz_dog_cel.[CLIENT]
+															, P_SET_CLIENT_ACC == hoz_dog_cel.[SET_CLIENT_ACC]
+															, P_BANKS_ACC == hoz_dog_cel.[ACC_BANKS]
+															, P_NDS_ACC == null
+															, P_CAPITAL_ACC == hoz_dog_cel.[ACC_CAPITAL]
+															, P_RASHOD == null
+															, P_GRT_RASHOD == null
+															, P_ACC_ADD_RASHOD == null
+															, P_CLIENT_RBP == hoz_dog_cel.[CLIENT_RBP]
+															, P_ACC_RC == null
+															, P_KNP == null
+															, P_VID_DOC == null
+															, P_KIND_EXEC == null
+															, P_DATE_EXEC == p_docum.[DATE_DOC]
+															, P_TYPE_MESS == null
+															, P_DOC_SEND == null
+															, P_SYM_KS == null
+															, P_NUM_KASSA == null
+															, P_NUM_FACT == null
+															, P_DATE_FACT == null
+															, P_DATE_PAY == null
+															, P_DOG_PURPOSE == null
+															, P_CON_DOC_NUM == null
+															, P_CON_DOC_DATE == null
+															, P_BEG_DATE == null
+															, P_END_DATE == null
+															, P_DATE_COURSE_CALC == null
+															, P_BUD_REQS == null
+															, P_ACC_OTHER == null
+															);
+						cal_calc.[TMC_DOCUM_REF] := p_docum;
+						cal_calc.[FOLDER] := p_docum.[IN_FOLDER];
+						cal_calc%state := 'FACT';
+						stdio.PUT_LINE_BUF('В календаре закрытий хоз. договора №'||hoz_dog_cel.[NUM_DOG]||' от '|| to_char(hoz_dog_cel.[DATE_BEGIN], 'DD/MM/YYYY') 
+							||' создан экземпляр хоз. операции "' || hoz_oper.[NAME] || '"');
+						&debug('В календаре закрытий хоз. договора №'||hoz_dog_cel.[NUM_DOG]||' от '|| to_char(hoz_dog_cel.[DATE_BEGIN], 'DD/MM/YYYY')
+							||' создан экземпляр хоз. операции "' || hoz_oper.[NAME] || '"',0)
+					end if;
+				exception
+					when others then
+						-- Причина перехвата others: перехватываем все возможнные исключения для вывода сообщения в буфер.
+						&rb(CR_IFRS_MANY_ZERO)
+						stdio.put_line_buf ('--------------------------------');	
+						stdio.put_line_buf (sqlerrm || chr(13) || ::[RUNTIME].[UTILS].error_stack(true));
+						stdio.PUT_LINE_BUF('!!!ОШИБКА при формировании экземпляра в календаре закрытий по хоз договору ' ||
+							hoz_dog_cel.[NUM_DOG]||' от '|| to_char(hoz_dog_cel.[DATE_BEGIN], 'DD/MM/YYYY'));
+						stdio.put_line_buf ('--------------------------------');
+				end;
+				
+			end if;
+		end loop;
+		
+		if not p_check then
+			stdio.PUT_LINE_BUF('Не найден мат. счет с типом АФПП!');
+		end if;
+		
+
+	end if;	
+end;
+
+WORK_DOCUM_SPIS (
+	@name('Дата обработки документа')
+	P_DATE in [DATE],
+	@name('Порождать финансовые проводки')
+	P_PROVE in [BOOLEAN],
+	@name('Курс валюты договора')
+	P_COURSE in [SUMMA_16_6],
+	@name('Признак гашения доверенности')
+	P_TRUST_DOC_CLOSE in [BOOLEAN] default null,
+	@name('Порождать счета-фактуры')
+	P_FACTURA_SIGN in [BOOLEAN] default null,
+	@name('Признак расчета курса на дату')
+	P_SIGN_EST_COURSE_DATE in [BOOLEAN] default null,
+	@name('Дата расчета курса')
+	P_DATE_EST_COURSE in [DATE] default null,
+	@name('Устанавливать дату валютирования')
+	P_SET_DATE_VAL in [BOOLEAN] default null
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATE := [SYSTEM]::[OP_DATE];
+
+	V_DATE_PAY := [SYSTEM]::[OP_DATE];
+	V_DATE_USAGE := [SYSTEM]::[OP_DATE];
+end if;
+-- End initialization of parameters and variables
+declare
+i number;
+KindSF integer;
+client_tmc 	[CLIENT_REF];
+vSumma 		[SUMMA] := 0;
+vDate		[DATE];
+begin
+	if p_message = 'DEFAULT' then
+		vDate := [SYSTEM]::[OP_DATE];	
+		P_SET_DATE_VAL := true;	
+		begin
+			select x(x.[CLIENTS_REF].[1].[1]) in ::[SED_CLIENTS] collections
+			where x.[CLIENTS_REF].[1].[1]%id = this(1).[SUP_CLIENT_REF]%id
+			and x.[DATE_IN] <= vDate and vDate<=nvl(x.[DATE_OUT], vDate)
+			fetch 1
+			into client_tmc;
+			use_sed:= true;
+		exception when NO_DATA_FOUND then
+			use_sed:= false;
+		end;
+		use_sed_utd := ::[TMC_DOCUM].[NEW#DOCUM].IsMayConsignFrame(this(1).[DATE_DOC],this(1).[DOC_NAME_REF],this(1).[REC_CLIENT_REF]);
+		
+		factura_temp := null;
+		-- дефолтные валидаторы
+		idx := this.last;
+		while idx is not null
+		loop
+			this(idx)=>[WORK_DOCUM](p_message, p_info, P_DATE, P_PROVE, P_COURSE, P_TRUST_DOC_CLOSE, P_FACTURA_SIGN, factura_temp, P_SET_DATE_VAL); -- чтобы сразу вывалились дефолтные прагмы по всем документам
+			idx := this.prior(idx);			
+		end loop;
+
+		--принудительная установка P_PROVE=true при обработке только матдокументов коррективроки (операция КОРРЕКТ_ДАТ)
+		declare
+			vPROVE boolean := true;
+		begin 
+			idx := this.first;
+			while idx is not null
+			loop
+				if this(idx).[DOC_NAME_REF].[OPER] != ::[TMC_OP_NAME]([CODE] = 'КОРРЕКТ_ДАТ') then
+					vPROVE := false;
+					exit;
+				end if; 
+				idx := this.next(idx);			
+			end loop;
+			
+			if vPROVE then
+				P_PROVE := true;
+				::[RUNTIME].[CSMD].Disable(V_EXEC, 'P_PROVE', 'P');				
+				&debug('  принудительная установка P_PROVE=true при обработке матдокументов корректировки (операция КОРРЕКТ_ДАТ)',0)
+			end if;
+		end;
+
+		-- доверенность
+		idx := this.first;
+		while idx is not null
+		loop
+			if this(idx).[TRUST_DOCUM_REF] is not null then
+				P_IS_TRUST_DOCUM_REF := true;
+				exit;
+			end if;
+			P_IS_TRUST_DOCUM_REF := false;
+			idx := this.next(idx);
+		end loop;
+		-- Счета - Фактуры для клиент-скрипта
+		if this.count > 1 then
+			V_WORK_ONE := false;
+		else
+			V_WORK_ONE := true;
+			
+			
+			-- если документ один, вытягиваем данные по СФ
+			V_NUM_FACT := this(this.first).[ACC_NUM];
+			V_DATE_FACTURA := this(this.first).[ACC_DATE];
+			V_DATE_PAY := this(this.first).[DATE_PAY];
+			
+		end if;
+		--------v-------------/akuzmin	 20/02/2012   BS00211803
+		--тип курса
+		if this(this.first).[HOZ_DOG_REF].[RATE_TYPE]is not null and P_COURSE != 1 then
+			P_COURSE := P_COURSE*(100+this(this.first).[HOZ_DOG_REF].[RATE_TYPE].[DEVIATION])/100.0;
+		end if;
+		--наличие хоз договора
+		idx := this.first;
+		while idx is not null
+		loop
+			if this(idx).[HOZ_DOG_REF] is not null then
+				V_SIGN_HOZ_DOG := true;
+				exit;
+			end if;
+			V_SIGN_HOZ_DOG := false;
+			idx := this.next(idx);
+		end loop;
+		--------^---------------
+		idx := this.first;
+		while idx is not null
+		loop
+			if this(idx).[DOC_NAME_REF].[SIGN_SF_INITION] or this(idx).[DOC_NAME_REF].[SIGN_SF_INVOICE] then
+				V_SIGN_SF_INITION := this(idx).[DOC_NAME_REF].[SIGN_SF_INITION];
+				V_SIGN_SF_INVOICE := this(idx).[DOC_NAME_REF].[SIGN_SF_INVOICE];
+				P_FACTURA_SIGN := (V_SIGN_SF_INITION or V_SIGN_SF_INVOICE) and nvl (::[FP_TUNE].[LIB].get_bool_value('SF_CREATE_ON_WORK'), true);
+				idxValidate := idx;
+				exit;
+			end if;
+			V_SIGN_SF_INITION := false;
+			V_SIGN_SF_INVOICE := false;
+			P_FACTURA_SIGN := (V_SIGN_SF_INITION or V_SIGN_SF_INVOICE) and nvl (::[FP_TUNE].[LIB].get_bool_value('SF_CREATE_ON_WORK'), true);
+			idxValidate := this.first;
+			idx := this.next(idx);
+		end loop;
+		--курс валюты договора
+		idx := this.first;
+		while idx is not null
+		loop
+			if this(idx).[HOZ_DOG_REF].[VALUTA] != sys_context (user_context, 'NatCur')
+				and this(idx).[DOC_NAME_REF].[OPER].[CODE] in ('ПРИХОД', 'ДОНАЦЕНКА', 'РЕАЛИЗАЦИЯ', 'РЕМОНТ') then
+				V_SIGN_COURSE := true;
+				exit;
+			end if;
+			V_SIGN_COURSE := false;
+			idx := this.next(idx);
+		end loop;
+		if nvl(V_SIGN_SF_INITION, false) then
+			-- определим тип создаваемого СФ
+			KindSF := ::[VHO_INTERFACE].[PRX_TMC].info_lib_get_factura_kind(This(This.First)%class, This(This.First));
+			if KindSF = 1 then -- если СФ будет на покупку
+				V_SIGN_SF_BUY := true;
+				V_NUM_FACT := this(1).[WORK_DOCUM].V_NUM_FACT;
+			else
+				V_SIGN_SF_BUY := false;	
+				-- номер зачищаем, т.к. на продажу номер должен сформироваться по счетчику
+				V_NUM_FACT := null;
+			end if;
+		end if;	
+		V_ARR.delete;
+		if nvl(use_sed, false) then
+			i := 0;
+			for j in 1..this.count loop
+				vSumma := vSumma + this(j).[SUM_DOC];
+			end loop;
+			
+			--поищем документы СЭД УПД
+			i := 0;
+			for j in 1..this.count loop
+				for s in ::[SED_UTD] all where s.[TMC_DOCUM_REF] = this(j) and s.[DOCUMENT_REF] is not null loop
+					declare
+						sdsf ref [FACTURA_DOC];
+					begin
+						i := i + 1;
+						sdsf := s.[DOCUMENT_REF];
+						V_ARR(i).[L1] := true;
+						V_ARR(i).[S1] := sdsf.[NUM_FACT];
+						V_ARR(i).[PN1] := sdsf.[SUM_FACT];
+						V_ARR(i).[N1] := sdsf;
+						if sdsf.[INITION] is null then
+							if sdsf.[INITION_CORR] is null then
+								V_ARR(i).[S2] := 'первичный';
+							else
+								V_ARR(i).[S2] := 'корректировочный';
+							end if;
+						else
+							V_ARR(i).[S2] := 'оплаченный';
+						end if;
+					end;
+				end loop;
+			end loop;
+			if this.count > 1 and V_ARR.count > 0 then
+				pragma error ('Для одного из выбранных документов отобран Счет-Фактура из соответствующего СЭД УПД. Пожалуйста, запустите обработку отдельно для каждого мат. документа.');
+			end if;
+			
+			if V_ARR.count = 0 then
+				for (select x(x.[NUM_FACT]	: NUM_FACT
+							,x.[KIND].[0]	: KIND
+							,x.[INITION]	: INITION
+							,x.[INITION_CORR] : INITION_CORR
+							,x.[SUM_FACT]	: SUM_FACT
+							,x%id			: SCH_F_ID
+							,x				: SF
+							,x.[CONN]		: CONN
+							) in ::[FACTURA_DOC]
+				where
+					x.[CL_DT].[1].[1]%id = client_tmc%id				
+					and x%state = 'ACTIVE'
+					and x.[INITION] is null
+				) loop
+	
+					if ::[VHO_INTERFACE].[PRX_TMC].isSedFacturaReadOnly(p_sf==x.SF) then
+						
+						if (::[VHO_INTERFACE].[PRX_TMC].get_docs_sum_by_fact(x.[SF]) + vSumma) <= x.[SUM_FACT] then
+							i := i + 1;
+							V_ARR(i).[L1] := false;
+							V_ARR(i).[S1] := x.[NUM_FACT];
+							V_ARR(i).[PN1] := x.[SUM_FACT];
+							V_ARR(i).[N1] := x.[SCH_F_ID];
+							if x.[INITION] is null then
+								if x.[INITION_CORR] is null then
+									V_ARR(i).[S2] := 'первичный';
+								else
+									V_ARR(i).[S2] := 'корректировочный';
+								end if;
+							else
+								V_ARR(i).[S2] := 'оплаченный';
+							end if;
+						end if;
+					end if;
+				end loop;
+			end if;	
+		end if;
+		if P_FACTURA_SIGN then
+			check_controls(use_sed, use_sed_utd);
+		end if;	
+
+		p_info := 'P_DATE, P_COURSE, P_FACTURA_SIGN, P_DATE_EST_COURSE, P_SIGN_EST_COURSE_DATE';
+	elsif p_message = 'VALIDATE' then
+		if p_info = 'P_FACTURA_SIGN' then
+			this(idxValidate).[WORK_DOCUM].V_SIGN_SF_INITION := nvl(this(idxValidate).[DOC_NAME_REF].[SIGN_SF_INITION], false); -- при валидации P_FACTURA_SIGN в WORK_DOCUM анализируются переменные V_SIGN_SF_INITION и V_SIGN_SF_INVOICE
+			this(idxValidate).[WORK_DOCUM].V_SIGN_SF_INVOICE := nvl(this(idxValidate).[DOC_NAME_REF].[SIGN_SF_INVOICE], false);
+			
+		end if;
+		this(idxValidate)=>[WORK_DOCUM](p_message, p_info, P_DATE, P_PROVE, P_COURSE, P_TRUST_DOC_CLOSE, P_FACTURA_SIGN, factura_temp, P_SET_DATE_VAL);
+		if p_info in ('P_FACTURA_SIGN', 'P_DATE') then
+			V_DATE_PAY := this(idxValidate).[WORK_DOCUM].V_DATE_PAY;
+			V_DATE_USAGE := this(idxValidate).[WORK_DOCUM].V_DATE_USAGE;
+			if nvl(P_FACTURA_SIGN, false) then
+				check_controls(use_sed,use_sed_utd);
+			else
+				V_TYPE.[0] := 1;
+				check_controls(false,false);
+				[CSMD].Command(V_EXEC, 'Subform1.Visible = False');
+				[CSMD].Command(V_EXEC, 'FrmFactura.Visible = True');
+			end if;
+		---------v---------/akuzmin 13/02/2012  BS00211803
+		--установили дату расчета курса			
+		elsif p_info = 'P_DATE_EST_COURSE'	then
+			if V_WORK_ONE then
+				P_COURSE := ::[DOCUMENT].[LIB_CUR].Get_Rate(this(this.first).[HOZ_DOG_REF].[VALUTA], P_DATE_EST_COURSE);
+				if this(this.first).[HOZ_DOG_REF].[RATE_TYPE]is not null and P_COURSE != 1 then
+					P_COURSE := P_COURSE*(100+this(this.first).[HOZ_DOG_REF].[RATE_TYPE].[DEVIATION])/100.0;
+					
+				end if;
+			else
+				P_COURSE := 1;
+			end if;		
+						
+		--убрали крыжык "Признак расчета курса на дату". Возвращаем дефолтные значения	
+		elsif p_info = 	'P_SIGN_EST_COURSE_DATE'  then
+			if P_SIGN_EST_COURSE_DATE then
+				P_DATE_EST_COURSE := P_DATE;
+				if V_WORK_ONE then
+					P_COURSE := ::[DOCUMENT].[LIB_CUR].Get_Rate(this(this.first).[HOZ_DOG_REF].[VALUTA], P_DATE_EST_COURSE);
+					if this(this.first).[HOZ_DOG_REF].[RATE_TYPE]is not null and P_COURSE != 1 then
+						P_COURSE := P_COURSE*(100+this(this.first).[HOZ_DOG_REF].[RATE_TYPE].[DEVIATION])/100.0;
+					end if;
+				else
+					P_COURSE := 1;
+				end if;
+			else
+				if V_WORK_ONE then
+					if this(this.first).[HOZ_DOG_REF].[COURSE] > 0 then
+						P_COURSE := this(this.first).[HOZ_DOG_REF].[Course];
+					else
+						P_COURSE := this(this.first).[HOZ_DOG_REF].[VALUTA].[VAL_COURCE];
+					end if;
+					if this(this.first).[HOZ_DOG_REF].[RATE_TYPE]is not null and P_COURSE != 1 then
+						P_COURSE := P_COURSE*(100+this(this.first).[HOZ_DOG_REF].[RATE_TYPE].[DEVIATION])/100.0;
+					end if;
+				else
+					P_COURSE := 1;
+				end if;
+				P_DATE_EST_COURSE := null;
+			end if;
+		
+		elsif p_info='%VAR%.V_CHOOSE.0' then
+				if V_CHOOSE.[0] = 1 then
+					[CSMD].Command(V_EXEC, 'Subform1.Visible = False');
+					[CSMD].Command(V_EXEC, 'FrmFactura.Visible = True');
+				elsif V_CHOOSE.[0] = 2 then
+					[CSMD].Command(V_EXEC, 'Subform1.Visible = True');
+					[CSMD].Command(V_EXEC, 'FrmFactura.Visible = False');
+				end if;	
+		
+		-------^---------------	
+		end if;
+	end if;
+end;
+end;
+
+execute is
+/*
+ *     Дата        Автор       BFS         Описание
+ * ----------   -----------	----------- ---------------------------------------------------
+ * 14.09.2012	akuzmin		BS00211803	Добавлены параметры "Признак расчета курса на дату", "Дата расчета курса" и их обработка.
+ * 25.02.2014	akuzmin		BS00806655	В случае, если создаваемый СФ будет на продажу, то блокируется поле для указания номера СФ. Удален закомментированный код и неиспользуемые переменные
+ * 01.12.2019   sokolov		RP0617211   Учет рамочных договоров долевой собственности
+ * 07.02.2020   sokolov     RP0619670   Добавлен параметр P_SET_DATE_VAL.
+ * 05.10.2020	asokolov	RP0623149	Добавлена переменная V_TYPE_SED, изменения в операции в рамках доработки СЭД.
+ * 03.10.2021   asokolov	RP0641122   В процедуре createIFRS_one в вызов New_calc добавлена передача P_SUMM_NDS_VAL, скорректирована передача P_VALUTA, P_COURSE, P_COURSE_DOG.
+ * 12.12.2023   sokolov     RP0674086   Скорректировано условие создания операций с видом AM_AFPP из настройки IFRS16_HOZ_OPER: если амортизация отрицательная - не создаем.
+ * 19.12.2024   nikaev		RP0688115   Добавлена принудительная установка P_PROVE=true при обработке только матдокументов коррективроки.
+ * 05.02.2025   nikaev		RP0696403   Установлен признак операции "Выводит команды в буфер сессии".
+*/
+	isOneMatDoc	boolean; -- группируются платежные документы одного мат/документа
+	id_int number;
+	ac_m ref [TMC_LIST];
+	cal_calc ref [CALENDAR_CALC];
+	hoz_oper ref [HOZ_OPER];
+	lv_canon_val varchar2(2000);
+begin
+	spisCreateSF := P_FACTURA_SIGN;
+	
+	idx := this.first;
+	while idx is not null loop
+		if this(idx)%state = 'FROM_SED' then
+			pragma error('Операция не предназначена для документов в статусе "' || this(idx)%statename || '"');
+		end if;
+		idx := this.next(idx);
+	end loop;
+
+	&debug('start WORK_DOCUM_SPIS',0)
+	&debug('количество документов для обработки = ' || this.count,0)
+	&debug('V_CHOOSE.[0] = ' || V_CHOOSE.[0],0)
+	idx := this.first;
+	while idx is not null
+	loop
+		-- эти переменные инициализируются в валидаторе WORK_DOCUM
+		if this.count > 1 then -- берем умолчательные значения из документа
+			this(idx).[WORK_DOCUM].V_TYPE.[0] := ::[VHO_INTERFACE].[PRX_TMC].Info_Lib_Get_Form_Type(This(idx)%class, This(idx)%Id, 'DEBUG');
+			this(idx).[WORK_DOCUM].V_NUM_FACT := ::[VHO_INTERFACE].[PRX_TMC].Info_Lib_Get_Num_Fact(This(idx)%class, This(idx)%Id);
+			this(idx).[WORK_DOCUM].V_DATE_PAY := nvl(::[VHO_INTERFACE].[PRX_TMC].Info_Lib_Get_Date_Pay(This(idx)%class, This(idx)%Id), P_DATE);
+			this(idx).[WORK_DOCUM].V_DATE_USAGE :=  nvl(::[VHO_INTERFACE].[PRX_TMC].Info_Lib_Get_Date_Usage(This(idx)%class, This(idx)%Id), P_DATE);
+			this(idx).[WORK_DOCUM].V_DATE_FACTURA := ::[VHO_INTERFACE].[PRX_TMC].Info_Lib_Get_Date_Docum(This(idx)%class, This(idx)%Id);
+			this(idx).[WORK_DOCUM].V_SIGN_SF_INITION := nvl(This(idx).[DOC_NAME_REF].[SIGN_SF_INITION], false);
+			this(idx).[WORK_DOCUM].V_SIGN_SF_INVOICE := nvl(This(idx).[DOC_NAME_REF].[SIGN_SF_INVOICE], false);
+			if spisCreateSF then
+				P_FACTURA_SIGN := this(idx).[WORK_DOCUM].V_SIGN_SF_INITION or this(idx).[WORK_DOCUM].V_SIGN_SF_INVOICE;
+			end if;
+		else
+			-- для одного документа можно задать реквизиты СФ
+			this(idx).[WORK_DOCUM].V_TYPE.[0] := ::[VHO_INTERFACE].[PRX_TMC].Info_Lib_Get_Form_Type(This(idx)%class, This(idx)%Id, 'DEBUG');
+			this(idx).[WORK_DOCUM].V_NUM_FACT := V_NUM_FACT;
+			this(idx).[WORK_DOCUM].V_DATE_PAY := nvl(V_DATE_PAY, P_DATE);
+			this(idx).[WORK_DOCUM].V_DATE_USAGE :=  nvl(V_DATE_USAGE, P_DATE);
+			this(idx).[WORK_DOCUM].V_DATE_FACTURA := V_DATE_FACTURA;
+			this(idx).[WORK_DOCUM].V_SIGN_SF_INITION := V_SIGN_SF_INITION;
+			this(idx).[WORK_DOCUM].V_SIGN_SF_INVOICE := V_SIGN_SF_INVOICE;
+		end if;
+		
+		&debug('документ id ' || this(idx),0)
+				
+		--получение значения курса		
+		P_COURSE := P_COURSE/(nvl((100+this(this.first).[HOZ_DOG_REF].[RATE_TYPE].[DEVIATION])/100.0,1));
+		&debug('P_COURSE = ' || P_COURSE,0)
+		--установка дополнительных реквизитов6
+		if P_SIGN_EST_COURSE_DATE = true and P_DATE_EST_COURSE is null then
+			pragma error('Введите дату расчета курса!');
+		end if;	
+
+		if P_SIGN_EST_COURSE_DATE and this(idx).[HOZ_DOG_REF] is not null then
+			this(idx).[WORK_DOCUM].V_COURSE_DATE := true;
+			this(idx).[WORK_DOCUM].V_DATE_COURSE_CALC := P_DATE_EST_COURSE;
+		else
+			this(idx).[WORK_DOCUM].V_COURSE_DATE := null;
+			this(idx).[WORK_DOCUM].V_DATE_COURSE_CALC := null;
+		end if;	
+
+		if V_CHOOSE.[0] = 2 then
+			declare
+				j integer;
+				f boolean;
+			begin
+				f := false;
+				j := V_ARR.first;
+				while j is not null loop
+					if V_ARR(j).[L1] then
+						if not f then
+							f := true;
+							id_int := V_ARR(j).[N1];
+						else
+							pragma error('Необходимо выбрать один счет-фактуру!');
+						end if;
+					end if;
+					j := V_ARR.next(j);
+				end loop;
+				if not nvl(f, false) then
+					pragma error('Не выбран счет-фактура!');
+				end if;
+			end;
+			select x(x) in ::[FACTURA_DOC] where x%id = id_int into factura_temp;
+			&debug('ветка 1, запуск WORK_DOCUM',0)
+			this(idx).[WORK_DOCUM](P_DATE, P_PROVE, P_COURSE, P_TRUST_DOC_CLOSE, P_FACTURA_SIGN, factura_temp, P_SET_DATE_VAL);
+		else
+			if P_FACTURA_SIGN and ::[TMC_DOCUM].[NEW#DOCUM].IsMayConsignFrame(this(idx).[DATE_DOC],this(idx).[DOC_NAME_REF],this(idx).[REC_CLIENT_REF])
+				and V_TYPE_SED.[0] = 2
+			then
+				-- если был выбран вариант - Формировать УПД
+				[STR].set_par(this(idx).[MISC],'WORK_DOCUM_WITH_UTD',1);
+			else
+				[STR].set_par(this(idx).[MISC],'WORK_DOCUM_WITH_UTD',0);
+			end if;
+			
+			&debug('ветка 2, запуск WORK_DOCUM',0)
+			this(idx).[WORK_DOCUM](P_DATE, P_PROVE, P_COURSE, P_TRUST_DOC_CLOSE, P_FACTURA_SIGN, null, P_SET_DATE_VAL);
+			
+			--Создания календаря IFRS амортизации
+			declare
+				ac_m_cnt number;
+			begin
+				select x(count(1) :cnt) in this(idx).[LIST_TMC]
+					where x.[ACC_MAT_SUP] is not null and x.[ACC_MAT_SUP].[GRUPPA].[TYPE].[CODE] = 'АФПП'
+				into ac_m_cnt;
+				if ac_m_cnt = 1 then
+					&debug('вызов createIFRS_one',0)
+					createIFRS_one(this(idx),P_DATE);
+				else
+					&debug('вызов createIFRS_many_or_zero',0)
+					createIFRS_many_or_zero(this(idx),P_DATE);
+				end if;
+			end;
+			
+		end if;
+		
+		declare
+			rashod ref [PL_RASHOD];
+			work [CASE_BETWEEN_TWO];
+		begin	
+			locate rashod
+			in ::[PL_RASHOD] all
+			where 	rashod.[TMC_DOCUM] = this(idx)
+				and rashod%state = 'NOT_WORK';
+			work.[0] := 1;
+			&debug('вызов pl_rashod_work',0)
+			::[VHO_INTERFACE].[PRX_TMC].pl_rashod_work(rashod, work);
+		exception
+			when NO_DATA_FOUND then null;
+		end;
+	
+		idx := this.next(idx);
+	end loop;
+	
+	if tune_common_folder_for_docs and P_PROVE then
+		-- объединение папок
+		&debug('объединение папок после цикла обработки документов',0)
+		declare
+			folder ref [FOLDER_PAY];
+			collectionFolder	varchar2(16);
+			foldToDel	ref [FOLDER_PAY];
+		begin
+			idx := this.first;
+			folder := this(idx).[IN_FOLDER]; -- папка первого документа
+			&debug('папка первого документа = (id) ' || folder,0)
+			collectionFolder := folder.[DOCS_IN_FOLD];
+			idx := this.next(idx);
+			-- все мат/документы ссылаются на папку первого мат/документа, все плат/документы складываются в эту папку
+			while idx is not null
+			loop
+				&debug('документ id ' || this(idx) || ', папка ' || this(idx).[IN_FOLDER],0)
+				declare
+					calendar	ref [CALENDAR_CALC];
+				begin
+					&debug('поиск записи в календаре хоз договора с такой же папкой',0)
+					locate calendar in [CALENDAR_CALC] all
+						where calendar.[FOLDER] = this(idx).[IN_FOLDER];
+					calendar.[FOLDER] := folder;
+					&debug('нашли, id ' || calendar || ', заменили в ней папку на папку мат документа',0)
+				exception when NO_DATA_FOUND then
+					null;					
+				end;
+				&debug('перенос документов из папки текущего документа в папку первого документа',0)
+				for mainDoc in this(idx).[IN_FOLDER].[DOCS_IN_FOLD]
+				loop
+					&debug('  id ' || mainDoc,0)
+					mainDoc%collection := collectionFolder; -- кидаем в папку
+					mainDoc.[DOCUMENT].[IN_FOLDER] := folder;
+				end loop;
+				-- удаляем ненужную папку
+				&debug('удаляем папку текущего документа',0)
+				foldToDel := this(idx).[IN_FOLDER];				
+				::[VHO_INTERFACE].[PRX_TMC].FOLDER_PAY_DELETE_AUTO(foldToDel);
+				this(idx).[IN_FOLDER] := folder;
+				idx := this.next(idx);
+			end loop;
+		
+			-- группировка
+			isOneMatDoc := false;
+			&debug('вызов WORK_FOLDER',0)
+			this(this.first).WORK_FOLDER (folder, P_DATE, isOneMatDoc, P_SET_DATE_VAL);
+		end;
+	end if;	
+	&debug('end WORK_DOCUM_SPIS',0)
+			
+	
+end;
+end;
+end;

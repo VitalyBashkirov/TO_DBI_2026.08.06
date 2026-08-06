@@ -1,0 +1,1353 @@
+class RES_BASE_ACCS;
+
+@import_plsql(true)
+@name('[ПСБ] Контроль создания регуляторных и оценочных резервов (Excel)')
+static method PSH_REP_PROV_XL is
+
+pragma macro (xl,'[OOXML]::[API_XL]');
+pragma macro(lp, '::[SHABLON_DOC].[LIB_OOXML]');
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+
+li_cur_row				integer;
+li_start_row	const	integer	:= 1;
+li_cur_col				integer := 0;
+
+-- Функция получение ссылки на договора обеспечения
+public function get_zalog(
+	  P_PROD 	ref [PRODUCT]
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: ,P_DATE 	date | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+	 -- ,P_DATE 	date
+	 ,P_DATE 	DATE_TIME
+	 ,n 		integer  -- Номер обеспечения по порядку
+	 ,kat 		varchar2 -- '1' - Все договора / '0' - Только с первой и второй категорией
+) return ref [ZALOG] is
+begin
+	if P_PROD%class = 'KRED_CORP' then
+		P_PROD := coalesce(P_PROD->(PR_CRED)[HIGH_LEVEL_CR], P_PROD);
+	end if;
+	
+	for (select zz(zz obj)
+			in ::[ZALOG] all
+			where zz.[PART_TO_LOAN].[PRODUCT] = P_PROD
+			  and ((zz.[VID_GUARANTEE].[SECS_CALCS_PARTS].[FACTOR] <> 0 and kat = '0') or kat = '1')			
+			  and F.A('В' || zz.[ACC_ZALOG].[ARC_MOVE] || 'сН', P_DATE + 1) <> 0
+			 order by zz%id
+			 fetch n
+		)
+	loop
+		return zz.obj;
+	end loop;
+end;
+
+-- Функция получение общей суммы обеспечения
+public function get_req_zalog_sum(
+	 P_PROD ref [PRODUCT]
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: ,P_DATE date | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+	-- ,P_DATE date
+	,P_DATE DATE_TIME
+) return number is
+begin
+	if P_PROD%class = 'KRED_CORP' then
+		P_PROD := coalesce(P_PROD->(PR_CRED)[HIGH_LEVEL_CR], P_PROD);
+	end if;
+	
+	for (
+		select x(sum(F.A('В' || x.[ACC_ZALOG].[ARC_MOVE] || 'сН', P_DATE + 1) * x.[VID_GUARANTEE].[SECS_CALCS_PARTS].[FACTOR]) :ob_sum)
+		in [ZALOG] all
+			where x.[PART_TO_LOAN].[PRODUCT] = P_PROD
+			  and x.[VID_GUARANTEE].[SECS_CALCS_PARTS].[FACTOR] <> 0
+			  and F.A('В' || x.[ACC_ZALOG].[ARC_MOVE] || 'сН', P_DATE + 1) <> 0
+		)
+	loop
+		return x.ob_sum;
+	end loop;
+end;
+
+-- Функция получение категории качества и процента резервирования
+public function get_req_prod_num(
+	  P_PROD  ref [PRODUCT]		  default null
+	 ,P_HOA	  ref [HOZ_OP_ACC]	  default null
+	 ,P_RES	  ref [RES_BASE_ACCS] default null
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: ,P_DATE  date | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+	 -- ,P_DATE  date
+	 ,P_DATE  DATE_TIME
+	 ,p_rekv  varchar2
+) return number is
+	v_cat		number;
+	v_cat_prc	number;
+	v_coll		number;
+begin
+	if P_HOA.[NAME_ACCOUNT] in(
+			 ::[TIP_ACC]([PRODUCT] = 'КРЕДИТЫ' and [COD] = 'ACCOUNT')
+			,::[TIP_ACC]([PRODUCT] = 'КРЕДИТЫ' and [COD] = 'ACC_DEBTS_CR')
+			,::[TIP_ACC]([PRODUCT] = 'BANKS_LOANS' and [COD] = 'BL_ACC_BASIC')
+			,::[TIP_ACC]([PRODUCT] = 'BANKS_LOANS' and [COD] = 'BL_EXCEED')
+			)
+	then
+		if P_PROD%class in ('KRED_PERS', 'KRED_CORP', 'OVERDRAFTS') then
+			v_coll := P_PROD->(PR_CRED)[GR_RISK_HIST];
+		elsif P_PROD%class = 'BANKS_LOANS' then
+			v_coll := P_PROD->(BANKS_LOANS)[GR_RISK_HISTORY];
+		end if;
+		
+		-- Получение категории качества и процента резервирования по 590-П
+		for (
+			 select zz(analytic(max(zz), 'keep (dense_rank last order by [1]) ', zz.[DATE_START]) obj)
+				in ::[CR_RISK_GR] all
+				where zz.[DATE_START] <= P_DATE
+				  -- and zz.[FIX] = true
+				  -- and zz.[IGNORED] = true
+				  and zz%collection = v_coll
+			)
+		loop
+			if zz.obj.[FIX] and zz.obj.[IGNORED] then
+				v_cat := zz.obj.[RISK_GROUP].[GROUP_NUM];
+				v_cat_prc := zz.obj.[PRC_RESERV];
+			end if;
+		end loop;
+	
+	-- Получение категории качества и процента резервирования по 611-П
+	elsif P_RES is not null then
+		for (
+			 select zz(analytic(max(zz), 'keep (dense_rank last order by [1]) ', zz.[DATE_START]) obj)
+			 	in P_RES.[GR_RISK_HIST]
+				where zz.[DATE_START] <= P_DATE
+				order by zz.[DATE_START] desc
+			)
+		loop
+			v_cat := zz.obj.[RISK_GROUP].[GROUP_NUM];
+			v_cat_prc := zz.obj.[PRC_RESERV];
+			exit;
+		end loop;
+	end if;
+	
+	if v_cat is null then
+		if P_PROD%class in ('KRED_PERS', 'KRED_CORP', 'OVERDRAFTS')  then
+			v_cat := ::[PR_CRED].[L_3].GetInfo(coalesce(P_PROD->(PR_CRED)[HIGH_LEVEL_CR],P_PROD), 'УЧТ_ГР', P_DATE);
+		elsif P_PROD%class = 'BANKS_LOANS' then
+			v_cat := ::[BANKS_LOANS].[LIB_01].GET_NUM(P_PROD, 'ГРУППА_РИСКА_УЧ', P_DATE);
+		end if;
+	end if;
+	
+	if v_cat_prc is null then
+		if P_PROD%class in ('KRED_PERS', 'KRED_CORP', 'OVERDRAFTS')  then
+			v_cat_prc := ::[PR_CRED].[L_3].GetInfo(coalesce(P_PROD->(PR_CRED)[HIGH_LEVEL_CR],P_PROD), 'ПРЦ_УЧТ_ГР', P_DATE);
+		elsif P_PROD%class = 'BANKS_LOANS' then
+			v_cat_prc := ::[BANKS_LOANS].[LIB_01].GET_NUM(P_PROD, 'ПРЦ_РИСКА_УЧ', P_DATE);
+		end if;
+	end if;
+	
+	if p_rekv = 'M_CAT' then	-- Получение категории резервирования
+		return v_cat;
+	elsif p_rekv = 'M_CAT_PRC' then	-- Получение процента резервирования
+		return v_cat_prc;
+	end if;
+
+end;
+
+-- сумма обеспечения, приходящаяся на указанный счет
+public function get_zalog_sum(
+	 P_PROD		ref [PRODUCT]
+	,P_ACC		ref [AC_FIN]
+	,P_RES		ref [RES_BASE_ACCS] default null
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: ,P_DATE		date | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+	-- ,P_DATE		date
+	,P_DATE		DATE_TIME
+) return number is
+
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: p_date_prev		date; | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+-- p_date_prev		date;
+p_date_prev		DATE_TIME;
+p_acc_res	boolean;
+
+begin
+	-- Проверяем распространяется обеспечение на этот счёт или нет
+	for (select f(1)
+			in ::[ACC_PATTERN] all
+		  where f%collection = ::[ANALYTIC_CODE]([CODE] = 'PSB_REP_PROV_XL').[ACC_PATT_CORR]%collection
+			and P_ACC.[MAIN_V_ID] like f.[PATTERN] || '%'
+		)
+	loop
+		p_acc_res := true;
+	end loop;
+	
+	if p_acc_res then	
+		p_date_prev := CALENDAR.Next_Date(
+						 'HOLIDAYS'		-- CalendarName
+						,'0'			-- Do_Work '0' - рабочий, '1' - выходной
+						,p_date			-- D - дата
+						,-1				-- Offset 	-2 = 2 рабочих назад, включая текущий (т.е. сегодня и вчера)
+						);
+
+		if p_res is not null then
+			P_PROD := P_RES;
+		end if;
+
+		for (select p(sum(coalesce(p.[PART], 0))	SUMMA)
+				in ::[PTL_HISTORY] all
+				where (p.[DATE_BEG] = p_date or p.[DATE_BEG] = p_date_prev)
+				  and p.[PRODUCT] = P_PROD
+			)
+		loop
+			return coalesce(p.[SUMMA],0);
+		end loop;
+	end if;
+	
+	-- Иначе вернём ноль
+	return 0;
+end;
+
+-- Функция получение числовых данных по МСФО из договора
+public function get_req_acc_ifrs(
+	  P_PROD	ref [PRODUCT]		default null
+	 ,P_HOA		ref [HOZ_OP_ACC]	default null
+	 ,P_RES		ref [RES_BASE_ACCS] default null	
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: ,P_DATE 	date | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+	 -- ,P_DATE 	date
+	 ,P_DATE 	DATE_TIME
+	 ,p_rekv 	varchar2
+	 ,p_prev	boolean 	default false	-- Признак предыдущего значения
+	 ,P_PORT	ref [RES_PORT] default null	 
+) return number is
+	v_hoa_type		ref [TIP_ACC];
+begin
+	v_hoa_type := P_HOA.[NAME_ACCOUNT];
+
+	if P_PROD is null then P_PROD := P_RES; end if;
+
+	-- Получение категории обесценения
+	if p_rekv = 'IFRS_CAT' then
+		for (select z(analytic(max(z.[STAGE].[CODE]), 'keep (dense_rank last order by [1]) ', z.[DATE_BEGIN])  cat)
+		       in ::[DEVAL_HIST] all
+		       where ((z.[DATE_BEGIN] <= P_DATE and not p_prev) or (z.[DATE_BEGIN] < P_DATE and p_prev))
+		       	 and z.[PRODUCT] = P_PROD
+			)
+		loop
+			return z.cat;
+		end loop;			
+	-- Получение процента обесценения
+	elsif p_rekv = 'IFRS_PRC' then
+		for (select z(analytic(max(z.[DEVAL_PRC]), 'keep (dense_rank last order by [1]) ', z.[DATE_BEGIN])  prc)
+		       in ::[PRC_DEVAL_HIST] all
+		       where ((z.[DATE_BEGIN] <= P_DATE and not p_prev) or (z.[DATE_BEGIN] < P_DATE and p_prev))
+		       	 and z.[PRODUCT] = P_PROD
+		       	 and (z.[TIP_ACC] = v_hoa_type or z.[TIP_ACC] is null)
+			)
+		loop
+			return z.prc;
+		end loop;			
+	-- Получение оценочного резерва
+	elsif p_rekv = 'IFRS_RES' then
+		if P_PORT is not null then
+			P_PROD := P_RES;
+		end if;
+		for (select z(analytic(max(z.[RES_SUMM]), 'keep (dense_rank last order by [1]) ', z.[DATE_BEGIN])  res)
+		       in ::[DEVAL_RESERV] all
+		       where ((z.[DATE_BEGIN] <= P_DATE and not p_prev) or (z.[DATE_BEGIN] < P_DATE and p_prev))
+		       	 and z.[PRODUCT] = P_PROD
+		       	 and (z.[TYPE_ACC] = v_hoa_type or z.[TYPE_ACC] is null)
+			)
+		loop
+			return z.res;
+		end loop;			
+	end if;
+
+return null;
+end;
+
+-- Функция получение процента обесценения по счету из массива "Счета договора" для портфеля
+public function get_prc_ifrs_on_acc(
+	 P_ACC ref [AC_FIN]
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: ,P_DATE date | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+	-- ,P_DATE date
+	,P_DATE DATE_TIME
+) return number is
+begin
+	for (select x(x  prod_id,  accs	ac_hoa)
+	 		in ::[PRODUCT]
+	 		 ,(::[HOZ_OP_ACC] all : accs ) all
+			where	accs%collection = x.[ARRAY_DOG_ACC]
+				and accs.[ACCOUNT_DOG].[1].[2] = P_ACC
+				and accs.[DATE_BEG] <= P_DATE
+				and x%class in ('PR_CRED','KRED_PERS','KRED_CORP','OVERDRAFTS', 'GUARANTIES', 'BANKS_LOANS', 'AGR_FACTOR', 'GEN_FACTOR')
+			order by accs.[DATE_BEG] desc	
+	) loop
+		return get_req_acc_ifrs(x.prod_id, x.ac_hoa, null, P_DATE, 'IFRS_PRC') / 100;
+	end loop;
+	return 0;
+end;
+
+
+-- Функция получение общей суммы задолженности по портфелю однородных требований
+public function get_sum_port(
+	 P_PORT ref [RES_PORT]
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: ,P_DATE date | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+	-- ,P_DATE date
+	,P_DATE DATE_TIME
+) return number is
+v_summ number;
+begin
+	select p(sum(F.A('В' || p.[RES_ACC].[ARC_MOVE] || 'СН', P_DATE + 1)))
+		in P_PORT.[ACCRS]
+		where p.[DATE_BEGIN] <= P_DATE
+			and (p.[DATE_END] is null or p.[DATE_END] > P_DATE)
+			and (p.[RES_ACC].[DATE_CLOSE] is null or p.[RES_ACC].[DATE_CLOSE] > P_DATE)
+	into v_summ;
+
+	return coalesce(abs(v_summ), 0);
+end;
+
+-- Функция получение общей суммы оценочного резерва по МСФО 9 по портфелю однородных требований
+public function get_sum_ifrs_port(
+	 P_PORT ref [RES_PORT]
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: ,P_DATE date | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+	-- ,P_DATE date
+	,P_DATE DATE_TIME
+) return number is
+v_summ number;
+begin
+	select p(sum(F.A('В' || p.[RES_ACC].[ARC_MOVE] || 'СН', P_DATE + 1) * get_prc_ifrs_on_acc(p.[RES_ACC], P_DATE))
+			)
+		in P_PORT.[ACCRS]
+		where p.[DATE_BEGIN] <= P_DATE
+			and (p.[DATE_END] is null or p.[DATE_END] > P_DATE)
+			and (p.[RES_ACC].[DATE_CLOSE] is null or p.[RES_ACC].[DATE_CLOSE] > P_DATE)
+	into v_summ;
+
+	return coalesce(abs(v_summ), 0);
+end;
+
+
+-- Получение счетов резерва по 590-П и корректировки резерва по МСФО
+public function get_acc_ifrs(
+	  P_PROD	ref [PRODUCT]		default null
+	 ,P_HOA		ref [HOZ_OP_ACC]	default null
+	 ,P_RES		ref [RES_BASE_ACCS] default null
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: ,P_DATE 	date | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+	 -- ,P_DATE 	date
+	 ,P_DATE 	DATE_TIME
+	 ,p_rekv 	varchar2
+) return ref [AC_FIN] is
+	v_hoa_type		ref [TIP_ACC];
+	v_hoa_type_s	ref [TIP_ACC];
+begin
+	v_hoa_type := P_HOA.[NAME_ACCOUNT];
+	-- Счета резерва 590-П по кредитам
+	if    p_rekv = 'AC_RES' and v_hoa_type = ::[TIP_ACC]([PRODUCT] = 'КРЕДИТЫ' and [COD] = 'ACCOUNT') then
+		v_hoa_type_s := ::[TIP_ACC]([PRODUCT] = 'КРЕДИТЫ' and [COD] = 'ACC_RESERV');
+	elsif p_rekv = 'AC_RES' and v_hoa_type = ::[TIP_ACC]([PRODUCT] = 'КРЕДИТЫ' and [COD] = 'ACC_DEBTS_CR') then		
+		v_hoa_type_s := ::[TIP_ACC]([PRODUCT] = 'КРЕДИТЫ' and [COD] = 'ACC_RESERV_DEBTS');
+	-- Счета резерва 590-П по МБК
+	elsif p_rekv = 'AC_RES' and v_hoa_type = ::[TIP_ACC]([PRODUCT] = 'BANKS_LOANS' and [COD] = 'BL_ACC_BASIC') then		
+		v_hoa_type_s := ::[TIP_ACC]([PRODUCT] = 'BANKS_LOANS' and [COD] = 'BL_RESERV');
+	elsif p_rekv = 'AC_RES' and v_hoa_type = ::[TIP_ACC]([PRODUCT] = 'BANKS_LOANS' and [COD] = 'BL_EXCEED') then		
+		v_hoa_type_s := ::[TIP_ACC]([PRODUCT] = 'BANKS_LOANS' and [COD] = 'BL_RESERV_DEBT');
+	-- Счета резерва по 611-П		
+	elsif p_rekv = 'AC_RES' and P_RES is not null then
+		return P_RES.[RES_ACC];
+	-- Счета корректировки резерва МСФО 590-П по кредитам
+	elsif p_rekv in ('IFRS_AC_RES_A', 'IFRS_AC_RES_P') and v_hoa_type = ::[TIP_ACC]([PRODUCT] = 'КРЕДИТЫ' and [COD] = 'ACCOUNT') then
+		v_hoa_type_s := ::[TIP_ACC]([PRODUCT] = 'КРЕДИТЫ' and [COD] = 'IFRS_ACC_RESERV');
+	elsif p_rekv in ('IFRS_AC_RES_A', 'IFRS_AC_RES_P') and v_hoa_type = ::[TIP_ACC]([PRODUCT] = 'КРЕДИТЫ' and [COD] = 'ACC_DEBTS_CR') then
+		v_hoa_type_s := ::[TIP_ACC]([PRODUCT] = 'КРЕДИТЫ' and [COD] = 'IFRS_ACC_RESERV_DEBTS');
+	-- Счета корректировки резерва МСФО 590-П по МБК		
+	elsif p_rekv in ('IFRS_AC_RES_A', 'IFRS_AC_RES_P') and v_hoa_type = ::[TIP_ACC]([PRODUCT] = 'BANKS_LOANS' and [COD] = 'BL_ACC_BASIC') then
+		v_hoa_type_s := ::[TIP_ACC]([PRODUCT] = 'BANKS_LOANS' and [COD] = 'IFRS_BL_RESERV');
+	elsif p_rekv in ('IFRS_AC_RES_A', 'IFRS_AC_RES_P') and v_hoa_type = ::[TIP_ACC]([PRODUCT] = 'BANKS_LOANS' and [COD] = 'BL_EXCEED') then
+		v_hoa_type_s := ::[TIP_ACC]([PRODUCT] = 'BANKS_LOANS' and [COD] = 'IFRS_BL_RESERV_DEBT');
+	-- Счета корректировки резерва МСФО 590-П по 611-П
+	elsif p_rekv in ('IFRS_AC_RES_A', 'IFRS_AC_RES_P') and P_RES is not null then
+		v_hoa_type_s := ::[TIP_ACC]([PRODUCT] = 'РЕЗЕРВИРОВАНИЕ' and [COD] = 'IFRS_РЕЗ_СЧЕТ_РЕЗ');
+		P_PROD := P_RES;
+	elsif p_rekv = 'UNREC' and P_RES is not null then
+		-- Получение из резервирования
+		for (select x(x.[ACC] : acc)
+				in P_RES.[UNRECOGNIZED_ACC]
+				where x.[ACC_UCH] = P_RES.[ACC]
+			)
+		loop
+			return x.acc;
+		end loop;
+
+		-- Получение из продукта
+		for (select ac(analytic(max(ac.[ACCOUNT_DOG].[1].[2]), 'keep (dense_rank last order by [1]) ', ac.[DATE_BEG])  ac_unr)
+		       in P_PROD.[ARRAY_DOG_ACC]
+		       where ac.[DATE_BEG] <= P_DATE
+		       	 and  (
+		       	 		(P_RES.[ACC].[MAIN_V_ID] like '47443%' and ac.[ACCOUNT_DOG].[1].[2].[MAIN_V_ID] like '47441%')
+		       	 		or
+		       	 		(P_RES.[ACC].[MAIN_V_ID] like '47502%' and ac.[ACCOUNT_DOG].[1].[2].[MAIN_V_ID] like '47501%')
+		       	 	  )
+			)
+		loop	
+			return ac.ac_unr;
+		end loop;
+
+	elsif p_rekv = 'UNREC' and P_HOA.[ACCOUNT_DOG].[1].[2].[MAIN_V_ID] like '47440%' then
+		for (select ac(analytic(max(ac.[ACCOUNT_DOG].[1].[2]), 'keep (dense_rank last order by [1]) ', ac.[DATE_BEG])  ac_unr)
+		       in P_PROD.[ARRAY_DOG_ACC]
+		       where ac.[DATE_BEG] <= P_DATE
+		       	 and  ac.[ACCOUNT_DOG].[1].[2].[MAIN_V_ID] like '47442%'
+			)
+		loop	
+			return ac.ac_unr;
+		end loop;
+		
+	end if;		
+	
+	if v_hoa_type_s is not null then
+		-- Получение счёта
+		for (select ac(analytic(max(ac.[ACCOUNT_DOG].[1].[2]), 'keep (dense_rank last order by [1]) ', ac.[DATE_BEG])  ac_res)
+		       in P_PROD.[ARRAY_DOG_ACC]
+		       where ac.[DATE_BEG] <= P_DATE
+		       	 and ac.[NAME_ACCOUNT] = v_hoa_type_s
+			)
+		loop
+			if    p_rekv in ('AC_RES', 'IFRS_AC_RES_A') then
+				return ac.ac_res;
+			elsif p_rekv = 'IFRS_AC_RES_P' then
+				for (select p(p.[ACC_DT] par)
+					in ::[PAIR_ACC_FIN]
+					where p.[ACC_KT] = ac.ac_res
+						fetch 1
+					)
+				loop
+					return p.par;
+				end loop;
+			end if;
+			exit;
+		end loop;			
+	end if;	
+
+return null;	
+end;
+
+--	Расчет срока задолженности по выписке для счетов картотеки по РКО
+public function Get_Debt_By_Acc_Move_Only
+                  (in_date_op in [date]
+                  ,in_acc in ref [AC_FIN]
+                  ) return integer
+is
+     out_debt_period number := 0;
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: out_debt_date 	 date; | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+     -- out_debt_date 	 date;
+     out_debt_date 	 DATE_TIME;
+	vUSE_OUT_SALDO 	 boolean;     
+begin
+	::[FP_TUNE].[LIB].get_value(vUSE_OUT_SALDO, 'USE_OUT_SALDO');
+	vUSE_OUT_SALDO := nvl(vUSE_OUT_SALDO, false);
+
+	if vUSE_OUT_SALDO then
+		 for (select x(x.[START_SUM] : IN_SUM
+		              ,x.[START_SUM] + (case when X.[DT] then - x.[SUMMA] else x.[SUMMA] end) : OUT_SUM
+		              ,x.[DATE] : DATE_IN
+		              ,analytic(LAG(x.[DATE]), 'over (order by nvl(c_stamp,c_date) desc, id desc)') : DATE_DZ
+		              )
+		          in ::[RECORDS] all
+		       where x%collection = in_acc.[ARC_MOVE]
+		         and x.[DATE] < in_date_op + interval('1','day')
+		        order by nvl(x.[STAMP], x.[DATE]) desc, x%id desc
+		     ) loop
+		
+		      if x.OUT_SUM >= 0 then
+		      	out_debt_date := trunc(x.DATE_DZ);
+		      	exit;
+		      elsif x.IN_SUM = 0 and x.OUT_SUM < 0 then
+		      	out_debt_date := trunc(x.DATE_IN);
+		      	exit;
+		      end if;
+		 end loop;
+
+	      if out_debt_date is not null then
+	      	out_debt_period := (trunc(in_date_op) - trunc(out_debt_date)) + 1;
+	      else out_debt_period := 0;
+	      end if;
+	
+	      &debug('Get_Debt_By_Acc_Move: Для счета ID "' || in_acc%id || '" дата возникновения ДЗ: "' || to_char(out_debt_date) || '" срок задолженности: "' || out_debt_period || '"', 0)
+	
+	      return out_debt_period * (-1);
+	else
+
+	     for (select x(x.[START_SUM] : IN_SUM
+	     			  ,x.[START_SUM] + (case when X.[DT] then - x.[SUMMA] else x.[SUMMA] end) : OUT_SUM
+	                  ,x.[DATE] : DATE_IN
+	                 )
+	              in ::[RECORDS] all
+	           where x%collection = in_acc.[ARC_MOVE]
+	             and x.[DATE] < in_date_op
+	            order by nvl(x.[STAMP], x.[DATE]) desc, x%id desc
+	         ) loop
+	
+	          if x.OUT_SUM >= 0 then
+	            out_debt_date := null;
+	            exit;
+	          elsif x.IN_SUM >= 0 and x.OUT_SUM < 0 then
+	            out_debt_date := trunc(x.DATE_IN) + 1;
+	            exit;
+	          end if;
+	     end loop;
+	
+	      if out_debt_date is not null and out_debt_date <= in_date_op then
+	      	out_debt_period := (trunc(in_date_op) - trunc(out_debt_date)) + 1;
+	      else out_debt_period := 0;
+	      end if;
+	
+	      &debug('Get_Debt_By_Acc_Move: Для счета ID "' || in_acc%id || '" дата возникновения ДЗ: "' || to_char(out_debt_date) || '" срок задолженности: "' || out_debt_period || '"', 0)
+	
+	      return out_debt_period * (-1);
+	end if;
+end;
+
+--	Расчет срока задолженности по выписке для счетов картотеки по РКО
+public function Get_Debt_By_Acc_Move
+                  (in_date_op in [date]
+                  ,in_acc in ref [AC_FIN]
+                  ) return integer
+is
+	ac_prev			ref [AC_FIN];
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: date_first		date; | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+	-- date_first		date;
+	date_first		DATE_TIME;
+	period_prev		integer;
+	P_DEBT_PERIOD	integer;
+begin
+	P_DEBT_PERIOD := Get_Debt_By_Acc_Move_Only(in_date_op, in_acc);
+	&debug('BEG P_DEBT_PERIOD =' || P_DEBT_PERIOD, 0)
+	
+	for (select ac(ac.[DATE] dt)
+		in in_acc.[ARC_MOVE]
+			where ac.[SUMMA] <> 0
+			order by ac.[DATE]
+		)
+	loop
+		date_first := trunc(ac.dt);
+		&debug('date_first =' || date_first, 0)
+		exit;
+	end loop;
+
+	&debug('(in_date_op - date_first + 1) =' || -(in_date_op - date_first + 1), 0)
+	if -(in_date_op - date_first + 1) = P_DEBT_PERIOD then 	-- Проверяем, что входящий счет не обнулялся
+		-- Ищем предыдущий счет
+		for h in ::[HOZ_OP_ACC] all
+		where h.[ACCOUNT_DOG].[1].[2] = in_acc
+		loop
+			for (select g(analytic(max(g), 'keep (dense_rank last order by [1]) ', g.[DATE_BEG]) obj)
+				 in ::[HOZ_OP_ACC] all
+				where g%collection = h%collection
+				  and g.[ACCOUNT_DOG].[1].[2].[MAIN_V_ID] like '458%'
+				  and g.[NAME_ACCOUNT] = ::[TIP_ACC](COD = 'РКО_458')
+				  and g.[ACCOUNT_DOG].[1].[2] <> in_acc
+				  and g.[DATE_BEG] < in_date_op
+				  fetch 1
+				)
+			loop
+				ac_prev := g.obj.[ACCOUNT_DOG].[1].[2];
+				&debug('AC_PREV = ' || AC_PREV.[MAIN_V_ID], 0)
+				period_prev := in_date_op - g.obj.[DATE_BEG];	-- Находим период просрочки прошлого счета
+				&debug('period_prev = ' || period_prev, 0)
+			end loop;
+			
+			if ac_prev is not null then
+				exit;
+			end if;
+		end loop;
+		
+		if period_prev is not null then
+			P_DEBT_PERIOD := P_DEBT_PERIOD - period_prev;
+		end if;
+	end if;
+
+	&debug('END P_DEBT_PERIOD =' || P_DEBT_PERIOD, 0)
+	return coalesce(P_DEBT_PERIOD, 0);
+end;
+
+-- Вывод в Excel ------------------------------------------------------------------------
+procedure print_one (
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: P_DATE	date | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+					-- P_DATE	date
+					P_DATE	DATE_TIME
+					,P_ACC	ref [AC_FIN]
+					,P_PROD	ref [PRODUCT]	    default null
+					,P_HOA	ref [HOZ_OP_ACC]	default null
+					,P_RES	ref [RES_BASE_ACCS] default null
+					,P_PORT ref [RES_PORT]		default null
+					,V_SUMM_PORT		number	default null
+					,V_SUMM_IFRS_PORT	number	default null
+					)
+is
+	i	integer;
+	v_cat		varchar2(3);
+	v_cat_prc	number;
+	v_cat_prc_err varchar2(30);
+	v_acc_saldo summa;
+	v_acc_priz	ref [AC_FIN];
+	v_acc_priz_saldo_v 	summa;
+	v_acc_priz_saldo 	summa;
+	v_baza 		summa;
+	v_r_res		number;
+	v_zalog_1	ref [ZALOG];
+	v_zalog_2	ref [ZALOG];
+	v_szac		summa;	
+	v_ac_res			ref [AC_FIN];
+	v_ac_res_saldo		summa;
+	v_ac_res_a			ref [AC_FIN];
+	v_ac_res_a_saldo	summa;
+	v_ac_res_p			ref [AC_FIN];
+	v_ac_res_p_saldo	summa;
+	
+	v_prc_dev	number;
+	v_r_ifrs	number;
+	v_f_ifrs	number;
+	v_ras_rvp	number;
+	v_debt_period integer;
+begin
+	&debug('P_ACC = '||P_ACC.[MAIN_V_ID],10)
+	&debug('P_RES = '||P_RES,10)
+	i:= 1;
+	li_cur_row := li_cur_row + 1;
+	
+	v_cat := to_char(get_req_prod_num(P_PROD, P_HOA, P_RES, P_DATE, 'M_CAT'));	-- Категория качества
+	v_cat_prc := get_req_prod_num(P_PROD, P_HOA, P_RES, P_DATE, 'M_CAT_PRC');	-- % резервирования
+	
+	if P_PORT is null then
+		for (select z(analytic(max(z.[PRC_RESERV]), 'keep (dense_rank last order by [1]) ', z.[DATE_START]) obj)
+	       	in P_ACC.[CLIENT_R].[GR_RISK_HIST]
+	       	where z.[DATE_START] <= P_DATE
+	 	  )
+		loop
+			if (v_cat_prc - z.obj) <> 0 then
+				v_cat_prc_err := 'Ошибка-в клиенте '||z.obj||'%';
+			end if;
+		end loop;
+	end if;
+	
+	v_acc_saldo := F.A('В' || P_ACC.[ARC_MOVE] || 'сН', P_DATE + 1);	-- Остаток на счёте задолженности
+
+	-- Только для счетов с продуктом
+	if P_PROD is not null then
+		if P_RES is not null or P_ACC.[MAIN_USV].[NUM] = '47440'
+		then
+			-- Получим счёт непризнанных задолженностей
+			-- if P_ACC.[MAIN_USV].[NUM] in ('47443', '47502', '47816') then
+				v_acc_priz := get_acc_ifrs(P_PROD, P_HOA, P_RES, P_DATE, 'UNREC');
+				if v_acc_priz is not null then
+					v_acc_priz_saldo_v := F.A('В' || v_acc_priz.[ARC_MOVE] || 'с',  P_DATE + 1);
+					v_acc_priz_saldo   := F.A('В' || v_acc_priz.[ARC_MOVE] || 'сН', P_DATE + 1);
+				end if;
+			-- end if;
+		end if;
+		-- Получение обеспечения по договору
+		v_zalog_1 := get_zalog(P_PROD, P_DATE, 1, '0');
+		v_zalog_2 := get_zalog(P_PROD, P_DATE, 2, '0');
+		v_szac := get_zalog_sum(P_PROD, P_ACC, P_RES, P_DATE);
+
+	else v_szac := 0;
+	end if;
+	
+	-- База для резервирования
+	if P_ACC.[MAIN_USV].[NUM] = '47440' then
+		v_baza := 0;
+	elsif v_acc_priz is not null then
+		if (v_acc_saldo <= v_acc_priz_saldo) then
+			 v_baza := 0;
+		else v_baza := (v_acc_saldo - v_acc_priz_saldo);
+		end if;
+	else v_baza := v_acc_saldo;
+	end if;
+	
+	if P_PORT is not null then 
+		v_r_res := v_baza * v_cat_prc / 100; -- Расчётный резерв для ПОТ
+	else
+		v_r_res := round(v_baza * v_cat_prc / 100, 2); -- Расчётный резерв
+	end if;
+	
+	-- Расчетный РВП с учётом обеспечения (рубли)
+	if v_szac = 0 then
+		v_ras_rvp := v_r_res;
+	elsif v_baza <= v_szac then
+		 v_ras_rvp := 0;
+	else v_ras_rvp := round((v_baza - v_szac) * v_cat_prc / 100, 2);
+	end if;
+
+	-- Счёт резерва и остаток на нём
+	v_ac_res := get_acc_ifrs(P_PROD, P_HOA, P_RES, P_DATE, 'AC_RES');
+	if P_PORT is not null and V_SUMM_PORT = 0 then 
+		v_ac_res_saldo := null;
+	else	
+		v_ac_res_saldo := F.A('В' || v_ac_res.[ARC_MOVE] || 'сН', P_DATE + 1);
+	end if;
+
+	----- МСФО ------------------------------------------------------
+	v_prc_dev := round(get_req_acc_ifrs(P_PROD, P_HOA, P_RES, P_DATE, 'IFRS_PRC'), 4); 	-- % резерва по МСФО
+	
+	-- Счета корректировки резерва по МСФО и остатки по ним
+	v_ac_res_a := get_acc_ifrs(P_PROD, P_HOA, P_RES, P_DATE, 'IFRS_AC_RES_A');
+	v_ac_res_p := get_acc_ifrs(P_PROD, P_HOA, P_RES, P_DATE, 'IFRS_AC_RES_P');
+	if (P_PORT is not null and V_SUMM_PORT = 0) or v_prc_dev is null then
+		v_ac_res_a_saldo = v_ac_res_p_saldo := null;
+	else
+		v_ac_res_a_saldo := F.A('В' || v_ac_res_a.[ARC_MOVE] || 'СН', P_DATE + 1) * (-1);
+		v_ac_res_p_saldo := F.A('В' || v_ac_res_p.[ARC_MOVE] || 'СН', P_DATE + 1);
+	end if;
+	
+	if P_PORT is not null then
+		v_r_ifrs := v_baza * v_prc_dev / 100;		-- Расчётный резерв по МСФО для ПОТ
+	elsif v_prc_dev is null then
+		v_r_ifrs := null;
+	elsif (P_PROD.[DATE_CLOSE] <= P_DATE or v_baza = 0) then
+		v_r_ifrs := 0;
+	else
+		v_r_ifrs := round(v_baza * v_prc_dev / 100, 2);		-- Расчётный резерв по МСФО
+	end if;
+	
+	if P_PORT is not null and V_SUMM_PORT = 0 then
+		v_f_ifrs := null;
+	else
+		v_f_ifrs := get_req_acc_ifrs(P_PROD, P_HOA, P_RES, P_DATE, 'IFRS_RES', false, P_PORT);		-- Фактический резерв по МСФО
+	end if;
+	
+	if (P_ACC.[MAIN_V_ID] like '458%' or P_ACC.[MAIN_V_ID] like '47423%') and P_ACC.[NAME] like '%РКО%' then
+		v_debt_period := Get_Debt_By_Acc_Move(P_DATE, P_ACC);				-- Кол-во дней просрочки по картотеке по РКО
+	end if;
+
+	&xl.put(li_cur_row, i, case when P_PROD%class = 'KRED_PERS' and P_ACC.[MAIN_USV].[NUM]  =   '47427' then '2.3.2.  Проценты по кредитам ФЛ: - %% текущие'
+								when P_PROD%class = 'KRED_PERS' and P_ACC.[MAIN_USV].[NUM] like '459%'  then '2.3.2.  Проценты по кредитам ФЛ: - %% просроченные'
+								when P_PROD%class = 'KRED_CORP' and P_ACC.[MAIN_USV].[NUM]  =   '47427' then '2.3.2.  Проценты по кредитам ЮЛ: - %% текущие'
+								when P_PROD%class = 'KRED_CORP' and P_ACC.[MAIN_USV].[NUM] like '459%'  then '2.3.2.  Проценты по кредитам ЮЛ: - %% просроченные'
+								when P_PROD%class = 'OVERDRAFTS' and P_ACC.[MAIN_USV].[NUM]  =   '47427' then '2.3.2.  Проценты по овердрафтам: - %% текущие'
+								when P_PROD%class = 'OVERDRAFTS' and P_ACC.[MAIN_USV].[NUM] like '459%'  then '2.3.2.  Проценты по овердрафтам: - %% просроченные'
+								when P_PROD%class in ('KRED_PERS', 'KRED_CORP', 'OVERDRAFTS') then P_PROD%classname||' '||P_PROD->(PR_CRED)[PRJ_KIND_CRED].[NAME]
+								when P_PROD%class = 'BANKS_LOANS' and P_ACC.[MAIN_USV].[NUM]  =   '47427' then '2.3.1.  Проценты по МБК: - %% текущие'
+								when P_PROD%class = 'BANKS_LOANS' and P_ACC.[MAIN_USV].[NUM] like '325%'  then '2.3.1.  Проценты по МБК: - %% просроченные'
+								when P_PROD%class = 'BANKS_LOANS' then P_PROD%classname
+								when P_PROD%class = 'GUARANTIES' and P_ACC.[MAIN_USV].[NUM] in ('47502', '47501','45812') then '2.3.1. Комиссия гарантии'
+								when P_PROD%class = 'GUARANTIES' then '3.1. ' || coalesce(P_PORT.[PORT_NAME], 'Индивидуальные гарантии')
+								when P_RES.[PROD_RES]%class = 'RES_PORT' then P_PORT.[PORT_NAME]
+								when P_PROD is null and instr(P_ACC.[NAME], 'РКО') > 0 then '2.2.1. Комиссии РКО ЮЛ_текущие индивидуальные'
+								when P_PROD is null and P_ACC.[MAIN_USV].[NUM] in ('30110','30114') then '1.1.1. Корсчета НОСТРО'
+								when P_PROD is null and P_ACC.[MAIN_USV].[NUM] in ('30221') then '1.1.2. Незавершенные расчеты_Корсчета НОСТРО'
+								when P_PROD is null and P_ACC.[MAIN_USV].[NUM] in ('30233') then '1.1.3. Незавершенные расчеты_ Платежные системы/операторы услуг платежной инфраструктуры'
+								when P_PROD is null and P_RES.[CUST]%class in ('CL_BANK_N', 'CL_BANK_F') and P_ACC.[MAIN_USV].[NUM] in ('47408') then '2.1.1. Конверсия_Контрагент_Банк'
+								when P_PROD is null and P_RES.[CUST]%class = 'CL_ORG' and P_ACC.[MAIN_USV].[NUM] in ('47408') then '2.1.2. Конверсия_Контрагент_ЮЛ'
+								when P_PROD is null and P_ACC.[MAIN_USV].[NUM] = '60308' then '2.4. Прочие требования_Недостачи'
+								when P_PROD is null and P_ACC.[MAIN_USV].[NUM] in ('60312', '60314') then '2.4. Прочие требования_Авансы, предварительная оплата работ и услуг'
+								when P_PROD is null and P_ACC.[MAIN_USV].[NUM] = '60323' then '2.4. Прочие дебиторы'
+								when P_PROD is null and P_ACC.[MAIN_USV].[NUM] in ('45410', '47107') then '2.4. Обеспечительный платеж_Аренда помещения'
+								when P_PROD is null and P_ACC.[MAIN_USV].[NUM] like '322%' then 'Операции РЕПО'
+								when P_PROD is null then P_RES%classname
+								else P_PROD%classname
+						   end); -- Продукт ИБСО
+	i := i + 1;
+	&xl.put(li_cur_row, i, case when P_PROD%class in ('KRED_PERS', 'KRED_CORP', 'OVERDRAFTS') then P_PROD->(PR_CRED)[CLIENT].[INN]
+								when P_PROD%class = 'BANKS_LOANS' then P_PROD->(BANKS_LOANS)[CLIENT].[INN]
+								when P_PROD%class = 'GUARANTIES' then P_PROD->(GUARANTIES)[PRINCIPAL].[INN]
+								when P_RES.[PROD_RES]%class = 'RES_PORT' then P_ACC.[CLIENT_R].[INN]
+								when P_PROD is null then P_RES.[CUST].[INN]
+						   end);  -- ИНН
+	i := i + 1;
+	&xl.put(li_cur_row, i, case when P_PROD%class in ('KRED_PERS', 'KRED_CORP', 'OVERDRAFTS') then P_PROD->(PR_CRED)[CLIENT].[NAME]
+								when P_PROD%class = 'BANKS_LOANS' then P_PROD->(BANKS_LOANS)[CLIENT].[NAME]
+								when P_PROD%class = 'GUARANTIES' then P_PROD->(GUARANTIES)[PRINCIPAL].[NAME]
+								when P_RES.[PROD_RES]%class = 'RES_PORT' then P_ACC.[CLIENT_R].[NAME]
+								when P_PROD is null then P_RES.[CUST].[NAME]
+						   end);  -- Клиент
+	i := i + 1;
+	&xl.put(li_cur_row, i, P_PROD.[NUM_DOG]); -- Номер договора
+	i := i + 1;
+	&xl.put(li_cur_row, i, to_number(v_cat)); -- Категория качества
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_cat_prc); -- Ставка расчетного резерва (РВП)(%)
+	i := i + 1;
+	&xl.put(li_cur_row, i,  case when P_PROD%class in ('KRED_PERS', 'KRED_CORP', 'OVERDRAFTS') then P_PROD->(PR_CRED)[FT_CREDIT].[CUR_SHORT]	
+								 when P_PROD%class = 'BANKS_LOANS' then P_PROD->(BANKS_LOANS)[CURRENCY].[CUR_SHORT]
+								 when P_PROD%class = 'GUARANTIES' then P_PROD->(GUARANTIES)[VALUTA].[CUR_SHORT]
+								 when P_PROD is null then P_ACC.[FINTOOL].[CUR_SHORT]
+							end); -- Валюта
+	i := i + 1;
+	if P_PROD is null and instr(P_ACC.[NAME], 'РКО') > 0 then
+		null;
+	end if;
+	
+	&xl.put(li_cur_row, i, P_ACC.[MAIN_USV].[NUM]); -- БС задолженности (Актив)
+	i := i + 1;
+	&xl.put(li_cur_row, i, P_ACC.[MAIN_V_ID]); -- Лицевой счет задолженности (АКТИВ)
+	i := i + 1;
+	&xl.put(li_cur_row, i, F.A('В' || P_ACC.[ARC_MOVE] || 'с',  P_DATE + 1)); -- Сумма задолженности (Актив)
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_acc_saldo); -- Сумма задолженности (Актив) (рубли)
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_acc_priz.[MAIN_USV].[NUM]); -- БС задолженности (Пассив)
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_acc_priz.[MAIN_V_ID]); -- Лицевой счет задолженности (ПАССИВ)
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_acc_priz_saldo_v); -- Сумма Прочие доходы (Пассив)
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_acc_priz_saldo); -- Сумма Прочие доходы (Пассив) (рубли)
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_baza); -- База для расчета РВП (рубли)
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_r_res); -- Расчётный РВП (рубли)
+	i := i + 1;
+	/*-- Обеспечение 1 ----------------------------------------------------------------
+	&xl.put(li_cur_row, i, v_zalog_1.[VID_GUARANTEE].[NAME]);	-- Вид обеспечения 1
+	i := i + 1;
+	&xl.put(li_cur_row, i, case when v_zalog_1.[VID_GUARANTEE].[SECS_CALCS_PARTS].[FACTOR] = 1.00 then 1
+								 when v_zalog_1.[VID_GUARANTEE].[SECS_CALCS_PARTS].[FACTOR] = 0.5  then 2
+								 else null
+							end); -- Категория качества обеспечения 1
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_zalog_1.[ACC_ZALOG].[MAIN_V_ID]); -- Лицевой счет обеспечения 1
+	i := i + 1;
+	&xl.put(li_cur_row, i, case when v_zalog_1 is not null then F.A('В' || v_zalog_1.[ACC_ZALOG].[ARC_MOVE] || 'с', P_DATE + 1)
+								 else null
+							end); -- Сумма обеспечения 1
+	i := i + 1;
+	&xl.put(li_cur_row, i, case when v_zalog_1 is not null then F.A('В' || v_zalog_1.[ACC_ZALOG].[ARC_MOVE] || 'сН', P_DATE + 1)
+								 else null
+							end); -- Сумма обеспечения (руб.) 1
+	i := i + 1;
+	-- Обеспечение 2 ----------------------------------------------------------------	
+	&xl.put(li_cur_row, i, v_zalog_2.[VID_GUARANTEE].[NAME]);	-- Вид обеспечения 2
+	i := i + 1;
+	&xl.put(li_cur_row, i, case when v_zalog_2.[VID_GUARANTEE].[SECS_CALCS_PARTS].[FACTOR] = 1.00 then 1
+								 when v_zalog_2.[VID_GUARANTEE].[SECS_CALCS_PARTS].[FACTOR] = 0.5  then 2
+								 else null
+							end); -- Категория качества обеспечения 2
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_zalog_2.[ACC_ZALOG].[MAIN_V_ID]); -- Лицевой счет обеспечения 2
+	i := i + 1;
+	&xl.put(li_cur_row, i, case when v_zalog_2 is not null then F.A('В' || v_zalog_2.[ACC_ZALOG].[ARC_MOVE] || 'с', P_DATE + 1)
+								 else null
+							end); -- Сумма обеспечения 2
+	i := i + 1;
+	&xl.put(li_cur_row, i, case when v_zalog_2 is not null then F.A('В' || v_zalog_2.[ACC_ZALOG].[ARC_MOVE] || 'сН', P_DATE + 1)
+								 else null
+							end); -- Сумма обеспечения (руб.) 2
+	i := i + 1;
+	&xl.put(li_cur_row, i, case when P_PROD is not null then get_req_zalog_sum(P_PROD, P_DATE) end); -- Общая сумма обеспечения
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_szac); -- Cумма обеспечения, выделенная на счет
+	i := i + 1;
+	&xl.put(li_cur_row, i, case  when v_szac = 0 then  0
+									when (v_baza <= v_szac) then 100
+									else trunc(100 - (v_baza - v_szac) / v_baza * 100, 3)
+							end); -- Процент покрытия лимита %%
+
+	i := i + 1;*/
+	&xl.put(li_cur_row, i, v_ac_res.[MAIN_USV].[NUM]); -- БС РВП
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_ac_res.[MAIN_V_ID]); -- Лицевой счет РВП
+	i := i + 1;
+	--&xl.put(li_cur_row, i, v_ras_rvp); -- Расчетный РВП с учётом обеспечения (рубли)
+	--i := i + 1;
+	&xl.put(li_cur_row, i, v_ac_res_saldo); -- Фактический РВП (рубли)
+	i := i + 1;
+	&xl.put(li_cur_row, i, case when P_PORT is not null and V_SUMM_PORT = 0 then null
+								when P_PORT is not null and V_SUMM_PORT > 0 then (v_ac_res_saldo - V_SUMM_PORT * v_cat_prc / 100)
+								else (v_ac_res_saldo - v_ras_rvp)
+							end); -- Расхождения РВП - недосоздан + пересоздан (рубли)
+	i := i + 1;
+	&xl.put(li_cur_row, i, get_req_acc_ifrs(P_PROD, P_HOA, P_RES, P_DATE, 'IFRS_CAT')); -- Группа IFRS 9
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_prc_dev); -- Процент обесценения IFRS 9
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_r_ifrs); -- Расчетный РВП_IFRS 9 (рубли)
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_f_ifrs); -- Фактический РВП_IFRS 9 (рубли)
+	i := i + 1;
+	--&xl.put(li_cur_row, i, get_req_acc_ifrs(P_PROD, P_HOA, P_RES, P_DATE, 'IFRS_RES', true, P_PORT)); -- Фактический РВП_IFRS 9 на предыдущую дату (рубли)
+	--i := i + 1;
+	&xl.put(li_cur_row, i, (v_r_ifrs - v_ras_rvp)); -- Расчетная Корректировка РВП_IFRS 9 (рубли)
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_ac_res_a.[MAIN_USV].[NUM]); -- БС Актив
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_ac_res_a.[MAIN_V_ID]); -- Активный счет Корректировки РВП_IFRS 9
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_ac_res_a_saldo); -- Фактическая Корректировка РВП_IFRS 9 Активный счёт
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_ac_res_p.[MAIN_USV].[NUM]); -- БС Пассив
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_ac_res_p.[MAIN_V_ID]); -- Пассивный счет Корректировки РВП_IFRS 9
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_ac_res_p_saldo); -- Фактическая Корректировка РВП_IFRS 9 Пассивный счёт
+	i := i + 1;
+	if P_PORT is not null and V_SUMM_IFRS_PORT > 0 then -- Для ПОТ по гарантиям
+		v_r_ifrs := V_SUMM_IFRS_PORT;
+	elsif P_PORT is not null and V_SUMM_PORT > 0 and v_prc_dev is not null then -- Для прочих ПОТ
+		v_r_ifrs := V_SUMM_PORT * v_prc_dev / 100;
+	end if;
+	&xl.put(li_cur_row, i, abs(v_ac_res_saldo - v_r_ifrs) - abs(-v_ac_res_a_saldo + v_ac_res_p_saldo)); --  Расхождения Корректировка РВП_IFRS 9 - недосоздан + пересоздан  (рубли)
+	i := i + 1;
+
+	-- Поиск продукта РКО для даты окончания
+	if P_PROD is null and P_ACC.[NAME] like '%РКО%' then
+			for (select prd(prd.[RKO] obj)
+				in ::[PSH_ACC_REPLACE] all -- updated CHANGE_QUALIFIER PSB_ACC_REPLACE->PSH_ACC_REPLACE 08/10/25
+				where (prd.[RES_BASE] = P_RES or prd.[ACCOUNT_REZ] = P_ACC)
+					and prd.[RKO] is not null
+			)
+			loop
+				P_PROD := prd.obj;
+				exit;
+			end loop;
+		
+		if P_PROD is null then
+			for (select prd(prd obj)
+				in ::[RKO]
+				 ,(::[HOZ_OP_ACC] all : hoa) all
+				where prd.[ARRAY_DOG_ACC] = hoa%collection
+					and hoa.[NAME_ACCOUNT] = ::[TIP_ACC]([COD] = 'РКО_47423' and [PRODUCT] = 'РКО')
+					and hoa = (select z(ANALYTIC(max(z%id), 'keep (dense_rank last order by [1] asc)', z.[DATE_BEG]))
+								in prd.[ARRAY_DOG_ACC]
+								where z.[ACCOUNT_DOG].[1].[2] = P_ACC
+								  and z.[DATE_BEG] <= P_DATE
+							  )
+
+				)
+			loop
+				P_PROD := prd.obj;
+			end loop;			
+		end if;
+	end if;
+	
+	&xl.cell(li_cur_row, i, case when P_PROD is not null then coalesce(P_PROD.[DATE_CLOSE], P_PROD.[DATE_ENDING])
+								 else P_ACC.[DATE_CLOSE]
+								 end); 	-- Дата закрытия/окончания договора/счета
+	i := i + 1;
+	&xl.cell(li_cur_row, i, v_debt_period); -- Просрочка для РКО
+	i := i + 1;
+	&xl.cell(li_cur_row, i, P_ACC.[DEPART].[CODE]); -- Подразделение счета
+	i := i + 1;
+	&xl.cell(li_cur_row, i, P_ACC.[OTV].[NAME]); -- Ответстсвенный по счету
+	i := i + 1;
+	&xl.put(li_cur_row, i, v_cat_prc_err); -- Категория качества /Контроль/
+
+	if li_cur_col < i then li_cur_col := i; end if;
+end;
+
+-- Поиск нужных счетов и договоров по КРЕДИТАМ ------------------------------
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: procedure calc_kred(P_DATE date) | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+-- procedure calc_kred(P_DATE date)
+procedure calc_kred(P_DATE DATE_TIME)
+is
+	ac_res_r  ref [AC_FIN];
+	ac_res_un ref [AC_FIN];
+	ac_res_a  ref [AC_FIN];
+	ac_res_p  ref [AC_FIN];	
+	check_ac  boolean;		
+begin
+	&debug('Начало обработки кредитов' ,10)
+	for (select ac(ac  obj_ac, c obj_dog, hoa obj_hoa, res res_obj)
+			in ::[AC_FIN]
+			,(::[ACC_PATTERN] all : acp)
+			,(::[PR_CRED] all : c)
+			,(::[HOZ_OP_ACC] all : hoa)
+			,(::[RES_BASE_ACCS] all : res)
+
+		  where
+		  -- Условия по финансовому счёту
+		    (ac.[DATE_CLOSE] is null or ac.[DATE_CLOSE] >= P_DATE - 32)
+			and acp%collection = ::[ANALYTIC_CODE]([CODE] = 'PSB_REP_PROV_XL').[PATT_NORMAL]
+			and ac.[MAIN_V_ID] like acp.[PATTERN] || '%'
+
+			-- Условия по кредитному договору
+			and c%class in ('KRED_CORP', 'OVERDRAFTS', 'KRED_PERS')
+			and coalesce(c.[DATE_CLOSE], P_DATE) >= P_DATE - 32
+			and (
+					(c.[HIGH_LEVEL_CR] is null and substr(ac.[MAIN_V_ID],1,5) in ('91317', '47443'))
+				 or
+					substr(ac.[MAIN_V_ID],1,5) not in ('91317', '47443')
+				)
+			-- Условия по массиву счета договора
+		  	and c.[ARRAY_DOG_ACC] = hoa%collection
+			and hoa.[NAME_ACCOUNT] not in (
+				 ::[TIP_ACC]([COD] = 'ACC_RESERV' and [PRODUCT] = 'КРЕДИТЫ')
+				,::[TIP_ACC]([COD] = 'ACC_RESERV_DEBTS' and [PRODUCT] = 'КРЕДИТЫ')
+				,::[TIP_ACC]([COD] = 'IFRS_ACC_RESERV' and [PRODUCT] = 'КРЕДИТЫ')
+				,::[TIP_ACC]([COD] = 'IFRS_ACC_RESERV_DEBTS' and [PRODUCT] = 'КРЕДИТЫ')
+				)
+			and hoa = (select z(ANALYTIC(max(z%id), 'keep (dense_rank last order by [1] asc)', z.[DATE_BEG]))
+						in c.[ARRAY_DOG_ACC]
+						where ac = z.[ACCOUNT_DOG].[1].[2]
+						  and z.[DATE_BEG] <= P_DATE
+					  )
+			-- and c = '5702038838'
+			-- Присоединяем резервирование
+			and res.[ACC](true) = ac
+	)
+	loop
+		check_ac := false;
+		ac_res_r  := get_acc_ifrs(ac.obj_dog, ac.obj_hoa, ac.res_obj, P_DATE, 'AC_RES');
+		ac_res_un := get_acc_ifrs(ac.obj_dog, ac.obj_hoa, ac.res_obj, P_DATE, 'UNREC');
+		ac_res_a  := get_acc_ifrs(ac.obj_dog, ac.obj_hoa, ac.res_obj, P_DATE, 'IFRS_AC_RES_P');
+		ac_res_p  := get_acc_ifrs(ac.obj_dog, ac.obj_hoa, ac.res_obj, P_DATE, 'IFRS_AC_RES_A');
+		
+		if ac.obj_hoa.[NAME_ACCOUNT] = ::[TIP_ACC]([PRODUCT] = 'КРЕДИТЫ' and [COD] = 'ACCOUNT') then
+			for (select z(ANALYTIC(max(z.[ACCOUNT_DOG].[1].[2]), 'keep (dense_rank last order by [1] asc)', z.[DATE_BEG]) acc)
+								in ac.obj_dog.[ARRAY_DOG_ACC]
+								where z.[NAME_ACCOUNT] = ::[TIP_ACC]([PRODUCT] = 'КРЕДИТЫ' and [COD] = 'ACCOUNT')
+								  and z.[DATE_BEG] <= P_DATE
+				)
+			loop
+				if z.acc = ac.obj_ac then
+					exit;
+				else
+					check_ac := true;
+				end if;
+			end loop;
+		end if;
+
+		if (F.A('В' || ac.obj_ac.[ARC_MOVE] || 'сН', P_DATE + 1) = 0 and
+		   coalesce(F.A('В' || ac_res_r.[ARC_MOVE]  || 'сН', P_DATE + 1), 0) = 0 and
+		   coalesce(F.A('В' || ac_res_un.[ARC_MOVE] || 'сН', P_DATE + 1), 0) = 0 and
+		   coalesce(F.A('В' || ac_res_a.[ARC_MOVE]  || 'сН', P_DATE + 1), 0) = 0 and
+		   coalesce(F.A('В' || ac_res_p.[ARC_MOVE]  || 'сН', P_DATE + 1), 0) = 0
+		   )
+		or check_ac
+		then
+			continue;
+		end if;
+		
+		print_one(P_DATE, ac.obj_ac, ac.obj_dog, ac.obj_hoa, ac.res_obj);
+	end loop;
+	&debug('Конец обработки кредитов' ,10)
+end;
+
+-- Поиск нужных счетов и договоров по ГАРАНТИЯМ ------------------------------
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: procedure calc_gar(P_DATE date) | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+-- procedure calc_gar(P_DATE date)
+procedure calc_gar(P_DATE DATE_TIME)
+is
+	ac_res_r  ref [AC_FIN];
+	ac_res_un ref [AC_FIN];
+	ac_res_a  ref [AC_FIN];
+	ac_res_p  ref [AC_FIN];	
+	v_res_p	  ref [RES_BASE_ACCS];
+	v_sum_port number;
+	v_sum_ifrs_port number;
+	v_prev_port ref [RES_PORT];
+begin
+	&debug('Начало обработки Гарантий' ,10)
+	for (select ac(ac  obj_ac, c obj_dog, hoa obj_hoa, res res_obj, port obj_port)
+			in ::[AC_FIN]
+			,(::[ACC_PATTERN] all : acp)
+			,(::[GUARANTIES] all : c)
+			,(::[HOZ_OP_ACC] all : hoa)
+			,(::[RES_BASE_ACCS] all : res)
+			,(::[RES_PORT] all : port)
+			,(::[RES_ACC_VAL] all port_acc)			
+
+		  where
+		  -- Условия по финансовому счёту
+		    (ac.[DATE_CLOSE] is null or ac.[DATE_CLOSE] >= P_DATE - 32)
+			and acp%collection = ::[ANALYTIC_CODE]([CODE] = 'PSB_REP_PROV_XL').[PATT_NORMAL]
+			and ac.[MAIN_V_ID] like acp.[PATTERN] || '%'
+
+			-- Условия по гарантии
+			and c%class = 'GUARANTIES'
+			and coalesce(c.[DATE_CLOSE], P_DATE) >= P_DATE - 32
+			-- Условия по массиву счета договора
+		  	and c.[ARRAY_DOG_ACC] = hoa%collection
+			and hoa.[NAME_ACCOUNT] not in (
+				 ::[TIP_ACC]([COD] = '_ACC_RESERV' and [PRODUCT] = 'ГАРАНТИИ')
+				,::[TIP_ACC]([COD] = 'G_ACC_RESERV_DEBTS' and [PRODUCT] = 'ГАРАНТИИ')
+				,::[TIP_ACC]([COD] = 'IFRS__ACC_RESERV' and [PRODUCT] = 'ГАРАНТИИ')
+				,::[TIP_ACC]([COD] = 'IFRS_G_ACC_RESERV_DEBTS' and [PRODUCT] = 'ГАРАНТИИ')
+				)
+			and hoa = (select z(ANALYTIC(max(z%id), 'keep (dense_rank last order by [1] asc)', z.[DATE_BEG]))
+						in c.[ARRAY_DOG_ACC]
+						where ac = z.[ACCOUNT_DOG].[1].[2]
+						  and z.[DATE_BEG] <= P_DATE
+					  )
+			-- and c = '5702038838'
+			-- Присоединяем резервирование
+			and (res.[ACC](true) = ac or res.[PROD_RES](true) = port)
+			-- Присоединяем портфели однородных требования
+			and port.[ACCRS](true) = port_acc%collection
+			and port_acc.[RES_ACC](true) = ac
+			and port_acc.[DATE_BEGIN](true) <= P_DATE
+			and (port_acc.[DATE_END](true) is null or port_acc.[DATE_END](true) > P_DATE)
+			 
+	order by port, c.[KIND_CREDIT].[NAME], c.[PRINCIPAL].[NAME], ac.[MAIN_V_ID]
+	)
+	loop
+		ac_res_r  := get_acc_ifrs(ac.obj_dog, ac.obj_hoa, coalesce(ac.res_obj, v_res_p), P_DATE, 'AC_RES');
+		ac_res_un := get_acc_ifrs(ac.obj_dog, ac.obj_hoa, coalesce(ac.res_obj, v_res_p), P_DATE, 'UNREC');
+		ac_res_a  := get_acc_ifrs(ac.obj_dog, ac.obj_hoa, coalesce(ac.res_obj, v_res_p), P_DATE, 'IFRS_AC_RES_P');
+		ac_res_p  := get_acc_ifrs(ac.obj_dog, ac.obj_hoa, coalesce(ac.res_obj, v_res_p), P_DATE, 'IFRS_AC_RES_A');
+		
+		if (F.A('В' || ac.obj_ac.[ARC_MOVE] || 'сН', P_DATE + 1) = 0 and
+		   coalesce(F.A('В' || ac_res_r.[ARC_MOVE]  || 'сН', P_DATE + 1), 0) = 0 and
+		   coalesce(F.A('В' || ac_res_un.[ARC_MOVE] || 'сН', P_DATE + 1), 0) = 0 and
+		   coalesce(F.A('В' || ac_res_a.[ARC_MOVE]  || 'сН', P_DATE + 1), 0) = 0 and
+		   coalesce(F.A('В' || ac_res_p.[ARC_MOVE]  || 'сН', P_DATE + 1), 0) = 0
+		   )
+		--or (ac.res_obj is not null and ac.res_obj.[PROD_RES] <> ac.obj_dog)
+		then
+			continue;
+		end if;
+		
+		if ac.obj_port is not null and (v_prev_port is null or v_prev_port <> ac.obj_port) then
+			v_sum_port := get_sum_port(ac.obj_port, P_DATE);
+			v_sum_ifrs_port := round(get_sum_ifrs_port(ac.obj_port, P_DATE), 2);
+		else
+			v_sum_port := 0;
+			v_sum_ifrs_port := 0;
+		end if;
+		
+		print_one(P_DATE, ac.obj_ac, ac.obj_dog, ac.obj_hoa, coalesce(ac.res_obj, v_res_p), ac.obj_port, v_sum_port, v_sum_ifrs_port);
+		v_prev_port := ac.obj_port;
+	end loop;
+	&debug('Конец обработки Гарантий' ,10)
+end;
+
+-- Поиск нужных счетов и договоров по МБК ------------------------------
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: procedure calc_mbk(P_DATE date) | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+-- procedure calc_mbk(P_DATE date)
+procedure calc_mbk(P_DATE DATE_TIME)
+is
+	ac_res_r  ref [AC_FIN];
+	ac_res_a  ref [AC_FIN];
+	ac_res_p  ref [AC_FIN];	
+	check_ac  boolean;		
+begin
+	-- debug_pipe('Начало обработки' ,10);
+	for (select ac(ac  obj_ac, c obj_dog, hoa obj_hoa, res res_obj)
+			in ::[AC_FIN]
+			,(::[BANKS_LOANS] all : c)
+			,(::[HOZ_OP_ACC] all : hoa)
+			,(::[RES_BASE_ACCS] all : res)
+			,(::[ACC_PATTERN] all : acp)			
+
+		  where
+		  -- Условия по финансовому счёту
+		    (ac.[DATE_CLOSE] is null or ac.[DATE_CLOSE] >= trunc(P_DATE, 'MM')-1)
+		    and ac.[DATE_OP] <= P_DATE
+			and acp%collection = ::[ANALYTIC_CODE]([CODE] = 'PSB_REP_PROV_XL').[PATT_NORMAL]
+			and ac.[MAIN_V_ID] like acp.[PATTERN] || '%'
+
+			-- Условия по договору МБК
+			and c.[DATE_BEGINING] <= P_DATE
+			and c.[CLIENT].[REGISTR_NUM] <> '1000351' -- Исключаем "ОПЕРУ-1 БАНКА РОССИИ", т.к. по ним нет резервов
+			and c.[TYPE_DEAL] in (::[SALE_LIST](CODE = 'PL_LOAN'))
+
+			and coalesce(c.[DATE_CLOSE], P_DATE) >= P_DATE - 32
+
+			-- Условия по массиву счета договора
+		  	and c.[ARRAY_DOG_ACC] = hoa%collection
+			and hoa.[NAME_ACCOUNT] not in (
+				 ::[TIP_ACC]([COD] = 'BL_RESERV' and [PRODUCT] = 'BANKS_LOANS')
+				,::[TIP_ACC]([COD] = 'BL_RESERV_DEBT' and [PRODUCT] = 'BANKS_LOANS')
+				,::[TIP_ACC]([COD] = 'IFRS_BL_RESERV' and [PRODUCT] = 'BANKS_LOANS')
+				,::[TIP_ACC]([COD] = 'IFRS_BL_RESERV_DEBT' and [PRODUCT] = 'BANKS_LOANS')
+				)
+			and hoa = (select z(ANALYTIC(max(z%id), 'keep (dense_rank last order by [1] asc)', z.[DATE_BEG]))
+						in c.[ARRAY_DOG_ACC]
+						where ac = z.[ACCOUNT_DOG].[1].[2]
+						  and z.[DATE_BEG] <= P_DATE
+					  )
+			-- and c = '5702038838'
+			-- Присоединяем резервирование
+			and res.[ACC](true) = ac
+	)
+	loop
+		check_ac := false;
+		
+		ac_res_r  := get_acc_ifrs(ac.obj_dog, ac.obj_hoa, ac.res_obj, P_DATE, 'AC_RES');
+		ac_res_a  := get_acc_ifrs(ac.obj_dog, ac.obj_hoa, ac.res_obj, P_DATE, 'IFRS_AC_RES_P');
+		ac_res_p  := get_acc_ifrs(ac.obj_dog, ac.obj_hoa, ac.res_obj, P_DATE, 'IFRS_AC_RES_A');
+		
+		if ac.obj_hoa.[NAME_ACCOUNT] = ::[TIP_ACC]([PRODUCT] = 'BANKS_LOANS' and [COD] = 'BL_ACC_BASIC') then
+			for (select z(ANALYTIC(max(z.[ACCOUNT_DOG].[1].[2]), 'keep (dense_rank last order by [1] asc)', z.[DATE_BEG]) acc)
+								in ac.obj_dog.[ARRAY_DOG_ACC]
+								where z.[NAME_ACCOUNT] = ::[TIP_ACC]([PRODUCT] = 'BANKS_LOANS' and [COD] = 'BL_ACC_BASIC')
+								  and z.[DATE_BEG] <= P_DATE
+				)
+			loop
+				if z.acc = ac.obj_ac then
+					exit;
+				else
+					check_ac := true;
+				end if;
+			end loop;
+		end if;
+	
+
+		if (F.A('В' || ac.obj_ac.[ARC_MOVE] || 'сН', P_DATE + 1) = 0 and
+		   coalesce(F.A('В' || ac_res_r.[ARC_MOVE]  || 'сН', P_DATE + 1), 0) = 0 and
+		   coalesce(F.A('В' || ac_res_a.[ARC_MOVE]  || 'сН', P_DATE + 1), 0) = 0 and
+		   coalesce(F.A('В' || ac_res_p.[ARC_MOVE]  || 'сН', P_DATE + 1), 0) = 0
+		   )
+		 or check_ac
+		then
+			continue;
+		end if;
+		
+		print_one(P_DATE, ac.obj_ac, ac.obj_dog, ac.obj_hoa, ac.res_obj);
+	end loop;
+end;
+
+-- Поиск нужных счетов по ПОРТФЕЛЮ ОДНОРОДНЫХ ТРЕБОВАНИЙ ------------------------------
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: procedure calc_POT(P_DATE date) | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+-- procedure calc_POT(P_DATE date)
+procedure calc_POT(P_DATE DATE_TIME)
+is
+	v_sum_port number;
+	v_sum_ifrs_port number;
+	v_prev_port ref [RES_PORT];
+begin
+	-- debug_pipe('Начало обработки' ,10);
+	for (select port(port obj_port, res res, ac acc, port port)
+			in ::[RES_PORT] 
+			 ,(::[RES_BASE_ACCS] all : res)
+			 ,(::[RES_ACC_VAL] all port_acc)	
+			 ,(::[AC_FIN] all ac) all		
+			 
+		  where
+		  	-- Условия по резервированию
+		  	res.[PROD_RES]%class = 'RES_PORT'
+		  	and res.[PROD_RES] = port
+		  	and (port.[DATE_CLOSE] is null or port.[DATE_CLOSE] >= P_DATE - 32) 
+		  	and port.[TYPE_RES].[NAME] not like 'ПОТ по экспресс-гарантиям%'
+			-- Присоединяем к ПОТ счета
+			and port.[ACCRS] = port_acc%collection
+			and port_acc.[RES_ACC] = ac
+			and port_acc.[DATE_BEGIN] <= P_DATE
+			and (port_acc.[DATE_END] is null or port_acc.[DATE_END] > P_DATE)
+ 
+		  	-- Условия по финансовому счёту
+		    and (ac.[DATE_CLOSE] is null or ac.[DATE_CLOSE] >= P_DATE - 32)
+		    and  ac.[DATE_OP] <= P_DATE
+		    
+		order by port, ac.[NAME], ac.[MAIN_V_ID]
+		)
+	loop
+		if v_prev_port is null or v_prev_port <> port.obj_port then
+			v_sum_port := get_sum_port(port.obj_port, P_DATE);
+		else
+			v_sum_port := 0;
+		end if;
+
+		print_one(P_DATE, port.acc, null, null, port.res, port.obj_port, v_sum_port);
+		v_prev_port := port.obj_port;
+	end loop;
+end;
+
+-- Поиск нужных счетов по РЕЗЕРВИРОВАНИЮ (без продукта) ------------------------------
+--(*)v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: procedure calc_other(P_DATE date) | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-29 16:44:29
+-- procedure calc_other(P_DATE date)
+procedure calc_other(P_DATE DATE_TIME)
+is
+	ac_res_a  ref [AC_FIN];
+	ac_res_p  ref [AC_FIN];			
+begin
+	-- debug_pipe('Начало обработки' ,10);
+	for (select res(res obj)
+			in ::[RES_BASE_ACCS] 
+			 ,(::[ACC_PATTERN] all : acp) all
+		  where
+		  	-- Условия по резервированию
+		  	res.[ACC] is not null
+		  	and res.[PROD_RES] is null
+		  	and (res.[DATE_CLOSE] is null or res.[DATE_CLOSE] >= ::[SYSTEM].[OP_DATE])
+		  	-- Условия по финансовому счёту
+		    and (res.[ACC].[DATE_CLOSE] is null or res.[ACC].[DATE_CLOSE] >= P_DATE - 32)
+		    and  res.[ACC].[DATE_OP] <= P_DATE
+			and acp%collection = ::[ANALYTIC_CODE]([CODE] = 'PSB_REP_PROV_XL').[PATT_NORMAL]
+			and res.[ACC].[MAIN_V_ID] like acp.[PATTERN] || '%'
+		    
+		order by res.[ACC].[NAME], res.[CUST].[NAME], res.[ACC].[MAIN_V_ID]
+		)
+	loop
+		ac_res_a := get_acc_ifrs(null, null, res.obj, P_DATE, 'IFRS_AC_RES_A');
+		ac_res_p := get_acc_ifrs(null, null, res.obj, P_DATE, 'IFRS_AC_RES_P');
+		
+		if F.A('В' || res.obj.[ACC].[ARC_MOVE] || 'сН', P_DATE + 1) = 0 and
+		   F.A('В' || res.obj.[RES_ACC].[ARC_MOVE] || 'сН', P_DATE + 1) = 0 and
+		   F.A('В' || ac_res_a.[ARC_MOVE] || 'сН', P_DATE + 1) = 0 and
+		   F.A('В' || ac_res_p.[ARC_MOVE] || 'сН', P_DATE + 1) = 0
+		then
+			continue;
+		end if;
+
+		print_one(P_DATE, res.obj.[ACC], null, null, res.obj);
+	end loop;
+end;
+PSH_REP_PROV_XL (
+	@name('Дата отчёта')                   P_DATE  in [DATE],
+	@name('Отчёт по кредитам')             P_KRED  in [BOOLEAN],
+	@name('Отчёт по страховым депозитам')  P_DEPN  in [BOOLEAN],
+	@name('Отчёт по МБК')                  P_MBK   in [BOOLEAN],
+	@name('Отчёт по гарантиям')            P_GAR   in [BOOLEAN],
+	@name('Отчёт по ПОТ (кроме гарантий)') P_POT   in [BOOLEAN],
+	@name('Отчёт по прочим счетам')        P_OTHER in [BOOLEAN]
+) is
+
+validate is
+begin
+	if p_message = 'DEFAULT' then
+		li_cur_col := 0;
+		-- P_DATE := trunc(::[SYSTEM].[OP_DATE], 'MM') - 1;
+		-- P_DATE := CALENDAR.Next_Date('HOLIDAYS', '0' , trunc(::[SYSTEM].[OP_DATE], 'MM') ,-2);
+		P_KRED = P_MBK = P_OTHER = P_GAR = P_POT := true;
+		
+	elsif  P_MESSAGE = 'VALIDATE'  then
+		if P_INFO = 'OK' then
+				if P_DATE is null or 
+					not (   nvl(P_KRED, false) = true 
+						 or nvl(P_DEPN, false) = true 
+						 or nvl(P_MBK,  false) = true 
+						 or nvl(P_GAR,  false) = true 
+						 or nvl(P_POT,  false) = true 
+						 or nvl(P_OTHER,false) = true
+						) 
+				then
+					pragma error('Некорректно заполнена экранная форма!');
+		    	end if;
+
+				if not nvl(&xl.open_file(::[SHABLON_DOC]([CODE]= 'PSB_REP_PROV_XL').[RPT_TMPL]), False) then
+					pragma error('Ошибка открытия шаблона с кодом '||'PSB_REP_PROV_XL');
+		    	end if;
+				&lp.xl_init('PSB_REP_PROV_XL');
+		    	&xl.open_sheet(1);		    					
+
+				li_cur_row := li_start_row;
+				
+				-- Формирование отчёта
+				if P_KRED  then calc_kred(P_DATE);  end if;
+				if P_MBK   then calc_mbk(P_DATE);   end if;
+				if P_OTHER then calc_other(P_DATE); end if;
+				if P_GAR   then calc_gar(P_DATE);   end if;				
+				if P_POT   then calc_POT(P_DATE);   end if;
+				
+				&debug('Закончена обработка',10)
+				&xl.Set_Format_Range(li_start_row, 1, li_cur_row, li_cur_col, p_borderId==&xl.get_border(p_top=='thin',p_bottom=='thin',p_left=='thin',p_right=='thin'));
+				&xl.Set_Format_Range(li_start_row, li_start_row, 1, li_cur_col, p_fillId == &xl.get_fill_back_color('C1C1C1'));
+				
+				&xl.set_autofilter(li_start_row, li_start_row, 1, li_cur_col);
+				&xl.RenameSheet(1,to_char(P_DATE, 'dd.mm.yyyy')||'г.');
+
+				&lp.xl_finish;				
+	    end if;
+	end if;
+end;
+end;
+end;

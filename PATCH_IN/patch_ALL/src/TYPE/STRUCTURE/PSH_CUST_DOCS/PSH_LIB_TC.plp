@@ -1,0 +1,301 @@
+class PSH_CUST_DOCS;
+
+@name('[ПСБ] Библиотека типов и констант')
+@tag('COPIED')
+library PSH_LIB_TC is
+
+-- состояния документов
+public stNew 			const varchar2(10) := 'NEW';		--новый
+public stChecked 		const varchar2(10) := 'CHECKED';	--без ошибок
+public stCheckErr		const varchar2(10) := 'CHKERROR';	--ошибки
+public stPodtv	 		const varchar2(10) := 'PODTV';		--подтверждено
+public stSendReqs 		const varchar2(10) := 'SENDREQS';	--запросы отправлены
+public stProcessErr		const varchar2(10) := 'SENDERR';	--ошибки отправлены
+public stAnswer			const varchar2(10) := 'ANSWERED';	--отклики получены
+public stFormAnsw		const varchar2(10) := 'FORMANSW';	--ответ сформирован
+public stSendAnsw		const varchar2(10) := 'SENDANSW'; 	--ответ отправлен
+public stNAdoptAnsw		const varchar2(10) := 'NADOPTANSW'; --ответ не принят
+public stSend			const varchar2(10) := 'SEND'; 		--отправлен
+public stNAdopt 		const varchar2(10) := 'NADOPT'; 	--не принят
+public stFinish			const varchar2(10) := 'FINISH';		--обработка завершена
+public stExecErr		const varchar2(10) := 'EXECERROR';	--ошибки исполнения
+public stCheckXSD		const varchar2(10) := 'CHECKXSD';	--на проверку по схеме
+public stErrXSD			const varchar2(10) := 'ERRXSD';		--ошибка проверки по схеме
+public stAnswXSD		const varchar2(10) := 'ANSWXSD';	--ответ на проверке по схеме
+public stAnswErr		const varchar2(10) := 'ANSWERR';	--ошибка в ответе при проверке по схеме
+public stAnswExc		const varchar2(10) := 'ANSWEXC';	--исключительная ситуация
+public stErrCheckSt		const varchar2(10) := 'ERRCHKST';	--ошибка статуса RP0614500
+public stErrClInfo		const varchar2(10) := 'ERRCLINF';	--ошибка в данных клиента
+
+-- состояния запросов
+public stRNew		const varchar2(10) := 'NEW';
+public stRSend		const varchar2(10) := 'SEND';
+public stRSendErr	const varchar2(10) := 'SENDERR';
+public stRAnswered	const varchar2(10) := 'ANSWERED';
+public stRFinish	const varchar2(10) := 'FINISH';
+public stRExcept	const varchar2(10) := 'EXCEPT';
+
+-- типы связей
+public lnkAnswer	const ref [TAX_EXC_LINK_TYP] := ::[TAX_EXC_LINK_TYP]([CODE] = 'ANSW');
+public lnkConfirm1	const ref [TAX_EXC_LINK_TYP] := ::[TAX_EXC_LINK_TYP]([CODE] = 'CONF1');
+public lnkConfirm2	const ref [TAX_EXC_LINK_TYP] := ::[TAX_EXC_LINK_TYP]([CODE] = 'CONF2');
+public lnkQuit		const ref [TAX_EXC_LINK_TYP] := ::[TAX_EXC_LINK_TYP]([CODE] = 'QUIT');
+public lnkRepeat	const ref [TAX_EXC_LINK_TYP] := ::[TAX_EXC_LINK_TYP]([CODE] = 'REPEAT');
+public lnkCorr		const ref [TAX_EXC_LINK_TYP] := ::[TAX_EXC_LINK_TYP]([CODE] = 'CORR');
+
+-- основные типы документов
+public typeBFN		const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'BFN'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+public typeTPO		const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'TPO'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+public typeTOO 		const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'TOO'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+public typeUCO 		const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'UCO'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+public typeUCC 		const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'UCC'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+public typeCMO 		const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'CMO'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+public typeCMC 		const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'CMC'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+public typeCSO 		const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'CSO'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+public typeSTO 		const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'STO'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+public typeTFO 		const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'TFO'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+
+-- служебные типы документов
+public typePT1	 	const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'PT1'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+public typePT2	 	const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'PT2'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+public typeUV1	 	const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'UV1'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+public typeUV2	 	const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'UV2'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+public typeUV3	 	const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'UV3'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+public typeKVT		const ref [PSH_CUST_DOC_TYP] := ::[PSH_CUST_DOC_TYP]([CODE] = 'KVT'); -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+
+-- разделитель каталогов
+public defSlash	varchar2;
+
+public XSDPath const [FILE$PATH] := 'gov/741p/';
+public dateFormat const varchar2(10) := 'YYYY-MM-DD';
+public pragma macro(date2str, 'to_char([1], &libtc.dateFormat)', substitute);
+public pragma macro(str2date, 'to_date([1], &libtc.dateFormat)', substitute);
+
+public pragma macro(xml_doc, '&xml.newDOMDocument([1])', substitute);
+public pragma macro(xml_docElem, '&xml.getDocumentElement([1])', substitute);
+public pragma macro(xml_node, '&xml.makeNode([1])', substitute);
+public pragma macro(xml_nodeElem, '&xml.makeElement([1])', substitute);
+public pragma macro(xml_getNodeValue, '&xml.GetNodeValue(&xml.getFirstChild([1]))', substitute);
+
+-- типы ошибок
+public errError	::[TAX_ERROR].[ERR_TYPE]%type := 'ERROR';
+
+public type T_sysAbs is table of [TAX_IC_TEXT_LIST];
+
+public type T_reqs is varray(0) of ref [PSH_CUST_REQS]; -- updated CHANGE_QUALIFIER PSB_CUST_REQS->PSH_CUST_REQS 08/10/25
+
+public type R_docOut is record(
+	r_clob 	clob
+	,r_docType 	ref [PSH_CUST_DOC_TYP] -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+	,r_fileName ::[PSH_CUST_DOCS].[FILE_NAME]%type
+	,r_branch 	ref [BRANCH]
+	,r_link		ref [TAX_EXC_LINK_TYP]);
+
+public type T_docOut is table of R_docOut;
+
+-- табличка для проверки обязательных тегов
+public type T_CheckXML	is table of varchar2(1) index by varchar2;
+
+-- табличка для ошибок
+public type T_Errors is table of [TAX_ERROR];
+public type TErrExecList is table of [TAX_ERROR_EXEC];
+
+public type T_Branch is table of ref [BRANCH] index by varchar2;
+
+public type R_BranchInfo is record (
+	f_nomF	varchar2(4),
+	f_bicF	varchar2(9) -- <xs:pattern value="\d{9}"/>				
+);
+
+public type T_BranchInfo is table of R_BranchInfo index by varchar2;
+public branchesInfo	T_BranchInfo;
+
+-- агрегация ошибок от информационных компонент
+public type r_errIC is record (
+	  f_code	varchar2(2)
+	, f_value	varchar2(256)
+	, f_pr		integer
+	, f_del		boolean
+	, f_desc	varchar2(512)
+);
+
+public type t_errIC is table of r_errIC;
+
+-- ФИО						
+public type r_fio	is record (
+	  Surname		varchar2(150)	-- Фамилия
+	, Name			varchar2(150)	-- Имя
+	, MiddleName	varchar2(150)	-- Отчество
+);
+
+-- сотрудник таможенного органа или банка и дата подписания документа (при наличии)
+public type r_person	is record (
+	  FIO		r_fio			-- ФИО
+	, Post		varchar2(250)	-- Должность
+	, Phone		varchar2(24)	-- Номер телефона
+	, DateSign	[DATE]			-- Дата подписания
+);
+
+-- реквизиты документа
+public type r_custDoc	is record (
+	  Name		varchar2(250)	-- Наименование документа
+	, DocNum	varchar2(50)	-- Номер документа
+	, DocDate	[DATE]			-- Дата документа
+	, PayerAcc	varchar2(20)	-- Номер счета плательщика, указанный в поручении на бесспорное списание
+);
+
+-- таможенный орган
+public type r_custOffice	is record (
+	  Code		varchar2(8)			-- Код
+	, Name		varchar2(50)		-- Наименование
+	, FullName	varchar2(250)		-- Полное наименование
+);
+
+-- плательщик (организация или ИП)
+public type r_payer is record (
+	  FullName		varchar2(250)	-- Полное наименование
+	, ShortName		varchar2(120)	-- Краткое наименование
+	, Language		varchar2(2)		-- Код языка для заполнения наименования (alpha-2 в стандарте ISO 639-1)
+	, FIO			r_fio			-- ФИО (для ИП)
+	, INN			varchar2(12)	-- ИНН
+	, KPP			varchar2(9)		-- КПП
+	, OGRN			varchar2(15)	-- ОГРН/ОГРНИП
+	, OKPOID		varchar2(10)	-- Код по ОКПО
+	, OKATOCode		varchar2(11)	-- Код ОКАТО
+	, ITN			varchar2(13)	-- ИТН участника внешнеэкономической деятельности
+);
+
+-- банк
+public type r_bank is record (
+	  FullName		varchar2(250)	-- Полное наименование
+	, ShortName		varchar2(120)	-- Краткое наименование
+	, Language		varchar2(2)		-- Код языка для заполнения наименования (alpha-2 в стандарте ISO 639-1)
+	, INN			varchar2(12)	-- ИНН
+	, KPP			varchar2(9)		-- КПП
+	, OGRN			varchar2(15)	-- ОГРН/ОГРНИП
+	, OKPOID		varchar2(10)	-- Код по ОКПО
+	, OKATOCode		varchar2(11)	-- Код ОКАТО
+	, BIC			varchar2(9)		-- БИК
+);
+
+-- счет
+public type r_acc is record (
+	  AccNum			varchar2(20)	-- Номер счета или реквизиты корпоративного электронного средства платежа 
+	, AccType			varchar2(250)	-- Вид счета
+	, AccCurCode		varchar2(3)		-- Валюта счета
+	, CorporatePayer	varchar(250)	-- Идентификатор корпоративного электронного средства платежа
+);
+					
+-- таблица счетов
+public type t_acc is table of r_acc;
+		
+public pragma macro('libtc',  '::[PSH_CUST_DOCS].[PSH_LIB_TC]', substitute);
+public pragma macro('libfun', '::[PSH_CUST_DOCS].[PSH_LIB_FUN]', substitute);
+public pragma macro('libchk', '::[PSH_CUST_DOCS].[PSH_LIB_CHECK]', substitute);
+public pragma macro('lib',    '::[PSH_CUST_DOCS].[PSH_LIB]', substitute);
+public pragma macro('agrlib', '::[EL_EXCH_AGR].[LIB]', substitute);
+public pragma macro('inlib',  '::[PSH_CUST_DOCS_IN].[PSH_LIB]', substitute);
+public pragma macro('xml',    '::[RUNTIME].[XML_DB]', substitute);
+public pragma macro('ft',     '::[FP_TUNE].[LIB]', substitute);
+
+public pragma macro (stBase, 'case [1]
+						when &libtc.stNew then ''Новый''
+						when &libtc.stChecked then ''Без ошибок''
+						when &libtc.stCheckErr then ''Ошибки''
+						when &libtc.stPodtv then ''Подтверждено''
+						when &libtc.stSendReqs then ''Запросы отправлены''
+						when &libtc.stAnswer then ''Отклики получены''
+						when &libtc.stFinish then ''Обработка завершена''
+						when &libtc.stFormAnsw	then ''Ответ сформирован''
+						when &libtc.stSendAnsw	then ''Ответ отправлен''
+						when &libtc.stNAdoptAnsw then ''Ответ не принят''
+						when &libtc.stSend	then ''Отправлен''
+						when &libtc.stNAdopt then ''Не принят''
+						when &libtc.stExecErr then ''Ошибки исполнения''
+						when &libtc.stCheckXSD then ''На проверку''
+						when &libtc.stErrXSD then ''Ошибки формата''
+						when &libtc.stAnswXSD then ''Ответ на проверке''
+						when &libtc.stAnswErr then ''Ошибки в ответе''
+						when &libtc.stAnswExc then ''Исключительная ситуация''
+						when &libtc.stErrCheckSt then ''Ошибка статуса''
+						when &libtc.stErrClInfo then ''Ошибки клиента''
+						end 
+						', substitute);
+
+public pragma macro(st, 'coalesce(&stBase([1]), (
+													case
+														when regexp_substr([1], ''[^0-9]*'') is null then
+															case
+																when (select y(count(1)) in ::[COM_STATUS_PRD] all where y%id = to_number([1])) > 0 then
+																	(select y(y.[NAME]) in ::[COM_STATUS_PRD] all where y%id = to_number([1]))
+																else
+																	null
+															end
+														else
+															null
+													end
+												))', substitute);
+
+public pragma macro (reqst, 'case [1]
+						when &libtc.stRNew then ''Новый''
+						when &libtc.stRSend then ''Отправлен''
+						when &libtc.stRSendErr then ''Ошибка отправки''
+						when &libtc.stRAnswered then ''Получен ответ''
+						when &libtc.stRFinish then ''Обработка завершена''
+						when &libtc.stRExcept then ''Исключение''
+						end
+						', substitute);
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+
+public function getStateName(p_stateId varchar2) return varchar2
+is
+result varchar2;
+begin
+	result := &stBase(p_stateId);
+	
+	if result is null and regexp_substr(p_stateId, '[^0-9]*') is null then
+		begin
+			select	x(x.[NAME])
+			in		::[COM_STATUS_PRD] all
+			where	x%id = to_number(p_stateId)
+			into	result;
+			
+		exception
+			when NO_DATA_FOUND then
+				return null;
+		end;
+	end if;
+	
+	return result;
+end;
+
+procedure fillBrInfo(p_branch ref [BRANCH], p_bic out ::[BRANCH].[SLIB].GET_BIC%type, p_brNum out varchar2(4))
+is
+	v_bankNum	varchar2(4);
+begin
+	p_bic 	:= ::[BRANCH].[SLIB].GET_BIC(p_branch);
+	::[BRANCH].[SLIB].GET_REG_NUM_TWO_PARTS(p_branch, v_bankNum, p_brNum);
+	p_brNum := nvl(p_brNum, '0');
+end;
+
+procedure fillBranches
+is
+	v_bic		::[BRANCH].[SLIB].GET_BIC%type;
+	v_brNum		varchar2(4);
+begin
+	for x in ::[BRANCH] loop
+		v_bic = v_brNum := null;
+		
+		fillBrInfo(x, v_bic, v_brNum);
+				
+		branchesInfo(x%id).f_nomF 	:= v_brNum;
+		branchesInfo(x%id).f_bicF 	:= v_bic;
+		
+	end loop;	
+end;
+
+begin
+	defSlash := stdio.SETTING('DEF_SLASH');
+	fillBranches();
+end;
+end;

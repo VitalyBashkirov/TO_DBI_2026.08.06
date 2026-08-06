@@ -1,0 +1,17 @@
+class RICHES_GUIDE;
+
+@name('[ПСБ] Установить количество с остатка на счете')
+method PSH_KOL_OST_CENN is
+PSH_KOL_OST_CENN is
+
+execute is
+/*********************************************************************
+Назначение:
+
+kurganov, последнее изменение 23 Июнь 2014 г.
+*********************************************************************/
+begin
+	this.[CERT].[AMOUNT]:=abs(this.[CERT].[ACCOUNT].[SALDO]);
+end;
+end;
+end;

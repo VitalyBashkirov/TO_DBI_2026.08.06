@@ -1,0 +1,41 @@
+class PSH_OUT_CHECKOFF;
+
+@name('[ПСБ] Добавить')
+@tag('CREATED')
+constructor PSH_NEW_AUTO is
+PSH_NEW_AUTO (
+	@name('Организация')          P_ORGANIZATION in [CLIENT_REF],
+	@name('Наличие адреса SWIFT') P_HAS_SWIFT    in [BOOLEAN]    default null
+) return ref [PSH_OUT_CHECKOFF] is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_ORGANIZATION := this.[ORGANIZATION];
+	P_HAS_SWIFT := this.[HAS_SWIFT];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+
+flag   number;
+
+begin
+	-- Установка значения реквизита "Организация"
+	[ORGANIZATION] := P_ORGANIZATION;
+	-- Установка значения реквизита "Наличие адреса SWIFT"
+	[HAS_SWIFT] := P_HAS_SWIFT;
+    select x(nvl(max(1), 0))in [CLIENT] all where x%id=P_ORGANIZATION
+    and x.[ADDRESSES].[TYPE].[KOD]='SWIFT_ADDRESS' 
+    and rownum = 1 into flag;  	
+    if flag = 1 then
+      [HAS_SWIFT]:=true;
+    else
+      [HAS_SWIFT]:=false;
+    end if;
+	
+end;
+end;
+end;

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ViewPresentation classId="AC_FIN" shortName="VW_CRIT_PSH_SS_OST_PER_2">
+    <Properties>
+        <Ordering>
+            <Column alias="C_DATE_OP" type="desc"/>
+        </Ordering>
+        <MethodFilter>Z1494265900</MethodFilter>
+    </Properties>
+    <Columns>
+        <Column alias="C_MAIN_V_ID" referenceId="0">
+            <Name>Основной номер</Name>
+            <Resizeable>true</Resizeable>
+            <Width>14</Width>
+        </Column>
+        <Column alias="C_DATE_OP" referenceId="0">
+            <Name>Дата открытия</Name>
+            <Align>center</Align>
+            <DateFormat>Default(dd/MM/yyyy)</DateFormat>
+            <Resizeable>true</Resizeable>
+            <Width>8</Width>
+        </Column>
+        <Column alias="C_DATE_CLOSE" referenceId="0">
+            <Name>Дата закрытия</Name>
+            <Align>center</Align>
+            <DateFormat>Default(dd/MM/yyyy)</DateFormat>
+            <Resizeable>true</Resizeable>
+            <Width>8</Width>
+        </Column>
+        <Column alias="C_INT_CUR_CODE" referenceId="1">
+            <Name>Код  ISO валюты</Name>
+            <Align>center</Align>
+            <Resizeable>true</Resizeable>
+            <Visibility>invisible</Visibility>
+            <Width>5</Width>
+            <Navigation>
+                <Transition>auto</Transition>
+            </Navigation>
+        </Column>
+        <Column alias="C_NAME_1" referenceId="1">
+            <Name>Cтатус</Name>
+            <Resizeable>true</Resizeable>
+            <Width>6</Width>
+            <Navigation>
+                <Transition>auto</Transition>
+            </Navigation>
+        </Column>
+        <Column alias="C_SALDO" referenceId="0">
+            <Name>Среднедневной остаток Валюта</Name>
+            <Align>right</Align>
+            <NumberPrecision>2</NumberPrecision>
+            <Resizeable>true</Resizeable>
+            <Width>12</Width>
+        </Column>
+        <Column alias="C_CUR_SHORT" referenceId="1">
+            <Name>Вал.</Name>
+            <Align>center</Align>
+            <Resizeable>true</Resizeable>
+            <Width>5</Width>
+            <Navigation>
+                <Transition>auto</Transition>
+            </Navigation>
+        </Column>
+        <Column alias="C_SALDO_1" referenceId="0">
+            <Name>Среднедневной остаток Рубли</Name>
+            <Align>right</Align>
+            <NumberPrecision>2</NumberPrecision>
+            <Resizeable>true</Resizeable>
+            <Width>12</Width>
+        </Column>
+        <Column alias="C_NAME" referenceId="0">
+            <Name>Наименование</Name>
+            <Resizeable>true</Resizeable>
+            <Width>34</Width>
+        </Column>
+        <Column alias="C_NAME_2" referenceId="1">
+            <Name>Владелец счета</Name>
+            <Resizeable>true</Resizeable>
+            <Width>27</Width>
+            <Navigation>
+                <Transition>auto</Transition>
+            </Navigation>
+        </Column>
+        <Column alias="C_INN" referenceId="1">
+            <Name>ИНН</Name>
+            <Align>center</Align>
+            <Resizeable>true</Resizeable>
+            <Width>10</Width>
+            <Navigation>
+                <Transition>auto</Transition>
+            </Navigation>
+        </Column>
+        <Column alias="C_NAME_3" referenceId="1">
+            <Name>Клиент, для расчетов с которым открыт счет банка</Name>
+            <Resizeable>true</Resizeable>
+            <Visibility>invisible</Visibility>
+            <Width>23</Width>
+            <Navigation>
+                <Transition>auto</Transition>
+            </Navigation>
+        </Column>
+        <Column alias="C_CODE" referenceId="1">
+            <Name>Подраз деление</Name>
+            <Resizeable>true</Resizeable>
+            <Width>8</Width>
+            <Navigation>
+                <Transition>auto</Transition>
+            </Navigation>
+        </Column>
+        <Column alias="C_DEPART" referenceId="1">
+            <Name>Подразделение</Name>
+            <Resizeable>true</Resizeable>
+            <Visibility>invisible</Visibility>
+            <Width>17</Width>
+            <Navigation>
+                <Transition>auto</Transition>
+            </Navigation>
+        </Column>
+        <Column alias="C_ACTUAL_ACCOUNTANT_NAME" referenceId="0">
+            <Name>Куратор владельца счета</Name>
+            <Resizeable>true</Resizeable>
+            <Width>20</Width>
+        </Column>
+    </Columns>
+</ViewPresentation>

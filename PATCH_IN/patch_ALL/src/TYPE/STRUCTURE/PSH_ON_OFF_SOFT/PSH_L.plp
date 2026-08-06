@@ -1,0 +1,2414 @@
+class PSH_ON_OFF_SOFT;
+
+@import_plsql(true)
+@name('[ПСБ] Библиотека')
+@tag('KUP_OUR_OPER_VW')
+library PSH_L is
+--L
+dp integer:=0;	--управление debug_pipe
+dp2 integer:=0;
+dp3 integer:=0;
+dp4 integer:=0;
+dp5 integer:=0;
+dp6 integer:=0;	--CFT_SELECT
+dp7 integer:=null;	--strStandartXxxName
+
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+fmt string(10):='dd/mm/yyyy';
+fmt24 string(22):='dd/mm/yyyy HH24:MI:SS';
+
+public prefName      string(10):='[ПСБ] ';	--Префикс Банка
+public prefShortName string(10):='PSH';		--Префикс Банка
+public sepEnd string(10):='~'; --'>';
+
+--Исключение на примере переименования ТПБ EXP_TRANS_TAO
+--При перестроении таблицы идет сообщение об ошибке о длинном имени индекса (33>30 символов)
+		 --1234567890123456
+excepShortName string(32767):=
+'EXP_TRANS_TAO,UFEBS_SBP_ED_AR1,UFEBS_SBP_TR_AR1,UFEBS_SBP_TI_AR1,UFEBS_SBP_LI_AR1,UFEBS_SBP_TR_IN1,UFEBS_SBP_IN_RE1,UFEBS_SBP_TR_RE1,UFEBS_SBP_TI_RE1,UFEBS_SBP_LI_RE1,KF_DATA_REF_ARR,PSH_BOS_KAS__ARR,LIQUIDITY_SBP1  ,TRANS_SBP1';
+
+repl_ShortName string(32767):=
+'EXP_TRA      , PSH_UFBS_ED_ARR, PSH_UFBS_TR_ARR, PSH_UFBS_TI_ARR, PSH_UFBS_LI_ARR,  PSH_UFBS_TR_IN, PSH_UFBS_IN_REF, PSH_UFBS_TR_REF, PSH_UFBS_TI_REF, PSH_UFBS_LI_REF,PSH_KF_DATA_ARR,PSH_BOS_KAS_ARR, PSH_LIQUIDITY_SB,PSH_TRANS_SBP';
+
+--sepLF string(10):='~'||LF$; --chr(10) сепаратор строк
+public sepLF string(10):=LF$; --chr(10) сепаратор строк
+
+public function iif(u boolean, v1 varchar2, v2 varchar2) return varchar2 is begin if u then return v1; end if; return v2; end;
+pragma restrict_references(iif, WndS, WnpS);
+
+public text_Check_Work string(128):='[PSH_ON_OFF_SOFT].[PSH_L].CheckWork';
+public uppText_Check_Work string(128):=upper(text_Check_Work);
+
+public text_Only_CheckWork string(512):=
+sepLF||
+'/*>.[1]<*/if not ::[PSH_ON_OFF_SOFT].[PSH_L].CheckWork(''DEFAULT'''||',&METHOD$CLASS,&METHOD$SNAME) then return null; end if;/*<.[1]>*/'
+||sepLF;
+
+public text string(512):=
+sepLF||
+'/*>.[1]<*/'||sepLF||
+'if p_message = '||'''DEFAULT'''||' then -- Автоадминистрирование локального функционала'||sepLF||
+' if not ::[PSH_ON_OFF_SOFT].[PSH_L].CheckWork(''DEFAULT'''||',&METHOD$CLASS,&METHOD$SNAME) then return null; end if;'||sepLF||
+'end if;'||sepLF||
+'/*<.[1]>*/'
+||sepLF;
+
+public text_Begin_end string(512):=
+sepLF||
+'/*>.[1]<*/ begin if not ::[PSH_ON_OFF_SOFT].[PSH_L].CheckWork(''DEFAULT'''||',&METHOD$CLASS,&METHOD$SNAME) then return null; end if; end; /*<.[1]>*/'
+||sepLF;
+
+public text_Begin_Default_end string(512):=
+sepLF||
+'/*>.[1]<*/'||sepLF||
+'begin'||sepLF||
+' if p_message = '||'''DEFAULT'''||' then -- Автоадминистрирование локального функционала'||sepLF||
+'   if not ::[PSH_ON_OFF_SOFT].[PSH_L].CheckWork(''DEFAULT'''||',&METHOD$CLASS,&METHOD$SNAME) then return null; end if;'||sepLF||
+' end if;'||sepLF||
+'end;'||sepLF||
+'/*<.[1]>*/'
+||sepLF;
+
+--->--- Выборка ЦФТ
+public type CFT_SELECT
+--(
+--p_class_id in [STRING_30]
+--,p_short_name in [STRING_30] default null
+--)
+is
+select a1 (  a1.ID			:id
+			,a1.OBJ_TYPE	:obj
+			,a1.CLASS_ID	:CLASS_ID
+			,a1.SHORT_NAME	:SHORT_NAME
+			,a1.name		:name
+			,a1.created		:created
+			,a1.user_cr		:user_cr
+			,a1.modif		:modif
+			,a1.user_mod	:user_mod
+			,a1.FLAGS		:flags
+			,a1.metka		:metka
+			,a1.tbp_name	:tbp_name)
+in (
+	(select  cl(b1.ID	ID
+			,'CLASSES'	OBJ_TYPE
+			,b1.ID		CLASS_ID
+			,b1.id		SHORT_NAME
+			,1 ord
+			,b1.name	NAME
+			,null		created
+			,null		user_cr
+			,null		modif
+			,null		user_mod
+			,null		flags
+			,null		metka
+			,b1.NAME	tbp_name)
+	in (CLASS_TABLES%rowtype :c1), (CLASSES%rowtype :b1)
+		where b1.ID = cl.CLASS_ID
+
+	union select  cl(cl.ID	ID
+		,'METHODS'			OBJ_TYPE
+		,cl.CLASS_ID		CLASS_ID
+		,cl.short_name
+		,decode(cl.FLAGS,'R',3,4) ord
+		,cl.name			NAME
+		,cl.CREATED			created
+		,cl.user_created	user_cr
+		,cl.MODIFIED		modif
+		,cl.USER_MODIFIED	user_mod
+		,cl.FLAGS			flags
+		,cl.TAG				metka
+		,null				tbp_name)
+	in (METHODS%rowtype :cl)
+		where cl.FLAGS not in ('Z','A')
+
+	union select  cl(cl.ID	ID
+		,'METHODS'			OBJ_TYPE
+		,cl.CLASS_ID		CLASS_ID
+		,cl.short_name
+		,3 ord
+		,cl.name			NAME
+		,cl.CREATED			created
+		,cl.user_created	user_cr
+		,cl.MODIFIED		modif
+		,cl.USER_MODIFIED	user_mod
+		,cl.FLAGS			flags
+		,cl.TAG				metka
+		,null				tbp_name)
+	in (METHODS%rowtype :cl)
+		where cl.FLAGS = 'Z' and not  exists (
+			select  f1(1 A$1)
+			in (CRITERIA%rowtype :f1)
+			where f1.ID = cl.ID)
+
+	union select  cl(cl.ID	ID
+		,'CRITERIA'			OBJ_TYPE
+		,cl.CLASS_ID		CLASS_ID
+		,cl.short_name
+		,2 ord
+		,cl.name			NAME
+		,null				created
+		,null				user_cr
+		,null				modif
+		,null				user_mod
+		,null				flags
+		,null				metka
+		,clas.NAME			tbp_name)
+	in (CRITERIA%rowtype :cl), (classes%rowtype :clas)
+	where clas.id = cl.CLASS_ID
+	)
+   )
+where --(a1.class_id=p_class_id and (p_short_name is null or a1.short_name=p_short_name)) and
+	not exists (
+	select  h1 (1 A$1)
+	in (OBJECTS_OPTIONS%rowtype :h1)
+	where h1.OBJ_TYPE = a1.OBJ_TYPE
+		and h1.CLASS_ID = a1.CLASS_ID
+		and (h1.SHORT_NAME = a1.SHORT_NAME or a1.SHORT_NAME like h1.SHORT_NAME)
+   )
+order by a1.class_id, a1.ord, a1.short_name;
+---<--- Выборка ЦФТ
+
+public function getLocalObjInfo
+	(
+	p_class_id in [STRING_30]
+	,p_short_name in [STRING_30] default null
+	,p_type varchar2(30) default null
+	,p_dp integer default null
+	)
+  --return boolean is
+	return string(12) is
+	ret_local boolean:=false;
+begin
+	if p_dp is null then return null; end if;
+	
+	for rec in CURSOR CFT_SELECT
+	loop
+		if (rec.CLASS_ID=p_class_id and (p_short_name is null or rec.SHORT_NAME=p_short_name))
+		then
+			debug_pipe(TB$||'CFT_SELECT.id........='||rec.id        ,p_dp);
+			debug_pipe(TB$||'CFT_SELECT.obj       ='||rec.obj       ,p_dp);
+			debug_pipe(TB$||'CFT_SELECT.CLASS_ID  ='||rec.CLASS_ID  ,p_dp);
+			debug_pipe(TB$||'CFT_SELECT.SHORT_NAME='||rec.SHORT_NAME,p_dp);
+			debug_pipe(TB$||'CFT_SELECT.name      ='||rec.name      ,p_dp);
+			debug_pipe(TB$||'CFT_SELECT.created   ='||rec.created   ,p_dp);
+			debug_pipe(TB$||'CFT_SELECT.user_cr   ='||rec.user_cr   ,p_dp);
+			debug_pipe(TB$||'CFT_SELECT.modif     ='||rec.modif     ,p_dp);
+			debug_pipe(TB$||'CFT_SELECT.user_mod  ='||rec.user_mod  ,p_dp);
+			debug_pipe(TB$||'CFT_SELECT.flags     ='||rec.flags     ,p_dp);
+			debug_pipe(TB$||'CFT_SELECT.metka     ='||rec.metka     ,p_dp);
+			debug_pipe(TB$||'CFT_SELECT.tbp_name  ='||rec.tbp_name  ,p_dp);
+			ret_local:=true;
+		end if;
+	end loop;
+	debug_pipe('CFT_SELECT ---> '||p_class_id
+		||iif(p_short_name is not null,'.'||p_short_name,'')
+		||iif(p_type is not null,' "'||p_type||'"','')
+		||' <- '||iif(ret_local,'Локал','Дистрибутив')
+		,p_dp);
+  --return ret_local;
+	return iif(ret_local,'Локал','Дистрибутив');
+end;
+
+--Исключение на примере переименования ТПБ EXP_TRANS_TAO
+--При перестроении таблицы идет сообщение об ошибке о длинном имени индекса (33>30 символов)
+public function getExcRepStr(p_inStr1024 in string(1024)) return string(1024) is
+	excStr string(1024):=excepShortName; --'1,2,EXP_TRANS_TAO';
+	repStr string(1024);				 --'1,2,EXP_TRA';
+	tmpStr string(1024);
+	retStr string(1024);
+begin
+	retStr:=p_inStr1024;
+	if instr(excStr,p_inStr1024)>0 then
+		&debug('.getExcRepStr -- > "'||p_inStr1024||'"',dp7)
+		for i in 1..100 loop
+			tmpStr:=trim(::[CL_PRIV].[PSH_DATE_DEATH].wbn(excStr,',',i));
+			if tmpStr=p_inStr1024 then
+				repStr := repl_ShortName; --'1,2,EXP_TRA';
+				retStr := trim(::[CL_PRIV].[PSH_DATE_DEATH].wbn(repStr,',',i));
+				&debug('.getExcRepStr -- < "'||retStr||'"',dp7)
+				exit;
+			end if;
+		end loop;
+	end if;
+	return retStr;
+end;
+
+public function GetClassName(MetodRef ref [METHOD]) return string(16) is
+n	integer;
+k	integer;
+cl	varchar2;
+begin
+	--Z$AC_FIN_VND_MOVE_DOC_MSK
+	--1234567890
+	n:=InStr(MetodRef.[PACKAGE_NAME],MetodRef.[SHORT_NAME],-1);
+	k:=InStr(MetodRef.[PACKAGE_NAME],MetodRef%ID,-1);
+	if nvl(n,0)<5 and nvl(k,0) = 0 then
+		pragma error('Ош. вычисления ТПБ для '||MetodRef.[SHORT_NAME]);
+	else
+--		cl := Substr(MetodRef.[PACKAGE_NAME],3,n-4);
+		cl := MetodRef.[CLASS_ID];
+	end if;
+	return cl;
+end;
+
+public Function GetState(koos ref [PSH_ON_OFF_SOFT]) return string(100) is
+PRAGMA RESTRICT_REFERENCES ( GetState, WNDS, WNPS );
+
+tmp string(160);
+status varchar2(128);--(50);
+par_id varchar2(50);
+par_name varchar2(128);--(100);
+begin
+	/** /
+	tmp:='Z$'||koos.[CODE_TBP]||'_'||koos.[SHORT_NAME];
+	for method in ::[METHOD] where method.[PACKAGE_NAME]=tmp
+	loop
+		return method.[STATUS];
+	end loop;
+	/**/
+	
+	--Башкиров В.Г. 21.06.2017 Переписан алгоритм определения статуса метода
+	for (select method(method.[STATUS]:c_STATUS) in ::[METHOD] 
+		where method.[CLASS_ID]=koos.[CODE_TBP] and method.[SHORT_NAME]=koos.[SHORT_NAME]
+	)loop
+		return method.c_STATUS;
+	end loop;
+	
+	--Дианков А.В. 26/10/2016 Добавлена секция
+	if koos.[SHORT_NAME] like 'VW%' then --представления	
+		begin
+	  		select x(x.[STATUS])
+	  		in (user_objects%rowtype :x) --таблица объектов
+	  		where x.[object_name] = koos.[SHORT_NAME]
+	  		into status;
+		exception when NO_DATA_FOUND then
+				--возможно это расширение
+				begin
+				 --найдем id начальное представление
+				 select cr(cr.[SRC_ID])
+				 in (CRITERIA%rowtype cr)
+				 where cr.[SHORT_NAME] = koos.[SHORT_NAME]
+					 	   AND cr.[CLASS_ID] = koos.[CODE_TBP]
+					 	   AND cr.[SRC_ID] is not null
+				 into par_id;
+				
+				 --вычислим короткое имя
+				 select cr(cr.[SHORT_NAME])
+				 in (CRITERIA%rowtype cr)
+				 where cr.[ID] = par_id
+				 into par_name;
+				
+				 --вычислим статус
+				 select x(x.[STATUS])
+	  			 in (user_objects%rowtype :x) --таблица объектов
+	  			 where x.[object_name] = par_name
+	  			 into status;
+				exception when NO_DATA_FOUND then
+	        		status := 'INVALID';
+				end;
+		end;
+		if koos.[OPER_ON_BASE] then	return status; end if; --если операция на схеме		
+	end if;
+	
+	return null;
+end;
+
+procedure AddMag(koos ref [PSH_ON_OFF_SOFT]) is
+
+pragma autonomous_transaction; --работаем в режиме автаномной транзакции
+
+AllRec integer:=0;
+DelRec integer:=0;
+SizeRec integer:=0;
+begin
+	AllRec :=koos.[MAG]%size(0);
+	SizeRec:=nvl(koos.[RECS_IN_MAG],nvl([FP_TUNE]::[LIB].get_str_value('PSB_RECS_IN_MAG',null,throw_error == 0),30));
+	&debug('Записей в журнале вызовов '||AllRec||' Максимальный размер журнала '||SizeRec,0)
+	if AllRec>=SizeRec then
+		DelRec:=AllRec-SizeRec+1;
+		&debug('Удаляем '||DelRec||' старую(ые) запись(и) журнала',0)
+		for m in koos.[MAG] order by m.[DATE] desc, m%Id desc
+		loop
+			--27/10/2016 Башкиров В.Г. Устранена ошибка типа ORA-20500: LOCK-RESOURCE_BUSY: Экземпляр [3039156215] блокирован, тип [PSB_MAG]
+			--m%delete; --Проблемы с блокировкой
+			m.PSH_DELETE_AUTO;
+			DelRec:=DelRec-1;
+			if DelRec<=0 then exit; end if;
+		end loop;
+	end if;
+	koos.[MAG].[PSH_NEW_AUTO]( -- updated CHANGE_SHORT_NAME NEW_AUTO->PSH_NEW_AUTO 15/10/25
+	sysdate										--Дата, время вызова
+	,stdlib.UserId								--Пользователь
+	,stdlib.UserId.[USERNAME]					--Сетевое имя
+	,::[SYSTEM].[LOCKINFO_FILIAL].u_machine()	--Компьютер
+	);
+	commit;
+
+exception when others then
+	rollback;	
+end;
+
+public function CheckWork(p_message varchar2 default 'DEFAULT',
+P_CLASS_NAME 	::[DEFVALS].[CLASS_NAME]%type,	--имя класса
+P_METH_NAME 	::[DEFVALS].[METH_NAME]%type,	--имя метода
+P_BISINESS		[MEMO_32767] default null,		--Зачем разработано, кто заказчик
+P_WORK			[MEMO_32767] default null,		--Что сделано
+P_DISTRIB		[STRING_140] default null,		--Рекомендуемая дистрибутивная операция
+--Башкиров В.Г. 16.11.2016 Исправлен тип данных для P_USER_INIT
+--P_USER_INIT	[STRING_30]	 default null,	--Создатель
+P_USER_INIT		[SBRF_NAME]  default null,	--Создатель
+
+--Башкиров В.Г. 07.11.2016 При добавлении записи в справочник по умолчанию пишем режим работы "0"-Журналировать
+P_TYPE_WORK		integer default 0,				--Режим работы (0-Только журналировать вызов,1-Журналировать и предупреждать,2-Журналировать и запрещать использовать)
+
+P_RECS_IN_MAG	[SHORT8]	 default null)		--Размер журнала
+return boolean is
+
+fl_ins boolean:=true;
+MetodRef ref [METHOD];
+koos ref [PSH_ON_OFF_SOFT];
+AddDays integer;
+vMAG	[PSH_MAG_ARR];
+
+ExBool boolean;
+of5	[ONE_FROM_5];
+
+begin
+	if p_message<>'DEFAULT' then return null; end if;
+
+	--Башкиров В.Г. 27.10.2016 Добавлена обработка переменной PSB_MAG_WORK-[ПСБ]Включить режим журналирования
+	--&debug('L.CheckWork -- PSB_MAG_WORK='||[FP_TUNE]::[LIB].get_str_value('PSB_MAG_WORK',null,throw_error == 0),0);
+	if not nvl([FP_TUNE]::[LIB].get_str_value('PSB_MAG_WORK',null,throw_error == 0),false) then
+		--&debug('Не включен режим журналирования локала Банка. Выходим',0);
+		&debug('Не включен режим журналирования локала Банка. Выходим',0)
+		return null;
+	end if;
+	
+	if P_CLASS_NAME is null then pragma error('Не указано имя класса!'); end if;
+	if P_METH_NAME is null then pragma error('Не указано имя метода!'); end if;
+	
+	for k in ::[PSH_ON_OFF_SOFT] where k.[CODE_TBP]=P_CLASS_NAME and k.[SHORT_NAME]=P_METH_NAME loop
+		fl_ins:=false;
+		koos:=k;
+		&debug(koos.[CODE_TBP]||'.'|| koos.[SHORT_NAME]||' присутствует в справочнике "[ПСБ] Администрирование функционала, разработанного Банком"',0)
+		if not nvl(koos.[IN_CHECK],false) then
+			koos.[IN_CHECK]:=true;
+			&debug('Проставим признак "Контроль встроен в операцию"',0)
+		end if;
+		if koos.[USER_INIT] is null then
+			koos.[USER_INIT]:=stdlib.UserId.[NAME];
+			&debug('Пропишем создателя',0)
+		end if;
+		exit;
+	end loop;
+	
+	if fl_ins then
+		if P_RECS_IN_MAG is null then P_RECS_IN_MAG:=nvl([FP_TUNE]::[LIB].get_str_value('PSB_RECS_IN_MAG',null,throw_error == 0),30); end if;
+		if P_USER_INIT is null then P_USER_INIT:=stdlib.UserId.[NAME]; end if;
+		AddDays:=nvl([FP_TUNE]::[LIB].get_str_value('PSB_DAYS',null,throw_error == 0),10);
+		
+		MetodRef:=null;
+
+		&debug('--- METHOD ---',0)
+		for method in ::[METHOD] where method.[PACKAGE_NAME]='Z$'||P_CLASS_NAME||'_'||P_METH_NAME
+		loop
+			&debug('method.[CLASS_ID].[PARENT]                 ='||method.[CLASS_ID].[PARENT] ,0)
+			&debug('method.[CLASS_ID].[PARENT].[HAS_INSTANCES] ='||method.[CLASS_ID].[PARENT].[HAS_INSTANCES] ,0)
+			&debug('method.[CLASS_ID].[PARENT].[KERNEL]        ='||method.[CLASS_ID].[PARENT].[KERNEL]        ,0)
+			&debug('method.[CLASS_ID].[PARENT].[DATA_PRECISION]='||method.[CLASS_ID].[PARENT].[DATA_PRECISION],0)
+			&debug('method.[CLASS_ID].[PARENT].[DATA_SIZE]     ='||method.[CLASS_ID].[PARENT].[DATA_SIZE]     ,0)
+			&debug('method.[CLASS_ID].[PARENT].[BASE_CLASS]    ='||method.[CLASS_ID].[PARENT].[BASE_CLASS]    ,0)
+			&debug('method.[CLASS_ID].[PARENT].[ENTITY]        ='||method.[CLASS_ID].[PARENT].[ENTITY]        ,0)
+			&debug('method.[CLASS_ID].[PARENT].[NAME]          ='||method.[CLASS_ID].[PARENT].[NAME]          ,0)
+			&debug('method.[CLASS_ID].[PARENT].[INTERFACE]     ='||method.[CLASS_ID].[PARENT].[INTERFACE]     ,0)
+
+			&debug('method.[CLASS_ID].[TARGET_CLASS]                 ='||method.[CLASS_ID].[TARGET_CLASS]                 ,0)
+			&debug('method.[CLASS_ID].[TARGET_CLASS].[HAS_INSTANCES] ='||method.[CLASS_ID].[TARGET_CLASS].[HAS_INSTANCES] ,0)
+			&debug('method.[CLASS_ID].[TARGET_CLASS].[KERNEL]        ='||method.[CLASS_ID].[TARGET_CLASS].[KERNEL]        ,0)
+			&debug('method.[CLASS_ID].[TARGET_CLASS].[DATA_PRECISION]='||method.[CLASS_ID].[TARGET_CLASS].[DATA_PRECISION],0)
+			&debug('method.[CLASS_ID].[TARGET_CLASS].[DATA_SIZE]     ='||method.[CLASS_ID].[TARGET_CLASS].[DATA_SIZE]     ,0)
+			&debug('method.[CLASS_ID].[TARGET_CLASS].[BASE_CLASS]    ='||method.[CLASS_ID].[TARGET_CLASS].[BASE_CLASS]    ,0)
+			&debug('method.[CLASS_ID].[TARGET_CLASS].[ENTITY]        ='||method.[CLASS_ID].[TARGET_CLASS].[ENTITY]        ,0)
+			&debug('method.[CLASS_ID].[TARGET_CLASS].[NAME]          ='||method.[CLASS_ID].[TARGET_CLASS].[NAME]          ,0)
+			&debug('method.[CLASS_ID].[TARGET_CLASS].[INTERFACE]     ='||method.[CLASS_ID].[TARGET_CLASS].[INTERFACE]     ,0)
+
+			&debug('method.[CLASS_ID].[HAS_INSTANCES] ='||method.[CLASS_ID].[HAS_INSTANCES] ,0)
+			&debug('method.[CLASS_ID].[KERNEL]        ='||method.[CLASS_ID].[KERNEL]        ,0)
+			&debug('method.[CLASS_ID].[DATA_PRECISION]='||method.[CLASS_ID].[DATA_PRECISION],0)
+			&debug('method.[CLASS_ID].[DATA_SIZE]     ='||method.[CLASS_ID].[DATA_SIZE]     ,0)
+			&debug('method.[CLASS_ID].[BASE_CLASS]    ='||method.[CLASS_ID].[BASE_CLASS]    ,0)
+			&debug('method.[CLASS_ID].[ENTITY]        ='||method.[CLASS_ID].[ENTITY]        ,0)
+			&debug('method.[CLASS_ID].[NAME]          ='||method.[CLASS_ID].[NAME]          ,0)
+			&debug('method.[CLASS_ID].[INTERFACE]     ='||method.[CLASS_ID].[INTERFACE]     ,0)
+
+			&debug('method.[NAME]        ='||method.[NAME]        ,0)
+			&debug('method.[PACKAGE_NAME]='||method.[PACKAGE_NAME],0)
+			&debug('method.[SHORT_NAME]  ='||method.[SHORT_NAME]  ,0)
+			&debug('method.[STATUS]      ='||method.[STATUS]      ,0)
+			&debug('method.[REPORT]      ='||method.[REPORT]      ,0)
+			&debug('method.[REPORT_TYPE] ='||method.[REPORT_TYPE] ,0)
+			
+			MetodRef:=method;
+			&debug('Будем добавлять в справочник '||P_CLASS_NAME||'.'||method.[SHORT_NAME]||'-'||method.[CLASS_ID].[NAME]||'.'||method.[NAME],0)
+			exit;
+		end loop;
+		
+		if MetodRef is null then pragma error(P_CLASS_NAME||'.'||P_METH_NAME||' Не найдено!'); end if;
+		var endDate [DATE];
+		endDate:=sysdate+AddDays;
+		
+		&debug('Создатель P_USER_INIT='||P_USER_INIT,0)
+
+		of5.[0]:=null;
+		koos:=::[PSH_ON_OFF_SOFT].[PSH_NEW_AUTO]( -- updated CHANGE_SHORT_NAME NEW_AUTO->PSH_NEW_AUTO 15/10/25
+		 P_CLASS_NAME				--Код ТПБ
+		,MetodRef.[CLASS_ID].[NAME]	--Наименование ТБП
+		,P_METH_NAME				--Имя объекта
+		,MetodRef.[NAME]			--Наименование объекта
+		,P_USER_INIT				--Создатель
+		,P_BISINESS					--Зачем разработано, кто заказчик
+		,P_WORK						--Что сделано
+		,sysdate					--Дата, Время включения в справочник
+		,null						--Пользователь изменивший доступность
+		,null						--Дата, Время изменения доступности
+		,null						--Обоснование изменение доступа
+		,P_TYPE_WORK				--Режим работы (0-Только журналировать вызов,1-Журналировать и предупреждать,2-Журналировать и запрещать использовать)
+		,endDate					--До какой даты разрешать пользоваться
+		,vMAG						--Журнал вызовов
+		,P_DISTRIB					--Рекомендуемая дистрибутивная операция
+		,true						--Контроль встроен в операцию
+		,P_RECS_IN_MAG				--Размер журнала
+		,null						--Принято сопровождением
+		,null						--Пользователь протестировавший функционал
+		,null						--Дата создания			
+		,null						--Пользователь создавший
+		,null						--Комментарий
+		,null						--Автодокументирование
+		,null						--Метка
+		,null						--удалить операцию
+		,null						--пользователь, рекомендующий удаление
+		,null						--обоснование удаления
+		,null						--операция на схеме
+		,null						--дата проверки
+		,null						--тип операции
+		,null
+		,of5
+		,null
+		,null
+		,null
+		);
+		
+		&debug(koos.[CODE_TBP]||'.'|| koos.[SHORT_NAME]||' ДОБАВЛЕНО в справочнике "[ПСБ] Администрирование функционала, разработанного Банком"',0)
+	end if;
+	
+	if [SYSTEM].[OP_DATE]<=nvl(koos.[DATE_end],[SYSTEM].[OP_DATE]) and koos.[TYPE_WORK]<2 then --До какой даты разрешать пользоваться
+		ExBool:=true;
+		&debug('Функционал доступен пользователю!',0)
+	else
+		ExBool:=false;
+		&debug('Функционал НЕ ДОСТУПЕН пользователю!',0)
+	end if;
+	
+	--Режим работы
+	var msg1 string(1000);
+	var msg2 string(1000);
+	var msg3 string(1000);
+	
+	-- Башкиров В.Г. 18.04.2014
+	if koos.[DATE_end] is not null then msg1:='Вы используете функционал, разработанный банком и не принятый службой сопровождения! Функционал можно использовать до '||to_char(koos.[DATE_end],fmt);
+	else								msg1:='Вы используете функционал, разработанный банком и не принятый службой сопровождения!';
+	end if;
+	
+	msg2:='Данный функционал, разработанный банком, запрещено использовать! Либо согласуйте его использование со службой сопровождения, либо используйте дистрибутывный '||koos.[DISTRIB];
+	msg3:='Данный функционал, разработанный банком, запрещено использовать! Согласуйте его использование со службой сопровождения, либо используйте дистрибутывный '||koos.[DISTRIB];
+	
+	AddMag(koos); --Журналировать вызов
+	if koos.[TYPE_WORK]=1 then --1-Журналировать и предупреждать
+		if ExBool then
+			if koos.[USER_ACCEPT] is null then
+				stdio.put_line_buf(msg1);
+			end if;
+		else
+			stdio.put_line_buf(msg2);
+		end if;
+	elsif koos.[TYPE_WORK]>=2 then --2-Журналировать и запрещать использовать
+		if ExBool then --and koos.[USER_ACCEPT] is null then
+			&debug('Генерация ошибки:'||msg1,0)
+			pragma error(msg1);
+		else
+			&debug('Генерация ошибки:'||msg1,0)
+			pragma error(msg3);
+		end if;
+	end if;
+	return ExBool;
+end;
+
+public function insCheckWork
+	(
+	p_class_id in [STRING_16]
+	,p_short_name in [STRING_16]
+	) return integer is
+begin
+	if	p_class_id in ('PSB_ON_OFF_SOFT', 'PSH_ON_OFF_SOFT')
+	--[ПСБ] Администрирование функционала, разработанного Банком
+	--	Библиотека
+	--	[ПСБ] Загрузка лицензионных операций
+	and (p_short_name = 'L' or p_short_name = 'PSB_MOD_OP_STAT' or p_short_name = 'PSH_MOD_OP_STAT')
+	then
+		return 0;
+	else
+		for	(
+			select m(1) in methods%rowtype
+			where   m.CLASS_ID  = p_class_id
+				and m.short_name= p_short_name
+				and
+			exists (select x(1) in SOURCES%rowtype where
+					x.name = m.id	--and x.type = 'VALIDATE' --секция проверки
+					and instr(upper(x.TEXT),uppText_Check_Work)>0
+					and rownum=1
+					)
+			)
+		loop
+			return 1;
+		end loop;
+	end if;
+	return 0;
+end;
+
+public function get_methods_id
+	(
+	p_class_id in [STRING_30]
+	,p_short_name in [STRING_30]
+	) return varchar2(16) is
+begin
+	for	(
+		select m(m.id : id) in methods%rowtype
+		where   m.CLASS_ID  = p_class_id
+			and m.short_name= p_short_name
+		fetch 1
+	) loop
+		return m.id;
+	end loop;
+	return null;
+end;
+
+public function isRequiresChanges
+	/*[ПСБ] Требуется изменение короткого имени или наименования ?*/
+	(
+	p_class_id in [STRING_30]
+	,p_short_name in [STRING_30]
+	) return varchar2(256) is
+sOldShortName string(128);
+sShortName string(128);
+sOldName string(128);
+sName string(128);
+sIsDistribObj varchar2(256);
+
+strTabl string(30);
+sTmp2 string(32767);
+begin
+	
+	
+	--Класс объекта локальный ?
+	--isRequiresChanges. Тип? Ищем реквизит в таблице классов
+	for	(
+		select cl(cl.id : id) in classes%rowtype
+		where   cl.ID = p_class_id
+			and cl.entity_id in ('TYPE','SYSTEM','PRODUCT')
+		fetch 1
+	) loop
+		strTabl:=upper('classes');
+	end loop;
+
+	sTmp2:=isDistribObj(p_class_id);
+	&debug('.isRequiresChanges -- Класс объекта '||p_class_id||' локальный ? strTabl='||strTabl||' sIsDistribObj('||p_class_id||')='||sTmp2,dp5)
+
+	if strTabl='CLASSES'
+	and p_short_name is not null --Если проверяется не TYPE
+  --and isDistribObj(p_class_id)='Нет'     Есть sTmp2
+	then
+		--Если это атрибут, его можно не править
+		for (
+			select ca(
+				ca.CLASS_ID	: CL_ID
+				,ca.ATTR_ID	: ATTR_ID
+			)
+			in class_attributes%rowtype all
+			where --ca.CLASS_ID not in ('FTC_DISTR_OBJ', 'FTC_HASH', 'FTC_SCHEME_OBJ')
+				ca.CLASS_ID =p_class_id
+			and ca.ATTR_ID  =p_short_name
+			fetch 1
+		) loop
+			strTabl:=upper('class_attributes');
+			if sTmp2='Нет' then
+				&debug('.isRequiresChanges -- Атрибут локального класса.Не правим',dp5)
+				return 'Нет';
+			else --Пример CLIENT.PSB_FAIL_MARK  и  CLIENT.PSB_OPER_CHAR
+				&debug('.isRequiresChanges -- Локальный атрибут дистрибутивного класса. Возможно нужно править',dp5)
+				--return 'Локальный атрибут дистрибутивного класса';
+			end if;
+		end loop;
+	end if;
+
+	sIsDistribObj:=isDistribObj(p_class_id,p_short_name);
+	&debug('.isRequiresChanges -- sIsDistribObj('||p_class_id||','||p_short_name||')='||sIsDistribObj||' strTabl='||strTabl||' p_short_name='||p_short_name,dp5)
+
+	if p_short_name is not null then
+		if sIsDistribObj='Нет' then null;
+		else 
+			if strTabl<>'CLASS_ATTRIBUTES' then
+				return 'Нет';
+			end if;
+		end if;
+	elsif p_short_name is null and strTabl='CLASS_ATTRIBUTES' then
+		--if sIsDistribObj='Нет' then null;
+		--elsif sIsDistribObj='Локальный атрибут дистрибутивного класса' then null;
+		--else return 'Нет';
+		--end if;
+		null;
+	end if;
+
+	sOldShortName	:=nvl(p_short_name,p_class_id);
+	sShortName		:=getStandartShortName(p_class_id,p_short_name);
+	sOldName		:=getOldName          (p_class_id,p_short_name);
+	sName			:=getStandartName     (p_class_id,p_short_name);
+	/**/
+	debug_pipe('sOldShortName='||sOldShortName,dp7);
+	debug_pipe('sShortName   ='||sShortName   ,dp7);
+	debug_pipe('sOldName     ='||sOldName     ,dp7);
+	debug_pipe('sName        ='||sName        ,dp7);
+	/**/
+
+	if sOldShortName=sShortName and sOldName=sName then
+		return 'Нет';
+	elsif sOldShortName is null
+	  and sShortName is null 
+	  and sOldName is null 
+	  and sName is null 
+	then
+		return null;
+	end if;
+	return 'Да';
+end;
+
+public function isDistribObj
+	/*[ПСБ] Дистрибутивный объект*/
+	(
+	p_class_id in [STRING_30]
+	,p_short_name in [STRING_30] default null
+	) return varchar2(256) is
+	tmpStr varchar2(256);
+begin
+	if p_short_name is not null then
+		for	(
+			select oo(
+				 oo.OBJ_TYPE  : OBJ_TYPE
+				,oo.CLASS_ID  : CLASS_ID
+				,oo.SHORT_NAME: SHORT_NAME
+				,oo.OPTION_ID : OPTION_ID
+					)
+			in objects_options%rowtype
+			where   oo.CLASS_ID  = p_class_id
+				and oo.SHORT_NAME= p_short_name
+			fetch 1
+		) loop
+			&debug('.isDistribObj -- "Да" '||tmpStr,dp5)
+			return tmpStr;
+		end loop;
+	else -- Класс объекта дистрибутивный ?
+		&debug('.isDistribObj -- Ищем в objects_options CLASSES='||p_class_id,dp5)
+		for	(
+			select oo(
+				 oo.OBJ_TYPE  : OBJ_TYPE
+				,oo.CLASS_ID  : CLASS_ID
+				,oo.SHORT_NAME: SHORT_NAME
+				,oo.OPTION_ID : OPTION_ID
+					)
+			in objects_options%rowtype
+			where
+				    oo.OBJ_TYPE ='CLASSES'
+				and oo.CLASS_ID = p_class_id
+			fetch 1
+		) loop
+			tmpStr:=oo.OBJ_TYPE  ||sepEnd
+				|| oo.CLASS_ID  ||sepEnd
+				|| oo.SHORT_NAME||sepEnd
+				|| oo.OPTION_ID;
+			&debug('.isDistribObj -- "Да" '||tmpStr,dp5)
+			return tmpStr;
+		end loop;
+	end if;
+	&debug('.isDistribObj -- Нет',dp5)
+	return 'Нет';
+end;
+
+public function getClassShortMethods
+	(
+	p_met [STRING_16]
+	,p_bOnlyDigits integer default 0 --В строке должны быть только цифры ?
+	) return string(33) is
+	ret_string string(33);
+begin
+	if p_bOnlyDigits=1 and length(p_met)=length(trim(translate(p_met,'1234567890','1234567890'))) then
+		for	(
+			select m(
+				m.class_id : class_id
+				,m.short_name : short
+				) in methods%rowtype
+			where m.id=p_met
+		) loop
+			ret_string:= m.class_id||'.'||m.short;
+			exit;
+		end loop;
+	end if;
+	&debug('.getClassShortMethods ->'||p_met||' <-'||ret_string,dp5)
+	return ret_string;
+end;
+
+public function getResultClassId
+	(
+	p_class_id in [STRING_16]
+	,p_short_name in [STRING_16]
+	) return varchar2(16) is
+begin
+	for	(
+		select m(m.result_class_id : result_class_id) in methods%rowtype
+		where   m.CLASS_ID  = p_class_id
+			and m.short_name= p_short_name
+		fetch 1
+	) loop
+		return m.result_class_id;
+	end loop;
+	return null;
+end;
+
+public function getSectionIsNull
+	(
+	p_class_id in [STRING_16]
+	,p_short_name in [STRING_16]
+	,p_sType in varchar2(12)
+	)
+	return boolean is
+
+	met varchar2(30);
+	ret_bIsNull boolean:=true;
+begin
+	p_class_id		:=upper(p_class_id);
+	p_short_name	:=upper(p_short_name);
+
+	met:=::[PSH_ON_OFF_SOFT].[PSH_L].get_methods_id(p_class_id,p_short_name);
+
+	for (select x(1) in SOURCES%rowtype
+		where x.name = met
+		  and x.type = p_sType --секция 'VALIDATE или EXECUTE'
+		fetch 1
+	) loop
+		ret_bIsNull:=false;
+	end loop;
+	return ret_bIsNull;
+end;
+
+public function DBG
+	(
+	 p_sPref in string(64)
+	,p_sNote in string(100)
+	,p_sTxt in string(32767)
+	,p_maxLen integer default null
+	,p_iDp integer default null
+	,p_bNewLine boolean default false
+	,p_begOrend boolean default true
+	)
+	return string(4000) is
+	mLen integer;
+	ret_str string(4000);
+	str_tmp string(4000);
+	sSep string(3):='...';
+begin
+	if p_iDp is null then
+		return null;
+	end if;
+
+	if p_maxLen is null then p_maxLen:=4000; end if;
+	mLen:=least(p_maxLen,4000);
+	
+	if p_begOrend then
+		if length(p_sTxt)>mLen then
+			str_tmp:=substr(p_sTxt,1,greatest(0,p_maxLen-length(sSep)))||sSep;
+		end if;
+	else
+		if length(p_sTxt)>mLen then
+			str_tmp:=sSep||substr(p_sTxt,-length(sSep));
+		end if;
+	end if;
+	if str_tmp is null then
+		str_tmp:=substr(p_sTxt,1,greatest(0,mLen-length(sSep)));
+	end if;
+
+	if p_begOrend then
+		ret_str:=substr(
+			p_sPref
+			||trim(p_sNote)
+		  --||'('||lpad(length(p_sTxt),7)||')'
+			||iif(p_sTxt is null,'','('||length(p_sTxt)||')')
+			||iif(p_bNewLine and p_bNewLine is not null,LF$,'')
+			||str_tmp
+			||iif(length(str_tmp)>mLen and substr(str_tmp,length(str_tmp))<>'.','...','')
+			,1,4000);
+	else
+		ret_str:=substr(
+			p_sPref
+			||trim(p_sNote)
+		  --||'('||lpad(length(p_sTxt),7)||')'
+			||iif(p_sTxt is null,'','('||length(p_sTxt)||')')
+			||iif(p_bNewLine and p_bNewLine is not null,LF$,'')
+			||iif(length(str_tmp)>mLen and substr(str_tmp,1,1)<>'.','...','')
+			||str_tmp
+			,1,4000);
+	end if;
+	--debug_pipe(ret_str,p_iDp);
+	&debug(ret_str,p_iDp)
+	return ret_str;
+end;
+
+public procedure inTextAfterKey
+	(
+	p_sInText in string(2000)
+	,p_inPos in out integer
+	,p_sAfterKey in string(64)
+	,p_sBuf_1 in out string(32767) --string(10) --
+	,p_sBuf_2 in out string(32767) --string(10) --
+	,p_sBuf_3 in out string(32767) --string(10) --
+	) is
+	tmp1 [MEMO_32767];
+	tmp2 [MEMO_32767];
+
+	sDelta2 string(4000);
+	sDelta3 string(4000);
+	lendelta integer;
+
+	sPr string(64):='L.inTextAfterKey ';
+begin
+	if p_sBuf_1%size<>32767 then pragma error('Ош. в .[PSH_ON_OFF_SOFT].[PSH_L].inTextAfterKey'); end if;
+
+	DBG(sPr,'> p_sInText  =',p_sInText  ,null,dp5);
+	DBG(sPr,'> p_inPos    =',p_inPos    ,null,dp5);
+	DBG(sPr,'> p_sAfterKey=',p_sAfterKey,null,dp5);
+	DBG(sPr,'> p_sBuf_1   =',p_sBuf_1   , 100,dp5,true,false);
+	DBG(sPr,'> p_sBuf_2   =',p_sBuf_2   , 100,dp5,true,true);
+	DBG(sPr,'> p_sBuf_2   =',p_sBuf_2   , 100,dp5,true,false);
+	DBG(sPr,'> p_sBuf_3   =',p_sBuf_3   , 100,dp5,true);
+
+	p_sAfterKey:=upper(p_sAfterKey);
+	if p_inPos is null then
+		p_inPos:=instr(upper(p_sBuf_1),p_sAfterKey);
+	else
+		DBG(sPr,'> Передана позиция ключа=',substr(p_sBuf_1,p_inPos),100,dp5,true);
+		p_inPos:=greatest(p_inPos,(instr(upper(p_sBuf_1),p_sAfterKey)));
+	end if;
+	if p_inPos<>0 then
+		DBG(sPr,'Ключ p_inPos=',p_inPos,null,dp5);
+	else
+		DBG(sPr,'< Ключ не нашли. Ничего не делааем. Выходим (!)',null,null,dp5);
+		return;
+	end if;
+
+	tmp1:=substr(p_sBuf_1,0,p_inPos + length(p_sAfterKey)-1);
+	tmp2:=substr(p_sBuf_1,p_inPos   + length(p_sAfterKey));
+
+	DBG(sPr,'=tmp1=',tmp1,null,dp5,true,true);
+	DBG(sPr,'=tmp2=',tmp1,100,dp5,true,false);
+	DBG(sPr,'p_sInText=',p_sInText,200,dp5,true);
+
+	if length(tmp1||p_sInText||tmp2)<=p_sBuf_1%size then
+		p_sBuf_1:=tmp1||p_sInText||tmp2;
+		DBG(sPr,TB$||'(1)p_sBuf_1=',p_sBuf_1,4000,dp5,true);
+	else
+		p_sBuf_1:=substr(tmp1||p_sInText||tmp2,1,p_sBuf_1%size);
+		sDelta2:=substr(tmp1||p_sInText||tmp2,p_sBuf_1%size+1);
+		lendelta:=length(sDelta2);
+		DBG(sPr,'=Сдвинем во второй буфер '||lendelta||' Бт >',sDelta2,null,dp5);
+		
+		if length(sDelta2||p_sBuf_2)<=p_sBuf_2%size then
+			p_sBuf_2:=sDelta2||p_sBuf_2;
+			DBG(sPr,'-Второй буфер ',p_sBuf_2,100,dp5,true);
+		else
+			sDelta3:=substr(sDelta2||p_sBuf_2,p_sBuf_2%size+1);
+			lendelta:=length(sDelta3);
+			DBG(sPr,'=Сдвинем в третий буфер '||lendelta||' Бт >',sDelta3,null,dp5);
+			
+			p_sBuf_2:=substr(sDelta2||p_sBuf_2,1,p_sBuf_2%size);
+			begin
+				p_sBuf_3:=sDelta3||p_sBuf_3;
+			exception when others then
+				pragma error('Ошибка! Размер кода для копирования очень большой');
+			end;
+			DBG(sPr,'-Третий буфер ',p_sBuf_3,100,dp5,true);
+		end if;
+	end if;
+
+	DBG(sPr,'< p_inPosn=',p_inPos ,null,dp5);
+	DBG(sPr,'< p_sBuf_1=',p_sBuf_1, 100,dp5,true,false);
+	DBG(sPr,'< p_sBuf_2=',p_sBuf_2, 100,dp5,true,true);
+	DBG(sPr,'< p_sBuf_2=',p_sBuf_2, 100,dp5,true,false);
+	DBG(sPr,'< p_sBuf_3=',p_sBuf_3, 100,dp5,true);
+end;
+
+public function getT
+	(
+	p_class_id in [STRING_16]
+	,p_short_name in [STRING_16]
+	,p_save boolean default null
+	,p_ref_poos ref [PSH_ON_OFF_SOFT] default null
+	,p_read_save boolean default null
+	,p_sType in out varchar2(12)
+	,ret_valid_text2 out [MEMO_32767]
+	,ret_valid_text3 out [MEMO_32767]
+	) 
+	return [MEMO_32767] is
+
+--pragma autonomous_transaction; --работаем в режиме автаномной транзакции
+
+	met varchar2(30);
+	text_in string(2000);
+	ret_valid_text [MEMO_32767];
+	
+	cntSepLF integer:=0;
+	cntLine integer:=0;
+	oPsbOnOffSoft [PSH_ON_OFF_SOFT];
+	oPsbIkLine [PSH_IK_LINE];				--Текст кода операции
+	oPsbIkdependencies [PSH_IK_DEPendENC];	--Зависимости
+
+	strTypeOper string(24);
+	bSectionIsNull boolean;	--секция 'VALIDATE или EXECUTE'
+	sPSH_DEPENDENCIES string(100);	--Какие типы объектов будем загружать в {ИК.Зависимости} справочника "[ПСБ] Администрирование функционала, разработанного Банком" MV-только методы и VIEW
+begin
+	/** /
+	--Отладка вставки inTextAfterKey
+	declare
+		p_sInText	string(2000);
+		p_inPos		integer;
+		p_sAfterKey string(64);
+		p_sBuf_1	string(10);		--10-(!)
+		p_sBuf_2	string(10);
+		p_sBuf_3	string(10);
+	begin
+		debug_pipe('-=Тест inTextAfterKey=-',0);
+		p_sInText	:='*8*';
+		p_inPos		:=null;
+		p_sAfterKey :='34';
+		p_sBuf_1	:='1234567890';
+		p_sBuf_2	:='2---+----2';
+		p_sBuf_3	:='3===+@@';
+		
+		inTextAfterKey(
+		p_sInText		--p_sInText in string(2000)
+		,p_inPos		--,p_inPos in out integer
+		,p_sAfterKey	--,p_sAfterKey in string(64)
+		,p_sBuf_1		--,p_sBuf_1 in out string(10)		10-(!)
+		,p_sBuf_2		--,p_sBuf_2 in out string(10)
+		,p_sBuf_3		--,p_sBuf_3 in out string(10)
+		);
+		pragma error('Отладка вставки!');
+	end;
+	/**/
+
+	p_class_id		:=upper(p_class_id);
+	p_short_name	:=upper(p_short_name);
+	oPsbOnOffSoft	:=p_ref_poos;
+
+	met:=::[PSH_ON_OFF_SOFT].[PSH_L].get_methods_id(p_class_id,p_short_name);
+	if met is null then return null; end if;
+
+	strTypeOper := ::[PSH_ON_OFF_SOFT].[PSH_L].getTypeOperStr(oPsbOnOffSoft.[FLAG]);
+	if strTypeOper in (	 'Библиотечная'
+						,'Отчет'
+						,'Триггер'
+						,'Функциональный реквизит'
+						,'Представление'
+						,'ТИП')
+	then
+		&debug('.getT -- Тип "'||strTypeOper||'" не обрабатываем (!)',dp)
+		return null;
+	elsif p_sType='VALIDATE' then
+		bSectionIsNull := ::[PSH_ON_OFF_SOFT].[PSH_L].getSectionIsNull(p_class_id, p_short_name, 'VALIDATE');
+		if bSectionIsNull and (p_sType='VALIDATE' or strTypeOper='Групповая')then
+			p_sType:='EXECUTE';
+			&debug('.getT -- Секцию "VALIDATE" переопределим на "EXECUTE" (!)',dp3)
+		end if;
+	end if;
+
+	--Сохранить предыдущий код в полях ИК.xxx, если еще не сохранен
+	if oPsbOnOffSoft.[PSH_IK_DATE_SAVE] is not null -- updated CHANGE_QUALIFIER IK_DATE_SAVE->PSH_IK_DATE_SAVE 15/10/25
+	and oPsbOnOffSoft.[PSH_IK_LINES]%size(1)>0
+	then
+		null; &debug('.getT -- Предыдущий код сохранен ранее '||to_char(oPsbOnOffSoft.[PSH_IK_DATE_SAVE],fmt24)||' {'||oPsbOnOffSoft.[PSH_IK_LINES]%size(0)||'}',dp4) -- updated CHANGE_QUALIFIER IK_DATE_SAVE->PSH_IK_DATE_SAVE 15/10/25
+	end if;
+	if p_save and oPsbOnOffSoft.[PSH_IK_DATE_SAVE] is not null -- updated CHANGE_QUALIFIER IK_DATE_SAVE->PSH_IK_DATE_SAVE 15/10/25
+	and oPsbOnOffSoft.[PSH_IK_LINES]%size(1)>0
+	then
+		p_save:=false;
+	end if;
+
+	if p_save then
+		if p_ref_poos is null then
+			p_save:=false;
+		else
+			oPsbOnOffSoft.[PSH_IK_DATE_SAVE]	:=sysdate; -- updated CHANGE_QUALIFIER IK_DATE_SAVE->PSH_IK_DATE_SAVE 15/10/25
+			oPsbOnOffSoft.[PSH_IK_SHORT_NAM]	:=oPsbOnOffSoft.[SHORT_NAME]; -- updated CHANGE_QUALIFIER IK_SHORT_NAME->PSH_IK_SHORT_NAM 15/10/25
+			oPsbOnOffSoft.[PSH_IK_NAME]			:=oPsbOnOffSoft.[NAME_M]; -- updated CHANGE_QUALIFIER IK_NAME->PSH_IK_NAME 15/10/25
+			oPsbOnOffSoft.[PSH_IK_LINES]%delete;
+			oPsbOnOffSoft.[PSH_IK_DEPENDENC]%delete; --ИК.Зависимости
+		end if; 
+	end if;
+
+	---идем в таблицу с текстом операции и собираем весь текст секции проверки. Собирать необходимо,
+	-- потому что в таблице построчная запись
+	ret_valid_text=ret_valid_text2=ret_valid_text3:=null;
+	if p_read_save and p_ref_poos is not null 
+	and oPsbOnOffSoft.[PSH_IK_DATE_SAVE] is not null  -- updated CHANGE_QUALIFIER IK_DATE_SAVE->PSH_IK_DATE_SAVE 15/10/25
+	and oPsbOnOffSoft.[PSH_IK_LINES]%size(1)>0
+	then
+		&debug('.getT -- Код "'||p_sType||'" брать из сохраненного '||to_char(oPsbOnOffSoft.[PSH_IK_DATE_SAVE],fmt24),dp3) -- updated CHANGE_QUALIFIER IK_DATE_SAVE->PSH_IK_DATE_SAVE 15/10/25
+		for ikl in var oIkl oPsbOnOffSoft.[PSH_IK_LINES]
+		where ikl.[IK_TYPE]=p_sType --секция 'VALIDATE или EXECUTE'
+		loop
+			if instr(upper(oIkl.[IK_TEXT]),uppText_Check_Work)>0 then
+				ret_valid_text=ret_valid_text2=ret_valid_text3:=null;
+				&debug('.getT -- В секции "'||p_sType||'" встретился код "'||uppText_Check_Work||'" выходим (!)',dp)
+				return null;
+			end if;
+			if cntLine=0 then
+				ret_valid_text:=oIkl.[IK_TEXT];
+			else
+				if nvl(length(ret_valid_text2),0)=0 then
+					begin
+						ret_valid_text:=ret_valid_text||sepLF||oIkl.[IK_TEXT];
+						cntSepLF:=cntSepLF+1;
+						&debug('.getT -- '||TB$||'(1)length(ret_valid_text2||sepLF||oIkl.[IK_TEXT])='||length(ret_valid_text2||sepLF||oIkl.[IK_TEXT]),dp)
+					exception when others then
+						&debug('.getT -- В секции "'||p_sType||'" встретился слишком большой код "'||length(ret_valid_text||sepLF||oIkl.[IK_TEXT])||'" Заполняем второй буфер (!)',dp)
+						ret_valid_text2:=oIkl.[IK_TEXT];
+						&debug('.getT -- '||TB$||'(2)length(ret_valid_text2)='||length(ret_valid_text2),dp)
+					end;
+				else
+					begin
+						ret_valid_text2:=ret_valid_text2||sepLF||oIkl.[IK_TEXT];
+						cntSepLF:=cntSepLF+1;
+						&debug('.getT -- '||TB$||'(2)length(ret_valid_text2||sepLF||oIkl.[IK_TEXT])='||length(ret_valid_text2||sepLF||oIkl.[IK_TEXT]),dp)
+					exception when others then
+						&debug('.getT -- (2)В секции "'||p_sType||'" встретился слишком большой код "'||length(ret_valid_text2||sepLF||oIkl.[IK_TEXT])||'" выходим (!)',dp)
+						pragma error ('В секции "'||p_sType||'" ОЧЕНЬ большой код " '||length(ret_valid_text)+length(ret_valid_text2||sepLF||oIkl.[IK_TEXT])||'" выходим (!)');
+						return null;
+					end;
+				end if;
+			end if;
+			cntLine:=cntLine+1;
+			&debug('.getT -- =Секция:'||p_sType||' извлечена сохраненная '||to_char(oPsbOnOffSoft.[PSH_IK_DATE_SAVE],fmt24)||' Строка:'||cntLine||' '||oIkl.[IK_TEXT],dp4) -- updated CHANGE_QUALIFIER IK_DATE_SAVE->PSH_IK_DATE_SAVE 15/10/25
+			if instr(oIkl.[IK_TEXT],LF$)>0 then
+				&debug('.getT -- =Секция:'||p_sType||' Строка:'||cntLine||' содержит разделитель!',dp4)
+			end if;
+		end loop;
+	else
+		sPSH_DEPENDENCIES:=::[FP_TUNE].[LIB].get_str_value('PSH_DEPENDENCIES');
+		&debug('.getT -- Зависимости обновим из dependencies в зависимости от настройки PSH_DEPENDENCIES='||sPSH_DEPENDENCIES||' для met='||met,dp3)
+		oPsbOnOffSoft.[PSH_IK_DEPENDENC]%delete;
+		for (select d(d)
+			in dependencies%rowtype
+			where d.REFERENCING_ID=met
+			and (nvl(length(sPSH_DEPENDENCIES),0)=0 or instr(sPSH_DEPENDENCIES,d.REFERENCED_TYPE)>0) -- MV-только методы и VIEW
+			order by
+				 d.REFERENCING_ID	--ИК.Объект ID
+				,d.REFERENCING_TYPE	--ИК.Тип объекта
+				,d.REFERENCED_ID	--ИК.Зависит от объекта
+				,d.REFERENCED_TYPE	--ИК.Тип объекта, от которого зависим
+				,d.REFERENCED_QUAL	--ИК.Короткое имя объекта, от которого зависим
+		) loop
+			--if p_save then
+				oPsbIkdependencies%init;
+				oPsbIkdependencies.[REFERENCING_ID]		:=d.REFERENCING_ID;		--ИК.Объект ID
+				oPsbIkdependencies.[REFERENCING_TYPE]	:=d.REFERENCING_TYPE;	--ИК.Тип объекта
+				oPsbIkdependencies.[REFERENCED_ID]		:=d.REFERENCED_ID;		--ИК.Зависит от объекта
+				oPsbIkdependencies.[REFERENCED_TYPE]	:=d.REFERENCED_TYPE;	--ИК.Тип объекта, от которого зависим
+				oPsbIkdependencies.[REFERENCED_QUAL]	:=d.REFERENCED_QUAL;	--ИК.Короткое имя объекта, от которого зависим
+				oPsbIkdependencies.[REFS_COUNT]			:=d.REFS_COUNT;			--ИК.Объект ID
+				oPsbOnOffSoft.[PSH_IK_DEPENDENC]%insert(oPsbIkdependencies);
+				
+				oPsbIkdependencies%delete;
+			--end if;
+		end loop;
+		if oPsbOnOffSoft.[PSH_IK_DEPENDENC]%size(1)>0 then
+			&debug('.getT -- В {Зависимости} обновлено '||iif(sPSH_DEPENDENCIES is null,'','"'||sPSH_DEPENDENCIES||'"')||' записей:'||oPsbOnOffSoft.[PSH_IK_DEPENDENC]%size(0),dp3)
+			p_ref_poos:=oPsbOnOffSoft;
+		end if;
+
+		&debug('.getT -- Код "'||p_sType||'" брать из sources',dp3)
+		for (select x(x)
+			in SOURCES%rowtype
+			where x.name = met
+			  and x.type = p_sType --секция 'VALIDATE или EXECUTE'
+			order by x.line
+		) loop
+			if instr(upper(x.text),uppText_Check_Work)>0 then
+				&debug('.getT -- В секции "'||p_sType||'" встретился код "'||uppText_Check_Work||'" выходим (!)',dp)
+				ret_valid_text=ret_valid_text2=ret_valid_text3:=null;
+				oPsbOnOffSoft.[PSH_IK_LINES]%delete;
+				return null;
+			end if;
+			if p_save then
+				oPsbIkLine%init;
+				oPsbIkLine.[IK_NAME]:=x.name;
+				oPsbIkLine.[IK_TYPE]:=x.type;
+				oPsbIkLine.[IK_LINE]:=x.line;
+				oPsbIkLine.[IK_TEXT]:=x.text;
+				oPsbOnOffSoft.[PSH_IK_LINES]%insert(oPsbIkLine);
+				
+				oPsbIkLine%delete;
+			end if;
+			
+			if cntLine=0 then
+				ret_valid_text:=x.text;
+				&debug(substr(
+					'.getT -- '||TB$
+					||lpad(cntLine+1,6)
+					||'(1)В секции "'||p_sType||'" length(ret_valid_text)='
+					||rpad(length(ret_valid_text),7)
+					||'('||length(x.text)||')'
+					||x.text,1,4000)
+					,dp)
+			else
+				if nvl(length(ret_valid_text2),0)=0 then
+					begin
+						ret_valid_text:=ret_valid_text||sepLF||x.text;
+						cntSepLF:=cntSepLF+1;
+						&debug(substr('.getT -- '||TB$||lpad(cntLine+1,6)||'(1)В секции "'||p_sType||'" length(ret_valid_text)='||rpad(length(ret_valid_text),7)||'('||length(x.text)||')'||x.text,1,4000),dp)
+					exception when others then
+						&debug('.getT -- Заполняем второй буфер (!) Первый заканчиваем. ret_valid_text('||length(ret_valid_text)||')=(см.V)'||LF$||iif(length(ret_valid_text)>100,LF$||'...','')||substr(ret_valid_text,-100),dp3)
+						ret_valid_text2:=sepLF||x.text;
+						cntSepLF:=cntSepLF+1;
+						&debug(substr('.getT -- '||TB$||lpad(cntLine+1,6)||'(2)В секции "'||p_sType||'" length(ret_valid_text2)='||rpad(length(ret_valid_text2),7)||'('||length(x.text)||')'||x.text,1,4000),dp)
+					end;
+				else
+					if nvl(length(ret_valid_text3),0)=0 then
+						begin
+							ret_valid_text2:=ret_valid_text2||sepLF||x.text;
+							cntSepLF:=cntSepLF+1;
+							&debug(substr('.getT -- '||TB$||lpad(cntLine+1,6)||'(2)В секции "'||p_sType||'" length(ret_valid_text2)='||rpad(length(ret_valid_text2),7)||'('||length(x.text)||')'||x.text,1,4000),dp)
+						exception when others then
+							&debug('.getT -- Заполняем третий буфер (!) Второй заканчиваем. ret_valid_text2('||length(ret_valid_text2)||')=(см.V)'||LF$||iif(length(ret_valid_text2)>100,LF$||'...','')||substr(ret_valid_text2,-100),dp3)
+							ret_valid_text3:=sepLF||x.text;
+							cntSepLF:=cntSepLF+1;
+							&debug(substr('.getT -- '||TB$||lpad(cntLine+1,6)||'(3)В секции "'||p_sType||'" length(ret_valid_text3)='||rpad(length(ret_valid_text3),7)||'('||length(x.text)||')'||x.text,1,4000),dp)
+						end;
+					else
+						begin
+							ret_valid_text3:=ret_valid_text3||sepLF||x.text;
+							cntSepLF:=cntSepLF+1;
+							&debug(substr('.getT -- '||TB$||lpad(cntLine+1,6)||'(3)В секции "'||p_sType||'" length(ret_valid_text3)='||rpad(length(ret_valid_text3),7)||'('||length(x.text)||')'||x.text,1,4000),dp)
+						exception when others then
+							pragma error ('В секции "'||p_sType||'" ОЧЕНЬ большой код " '||length(ret_valid_text)+length(ret_valid_text2)+length(ret_valid_text3||sepLF||x.text)||'" выходим (!)');
+							return null;
+						end;
+					end if;
+				end if;
+			end if;
+			cntLine:=cntLine+1;
+			if instr(x.text,LF$)>0 then
+				&debug('.getT -- =Строка:'||cntLine||' содержит разделитель!',dp4)
+			end if;
+		end loop;
+	end if;
+	&debug('.getT -- ИТОГО '||p_sType||' (1)=cntLine='||cntLine||' cntSepLF='||cntSepLF
+		||' ret_valid_text('||length(ret_valid_text)||')'
+		||' ret_valid_text2('||length(ret_valid_text2)||')'
+		||' ret_valid_text3('||length(ret_valid_text3)||')',dp3)
+	
+	&debug('.getT -- (1v)'||TB$||'ret_valid_text('||length(ret_valid_text)||')=(см.V)'||LF$||substr(ret_valid_text,1,100)||iif(length(ret_valid_text)>100,LF$||'...',''),dp3)
+	&debug('.getT -- (1^)'||TB$||iif(length(ret_valid_text)>100,LF$||'...','')||substr(ret_valid_text, -100),dp3)
+
+	if ret_valid_text2 is not null then
+		&debug('.getT -- (2v)'||TB$||'ret_valid_text2('||length(ret_valid_text2)||')=(см.V)'||LF$||substr(ret_valid_text2,1,100)||iif(length(ret_valid_text2)>100,LF$||'...',''),dp3)
+		&debug('.getT -- (2^)'||TB$||iif(length(ret_valid_text2)>100,LF$||'...','')||substr(ret_valid_text2, -100),dp3)
+	end if;
+
+	if ret_valid_text3 is not null then
+		&debug('.getT -- (3v)'||TB$||'ret_valid_text3('||length(ret_valid_text3)||')=(см.V)'||LF$||substr(ret_valid_text3,1,100)||iif(length(ret_valid_text3)>100,LF$||'...',''),dp3)
+		&debug('.getT -- (3^)'||TB$||iif(length(ret_valid_text3)>100,LF$||'...','')||substr(ret_valid_text3, -100),dp3)
+	end if;
+	
+	&debug('.getT -- '||TB$||'1 p_sType='||p_sType,dp4)
+	if nvl(instr(upper(ret_valid_text),'BEGIN'),0) = 0 then
+		if p_sType='EXECUTE' then
+			&debug('.getT -- '||TB$||'2',dp4)
+			if ::[PSH_ON_OFF_SOFT].[PSH_L].getSectionIsNull(p_class_id, p_short_name, 'EXECUTE') then
+				&debug('.getT -- '||TB$||'3',dp4)
+				text_in:=::[PSH_ON_OFF_SOFT].[PSH_L].text_Begin_end;
+			else
+				&debug('.getT -- '||TB$||'4',dp4)
+				text_in:=::[PSH_ON_OFF_SOFT].[PSH_L].text_Only_CheckWork;
+			end if;
+		elsif p_sType='VALIDATE' then
+			&debug('.getT -- '||TB$||'5',dp4)
+			text_in:=::[PSH_ON_OFF_SOFT].[PSH_L].text_Begin_Default_end;
+		end if;
+	else
+		if p_sType='EXECUTE' then
+			&debug('.getT -- '||TB$||'6',dp4)
+			if ::[PSH_ON_OFF_SOFT].[PSH_L].getSectionIsNull(p_class_id, p_short_name, 'EXECUTE') then
+				&debug('.getT -- '||TB$||'7',dp4)
+				text_in:=::[PSH_ON_OFF_SOFT].[PSH_L].text_Begin_end;
+			else
+				&debug('.getT -- '||TB$||'8',dp4)
+				text_in:=::[PSH_ON_OFF_SOFT].[PSH_L].text_Only_CheckWork;
+			end if;
+		elsif p_sType='VALIDATE' then
+			&debug('.getT -- '||TB$||'9',dp4)
+			text_in:=::[PSH_ON_OFF_SOFT].[PSH_L].text_Begin_Default_end;
+		end if;
+		--&debug('.getT -- '||TB$||'10',dp4)
+		--text_in:=::[PSH_ON_OFF_SOFT].[PSH_L].text;
+	end if;
+	if ::[PSH_ON_OFF_SOFT].[PSH_L].getResultClassId(p_class_id,p_short_name) is null then
+		text_in:=replace(text_in,',&METHOD$CLASS,&METHOD$SNAME) then return null;'
+								,',&METHOD$CLASS,&METHOD$SNAME) then return;'
+						);
+	end if;
+	&debug('.getT -- =В секцию "'||p_sType||'" Добавим text_in=(см.V)'||LF$||text_in,dp4)
+
+	--проверяем есть ли операция по сбору статистики
+	if instr(upper(ret_valid_text),::[PSH_ON_OFF_SOFT].[PSH_L].upptext_Check_Work)>0 then
+		null;
+	else
+		declare
+			inPosFunc integer;
+			inPosProc integer;
+			inPosBeg integer;
+			inPosend integer;
+			inPos integer;
+			iErr integer;
+			tmp_text varchar2(32767);
+			lenend integer;
+			lendelta integer;
+		begin
+			tmp_text:=ret_valid_text;
+			
+			inPosFunc	:=nvl(instr(upper(tmp_text),'FUNCTION'),0);
+			inPosProc	:=nvl(instr(upper(tmp_text),'PROCEDURE'),0);
+			inPosBeg	:=nvl(instr(upper(tmp_text),'BEGIN'),0);
+			inPosend	:=nvl(instr(upper(tmp_text),'end;'),0);
+			&debug('.getT -- =Ищем место вставки после "begin"',dp4)
+			&debug('.getT -- '||TB$||'inPosFunc='||inPosFunc,dp4)
+			&debug('.getT -- '||TB$||'inPosProc='||inPosProc,dp4)
+			&debug('.getT -- '||TB$||'inPosBeg ='||inPosBeg ,dp4)
+			&debug('.getT -- '||TB$||'inPosend ='||inPosend ,dp4)
+			
+			inPos		:=0;
+			iErr		:=0;
+			if (inPosFunc>0 or inPosProc>0) and greatest(inPosFunc,inPosProc)<inPosBeg then
+				loop
+					inPos:=inPos+inPosend+length('end;'); --+length(sepLF);
+					tmp_text:=substr(ret_valid_text,inPos);
+
+					&debug('.getT -- =Есть локальная function/procedure до begin '
+						||inPosFunc||'/'
+						||inPosProc||'/'
+						||inPosBeg
+						||' Далее ищем после "end;" с символа №'||inPos
+						||' tmp_text('||length(tmp_text)||')=(см.V)'||LF$
+						||substr(tmp_text,1,100)
+						||iif(length(tmp_text)>100,LF$||'...',''),dp4)
+						
+					if length(tmp_text)=0 then
+						exit;
+					end if;
+
+					inPosFunc	:=nvl(instr(upper(tmp_text),'FUNCTION'),0);
+					inPosProc	:=nvl(instr(upper(tmp_text),'PROCEDURE'),0);
+					inPosBeg	:=nvl(instr(upper(tmp_text),'BEGIN'),0);
+					inPosend	:=nvl(instr(upper(tmp_text),'end;'),0);
+					&debug('.getT -- =Ищем место вставки после "begin"',dp4)
+					&debug('.getT -- '||TB$||'inPosFunc='||inPosFunc,dp4)
+					&debug('.getT -- '||TB$||'inPosProc='||inPosProc,dp4)
+					&debug('.getT -- '||TB$||'inPosBeg ='||inPosBeg ,dp4)
+					&debug('.getT -- '||TB$||'inPosend ='||inPosend ,dp4)
+					
+					if greatest(inPosFunc,inPosProc)=0 and inPosBeg>0 then
+						&debug('.getT -- Позиция "begin" после '||inPos
+							||' ret_valid_text('||length(ret_valid_text)||')=(см.V)'||LF$
+							||substr(ret_valid_text,inPos,100)
+							||iif(length(ret_valid_text)>100,LF$||'...',''),dp4)
+						exit;
+					end if;
+					
+					iErr:=iErr+1; if iErr>300 then pragma error('Ош. поиска места вставки'); end if;
+				end loop;
+			end if;
+
+			--тогда вставляем текст после Begin
+			inTextAfterKey(
+			text_in				--p_sInText in string(2000)
+			,inPos				--,p_inPos in out integer
+			,'BEGIN'			--,p_sAfterKey in string(64)
+			,ret_valid_text		--,p_sBuf_1 in out string(10)		10-(!)
+			,ret_valid_text2	--,p_sBuf_2 in out string(10)
+			,ret_valid_text3	--,p_sBuf_3 in out string(10)
+			);
+
+			/** /
+			inPos:=greatest(inPos,(instr(upper(ret_valid_text),'BEGIN')));
+			tmp1:=substr(ret_valid_text,0,inPos + length('begin'));
+			tmp2:=substr(ret_valid_text,inPos + length('begin'));
+			
+			&debug('.getT -- =tmp1('||length(tmp1)||')='||tmp1,dp4)
+			&debug('.getT -- =tmp2('||length(tmp1)||')='||substr(tmp2,1,100)||iif(length(tmp2)>100,'...',''),dp4)
+			&debug('.getT -- =text_in('||length(text_in)||')='||text_in,dp4)
+		  --ret_valid_text:=tmp1||iif(substr(tmp1,length(tmp1))=sepLF,'',sepLF)||text||iif(substr(text,length(text))=sepLF,'',sepLF)||tmp2;
+		  	if length(tmp1||text_in||tmp2)<=ret_valid_text%size then
+				ret_valid_text:=tmp1||text_in||tmp2;
+		  	else
+		  		ret_valid_text:=substr(tmp1||text_in||tmp2,1,ret_valid_text%size);
+		  		sDelta2:=substr(tmp1||text_in||tmp2,ret_valid_text%size+1);
+		  		lendelta:=length(sDelta2);
+		  		&debug('.getT -- =Сдвинем во второй буфер '||lendelta||' Бт >'||sDelta2,dp4)
+		  		
+		  		if length(sDelta2||ret_valid_text2)<=ret_valid_text2%size then
+		  			ret_valid_text2:=sDelta2||ret_valid_text2;
+		  			&debug('.getT -- Второй буфер '||length(ret_valid_text2)||' >'||substr(ret_valid_text2,1,lendelta+100)||iif(length(ret_valid_text2)>lendelta+100,LF$||'...',''),dp4)
+		  		else
+			  		sDelta3:=substr(sDelta2||ret_valid_text2,ret_valid_text2%size+1);
+			  		lendelta:=length(sDelta3);
+			  		&debug('.getT -- =Сдвинем в третий буфер '||lendelta||' Бт >'||sDelta3,dp4)
+			  		
+			  		ret_valid_text2:=substr(sDelta2||ret_valid_text2,1,ret_valid_text2%size);
+
+			  		ret_valid_text3:=sDelta3||ret_valid_text3;
+		  			&debug('.getT -- Третий буфер '||length(ret_valid_text3)||' >'||substr(ret_valid_text3,1,lendelta+100)||iif(length(ret_valid_text3)>lendelta+100,LF$||'...',''),dp4)
+		  		end if;
+		  	end if;
+		  	/**/
+		end;
+	end if;
+	
+	if ret_valid_text is null then
+		cntLine:=0;
+	else
+		cntLine:=(length(ret_valid_text)-length(replace(ret_valid_text,sepLF)))/length(sepLF)+1;
+		&debug('.getT -- ('||length(ret_valid_text)||'-'||length(replace(ret_valid_text,sepLF))||')/'||length(sepLF)||'+1='||cntLine,dp4)
+	end if;
+
+	&debug(substr('.getT -- met='||met||'('||cntLine||')'||' ret_valid_text('||length(ret_valid_text)||')='||LF$||ret_valid_text,1,4000),dp2)
+	if ret_valid_text2 is not null then
+		&debug(substr('.getT -- '||TB$||'(2)ret_valid_text2('||length(ret_valid_text2)||')='||LF$||ret_valid_text2,1,4000),dp2)
+	end if;
+	if ret_valid_text3 is not null then
+		&debug(substr('.getT -- '||TB$||'(3)ret_valid_text3('||length(ret_valid_text3)||')='||LF$||ret_valid_text3,1,4000),dp2)
+	end if;
+
+	if p_save then
+		p_ref_poos:=oPsbOnOffSoft;
+		&debug('.getT -- =Сохранили изменения ИК',dp4)
+	end if;
+	
+	return ret_valid_text;
+/** /	
+exception when others then
+	rollback;
+	ret_valid_text:=sqlerrm;
+	&debug('Ош. в getT'||LF$||sqlerrm,dp)
+	return ret_valid_text;	
+/**/
+end; --.getT
+
+public function getTypeOperStr(p_flag string(1)) return string(24) is
+	ret_str string(24);
+begin
+	if    p_flag='L' then ret_str:='Библиотечная';
+	elsif p_flag='R' then ret_str:='Отчет';
+	elsif p_flag='T' then ret_str:='Триггер';
+	elsif p_flag='A' then ret_str:='Функциональный реквизит';
+	elsif p_flag='W' then ret_str:='Представление';
+	elsif p_flag='Q' then ret_str:='ТИП';
+
+	elsif p_flag='G' then ret_str:='Списочная';
+	elsif p_flag='Z' then ret_str:='Фильтр';
+	elsif p_flag='M' then ret_str:='Простая';
+	elsif p_flag='S' then ret_str:='Групповая';
+	elsif p_flag='C' then ret_str:='Конструктор';
+	elsif p_flag='Y' then ret_str:='Деструктор';
+	elsif p_flag='P' then ret_str:='Печать';
+	elsif p_flag='O' then ret_str:='Выбор';
+	end if;
+	return ret_str;
+end;
+
+public function getBaseName return varchar2(32) is
+ret_BaseName varchar2(32);
+begin
+	for (select bn(bn.name :c_name) in v$database%rowtype)
+	loop
+		ret_BaseName:=bn.c_name;
+		exit;
+	end loop;
+	return ret_BaseName;
+end;
+
+public function getDependencies
+	/*[ПСБ] Есть зависимые ?*/
+	/*[ПСБ] Зависимые*/
+			(
+	p_class_id in string(100)
+		/*Класс объекта*/
+	,p_short_name in string(100)
+		/*Короткое имя объекта*/
+	,p_type_info integer default 0
+		/*0 - Да/Нет  1-Список зависимых*/
+	,p_bOnlyDependence integer default 0
+		/*0-Выводим для каждой записи, 1-Только для зависимых*/
+	--,p_rFTC_SCHEME_OBJ ref [FTC_SCHEME_OBJ] default null
+			)
+	return [MEMO_32767] is
+	
+	met varchar2(100);
+	ret_sDependencies [MEMO_32767];
+	sPSH_DEPENDENCIES string(100);	--Какие типы объектов будем загружать в {ИК.Зависимости} справочника "[ПСБ] Администрирование функционала, разработанного Банком" MV-только методы и VIEW
+	oPsbIkdependencies [PSH_IK_DEPendENC];	--Зависимости
+	sepBegin string(10):='';	--'<';
+	sepEnd string(10):='~';		--'>';
+	sepLine string(10):=LF$; 	--'~'
+	
+	sBaseName varchar2(32):=getBaseName;
+	nn integer:=0;
+begin
+	&debug('.getDependencies ---> '||sBaseName||' p_class_id('  ||length(p_class_id)  ||')='||p_class_id||' p_short_name('||length(p_short_name)||')='||p_short_name
+			||' Выводить:'||iif(p_type_info=0,'"Да/Нет"','Список зависимостей')||' '
+			||iif(p_bOnlyDependence=0,'Выводим для каждой записи','Выводим Только для зависимых'),dp5)
+	
+	met:=::[PSH_ON_OFF_SOFT].[PSH_L].get_methods_id(p_class_id,p_short_name);
+	if met is null then return null; end if;
+	
+	sPSH_DEPENDENCIES:=::[FP_TUNE].[LIB].get_str_value('PSH_DEPENDENCIES'); --sPSH_DEPENDENCIES:='MV';
+	&debug('Зависимости обновим из dependencies в зависимости от настройки PSH_DEPENDENCIES='||sPSH_DEPENDENCIES||' для met='||met,dp5)
+	
+	--[ПСБ] Есть зависит от? --зависимые?
+	for	(select d(count(1) : C_COUNT) in dependencies%rowtype
+		where d.REFERENCING_ID=met
+		and (nvl(length(sPSH_DEPENDENCIES),0)=0 or instr(sPSH_DEPENDENCIES,d.REFERENCED_TYPE)>0) -- MV-только методы и VIEW
+		--зависимые
+		--зависит от?
+		and d.referenced_id <> d.referencing_id
+		fetch 1
+		)
+	loop
+		nn:=d.C_COUNT;
+	end loop;
+
+	&debug('.getDependencies -- Нужно "'||iif(p_type_info=1,'[ПСБ] Зависимые','[ПСБ] Есть зависимые?')||'" Зависимых:'||nn,dp5)
+	if p_type_info=1 and nn>0 then --[ПСБ] Зависимые
+		/** /
+		for (select d	(
+				analytic(listagg(
+					case when d.REFERENCED_ID   is null then '' else sepBegin||d.REFERENCED_ID  ||sepEnd end ||
+					case when d.REFERENCED_TYPE is null then '' else sepBegin||d.REFERENCED_TYPE||sepEnd end ||
+					case when d.REFERENCED_QUAL is null then '' else sepBegin||d.REFERENCED_QUAL||sepEnd end ||
+					case when d.REFS_COUNT      is null then '' else sepBegin||d.REFS_COUNT     ||sepEnd end
+					,sepLine
+					), 'within group (order by [1], [2])', d.REFERENCED_TYPE, d.REFERENCED_QUAL) : C_LIST_dependencies
+						)
+			in dependencies%rowtype
+			where d.REFERENCING_ID = met
+			and (nvl(length(sPSH_DEPENDENCIES), 0) = 0 OR instr(sPSH_DEPENDENCIES, d.REFERENCED_TYPE) > 0)
+		) loop
+		/** /
+		for (select distinct d(
+		analytic(
+		    LISTAGG(
+		        case when d.REFERENCED_ID   is null then '' else sepBegin||d.REFERENCED_ID  ||sepEnd end ||
+		        case when d.REFERENCED_TYPE is null then '' else sepBegin||d.REFERENCED_TYPE||sepEnd end ||
+		        case when d.REFERENCED_QUAL is null then '' else sepBegin||d.REFERENCED_QUAL||sepEnd end ||
+		        case when d.REFS_COUNT      is null then '' else sepBegin||d.REFS_COUNT     ||sepEnd end,
+		        sepLine
+		    ),
+		    'within group (order by [1], [2])', 
+		    d.REFERENCED_TYPE, 
+		    d.REFERENCED_QUAL
+		) : C_LIST_dependencies
+		)
+		in dependencies%rowtype
+		where 
+		d.REFERENCED_ID = met
+		and (nvl(length(sPSH_DEPENDENCIES), 0) = 0 OR instr(sPSH_DEPENDENCIES, d.REFERENCED_TYPE) > 0)
+		and d.referenced_id <> d.referencing_id -- and d.referenced_type='M' --зависят от?
+		) loop
+			ret_sDependencies:=d.C_LIST_dependencies;
+			exit;
+		end loop;
+		/**/
+		ret_sDependencies:=null;
+		for (select d(
+			 d.REFERENCED_ID   : REFERENCED_ID
+			,d.REFERENCED_TYPE : REFERENCED_TYPE
+			,d.REFERENCED_QUAL : REFERENCED_QUAL
+			,d.REFS_COUNT      : REFS_COUNT
+					)
+		in dependencies%rowtype
+		where d.REFERENCING_ID=met
+		and (nvl(length(sPSH_DEPENDENCIES),0)=0 or instr(sPSH_DEPENDENCIES,d.REFERENCED_TYPE)>0) -- MV-только методы и VIEW
+		--зависимые
+		--зависит от?
+		and d.referenced_id <> d.referencing_id
+		order by d.REFERENCED_ID
+				,d.REFERENCED_TYPE
+				,d.REFERENCED_QUAL
+		) 
+		loop
+			ret_sDependencies:=	ret_sDependencies||
+								sepBegin||d.REFERENCED_ID  ||sepEnd||
+								sepBegin||d.REFERENCED_TYPE||sepEnd||
+								sepBegin||d.REFERENCED_QUAL||sepEnd||
+								sepBegin||d.REFS_COUNT     ||sepEnd||
+						 		sepLine;
+		end loop;
+	end if;
+	&debug('.getDependencies -- p_type_info='||p_type_info||' p_bOnlyDependence='||p_bOnlyDependence||' ret_sDependencies='||LF$||ret_sDependencies ,dp5)
+
+	if p_type_info=0 then -- 0 - Да/Нет
+		if nn=0 then
+			if p_bOnlyDependence=0 then --0-Выводим для каждой записи
+				return 'Нет'||iif(sPSH_DEPENDENCIES is not null,'('||sPSH_DEPENDENCIES||')','');
+			end if;
+		else
+			return 'Да'||iif(sPSH_DEPENDENCIES is not null or nn>0,'('||sPSH_DEPENDENCIES||nn||')','');
+		end if;
+	end if;
+
+	/** /
+	if p_bOnlyDependence=1 and nvl(nn,0)>0 then
+		debug_pipe(substr(p_rFTC_SCHEME_OBJ%id||'[methods_id:'||lpad(p_class_id||'.'||p_short_name||'.'||met,42)||'] Зависимые'||iif(sPSH_DEPENDENCIES is not null,'от "'||sPSH_DEPENDENCIES||'"','')||':'||p_class_id||'.'||ret_sDependencies,1,4000),dp3);
+	else
+		debug_pipe(substr(p_rFTC_SCHEME_OBJ%id||'[methods_id:'||lpad(p_class_id||'.'||p_short_name||'.'||met,42)||']',1,4000),dp3);
+	end if;
+	/**/
+	if p_bOnlyDependence=1 and nvl(nn,0)>0 then
+		&debug(substr('[methods_id:'||lpad(p_class_id||'.'||p_short_name||'.'||met,42)||'] Зависимые'||iif(sPSH_DEPENDENCIES is not null,'от "'||sPSH_DEPENDENCIES||'"','')||':'||p_class_id||'.'||ret_sDependencies,1,4000),dp3)
+	else
+		&debug(substr('[methods_id:'||lpad(p_class_id||'.'||p_short_name||'.'||met,42)||']',1,4000),dp3)
+	end if;
+	/**/
+	return ret_sDependencies;
+end;
+
+public function getOldName
+	/*[ПСБ] Текущее наименование*/
+	(
+	p_class_id in [STRING_30]
+	,p_short_name in [STRING_30]
+	) return [STRING_128] is
+	strTabl string(30);
+	sTmpName string(512);
+
+	sTmpShortName string(256);
+	fl_VW_CRIT	boolean:=false;
+	fl_REF		boolean:=false;
+	fl_ARR		boolean:=false;
+begin
+	--getOldName.Тип? Ищем реквизит в таблице классов
+	if p_short_name is null then
+		for	(
+			select cl(cl.name : name) in classes%rowtype
+			where   cl.ID = p_class_id
+				and cl.entity_id in ('TYPE','SYSTEM','PRODUCT')
+			fetch 1
+		) loop
+			strTabl:=upper('classes');
+			sTmpName:=cl.name;
+		end loop;
+	end if;
+
+	--getOldName.Это представление ?
+	if sTmpName is null then
+		if p_short_name like 'VW_CRIT_%' then
+			for	(
+				select cr(cr.name : name) in criteria%rowtype
+				where   cr.CLASS_ID = p_class_id
+					and cr.SHORT_NAME  = p_short_name
+				fetch 1
+			) loop
+				strTabl:=upper('criteria');
+				sTmpName:=cr.name;
+			end loop;
+		end if;
+	end if;
+
+	--getOldName.Метод ?
+	if sTmpName is null then
+		for	(
+			select m(m.name : name) in methods%rowtype
+			where   m.CLASS_ID  = p_class_id
+				and m.short_name= p_short_name
+			fetch 1
+		) loop
+			strTabl:=upper('methods');
+			sTmpName:=m.name;
+		end loop;
+	end if;
+	
+	--getOldName.Атрибут? Ищем реквизит в структуре типов
+	if sTmpName is null then
+		for	(
+			select a(a.name : name) in class_attributes%rowtype
+			where   a.CLASS_ID = p_class_id
+				and a.ATTR_ID  = p_short_name
+			fetch 1
+		) loop
+			strTabl:=upper('class_attributes');
+			sTmpName:=a.name;
+		end loop;
+	end if;
+
+	--getOldName.Аутсорсинг.Возможно это уже переименованый ATTR-Объект на схеме
+	/** /
+	if sTmpName is null and p_short_name is not null then
+		&debug('.getOldName -- Ищем ATTR в FTC_SCHEME_OBJ для '||p_class_id||'.'||p_short_name,dp7)
+		for	(
+			select fso(fso.SHORT_NAME : SHORT_NAME) in ::[FTC_SCHEME_OBJ] all
+			where  fso.CLASS_ID   = p_class_id
+			   and fso.SHORT_NAME = p_short_name
+			   and fso.OBJ_TYPE = 'ATTR'
+			fetch 1
+		) loop
+			strTabl:=upper('FTC_SCHEME_OBJ');
+			
+			sTmpShortName:=strStandartShortName(fso.[SHORT_NAME], fl_VW_CRIT,fl_REF,fl_ARR);
+			sTmpName:=substr(getStandartName(p_class_id,sTmpShortName),length(prefName)+1);
+		end loop;
+	end if;
+	/**/
+	-- Другое добавлять тут
+
+	&debug('.getOldName -- '||p_class_id||'.'||p_short_name||'->'||strTabl||'->'||sTmpName,dp5)
+	return sTmpName;
+end;
+
+public function getStandartShortName
+	/*[ПСБ] Стандартное короткое имя объекта объекта*/
+	(
+	p_class_id in [STRING_30]
+	,p_short_name in [STRING_30]
+	) return [STRING_128] is
+
+	sOldShortName [STRING_128];
+	ret_StandartShortName [STRING_128];
+
+	fl_VW_CRIT	boolean:=false;
+	fl_REF		boolean:=false;
+	fl_ARR		boolean:=false;
+
+	strTabl string(30);
+	sTmpShortName string(256);
+	sTmp2 string(32767);
+begin
+	ret_StandartShortName:=p_short_name;
+	if isDistribObj(p_class_id,p_short_name)='Нет' then null;
+	else
+		&debug('.getStandartShortName -- Дистрибутивный объект.Не правим.StandartShortName('||length(ret_StandartShortName)||iif(length(ret_StandartShortName)>128,'!','')||')=->'||ret_StandartShortName,dp3)
+		return ret_StandartShortName;
+	end if;
+
+	--getStandartShortName. Тип? Ищем реквизит в таблице классов
+	if p_short_name is null then
+		for	(
+			select cl(cl.id : id) in classes%rowtype
+			where   cl.ID = p_class_id
+				and cl.entity_id in ('TYPE','SYSTEM','PRODUCT')
+			fetch 1
+		) loop
+			strTabl:=upper('classes');
+			sTmpShortName:=cl.id;
+		end loop;
+	end if;
+
+	if strTabl<>'CLASSES' and isDistribObj(p_class_id)='Нет' then
+		&debug('.getStandartShortName -- Объект локального класса.Не правим.StandartShortName('||length(ret_StandartShortName)||iif(length(ret_StandartShortName)>128,'!','')||')=->'||ret_StandartShortName,dp5)
+		return ret_StandartShortName;
+	end if;
+	
+	if substr(p_short_name,1,1)='Z' and length(substr(p_short_name,2))=length(::[RUNTIME].[STR].Get_DigitAll(p_short_name,2)) then
+		&debug('.getStandartShortName -- Это имя фильтра.Не правим.StandartShortName('||length(ret_StandartShortName)||iif(length(ret_StandartShortName)>128,'!','')||')=->'||ret_StandartShortName,dp5)
+		return ret_StandartShortName;
+	end if;
+	
+	--getStandartShortName. Это представление ?
+	if sTmpShortName is null then
+		if p_short_name like 'VW_CRIT_%' then
+			for	(
+				select cr(cr.short_name : short_name) in criteria%rowtype
+				where   cr.CLASS_ID = p_class_id
+					and cr.SHORT_NAME  = p_short_name
+				fetch 1
+			) loop
+				strTabl:=upper('criteria');
+				sTmpShortName:=cr.short_name;
+			end loop;
+		end if;
+	end if;
+	
+	--getStandartShortName. Метод?
+	if sTmpShortName is null then
+		for	(
+			select m(
+					 m.id : id
+					,m.short_name : short_name
+					) in methods%rowtype
+			where   m.CLASS_ID  = p_class_id
+				and m.short_name= p_short_name
+			fetch 1
+		) loop
+			strTabl:=upper('methods');
+			sTmpShortName:=m.short_name;
+		end loop;
+	end if;
+
+	--getStandartShortName Атрибут?. Ищем реквизит в структуре типов
+	if sTmpShortName is null then
+		for	(
+			select a(a.attr_id : attr_id) in class_attributes%rowtype
+			where   a.CLASS_ID = p_class_id
+				and a.ATTR_ID  = p_short_name
+			fetch 1
+		) loop
+			strTabl:=upper('class_attributes');
+			sTmpShortName:=a.attr_id;
+		end loop;
+	end if;
+
+	if sTmpShortName is null then
+		for	(
+			select a(a.attr_id : attr_id) in class_attributes%rowtype
+			where   a.CLASS_ID = p_class_id
+				and a.ATTR_ID  = p_short_name
+			fetch 1
+		) loop
+			strTabl:=upper('class_attributes');
+			sTmpShortName:=a.attr_id;
+		end loop;
+	end if;
+
+	--getStandartShortName. Аутсорсинг.Возможно это уже переименованый ATTR-Объект на схеме
+	/** /
+	if sTmpShortName is null and p_short_name is not null then
+		&debug('.getStandartShortName -- Ищем ATTR в FTC_SCHEME_OBJ для '||p_class_id||'.'||p_short_name,dp7)
+		for	(
+			select fso(fso.SHORT_NAME : SHORT_NAME) in ::[FTC_SCHEME_OBJ] all
+			where  fso.CLASS_ID   = p_class_id
+			   and fso.SHORT_NAME = p_short_name
+			   and fso.OBJ_TYPE = 'ATTR'
+			fetch 1
+		) loop
+			strTabl:=upper('FTC_SCHEME_OBJ');
+			sTmpShortName:=fso.SHORT_NAME;
+		end loop;
+	end if;
+
+	if sTmpShortName is null then
+		&debug('.getStandartShortName -- Тип(?) ShortName=->'||ret_StandartShortName,dp5)
+		return ret_StandartShortName;
+	end if;
+	
+	sOldShortName:=nvl(p_short_name,p_class_id);
+	sTmpShortName:=strStandartShortName(sTmpShortName, fl_VW_CRIT,fl_REF,fl_ARR);
+	
+	ret_StandartShortName:=substr(nvl(sTmpShortName,sOldShortName),1,iif(fl_VW_CRIT,ret_StandartShortName%size,16));
+	&debug('.getStandartShortName -- '||p_class_id||'.'||p_short_name||'->'||strTabl||'.'||ret_StandartShortName,dp5)
+	return ret_StandartShortName;
+	/**/
+end;
+
+------------------------------
+public function strStandartShortName(
+		sTmpShortName in [STRING_128]
+		,fl_VW_CRIT in out boolean
+		,fl_REF in out boolean
+		,fl_ARR in out boolean
+		) return [STRING_128] is
+	
+	tmpPref string(30); --Для VW_CRIT_
+	tmpPostfixRef string(30); --Для _REF
+	tmpPostfixArr string(30); --Для _ARR
+	ret_sShort [STRING_128];
+begin
+	&debug('.strStandartShortName > "'||sTmpShortName||'"',dp7)
+
+	if fl_VW_CRIT is null then fl_VW_CRIT:=false; end if;
+	if sTmpShortName like 'VW_CRIT_%' then
+		tmpPref:='VW_CRIT_';
+		sTmpShortName:=substr(sTmpShortName,length('VW_CRIT_')+1);
+		fl_VW_CRIT:=true;
+	elsif sTmpShortName like '%_REF' then
+		tmpPostfixRef:='_REF';
+		sTmpShortName:=substr(sTmpShortName,1,length(sTmpShortName)-length('_REF'));
+		fl_REF:=true;
+	elsif sTmpShortName like '%_ARR' then
+		tmpPostfixArr:='_ARR';
+		sTmpShortName:=substr(sTmpShortName,1,length(sTmpShortName)-length('_REF'));
+		fl_ARR:=true;
+	end if;
+
+	sTmpShortName:=getExcRepStr(sTmpShortName);																									&debug('ERS  0.'||sTmpShortName,dp7)
+																																				&debug('SN:  1.'||sTmpShortName,dp7)
+	if instr(sTmpShortName,'PSHB')=1                                 then sTmpShortName:=replace(sTmpShortName,'PSHB',prefShortName); end if;	&debug('SN:  2.'||sTmpShortName,dp7)
+	if instr(sTmpShortName,'PSB')=1                                  then sTmpShortName:=replace(sTmpShortName,'PSB' ,prefShortName); end if;	&debug('SN:  3.'||sTmpShortName,dp7)
+	if instr(sTmpShortName,'CBF')=1                                  then sTmpShortName:=replace(sTmpShortName,'CBF' ,prefShortName); end if;	&debug('SN:  4.'||sTmpShortName,dp7)
+	if instr(sTmpShortName,'CFT')=1                                  then sTmpShortName:=replace(sTmpShortName,'CFT' ,prefShortName); end if;	&debug('SN:  5.'||sTmpShortName,dp7)
+	if instr(sTmpShortName,'TCB')=1                                  then sTmpShortName:=replace(sTmpShortName,'TCB' ,prefShortName); end if;	&debug('SN:  6.'||sTmpShortName,dp7)
+	if instr(sTmpShortName,length(sTmpShortName)-length('PSBH')+1)>0 then sTmpShortName:=replace(sTmpShortName,'PSBH',prefShortName); end if;	&debug('SN:  7.'||sTmpShortName,dp7)
+	if instr(sTmpShortName,length(sTmpShortName)-length('PSB')+1)>0  then sTmpShortName:=replace(sTmpShortName,'PSB' ,prefShortName); end if;	&debug('SN:  8.'||sTmpShortName,dp7)
+
+	if    fl_VW_CRIT then sTmpShortName:=tmpPref||prefShortName||'_'||ltrim(sTmpShortName,'_');						&debug('SN: 20.'||sTmpShortName,dp7) --'VW_CRIT_PSH_'
+	elsif fl_REF then	--'_REF'
+		if substr(sTmpShortName,1,length(prefShortName)+1)=prefShortName||'_' then	sTmpShortName:=rtrim(substr(sTmpShortName,1,16-4),'_');						&debug('SN: 21.1'||sTmpShortName,dp7)
+		else																		sTmpShortName:=rtrim(substr(prefShortName||'_'||sTmpShortName,1,16-4),'_');	&debug('SN: 21.2'||sTmpShortName,dp7)
+		end if;
+		sTmpShortName:=sTmpShortName||tmpPostfixRef;																											&debug('SN: 21.3'||sTmpShortName,dp7)
+	elsif fl_ARR then	--'_ARR'
+		if substr(sTmpShortName,1,length(prefShortName)+1)=prefShortName||'_' then	sTmpShortName:=rtrim(substr(sTmpShortName,1,16-4),'_');						&debug('SN: 22.1'||sTmpShortName,dp7)
+		else																		sTmpShortName:=rtrim(substr(prefShortName||'_'||sTmpShortName,1,16-4),'_');	&debug('SN: 22.2'||sTmpShortName,dp7)
+		end if;
+		sTmpShortName:=sTmpShortName||tmpPostfixArr;																											&debug('SN: 22.3'||sTmpShortName,dp7)
+  --else				sTmpShortName:=prefShortName||'_'||ltrim(sTmpShortName,'_');								&debug('SN: 23.'||sTmpShortName,dp7) --'PSH_'
+	end if;
+
+
+	sTmpShortName:=replace(sTmpShortName,'PSB',prefShortName);									&debug('SN: 30.'||sTmpShortName,dp7)
+	if instr(sTmpShortName,prefShortName)=0 then
+		sTmpShortName:=prefShortName||'_'||sTmpShortName;										&debug('SN: 31.'||sTmpShortName,dp7)
+	end if;
+
+	ret_sShort:=substr(sTmpShortName,1,16);
+	&debug('.strStandartShortName < "'||ret_sShort||'"',dp7)
+	return ret_sShort;
+end;
+
+public function strStandartName(sTmpName in [STRING_128]) return [STRING_128] is
+	ret_sName [STRING_128];
+begin
+	&debug('.strStandartName > "'||sTmpName||'"',dp3)
+	
+	if instr(trim(sTmpName),'[')=1 			then sTmpName:=replace(replace(sTmpName,'['),']');            end if;	&debug(' 1.'||sTmpName,dp7)
+	if instr(sTmpName,'PSHB.')>0            then sTmpName:=replace(sTmpName,'PSHB.'           ,prefName); end if;	&debug(' 2.'||sTmpName,dp7)
+	if instr(sTmpName,'ПCХБ.')>0            then sTmpName:=replace(sTmpName,'ПCХБ.'           ,prefName); end if;	&debug(' 3.'||sTmpName,dp7)
+	if instr(sTmpName,'ПСХ.')>0             then sTmpName:=replace(sTmpName,'ПСХ.'            ,prefName); end if;	&debug(' 4.'||sTmpName,dp7)
+	if instr(sTmpName,'PSB.')>0             then sTmpName:=replace(sTmpName,'PSB.'            ,prefName); end if;	&debug(' 5.'||sTmpName,dp7)
+	if instr(sTmpName,prefShortName||'.')>0 then sTmpName:=replace(sTmpName,prefShortName||'.',prefName); end if;	&debug(' 7.'||sTmpName,dp7)
+	if instr(sTmpName,'АБС.')>0             then sTmpName:=replace(sTmpName,'АБС.'            ,prefName); end if;	&debug(' 8.'||sTmpName,dp7)
+	if instr(sTmpName,'ПКБ.')>0             then sTmpName:=replace(sTmpName,'ПКБ.'            ,prefName); end if;	&debug(' 9.'||sTmpName,dp7)
+	if instr(sTmpName,'PSB.')>0             then sTmpName:=replace(sTmpName,'PSB.'            ,prefName); end if;	&debug('10.'||sTmpName,dp7)
+	if instr(sTmpName,'ПCБ.')>0             then sTmpName:=replace(sTmpName,'ПCБ.'            ,prefName); end if;	&debug('11.'||sTmpName,dp7)
+	if instr(sTmpName,'ТКБ.')>0             then sTmpName:=replace(sTmpName,'ТКБ.'            ,prefName); end if;	&debug('12.'||sTmpName,dp7)
+
+	if instr(sTmpName,'PSHB')>0             then sTmpName:=replace(sTmpName,'PSHB'           ,prefName); end if;	&debug('21.'||sTmpName,dp7)
+	if instr(sTmpName,'ПCХБ')>0             then sTmpName:=replace(sTmpName,'ПCХБ'           ,prefName); end if;	&debug('22.'||sTmpName,dp7)
+	if instr(sTmpName,'ПСХ')>0              then sTmpName:=replace(sTmpName,'ПСХ'            ,prefName); end if;	&debug('23.'||sTmpName,dp7)
+	if instr(sTmpName,'PSB')>0              then sTmpName:=replace(sTmpName,'PSB'            ,prefName); end if;	&debug('24.'||sTmpName,dp7)
+	if instr(sTmpName,prefShortName||'')>0  then sTmpName:=replace(sTmpName,prefShortName    ,prefName); end if;	&debug('25.'||sTmpName,dp7)
+	if instr(sTmpName,'АБС')>0              then sTmpName:=replace(sTmpName,'АБС'            ,prefName); end if;	&debug('26.'||sTmpName,dp7)
+	if instr(sTmpName,'ПКБ')>0              then sTmpName:=replace(sTmpName,'ПКБ'            ,prefName); end if;	&debug('27.'||sTmpName,dp7)
+	if instr(sTmpName,'PSB')>0              then sTmpName:=replace(sTmpName,'PSB'            ,prefName); end if;	&debug('28.'||sTmpName,dp7)
+	if instr(sTmpName,'ПCБ')>0              then sTmpName:=replace(sTmpName,'ПCБ'            ,prefName); end if;	&debug('30.'||sTmpName,dp7)
+	if instr(sTmpName,'ТКБ')>0              then sTmpName:=replace(sTmpName,'ТКБ'            ,prefName); end if;	&debug('31.'||sTmpName,dp7)
+	
+	if instr(sTmpName,'BFK.')>0             then sTmpName:=replace(sTmpName,'BFK.'           ,prefName); end if;	&debug('40.'||sTmpName,dp7)
+	if instr(sTmpName,'CFB.')>0             then sTmpName:=replace(sTmpName,'CFB.'           ,prefName); end if;	&debug('41.'||sTmpName,dp7)
+	if instr(sTmpName,'CBF.')>0             then sTmpName:=replace(sTmpName,'CBF.'           ,prefName); end if;	&debug('41.'||sTmpName,dp7)
+	if instr(sTmpName,'БФК.')>0             then sTmpName:=replace(sTmpName,'БФК.'           ,prefName); end if;	&debug('42.'||sTmpName,dp7)
+	if instr(sTmpName,'БКФ.')>0             then sTmpName:=replace(sTmpName,'БКФ.'           ,prefName); end if;	&debug('43.'||sTmpName,dp7)
+	if instr(sTmpName,'BFK')>0              then sTmpName:=replace(sTmpName,'BFK'            ,prefName); end if;	&debug('44.'||sTmpName,dp7)
+	if instr(sTmpName,'CFB')>0              then sTmpName:=replace(sTmpName,'CFB'            ,prefName); end if;	&debug('45.'||sTmpName,dp7)
+	if instr(sTmpName,'CBF')>0              then sTmpName:=replace(sTmpName,'CBF'            ,prefName); end if;	&debug('45.'||sTmpName,dp7)
+	if instr(sTmpName,'БФК')>0              then sTmpName:=replace(sTmpName,'БФК'            ,prefName); end if;	&debug('46.'||sTmpName,dp7)
+	if instr(sTmpName,'БКФ')>0              then sTmpName:=replace(sTmpName,'БКФ'            ,prefName); end if;	&debug('47.'||sTmpName,dp7)
+	
+	if instr(sTmpName,trim(trim(trim(prefName),'['),']'))>0 --'ПСБ'
+	then
+		if instr(sTmpName,trim(prefName)||'.')>0 then sTmpName:=replace(sTmpName,trim(prefName)||'.',prefName); end if;	&debug('50.'||sTmpName,dp7) --'[ПСБ].' '[ПСБ] '
+		if instr(sTmpName,trim(trim(trim(prefName),'['),']')||'.')>0 then
+			sTmpName:=replace(sTmpName,trim(trim(trim(prefName),'['),']')||'.',trim(trim(trim(prefName),'['),']')||' ');&debug('51.'||sTmpName,dp7) --'ПСБ '); 
+		end if;																											&debug('52.'||sTmpName,dp7) --'ПСБ.'
+		if instr(sTmpName,trim(prefName))=0  then	--[ПСБ]
+			sTmpName:=replace(sTmpName,trim(trim(trim(prefName),'['),']'),'[ПСБ]');										&debug('53.'||sTmpName,dp7) --'ПСБ','[ПСБ]'
+		end if;
+		if instr(sTmpName,trim(prefName))>0  then	--'[ПСБ]'
+			if instr(sTmpName,prefName)>0 then null;--'[ПСБ] '
+			else sTmpName:=replace(sTmpName,trim(prefName),prefName);													&debug('54.'||sTmpName,dp7) --'[ПСБ]','[ПСБ] '
+			end if;
+		end if;
+	else
+		sTmpName:=trim(sTmpName);
+		if substr(sTmpName,1,1)='!' then sTmpName:='!'||prefName||trim(trim(sTmpName,'!'));	--'![ПСБ] '
+		else							 sTmpName:=prefName||sTmpName;						--'[ПСБ] '
+		end if;
+	end if;
+	if sTmpName like 'Ссылка%'
+	or sTmpName like 'Массив%'
+	then
+		sTmpName:=substr(prefName||prefName,1,ret_sName%size);
+	end if;
+	ret_sName:=substr(sTmpName,1,ret_sName%size);
+	::[HOOK_BANK].[EXP_GET_PR_ADDR].DelDublSpace(ret_sName);															&debug('55.'||ret_sName,dp7) --'[ПСБ]','[ПСБ] '
+
+	ret_sName:=substr(ret_sName,1,128);
+	&debug('.strStandartName < "'||ret_sName||'"',dp3)
+	return ret_sName;
+end;
+
+public function getStandartName
+	/*[ПСБ] Стандартное наименование*/
+	(
+	p_class_id in [STRING_30]
+	,p_short_name in [STRING_30]
+	) return [STRING_128] is
+	sOldName [STRING_128];
+	ret_StandartName [STRING_128];
+
+	strTabl string(30);
+	sTmpName string(256);
+	sTmp2 string(32767);
+begin
+	ret_StandartName:=p_short_name;
+	if isDistribObj(p_class_id,p_short_name)='Нет' then null;
+	else
+		&debug('.getStandartName -- Дистрибутивный объект.Не правим.StandartName('||length(ret_StandartName)||iif(length(ret_StandartName)>128,'!','')||')=->'||ret_StandartName,dp3)
+		return ret_StandartName;
+	end if;
+
+	--getStandartName. Тип? Ищем реквизит в таблице классов
+	if p_short_name is null then
+		for	(
+			select cl(cl.name : name) in classes%rowtype
+			where   cl.ID = p_class_id
+				and cl.entity_id in ('TYPE','SYSTEM','PRODUCT')
+			fetch 1
+		) loop
+			strTabl:=upper('classes');
+			sTmpName:=cl.name;
+		end loop;
+	end if;
+
+	--getStandartName. Это представление ?
+	if sTmpName is null then
+		if p_short_name like 'VW_CRIT_%' then
+			for	(
+				select cr(cr.name : name) in criteria%rowtype
+				where   cr.CLASS_ID = p_class_id
+					and cr.SHORT_NAME  = p_short_name
+				fetch 1
+			) loop
+				strTabl:=upper('criteria');
+				sTmpName:=cr.name;
+			end loop;
+		end if;
+	end if;
+	
+	--getStandartName. Метод ?
+	if sTmpName is null then
+		for	(
+			select m(m.name : name) in methods%rowtype
+			where   m.CLASS_ID  = p_class_id
+				and m.short_name= p_short_name
+			fetch 1
+		) loop
+			strTabl:=upper('methods');
+			sTmpName:=m.name;
+		end loop;
+	end if;
+
+	--getStandartName Атрибут?. Ищем реквизит в структуре типов
+	if sTmpName is null then
+		for	(
+			select a(a.name : name) in class_attributes%rowtype
+			where   a.CLASS_ID = p_class_id
+				and a.ATTR_ID  = p_short_name
+			fetch 1
+		) loop
+			strTabl:=upper('class_attributes');
+			sTmpName:=a.name;
+		end loop;
+	end if;
+
+	if sTmpName is null then
+		&debug('.getStandartName -- Тип(?) Name=->'||ret_StandartName,dp5)
+		return ret_StandartName;
+	end if;
+	
+	sTmp2:=isDistribObj(p_class_id);
+	&debug('.getStandartName -- Класс объекта '||p_class_id||' локальный ? strTabl='||strTabl||' sIsDistribObj('||p_class_id||')='||sTmp2,dp5)
+
+	ret_StandartName=sOldName:=sTmpName;
+	if strTabl='CLASS_ATTRIBUTES' then
+		if sTmp2='Нет' then
+			&debug('.getStandartName -- Атрибут локального класса.Не правим',dp5)
+			return ret_StandartName;
+		else --Пример CLIENT.PSB_FAIL_MARK  и  CLIENT.PSB_OPER_CHAR
+			&debug('.getStandartName -- Локальный атрибут дистрибутивного класса. Нужно править',dp5)
+		end if;
+	elsif strTabl='METHODS' then
+		if sTmp2='Нет' then
+			&debug('.getStandartName -- Метод локального класса.Нужно править',dp5)
+		else --Пример CLIENT.PSB_FAIL_MARK  и  CLIENT.PSB_OPER_CHAR
+			&debug('.getStandartName -- Метод дистрибутивного класса. Не правим',dp5)
+			return ret_StandartName;
+		end if;
+	else
+		if sTmp2='Нет' then --isDistribObj(p_class_id)='Нет' then
+			&debug('.getStandartName -- Объект локального класса.Не правим.StandartName('||length(ret_StandartName)||iif(length(ret_StandartName)>128,'!','')||')=->'||ret_StandartName,dp5)
+			return ret_StandartName;
+		end if;
+	end if;
+	
+	if sTmpName is not null
+	and instr(sTmpName,prefName)=1 --'[ПСБ] ')=1
+	then
+		null;
+		&debug('Уже стандартно '||strTabl||'.Name "'||sTmpName||'"',dp3)
+	else
+		/** /
+		&debug('НУЖНО переименовывать '||strTabl||'.Name "'||sTmpName||'"',dp3)
+		
+		if instr(trim(sTmpName),'[')=1 			then sTmpName:=replace(replace(sTmpName,'['),']');            end if;	&debug(' 1.'||sTmpName,dp5)
+		if instr(sTmpName,'PSHB.')>0            then sTmpName:=replace(sTmpName,'PSHB.'           ,prefName); end if;	&debug(' 2.'||sTmpName,dp5)
+		if instr(sTmpName,'ПCХБ.')>0            then sTmpName:=replace(sTmpName,'ПCХБ.'           ,prefName); end if;	&debug(' 3.'||sTmpName,dp5)
+		if instr(sTmpName,'ПСХ.')>0             then sTmpName:=replace(sTmpName,'ПСХ.'            ,prefName); end if;	&debug(' 4.'||sTmpName,dp5)
+		if instr(sTmpName,'PSB.')>0             then sTmpName:=replace(sTmpName,'PSB.'            ,prefName); end if;	&debug(' 5.'||sTmpName,dp5)
+		if instr(sTmpName,prefShortName||'.')>0 then sTmpName:=replace(sTmpName,prefShortName||'.',prefName); end if;	&debug(' 7.'||sTmpName,dp5)
+		if instr(sTmpName,'АБС.')>0             then sTmpName:=replace(sTmpName,'АБС.'            ,prefName); end if;	&debug(' 8.'||sTmpName,dp5)
+		if instr(sTmpName,'ПКБ.')>0             then sTmpName:=replace(sTmpName,'ПКБ.'            ,prefName); end if;	&debug(' 9.'||sTmpName,dp5)
+		if instr(sTmpName,'PSB.')>0             then sTmpName:=replace(sTmpName,'PSB.'            ,prefName); end if;	&debug('10.'||sTmpName,dp5)
+		if instr(sTmpName,'ПCБ.')>0             then sTmpName:=replace(sTmpName,'ПCБ.'            ,prefName); end if;	&debug('11.'||sTmpName,dp5)
+
+		if instr(sTmpName,'PSHB')>0             then sTmpName:=replace(sTmpName,'PSHB'           ,prefName); end if;	&debug('21.'||sTmpName,dp5)
+		if instr(sTmpName,'ПCХБ')>0             then sTmpName:=replace(sTmpName,'ПCХБ'           ,prefName); end if;	&debug('22.'||sTmpName,dp5)
+		if instr(sTmpName,'ПСХ')>0              then sTmpName:=replace(sTmpName,'ПСХ'            ,prefName); end if;	&debug('23.'||sTmpName,dp5)
+		if instr(sTmpName,'PSB')>0              then sTmpName:=replace(sTmpName,'PSB'            ,prefName); end if;	&debug('24.'||sTmpName,dp5)
+		if instr(sTmpName,prefShortName||'')>0  then sTmpName:=replace(sTmpName,prefShortName    ,prefName); end if;	&debug('25.'||sTmpName,dp5)
+		if instr(sTmpName,'АБС')>0              then sTmpName:=replace(sTmpName,'АБС'            ,prefName); end if;	&debug('26.'||sTmpName,dp5)
+		if instr(sTmpName,'ПКБ')>0              then sTmpName:=replace(sTmpName,'ПКБ'            ,prefName); end if;	&debug('27.'||sTmpName,dp5)
+		if instr(sTmpName,'PSB')>0              then sTmpName:=replace(sTmpName,'PSB'            ,prefName); end if;	&debug('28.'||sTmpName,dp5)
+		if instr(sTmpName,'ПCБ')>0              then sTmpName:=replace(sTmpName,'ПCБ'            ,prefName); end if;	&debug('30.'||sTmpName,dp5)
+		
+		if instr(sTmpName,'BFK.')>0             then sTmpName:=replace(sTmpName,'BFK.'           ,prefName); end if;	&debug('40.'||sTmpName,dp5)
+		if instr(sTmpName,'CFB.')>0             then sTmpName:=replace(sTmpName,'CFB.'           ,prefName); end if;	&debug('41.'||sTmpName,dp5)
+		if instr(sTmpName,'БФК.')>0             then sTmpName:=replace(sTmpName,'БФК.'           ,prefName); end if;	&debug('42.'||sTmpName,dp5)
+		if instr(sTmpName,'БКФ.')>0             then sTmpName:=replace(sTmpName,'БКФ.'           ,prefName); end if;	&debug('43.'||sTmpName,dp5)
+		if instr(sTmpName,'BFK')>0              then sTmpName:=replace(sTmpName,'BFK'            ,prefName); end if;	&debug('44.'||sTmpName,dp5)
+		if instr(sTmpName,'CFB')>0              then sTmpName:=replace(sTmpName,'CFB'            ,prefName); end if;	&debug('45.'||sTmpName,dp5)
+		if instr(sTmpName,'БФК')>0              then sTmpName:=replace(sTmpName,'БФК'            ,prefName); end if;	&debug('46.'||sTmpName,dp5)
+		if instr(sTmpName,'БКФ')>0              then sTmpName:=replace(sTmpName,'БКФ'            ,prefName); end if;	&debug('47.'||sTmpName,dp5)
+		
+		if instr(sTmpName,trim(trim(trim(prefName),'['),']'))>0 --'ПСБ'
+		then
+			if instr(sTmpName,trim(prefName)||'.')>0 then sTmpName:=replace(sTmpName,trim(prefName)||'.',prefName); end if;	&debug('50.'||sTmpName,dp5) --'[ПСБ].' '[ПСБ] '
+			if instr(sTmpName,trim(trim(trim(prefName),'['),']')||'.')>0 then
+				sTmpName:=replace(sTmpName,trim(trim(trim(prefName),'['),']')||'.',trim(trim(trim(prefName),'['),']')||' ');&debug('51.'||sTmpName,dp5) --'ПСБ '); 
+			end if;																											&debug('52.'||sTmpName,dp5) --'ПСБ.'
+			if instr(sTmpName,trim(prefName))=0  then	--[ПСБ]
+				sTmpName:=replace(sTmpName,trim(trim(trim(prefName),'['),']'),'[ПСБ]');										&debug('53.'||sTmpName,dp5) --'ПСБ','[ПСБ]'
+			end if;
+			if instr(sTmpName,trim(prefName))>0  then	--'[ПСБ]'
+				if instr(sTmpName,prefName)>0 then null;--'[ПСБ] '
+				else sTmpName:=replace(sTmpName,trim(prefName),prefName);													&debug('54.'||sTmpName,dp5) --'[ПСБ]','[ПСБ] '
+				end if;
+			end if;
+		else
+			sTmpName:=trim(sTmpName);
+			if substr(sTmpName,1,1)='!' then sTmpName:='!'||prefName||trim(trim(sTmpName,'!'));	--'![ПСБ] '
+			else							 sTmpName:=prefName||sTmpName;						--'[ПСБ] '
+			end if;
+		end if;
+		ret_StandartName:=substr(sTmpName,1,ret_StandartName%size);
+		::[HOOK_BANK].[EXP_GET_PR_ADDR].DelDublSpace(ret_StandartName);														&debug('55.'||ret_StandartName,dp5) --'[ПСБ]','[ПСБ] '
+		/**/
+		ret_StandartName:=strStandartName(sTmpName);
+	end if;
+
+	ret_StandartName:=substr(nvl(ret_StandartName,sOldName),1,ret_StandartName%size);
+	&debug('.ret_StandartName -- '||p_class_id||'.'||p_short_name||'->'||strTabl||'->'||ret_StandartName,dp5)
+	return ret_StandartName;
+end;
+------------------------------
+public function 	getShortOld
+	/*[ПСБ] Переименовано в короткое имя объекта*/
+	(
+	p_class_id in [STRING_30]
+	,p_short_name in [STRING_30]
+	) return [STRING_128] is
+	
+	fl_VW_CRIT boolean;
+	fl_REF boolean;
+	fl_ADD boolean;
+	ret_sShortName [STRING_128];
+	tmpClassId16 in varchar2(16);
+begin
+	--getShortOld. Тип? Ищем реквизит в таблице классов
+	/** /
+	if p_short_name is null then
+		ret_sShortName:=strStandartShortName(p_class_id,fl_VW_CRIT,fl_REF,fl_ADD);
+		tmpClassId16:=substr(ret_sShortName,1,tmpClassId16%size);
+		&debug('.getShortOld -- p_class_id='||p_class_id||' Ищем в classes ID = tmpClassId16='||tmpClassId16,dp7)
+		for	(
+			select cl(cl) in classes%rowtype
+			where   cl.ID = tmpClassId16
+				and cl.entity_id in ('TYPE','SYSTEM','PRODUCT')
+			fetch 1
+		) loop
+			&debug('.getShortOld --   p_class_id='||p_class_id  ,dp7)
+			&debug('.getShortOld -- tmpClassId16='||tmpClassId16,dp7)
+			if p_class_id<>tmpClassId16 then
+				&debug('.getShortOld -- p_class_id='||p_class_id||' Ищем в FTC_SCHEME_OBJ CLASS_ID = p_class_id='||p_class_id,dp7)
+				for fso in ::[FTC_SCHEME_OBJ]
+				where fso.[CLASS_ID]=p_class_id
+				  and fso.[SHORT_NAME] is null
+				  and fso.[OBJ_TYPE] in ('TYPE','SYSTEM')
+				  and fso.[PSH_START] is not null
+				fetch 1
+				loop
+					&debug('.getShortOld >'||p_class_id||' <'||ret_sShortName,dp5)
+					return ret_sShortName;
+				end loop;
+			end if;
+		end loop;
+	end if;
+	/**/
+	return null;
+end;
+public function getNameOld
+	/*[ПСБ] Переименовано наименование объекта*/
+	(
+	p_class_id in [STRING_30]
+	,p_short_name in [STRING_30]
+	) return [STRING_128] is
+
+	sOldShortName [STRING_128];
+	ret_NameOld [STRING_30];
+	fl_VW_CRIT boolean:=false;
+
+	strTabl string(30);
+	sTmpShortName string(256);
+	
+	tmpPref string(30); --Для VW_CRIT_
+	--s30 string(30);
+begin
+	&debug('.getNameOld -> p_class_id='||p_class_id||' p_short_name='||p_short_name,dp5)
+  --&debug('.getNameOld -- Будем искать='||getStandartShortName(p_class_id,p_short_name),dp5)
+	&debug('.getNameOld --             ='||strStandartName(p_class_id),dp5)
+	return null; --еще не доработано !!!
+	
+	ret_NameOld:=p_short_name;
+	if isDistribObj(p_class_id,p_short_name)='Нет' then null;
+	else
+		&debug('.getNameOld -- Дистрибутивный объект.Не правим.ShortOld('||length(ret_NameOld)||iif(length(ret_NameOld)>128,'!','')||')=->'||ret_NameOld,dp3)
+		return ret_NameOld;
+	end if;
+
+	if p_short_name is null then
+		--getNameOld. Тип? Ищем реквизит в таблице классов
+		if p_short_name is null then
+			for	(
+				select cl(cl.id : id) in classes%rowtype
+				where   cl.ID = p_class_id
+					and cl.entity_id in ('TYPE','SYSTEM','PRODUCT')
+				fetch 1
+			) loop
+				strTabl:=upper('classes');
+				sTmpShortName:=cl.id;
+			end loop;
+		end if;
+	end if;
+
+	if strTabl<>'CLASSES' and isDistribObj(p_class_id)='Нет' then
+	 &debug('Объект локального класса.Не правим.ShortOld('||length(ret_NameOld)||iif(length(ret_NameOld)>128,'!','')||')=->'||ret_NameOld,dp5)
+		return ret_NameOld;
+	end if;
+	
+	--&debug('length('||substr(p_short_name,2)||')='||length(substr(p_short_name,2)),dp5)
+	--s30:=::[RUNTIME].[STR].Get_DigitAll(substr(p_short_name,2));
+	--&debug('length('||s30||')='||length(s30),dp5)
+	if substr(p_short_name,1,1)='Z' and length(substr(p_short_name,2))=length(::[RUNTIME].[STR].Get_DigitAll(p_short_name,2)) then
+		&debug('Это имя фильтра.Не правим.ShortOld('||length(ret_NameOld)||iif(length(ret_NameOld)>128,'!','')||')=->'||ret_NameOld,dp5)
+		return ret_NameOld;
+	end if;
+	
+	--getNameOld. Это представление ?
+	if sTmpShortName is null then
+		if p_short_name like 'VW_CRIT_%' then
+			for	(
+				select cr(cr.short_name : short_name) in criteria%rowtype
+				where   cr.CLASS_ID = p_class_id
+					and cr.SHORT_NAME  = p_short_name
+				fetch 1
+			) loop
+				strTabl:=upper('criteria');
+				sTmpShortName:=cr.short_name;
+			end loop;
+		end if;
+	end if;
+	
+	--getNameOld. Метод?
+	if sTmpShortName is null then
+		for	(
+			select m(
+					 m.id : id
+					,m.short_name : short_name
+					) in methods%rowtype
+			where   m.CLASS_ID  = p_class_id
+				and m.short_name= p_short_name
+			fetch 1
+		) loop
+			strTabl:=upper('methods');
+			sTmpShortName:=m.short_name;
+		end loop;
+	end if;
+
+	--getNameOld Атрибут?. Ищем реквизит в структуре типов
+	if sTmpShortName is null then
+		for	(
+			select a(a.attr_id : attr_id) in class_attributes%rowtype
+			where   a.CLASS_ID = p_class_id
+				and a.ATTR_ID  = p_short_name
+			fetch 1
+		) loop
+			strTabl:=upper('class_attributes');
+			sTmpShortName:=a.attr_id;
+		end loop;
+	end if;
+
+	if sTmpShortName is null then
+		&debug('.getNameOld -- Тип(?) ShortName=->'||ret_NameOld,dp5)
+		return ret_NameOld;
+	end if;
+	
+	sOldShortName:=nvl(p_short_name,p_class_id);
+	if sTmpShortName like 'VW_CRIT_%' then
+		tmpPref:='VW_CRIT_';
+		sTmpShortName:=substr(sTmpShortName,length('VW_CRIT_')+1);
+		fl_VW_CRIT:=true;
+	end if;
+
+																																				&debug('SN: 0.'||sTmpShortName,dp5)
+	if instr(sTmpShortName,'PSHB')=1                                 then sTmpShortName:=replace(sTmpShortName,'PSHB',prefShortName); end if;	&debug('SN: 1.'||sTmpShortName,dp5)
+	if instr(sTmpShortName,'PSB')=1                                  then sTmpShortName:=replace(sTmpShortName,'PSB' ,prefShortName); end if;	&debug('SN: 2.'||sTmpShortName,dp5)
+	if instr(sTmpShortName,'TCB')=1                                  then sTmpShortName:=replace(sTmpShortName,'TCB' ,prefShortName); end if;	&debug('SN: 3.'||sTmpShortName,dp5)
+	if instr(sTmpShortName,length(sTmpShortName)-length('PSBH')+1)>0 then sTmpShortName:=replace(sTmpShortName,'PSBH',prefShortName); end if;	&debug('SN: 4.'||sTmpShortName,dp5)
+	if instr(sTmpShortName,length(sTmpShortName)-length('PSB')+1)>0  then sTmpShortName:=replace(sTmpShortName,'PSB' ,prefShortName); end if;	&debug('SN: 5.'||sTmpShortName,dp5)
+
+	if fl_VW_CRIT then	sTmpShortName:=tmpPref||prefShortName||'_'||ltrim(sTmpShortName,'_');	&debug('SN: 6.'||sTmpShortName,dp5) --'VW_CRIT_PSH_'
+  --else				sTmpShortName:=prefShortName||'_'||ltrim(sTmpShortName,'_');			&debug('SN: 7.'||sTmpShortName,dp5) --'PSH_'
+	end if;
+
+	sTmpShortName:=replace(sTmpShortName,'PSB',prefShortName);									&debug('SN: 8.'||sTmpShortName,dp5) --'PSH'
+	--if instr(sTmpShortName,prefShortName)=0 then																				 --'PSH'
+	--end if;
+
+	ret_NameOld:=substr(nvl(sTmpShortName,sOldShortName),1,iif(fl_VW_CRIT,ret_NameOld%size,16));
+	&debug('.getNameOld -- '||p_class_id||'.'||p_short_name||'->'||strTabl||'.'||ret_NameOld,dp5)
+	return ret_NameOld;
+end;
+
+public function getTypeObj(
+	/*[ПСБ] Полутить тип объекта*/
+	p_class_id in [STRING_30]
+	,p_short_name in [STRING_30]
+	)
+	return [STRING_128]
+is
+	retObjType [STRING_128];
+begin
+	if p_short_name is null then
+		for (select cl(1)
+			in CLASSES%rowtype all
+			where cl.[ID] = p_class_id
+			fetch 1
+		) loop
+			retObjType		:= 'TYPE';
+		end loop;
+	end if;
+	
+	if retObjType is null then
+		for (select attr(1)
+			in CLASS_ATTRIBUTES%rowtype all
+			where attr.[CLASS_ID] = p_class_id
+			and attr.[ATTR_ID] = p_short_name
+			fetch 1
+		) loop
+			retObjType		:= 'ATTR';
+		end loop;
+	end if;
+
+	if retObjType is null then
+		for (select m(1)
+			in METHODS%rowtype all
+			where m.[CLASS_ID] = p_class_id
+			and m.[SHORT_NAME] = p_short_name
+			fetch 1
+		) loop
+			retObjType		:= 'METH';
+		end loop;
+	end if;
+
+	if retObjType is null then
+		for (select cr(1)
+			in CRITERIA%rowtype
+			where cr.[CLASS_ID] = p_class_id
+			and cr.[SHORT_NAME] = p_short_name
+			fetch 1
+		) loop
+			retObjType		:= 'CRIT';
+		end loop;
+	end if;
+			
+	if retObjType is null then
+		for (select ci(1)
+			in CLASS_INDEXES%rowtype
+			where ci.[CLASS_ID] = p_class_id
+			and ci.[NAME] = p_short_name
+			fetch 1
+		) loop
+			retObjType		:= 'IDX';
+		end loop;
+	end if;
+
+	if retObjType is null then
+		for (select st(1)
+			in STATES%rowtype
+			where st.[ID] = p_class_id
+			and st.[NAME] = p_short_name
+			fetch 1
+		) loop
+			retObjType		:= 'STATE';
+		end loop;
+	end if;
+	
+	if retObjType is null then
+		for (select tr(1)
+			in TRANSITIONS%rowtype
+			where tr.[ID] = p_class_id
+			and tr.[SHORT_NAME] = p_short_name
+			fetch 1
+		) loop
+			retObjType		:= 'TRAN';
+		end loop;
+	end if;
+	
+	if retObjType is null then
+		for (select trgr(1)
+			in user_triggers%rowtype
+			where trgr.[TRIGGER_TYPE] = p_class_id
+			and trgr.[TRIGGER_NAME] = p_short_name
+			fetch 1
+		) loop
+			retObjType		:= 'TRIGGER';
+		end loop;
+	end if;
+
+	retObjType:=nvl(retObjType,'TYPE');
+	&debug('.getTypeObj -- <"'||retObjType||'" >'||p_class_id||'.'||p_short_name,dp5)
+	return retObjType;
+end;
+end;

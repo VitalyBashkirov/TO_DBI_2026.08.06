@@ -1,0 +1,313 @@
+class NOTRADE;
+
+@import_plsql(true)
+@this(plsql_lock:=false)
+@name('[ПСБ] ВСЕ. Печать распоряжения об установке курсов')
+@tag('COPIED')
+method PSH_PRNT_ORD_XML is
+
+@name('Строка валидатора')      public V_DEST    [STRING_32000];
+@name('Экспорт курсов')         public P_EXP     [BOOLEAN];
+@name('Раздельный курс')        public P_RAZDEL  [BOOLEAN];
+@name('Экспорт в ДБО  Faktura') public P_FACTURA [BOOLEAN];
+public G_ALL_KASSA		boolean;
+public G_DATE			date;
+public G_NUM_ORDER		string(16);
+public time_kurs date;
+pragma include(::[RUNTIME].[DEBUG_MACRO]);
+dp  number:=0;	--управление debug_pipe
+dp2 number:=10;	--управление debug_pipe
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+fmt	   string(10):='dd/mm/yyyy';
+fmtHMS string(22):='dd/mm/yyyy HH24:MI:SS';
+
+pragma macro(xl,'[OOXML]::[API_XL]');
+pragma macro(orsa,'::[OOXML].[API_ORSA]');	
+pragma include(::[RUNTIME].[DEBUG_MACRO]);
+pragma macro(iBorder,'&xl.get_border(&xl.xl_b_thin,&xl.xl_b_thin,&xl.xl_b_thin,&xl.xl_b_thin)');
+
+vFilePath string(100):='L:\CFT\IBSO\PSH\exchange\raspor';
+--vFilePath string(100):='M:\PSH\exchange\raspor'; -- Каталог для тетсирования на IBSZ
+vFioFilePath string(100):='./PSH/exchange/raspor';
+
+vFileName	string(512);
+v_kassa	ref [NOTRADE];
+PSH_PRNT_ORD_XML (
+	@name('По всем кассам')              P_ALL_KASSA in [BOOLEAN],
+	@name('Дата/время установки курсов') P_DATE      in [DATE_TIME],
+	@name('Номер распоряжения')          P_NUM_ORDER in [STRING_16],
+	@name('Пользователь')                P_USER      in [USER_REF]   default null,
+	@name('Руководитель')                P_BOSS      in [USER_REF]   default null,
+	@name('Прислать по почте')           P_SAVE      in [BOOLEAN],
+	@name('Адрес')                       P_POST      in [STRING_250]
+) is
+
+validate is
+v_bank_address 		varchar2(1000);
+v_bank_name			::[CLIENT].[NAME]%type;
+v_reg_num			::[CL_BANK_N].[REG_NUM]%type;
+v_full_bank_name	::[CL_CORP].[LONG_NAME]%type;
+	xl_tmpl			blob	:= empty_blob();	-- файл шаблона из справочника
+	xl_out			blob	:= empty_blob();	-- результирующий файл
+	rep_id			string;
+v_kassa				ref [NOTRADE];
+v_user_casta_value	[MEMO];
+kurs_beg integer:=27; --начальная позиция для курсов
+n integer:=0;
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		P_FACTURA	:= true;	--Башкиров В.Г. 12.12.2019 Добавлен функционал "Экспорт в ДБО  Faktura" по курсам для 00102-Касса ДО "Центральный"
+		P_ALL_KASSA := false;
+		P_SAVE:=true;
+
+		P_EXP:=true; P_POST:='mskobmen@pshb.ru';
+		
+		if this.[NUM_PK]='00113' then	P_RAZDEL:=false;
+		else							P_RAZDEL:=true;
+		end if;
+
+		for (select j(j.[JOUR_DATE_INPUT]	: JOUR_DATE_INPUT
+					 ,j.[NUM_ORDER]			: NUM_ORDER
+					 ,j.[USER_ACCEPT]		: USER_ACCEPT
+					 )
+				in [JOUR_RATE_OPER]
+				where j.[DATE_ACCEPT] is not null
+				order by j.[JOUR_DATE_INPUT] desc, j.[NUM_ORDER] desc)
+		loop
+			P_DATE := j.[JOUR_DATE_INPUT];
+			P_NUM_ORDER := j.[NUM_ORDER];
+			exit;
+		end loop;
+			
+		G_ALL_KASSA = G_DATE = G_NUM_ORDER := null;		
+		P_USER:=stdlib.UserId;
+
+
+	elsif P_MESSAGE = 'VALIDATE' Then
+		if P_INFO = 'P_DATE' then
+			P_NUM_ORDER := null;
+			P_ALL_KASSA := false;
+			
+			for (select j(j.[NUM_ORDER]			: NUM_ORDER
+						 ,j.[USER_ACCEPT]		: USER_ACCEPT
+						 )
+					in [JOUR_RATE_OPER]
+					where j.[JOUR_DATE_INPUT] = P_DATE
+					order by j.[NUM_ORDER] desc)
+			loop
+				P_NUM_ORDER := j.[NUM_ORDER];
+				exit;
+			end loop;
+			
+		elsif P_INFO = 'P_NUM_ORDER' then
+			P_DATE := null;
+			P_ALL_KASSA := false;
+			
+			for (select j(j.[JOUR_DATE_INPUT]	: JOUR_DATE_INPUT
+						 ,j.[USER_ACCEPT]		: USER_ACCEPT
+						 )
+					in [JOUR_RATE_OPER]
+					where j.[NUM_ORDER] = P_NUM_ORDER
+					order by j.[JOUR_DATE_INPUT] desc)
+			loop
+				P_DATE := j.[JOUR_DATE_INPUT];
+				exit;
+			end loop;
+
+		elsif P_INFO = '%VAR%.P_RAZDEL' then	
+			if    this.[NUM_PK] not like '00113' and not P_RAZDEL then 
+				P_RAZDEL:=true;  stdio.put_line_buf('Общее распоряжение возможно только если выбрана касса 00113-ООО "Промсельхозбанк" !');
+			end if;
+			P_POST:='mskobmen@pshb.ru;';
+
+		elsif P_INFO = 'OK' then
+			v_kassa:=this;
+
+			for NumPk in ::[NOTRADE]
+			where NumPk.[NUM_PK] in ('00100','00113')
+			order by NumPk.[NUM_PK] desc
+			loop
+				G_ALL_KASSA = G_DATE = G_NUM_ORDER := null;
+				
+				if P_RAZDEL then	v_kassa := this;
+				else				v_kassa := NumPk;
+				end if;
+
+				xl_tmpl:=empty_blob;
+				::[SHABLON_DOC].[LIB_OOXML].load_blob('PSH_ALL_PRINT_ORDER_OOXML', xl_tmpl, null, null, null, [FILIAL]);
+				if xl_tmpl is null then
+					pragma error('Не найден шаблон PSH_ALL_PRINT_ORDER_OOXML с загруженным файлом');
+				end if;		
+				
+				if not &xl.open_file(xl_tmpl) then
+					pragma error('Ошибка при открытии печатной формы шаблона');
+				end if;	
+
+				&xl.Open_Sheet(1);			-- установим текущий лист
+
+				::[NOTRADE].[LIB_RPT].get_bank_info(v_kassa.[FILIAL],
+														v_kassa.[DEPART],
+														v_kassa,
+														v_bank_address,
+														v_bank_name,
+														v_reg_num,
+														v_full_bank_name);
+	
+					--Заполнение шапки
+					&xl.Put(2, 1, v_full_bank_name || ' (' || v_bank_name || ')');
+					&xl.Put(3, 1, 'Адрес банка (филиала): ' || v_bank_address);
+					&xl.Put(4, 1, 'Распоряжение №' || P_NUM_ORDER);
+					&xl.Put(5, 1, [VIEWFUN].DAT_STR(P_DATE, '3'));
+	
+	
+					&xl.Put(15, 6, to_char(P_DATE, 'dd.mm.yyyy hh24:mi:ss'));
+					
+					if 1=2 and not P_RAZDEL then
+						if to_char(P_DATE,'HH24:MI') != '09:00' then &xl.Put(23, 6, to_char(P_DATE + 3600/86400, 'dd.mm.yyyy hh24:mi:ss'));
+						else &xl.Put(23, 6, to_char(P_DATE - 3600/86400, 'dd.mm.yyyy hh24:mi:ss'));
+						end if;
+					else 
+						&xl.Put(23, 6, to_char(P_DATE, 'dd.mm.yyyy hh24:mi:ss'));
+					end if;	
+					
+					n:=0;
+					for (
+						select r(r.[JOUR_CUR].[CUR_SHORT]					: JOUR_CUR
+								 ,r.[JOUR_CUR].[VAL_UNIT]					: VAL_UNIT
+								 ,r.[JOUR_CUR_BASE].[CUR_SHORT]				: JOUR_CUR_BASE
+								 ,r.[PAY_DOC].[NAME]						: PAY_DOC
+								 ,r.[JOUR_RATE_ED]							: JOUR_RATE
+								 ,r.[JOUR_OPER].[NUM]						: OPER_NUM
+								 ,r.[JOUR_OPER].[NAME]						: OPER_NAME
+								 ,r.[SUM_FROM]								: SUM_FROM
+								 ,r.[SUM_TO]								: SUM_TO
+								 ,r.[INT_IN_CURR_OUT]						: INT_IN_CURR_OUT
+								 )
+							in v_kassa.[JOUR_RATE_OPER] all
+							where r.[DATE_ACCEPT] is not null
+							  and r.[JOUR_DATE_INPUT] = P_DATE
+							  and r.[NUM_ORDER] = P_NUM_ORDER
+							order by r.[JOUR_OPER].[NUM], r.[JOUR_CUR].[CUR_SHORT], r.[JOUR_CUR_BASE].[CUR_SHORT], r.[PAY_DOC].[NAME], r.[SUM_FROM]
+					)
+					loop
+						&xl.Put(kurs_beg+n, 3, r.[VAL_UNIT]);
+						if r.[OPER_NUM]!=3 then
+						&xl.Put(kurs_beg+n, 2, nvl(r.[PAY_DOC], r.[JOUR_CUR]));
+						&xl.Put(kurs_beg+n, 4, r.[JOUR_CUR_BASE]);
+						else
+						&xl.Put(kurs_beg+n, 4, nvl(r.[PAY_DOC], r.[JOUR_CUR]));
+						&xl.Put(kurs_beg+n, 2, r.[JOUR_CUR_BASE]);					
+						end if;
+						&xl.Put(kurs_beg+n, 5, r.[OPER_NUM]);
+						&xl.Put(kurs_beg+n, 6, r.[OPER_NAME]);
+						&xl.Put(kurs_beg+n, 7, r.[JOUR_RATE]);
+					
+						&xl.PasteSpecial(kurs_beg,1,kurs_beg,7,kurs_beg+n,1);
+						n:=n+1;
+					end loop;
+	
+				--Башкиров В.Г. 24.07.2025
+				if    v_kassa.[NUM_PK] LIKE '00113' then	&xl.Delete_Row(16,8);	--00113 - ООО "Промсельхозбанк"
+				else										&xl.Delete_Row(7,9);	--00100 - Удаленная точка обслуживания ООО "Промсельхозбанк" (УТО)
+				end if;
+
+				--Начальник управления ценных бумаг
+				&xl.cell				/* Запись строкового значения в ячейку */
+					( kurs_beg+n+6 			/* Строка адреса ячейки */
+					, 6						/* Колонка адреса ячейки */
+					,'УСТАНОВЛЕНО'			/* Строковое значение для записи в ячейку */
+					||NL$||to_char(sysdate,'dd.mm.yyyy hh24:mi:ss')
+					||NL$||iif(P_USER is not null,P_USER.[CASTA].[VALUE],stdlib.UserId.[CASTA].[VALUE])		--'Начальник управления ценных бумаг'
+					||NL$||iif(P_USER is not null,::[RUNTIME].[STDLIB].fio(P_USER.[NAME],'Ф И.О.'),	--'Архипенко В.В.'
+												  ::[RUNTIME].[STDLIB].fio(stdlib.UserId.[NAME],'Ф И.О.'))
+					 ||NL$||'тел. 7(495) 665-15-62 (доб.'||iif(P_USER=::[USER]([USERNAME]='TYULENEV'),'176','120')||')'
+					, null					/*p_numFmtId	 Идентификатор формата */
+					, null					/*p_fontId		 Идентификатор фонта */
+					, null					/*p_fillId		 Идентификатор для тэга <fills /> */
+					, &iBorder				/*p_borderId	 Идентификатор окантовок */
+					, &xl.xl_av_center		/*p_vertical	Способ выравнивания в ячейке по вертикали.	Допустимые значения для параметра : см. xl_av_...*/
+					, &xl.xl_ah_center		/*p_horizontal	Способ выравнивания в ячейке по горизонтали.	Допустимые значения для параметра : см. xl_ah_...*/
+					, true					/*p_wrapText	 Необходимость переноса данных в ячейке по словам */
+					, null					/*p_ndent		Размер отступа для текста в ячейке (количество пространства при обычном стиле шрифта).
+																Целое значение, где прирост 1 представляет собой 3 места.
+																Количество пробелов для отступа рассчитывается следующим образом:
+																Количество пробелов для отступа = значение отступа * 3	*/
+					, null					/* Автоподбор размеров строки / столбца: 1 - да, 0 - нет */
+					, null					/* Номер листа */
+					, null					/* Признак хранения строки в ячейке "Inline" (xl\worksheets\sheet<p_sheet>.xml), а не ссылки из общего списка строк (xl\sharedStrings.xml)*/
+					);
+
+
+				&xl.finish(xl_out);
+
+				if P_SAVE then
+					[OOXML]::[API_ORSA].putReport2SaveAs
+						( p_blob		== xl_out
+						, p_extention	== 'xlsx'
+						, p_file_name	== v_kassa.[NUM_PK]||'_'||to_char(P_DATE,'YYYYMMDD_HH24_MI_SS')
+						, p_file_path	== vFilePath
+						, p_description	== 'Распоряжение на ВОО по кассе №'||v_kassa.[NUM_PK]||'-'||v_kassa.[NAME_PK]
+						);
+				else
+					rep_id := &orsa.putReport2Run(xl_out, 'xlsx', '[ПСБ] Все. Печать распоряжения об установке курсов');
+				end if;
+				
+				if P_RAZDEL then exit; end if;
+			end loop;
+
+			if P_EXP then time_kurs:=P_DATE;
+			  --Башкиров В.Г. 18.06.2019 PSH_EXP_CURBANKI заменил на PSH_EXP_CURBANK2-[ПСБ] Экспорт текущих курсов (+ курсы ЦБ)
+			  --Stdio.PUT_LINE_BUF('<% CALL NOTRADE PSH_EXP_CURBANKI ' || v_kassa%id || ' %>');
+				Stdio.PUT_LINE_BUF('<% CALL NOTRADE PSH_EXP_CURBANK2 ' || v_kassa%id || ' %>');
+			end if;
+
+		elsif P_INFO = 'CANCEL' then
+			G_ALL_KASSA = G_DATE = G_NUM_ORDER := null;
+		end if;
+	end if;
+end;
+
+execute is
+begin
+
+if P_SAVE then
+	v_kassa:=this;
+
+	for NumPk in ::[NOTRADE]
+	where NumPk.[NUM_PK] in ('00100','00113')
+	order by NumPk.[NUM_PK] desc
+	loop
+		if P_RAZDEL then	v_kassa := this;
+		else				v_kassa := NumPk;
+		end if;
+		vFileName:=v_kassa.[NUM_PK]||'_'||to_char(P_DATE,'YYYYMMDD_HH24_MI_SS')||'.xlsx';
+
+		debug_pipe('SendMail -- ('||NumPk.[NUM_PK]||') Путь до файла (в FIO):'||vFioFilePath||' Файл:'||vFileName,dp);	
+		[PSH_SMTP_MAIL].SendMail( -- updated CHANGE_SHORT_NAME SMTP_MAIL->PSH_SMTP_MAIL 15/10/25
+						  P_POST		-- Кому (E-Mail) Можно указать несколько адресов разделенных "точкой с запятой"
+						, 'распоряжение на установку курсов по кассе '||v_kassa.[NUM_PK]||'-'||v_kassa.[NAME_PK] 	-- Тема	
+						, 'Установить курс обмена наличной валюты с  '||to_char(P_DATE,'DD.MM.YYYY HH24:MI:SS')||CHR(13)||CHR(13)
+							||'дата печати распоряжения '||to_char(sysdate,'DD.MM.YYYY HH24:MI:SS')	-- Сообщение
+						, 'IT@pshb.ru'	-- от кого (E-Mail, если пусто, то используется значение DEFAULT_FROM_EMAIL)
+						, vFioFilePath	--/* Путь до файла (в FIO). */
+						, vFileName		-- /* Имя файла. */
+						, false			-- если TRUE, то вылетит ERROR_ON_SEND
+						);
+
+		if P_RAZDEL then
+			debug_pipe('SendMail -- Выход',dp);
+			exit;
+		end if;
+	end loop;
+end if;
+
+--Башкиров В.Г. 12.12.2019 Добавлен функционал "Экспорт в ДБО  Faktura" по курсам для 00102-Касса ДО "Центральный"
+if P_FACTURA then
+	PSH_EXP_FAKTURA(P_DATE,::[NOTRADE]([NUM_PK]='00102'),false); --Касса ДО "Центральный"
+end if;
+end;
+end;
+end;

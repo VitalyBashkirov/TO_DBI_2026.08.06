@@ -1,0 +1,1267 @@
+class PERSONAL_ADDRESS;
+
+@import_plsql(true)
+@name('Изменить')
+@tag('COPIED')
+method EDIT#AUTO is
+
+@name('В формате КЛАДР')
+public V_KLADR_MODE [NUMBER];
+@name('Адрес')
+public V_ADDR [PERSONAL_ADDRESS];
+@name('Почтовый индекс проставлять автоматически')
+public V_AUTO_ZIP [BOOLEAN];
+@name('V_VB')
+public V_VB [STRING_32000];
+@name('Список домов')
+public V_HOUSE_ARR [LIST_DOMA_ARR];
+@name('Выбор № дома')
+public V_HOUSE_REF [LIST_DOMA_REF];
+@name('Страна')
+public V_COUNTRY [COUNTRY_REF];
+@name('Станции метро')
+public V_METRO_STATIONS [METRO_STATIO_ARR];
+@name('Текущий нас. пункт с формы ввода')
+public V_CURRENT_CITY [NAME_CITY_REF];
+@name('Адресный объект строкой')
+public V_STR [MEMO];
+@name('Дом (ссылка) строкой')
+public V_STR_HOUSE [MEMO];
+@name('Тип адресного деления')
+public V_STRUCT [ONE_FROM_THREE];
+@name('ОКТМО (ссылка)')
+public V_OKTMO_REF [OKTMO_REF];
+@name('Работающая операция')
+public V_OPER [STRING_16];
+
+pragma include([RUNTIME].[DEBUG_MACRO]);
+pragma include([PERSONAL_ADDRESS].[LIB]);
+pragma include([SYSTEM].[PRODUCTS]);
+pragma include (::[runtime].[MACRO_LIB]);
+t1			::[RUNTIME].[COMP_OBJ].table_list%type;
+n1			integer;
+v_checks	::[CLIENT_INTERFACE].[PRX_LEGAL].TableCheck;
+V_OKATO_CODE	::[TERRITORY].[CODE]%type;
+V_OKTMO_CODE	::[OKTMO].[CODE]%type;
+v_direct_run	boolean;
+
+v_addr_obj_exp		::[PERSONAL_ADDRESS].[API_LIB].addr_obj_expanded_rectype%type;
+v_addr_obj_cur_ref	[ADDRESS_OBJ_REF];
+v_oktmo_cur_ref ref [OKTMO];
+v_personal_addr [PERSONAL_ADDRESS];
+tn_no_str_addr	boolean;
+tn_kladr_zip	boolean;
+tn_strong_street  boolean;
+
+korpus_shortname const varchar2(10)	:= 'к';
+
+type t_metro_station is table of [METRO_STATION] index by string(200);
+v_metro_station_before t_metro_station;
+
+
+
+procedure Save_Stat_Codes(
+	p_client	ref [CLIENT]
+	, p_okato	::[TERRITORY].[CODE]%type
+	, p_oktmo	::[OKTMO].[CODE]%type
+) is
+	v_cl_corp	ref [CL_CORP];
+begin
+	&debug ('>>Save_Stat_Codes Клиент:' || p_client%class || ' ID:' || p_client%id
+		|| ' ОКАТО:' || p_okato || ' ОКТМО:'|| p_oktmo, 0)
+	if p_client is null then
+		return;
+	end if;
+	if p_okato is not null then
+		p_client.[OKATO_CODE] := p_okato;
+		&debug ('		Изменили ОКАТО:' ||p_okato , 0)
+	end if;
+	-- Для банков и участников расчетов не ставим автоматически ОКТМО
+	if p_oktmo is not null and p_client%class = ::[CL_ORG]%class then
+		v_cl_corp%id := p_client%id;
+		v_cl_corp.[OKTMO_CODE] := p_oktmo;
+		&debug ('		Изменили ОКТМО:' ||p_oktmo , 0)
+	end if;
+end;
+
+procedure ValidateWithPragma(
+	address	ref [PERSONAL_ADDRESS]
+	, P_TYPE 			::[PERSONAL_ADDRESS].[TYPE]%type
+	, P_ZIP 			::[PERSONAL_ADDRESS].[POST_CODE]%type
+	, P_IMP_STR			::[PERSONAL_ADDRESS].[IMP_STR]%type
+	, P_HOUSE			::[PERSONAL_ADDRESS].[HOUSE]%type
+	, P_KORPUS			::[PERSONAL_ADDRESS].[KORPUS]%type
+	, P_FLAT			::[PERSONAL_ADDRESS].[FLAT]%type
+	, P_DISTRICT		::[PERSONAL_ADDRESS].[DISTRICT]%type
+	, P_HOUSE_REF		::[PERSONAL_ADDRESS].[HOUSE_REF]%type
+	, P_STREET_STR		::[PERSONAL_ADDRESS].[STREET_STR]%type
+	, P_FIX_PRINT		::[PERSONAL_ADDRESS].[FIX_PRINT]%type
+	, P_REG_DATE		::[PERSONAL_ADDRESS].[REG_DATE]%type
+	, P_REG_END_DATE	::[PERSONAL_ADDRESS].[REG_END_DATE]%type
+	, P_ADDR_OBJ		::[PERSONAL_ADDRESS].[ADDR_OBJ]%type
+	, P_REG_PLACE_NAME	::[PERSONAL_ADDRESS].[REG_PLACE_NAME]%type
+	, P_REG_PLACE_CODE	::[PERSONAL_ADDRESS].[REG_PLACE_CODE]%type
+)
+is
+	v_addresses [ADDRESSES];
+	v_city		ref [NAMES_CITY];
+	class_tbl	TYPE_STRING_TABLE := TYPE_STRING_TABLE();
+begin
+	if P_TYPE is null then
+		pragma error('Не выбран тип адреса.');
+	end if;
+	
+	-- Если адрес строкой не задан, значит должен быть выбран адресный объект
+	if P_IMP_STR is null and P_ADDR_OBJ is null then
+		pragma error('Необходимо заполнить один из реквизитов: "Адресный объект" или "Адрес строкой".');
+	end if;
+	
+	v_addresses := address%collection;
+
+	-- Проверяем, есть ли в массиве адресов адрес с таким же типом (если это не допускается)
+	if v_addresses is not null and not nvl(P_TYPE.[IS_MULTIPLE], false) then
+		for a in ::[PERSONAL_ADDRESS] all
+			where a%collection = v_addresses
+				and a.[TYPE] = P_TYPE
+				and a <> address
+			fetch 1
+		loop
+			pragma Error('У клиента уже есть адрес "'||P_TYPE.[NAME]||'".');
+		end loop;
+	end if;
+	
+	v_city := ::[PERSONAL_ADDRESS].[API_LIB].get_city(P_ADDR_OBJ);
+	if v_city is null then
+		-- Город не указан - значит не можем выбирать станции метро
+		if address.[METRO_STATIONS]%size (1) > 0 then
+			pragma error('Адресный объект не содержит населенного пункта, станции метро не могут быть заданы без указания населенного пункта.');
+		end if;
+	else
+		-- если город указан, значит он должен совпадать со всеми городами в станциях метро
+		declare
+			v_finded_station ref [METRO_STATION];
+		begin
+			locate v_finded_station
+			in address.[METRO_STATIONS]
+			where v_finded_station.[STATION].[METRO_LINE].[CITY] != v_city;
+			pragma error('Населенный пункт адреса не совпадает с населенным пунктом станций метро.');
+		exception when NO_DATA_FOUND then null;
+		end;	
+	end if;
+
+	if P_TYPE = ::[ADDRESS_TYPE]([KOD]='CORP_CHARTER') and v_addresses is not null then
+		begin
+			select cc(cc.child_id)
+			in class_relations%rowtype
+			where cc.parent_id = 'CL_CORP'
+			into class_tbl;
+		exception when no_data_found then null;
+		end;
+		
+		for	(
+			select r(r.[NAME]: name)
+			in ::[CLIENT]
+			where r.[ADDRESSES] = v_addresses
+				and r%class in (select cc(cc.column_value) in class_tbl)
+				and exists (
+					select l(1)
+					in r.[LINKS_OTHER]
+					where l.[VID_LINK] = ::[CL_LINK]([CODE] = 'ГОЛОВНАЯ_ОРГ')
+						and (l.[DATE_BEG] <= trunc(sysdate) or l.[DATE_BEG] is null)
+						and (l.[DATE_END] >= trunc(sysdate) or l.[DATE_END] is null)
+						)
+			)
+		loop
+			pragma error('В досье филиала/представительства "'||r.name||'" запрещён адрес типа "'||P_TYPE.[NAME]||'". Данный тип адреса указывается только у головной организации.');
+		end loop;
+	end if;
+end;
+
+
+public procedure executor(
+	address 			ref [PERSONAL_ADDRESS]
+	, P_TYPE 			::[PERSONAL_ADDRESS].[TYPE]%type
+	, P_ZIP 			::[PERSONAL_ADDRESS].[POST_CODE]%type
+	, P_IMP_STR			::[PERSONAL_ADDRESS].[IMP_STR]%type
+	, P_HOUSE			::[PERSONAL_ADDRESS].[HOUSE]%type
+	, P_KORPUS			::[PERSONAL_ADDRESS].[KORPUS]%type
+	, P_FLAT			::[PERSONAL_ADDRESS].[FLAT]%type
+	, P_DISTRICT		::[PERSONAL_ADDRESS].[DISTRICT]%type
+	, P_HOUSE_REF		::[PERSONAL_ADDRESS].[HOUSE_REF]%type
+	, P_STREET_STR		::[PERSONAL_ADDRESS].[STREET_STR]%type
+	, P_FIX_PRINT		::[PERSONAL_ADDRESS].[FIX_PRINT]%type
+	, P_REG_DATE		::[PERSONAL_ADDRESS].[REG_DATE]%type
+	, P_REG_END_DATE	::[PERSONAL_ADDRESS].[REG_END_DATE]%type
+	, P_ADDR_OBJ		::[PERSONAL_ADDRESS].[ADDR_OBJ]%type
+	, P_OKTMO			::[PERSONAL_ADDRESS].[OKTMO]%type
+	, P_STRUCT			::[PERSONAL_ADDRESS].[INPUT_STRUCT]%type
+	, P_REG_PLACE_NAME	::[PERSONAL_ADDRESS].[REG_PLACE_NAME]%type
+	, P_REG_PLACE_CODE	::[PERSONAL_ADDRESS].[REG_PLACE_CODE]%type
+) is
+	v_CL 		ref [CLIENT];
+	v_ADD		varchar(32000);
+	v_addresses	[PERSONAL_ADDRESS];
+	v_OKATO ::[TERRITORY].[CODE]%type;
+	v_OKTMO ::[OKTMO].[CODE]%type;
+begin
+	if P_TYPE <> ::[ADDRESS_TYPE]([KOD]='TEMPORARY_REG') then
+		P_REG_END_DATE := null;
+	end if;
+
+	ValidateWithPragma(
+		address
+		, P_TYPE
+		, P_ZIP
+		, P_IMP_STR
+		, P_HOUSE
+		, P_KORPUS
+		, P_FLAT
+		, P_DISTRICT
+		, P_HOUSE_REF
+		, P_STREET_STR
+		, P_FIX_PRINT
+		, P_REG_DATE
+		, P_REG_END_DATE
+		, P_ADDR_OBJ
+		, P_REG_PLACE_NAME
+		, P_REG_PLACE_CODE);
+	v_addresses := address;
+	
+	-- работает только для редактора
+	if V_OPER is null then
+		for v_CL in ::[CLIENT] where v_CL.[ADDRESSES] = address%collection loop
+			-- вызов хука для добавления событий при изменении клиента
+			::[HOOK].[CL_EDIT_EVENT](
+				 P_METH_CLASS	== &METHOD$CLASS
+				,P_METH_NAME	== &METHOD$SNAME
+				,P_ACTION		== 'BEGIN'
+				,P_CLIENT		== v_CL
+				,P_ADDRESS		== v_addresses);
+		end loop;
+	end if;
+	
+	v_addresses.[POST_CODE]		:= P_ZIP;
+	v_addresses.[IMP_STR]		:= P_IMP_STR;
+	v_addresses.[HOUSE]			:= P_HOUSE;
+	v_addresses.[KORPUS]		:= P_KORPUS;
+	v_addresses.[FLAT]			:= P_FLAT;
+	v_addresses.[DISTRICT]		:= P_DISTRICT;
+	v_addresses.[TYPE]			:= P_TYPE;
+	v_addresses.[HOUSE_REF] 	:= P_HOUSE_REF;
+	v_addresses.[STREET_STR]	:= P_STREET_STR;
+	v_addresses.[FIX_PRINT]		:= P_FIX_PRINT;
+	v_addresses.[REG_DATE]		:= P_REG_DATE;
+	v_addresses.[REG_END_DATE]	:= P_REG_END_DATE;
+	v_addresses.[ADDR_OBJ]		:= P_ADDR_OBJ;
+	v_addresses.[OKTMO]			:= P_OKTMO;
+	v_addresses.[INPUT_STRUCT]	:= P_STRUCT;
+	v_addresses.[REG_PLACE_NAME]:= P_REG_PLACE_NAME;
+	v_addresses.[REG_PLACE_CODE]:= P_REG_PLACE_CODE;
+	address := v_addresses;
+	
+	-- работает только для редактора
+	if V_OPER is null then
+		for v_CL in ::[CLIENT] where v_CL.[ADDRESSES] = address%collection loop
+			-- вызов хука для добавления событий при изменении клиента
+			::[HOOK].[CL_EDIT_EVENT](
+				 P_METH_CLASS	== &METHOD$CLASS
+				,P_METH_NAME	== &METHOD$SNAME
+				,P_ACTION		== 'END'
+				,P_CLIENT		== v_CL
+				,P_ADDRESS		== v_addresses);
+		end loop;
+	end if;
+	
+pragma if_def(IBSO_RETAIL);
+	::[OWS_CLIENT].[OWS_CL_LIB].ChgReportAdd(address%parent);
+pragma end_if;
+
+	for v_CL in ::[CLIENT] where v_CL.[ADDRESSES] = address%collection loop
+		::[RUNTIME].[STR].set_par(v_ADD, 'P_TYPE_ADDR', address.[TYPE]);
+		::[CLIENT_INTERFACE].[PRX_FP].split_adm_jlib_create_adm_doc(
+			t1,
+			address%class,	-- имя класса
+			address,		-- ID объекта
+			null,			-- ЦБ
+			null,			-- Аналитический счет
+			v_CL,			-- клиент,
+			v_CL, 			--инициатор
+			null,			
+			null,
+			v_ADD			-- доп. параметры
+			);
+		::[CLIENT_INTERFACE].[PRX_LEGAL].legal_address_execute(v_CL, v_checks);
+		if v_direct_run is null then
+			check_stat_codes(null, address%collection, P_TYPE, ::[PERSONAL_ADDRESS].[API_LIB].get_city(P_ADDR_OBJ)
+					,	v_OKATO,		v_OKTMO
+					,	V_OKATO_CODE,	V_OKTMO_CODE
+					,	V_VB, P_HOUSE_REF);
+			Save_Stat_Codes(v_CL, v_OKATO, v_OKTMO); -- Сразу сохраняем новые безусловные значения
+		else
+			if V_VB = 'Yes' then
+				Save_Stat_Codes (v_CL, V_OKATO_CODE, V_OKTMO_CODE);
+			end if;
+		end if;
+	end loop;
+end;
+
+public procedure check_stat_codes
+/*	Процедура вычисляет новые значения ОКАТО и ОКТМО для клиента на основе города из юридического адреса.*/
+(
+	cl_ref		ref [CLIENT]	
+	/*	Клиент, для которого вычисляются ОКАТО/ОКТМО*/
+	,	p_addresses	[ADDRESSES]
+	/*	Массив адресов. Используется для определения клиента, если клиент не указан*/
+	,	p_type		ref [ADDRESS_TYPE]
+	/*	Тип адреса*/
+	,	p_city		ref [NAMES_CITY]
+	/*	Город, по которому определяются коды ОКАТО и ОКТМО*/
+	,	p_okato	in out nocopy ::[TERRITORY].[CODE]%type
+	/*	Принимает текущее значение ОКАТО с экранной формы, возвращает новое значение, если старое было не определено */
+	,	p_oktmo	in out nocopy ::[OKTMO].[CODE]%type
+	/*	Принимает текущее значение ОКТМО с экранной формы, возвращает новое значение, если старое было не определено */
+	,	p_new_okato	out nocopy ::[TERRITORY].[CODE]%type
+	/*	Новый код ОКАТО, который надо подтвердить у пользователя*/
+	,	p_new_oktmo	out nocopy ::[OKTMO].[CODE]%type
+	/*	Новый код ОКТМО, который надо подтвердить у пользователя*/
+	,	p_vb		in out nocopy string(32000)
+	/*	Возвращается строка для клиент-скрипта. Содержит либо предупреждение, либо запрос на изменение кодов ОКАТО/ОКТМО */
+	,	p_house		ref [HOUSES] default null
+	/*	Дом, по которому определяется код ОКАТО*/
+) is
+	v_check_OKATO	boolean;
+	v_check_OKTMO	boolean;
+	v_ao		ref [ADDRESS_OBJ];
+	c_cl_corp	ref [CL_CORP];
+
+	v_city_okato	::[TERRITORY].[CODE]%type;
+	v_city_oktmo	::[OKTMO].[CODE]%type;
+	v_client_okato	::[TERRITORY].[CODE]%type;
+	v_client_oktmo	::[OKTMO].[CODE]%type;
+	v_vb	string(32000);
+	v_OkatoCalcMode	number;
+begin
+	&debug ('>>check_stat_codes Тип адреса:'|| P_TYPE.[KOD] || ' город:"'|| P_CITY.[NAME] || '" (id='|| P_CITY%id ||')', 0)
+	&debug ('	Передано ОКАТО:'|| p_okato || ' ОКТМО:'|| p_oktmo, 0)
+
+	v_client_okato	:= p_okato;
+	v_client_oktmo	:= p_oktmo;
+
+	if P_TYPE in (::[ADDRESS_TYPE]([KOD] = 'CORP'), ::[ADDRESS_TYPE]([KOD] = 'REGISTRATION')) and P_CITY is not null
+		and ::[PERSONAL_ADDRESS].[LIB].get_country (P_CITY) = ::[SYSTEM].[COUNTRY] then
+		v_OkatoCalcMode	:= nvl(::[FP_TUNE].[LIB].get_num_value('OKATO_CALC_MODE',null,'0'),1);
+		if P_TYPE = ::[ADDRESS_TYPE]([KOD] = 'CORP') then
+			v_check_OKATO	:= ::[FP_TUNE].[LIB].get_bool_value('AUTO_FILL_STAT_CODES',::[FP_TUNE].[LIB].set_canons('<STAT_CODES>', 'ОКАТО', '<CLIENT_TYPE>', 'INT_CL_ORG'),'0');
+			v_check_OKTMO	:= ::[FP_TUNE].[LIB].get_bool_value('AUTO_FILL_STAT_CODES',::[FP_TUNE].[LIB].set_canons('<STAT_CODES>', 'ОКТМО', '<CLIENT_TYPE>', 'INT_CL_ORG'),'0');
+		else
+			v_check_OKATO	:= ::[FP_TUNE].[LIB].get_bool_value('AUTO_FILL_STAT_CODES',::[FP_TUNE].[LIB].set_canons('<STAT_CODES>', 'ОКАТО', '<CLIENT_TYPE>', 'INT_CL_PRIV'),'0');
+			v_check_OKTMO	:= false;
+		end if;
+
+		&debug ('	Проверять ОКАТО:'|| bool_char (v_check_OKATO, 'Да', 'Нет') || ' ОКТМО:'|| bool_char (v_check_OKTMO, 'Да', 'Нет'), 0)
+	
+		if v_check_OKATO or v_check_OKTMO then
+			if cl_ref is null then
+				begin
+					select cl_okato(cl_okato, cl_okato.[OKATO_CODE], ccp, ccp.[OKTMO_CODE])
+					in ::[CLIENT]
+						left outer join (::[CL_CORP] : ccp) on cl_okato = ccp%id
+					where	cl_okato.[ADDRESSES] = P_ADDRESSES
+					into cl_ref, v_client_okato, c_cl_corp, v_client_oktmo;
+
+					&debug ('	Нашли клиента id='|| cl_ref%id || ' ОКАТО:'|| v_client_okato
+						||' ОКТМО:'|| v_client_oktmo || ', c_cl_corp:'||c_cl_corp%id, 0)
+				exception when NO_DATA_FOUND then
+					&debug ('	Клиент не найден! Выходим из процедуры', 0)
+					return;
+				end;
+			else
+				-- Для банков и участников расчетов не ставим автоматически ОКТМО
+				if ::[RUNTIME].[LIB].Is_Parent('CL_ORG', cl_ref%class) then
+					c_cl_corp := cl_ref;
+					&debug ('	Клиент является потомком [CL_ORG].', 0)
+				end if;
+			end if;
+			
+			begin
+				select addr_obj(addr_obj, addr_obj.[OKATO].[CODE], addr_obj.[OKTMO].[CODE])
+				in ::[ADDRESS_OBJ]
+				where addr_obj%id = P_CITY
+				into v_ao, v_city_okato, v_city_oktmo;
+
+				&debug('	Нашли город id='|| v_ao%id || ' ОКАТО:'|| v_city_okato ||' ОКТМО:'|| v_city_oktmo, 0)
+			exception when NO_DATA_FOUND then
+				v_ao := null; v_city_okato := null; v_city_oktmo := null;
+				&debug('	Город не найден!', 0)
+			end;
+			
+			if v_OkatoCalcMode in (2,3) then
+				declare
+					v_house_okato	::[TERRITORY].[CODE]%type; 
+				begin
+					begin
+						select house(house.[AOGUID], house.[OKATO].[CODE])
+						in ::[HOUSES]
+						where house%id = p_house
+						into v_ao, v_house_okato;
+		
+						&debug('	По дому id=' ||p_house%id||' нашли город id='|| v_ao%id || ' ОКАТО:'|| v_house_okato, 0)
+					exception when NO_DATA_FOUND then
+						v_ao := null; v_house_okato := null;
+						&debug('	По дому id=' ||p_house%id||' город не найден!', 0)
+					end;
+					if v_OkatoCalcMode = 3 then -- только по дому
+						v_city_okato := v_house_okato;
+					else -- по дому, либо по адресному объекту, если по дому не нашли
+						v_city_okato := coalesce(v_house_okato, v_city_okato);
+					end if;
+				end;
+			end if;
+
+			if (v_check_OKATO and v_city_okato is null)
+				and (v_check_OKTMO and v_city_oktmo is null and c_cl_corp is not null) then
+				v_vb := 'Для выбранного населенного пункта не указаны значения ОКАТО и ОКТМО. Необходимо заполнить коды вручную.';
+			elsif v_check_OKATO and v_city_okato is null then
+				v_vb := 'Для выбранного населенного пункта/дома не указано значения ОКАТО. Необходимо заполнить код вручную.';
+			elsif v_check_OKTMO and v_city_oktmo is null and c_cl_corp is not null then
+				v_vb := 'Для выбранного населенного пункта не указаны значения ОКТМО. Необходимо заполнить код вручную.';
+			end if;
+
+			-- Изменяем коды, если есть все данные для этого
+			if v_check_OKATO and v_city_okato is not null and v_client_okato is null then
+				p_okato := v_city_okato;
+				&debug ('	Изменили ОКАТО на '|| p_okato, 0)
+			end if;
+			if v_check_OKTMO and v_city_oktmo is not null and v_client_oktmo is null and c_cl_corp is not null then
+				p_oktmo := v_city_oktmo;
+				&debug ('	Изменили ОКТМО на '|| p_oktmo, 0)
+			end if;
+
+			-- Ругаемся, если коды заполнены, но не совпадают. Эти варианты не пересекаются с предыдущими вариантами.
+			if v_check_OKATO and v_city_okato != v_client_okato
+				and v_check_OKTMO and v_city_oktmo != v_client_oktmo then
+				&debug ('	Запросили изменение и ОКТМО, и ОКАТО', 0)
+				p_new_okato := v_city_okato;
+				p_new_oktmo := v_city_oktmo;
+				p_vb := p_vb || case when p_vb is null then '' else NL$ end || '?' || v_vb;
+				p_vb := p_vb || case when v_vb is null then '' else NL$ end ||
+					'Коды ОКАТО и ОКТМО не совпадают с кодами населенного пункта. Изменить коды ОКАТО и ОКТМО на коды Населенного пункта?';
+			elsif v_check_OKATO and v_city_okato != v_client_okato then
+				p_new_okato := v_city_okato;
+				&debug ('	Запросили изменение ОКАТО', 0)
+				p_vb := p_vb || case when p_vb is null then '' else NL$ end || '?' || v_vb;
+				p_vb := p_vb || case when v_vb is null then '' else NL$ end ||
+					'Код ОКАТО не совпадает с кодом населенного пункта/дома. Изменить код ОКАТО на код Населенного пункта/дома?';
+			elsif v_check_OKTMO and v_city_oktmo != v_client_oktmo then
+				&debug ('	Запросили изменение ОКТМО', 0)
+				p_new_oktmo := v_city_oktmo;
+				p_vb := p_vb || case when p_vb is null then '' else NL$ end || '?' || v_vb;
+				p_vb := p_vb || case when v_vb is null then '' else NL$ end ||
+					'Код ОКТМО не совпадает с кодом населенного пункта. Изменить код ОКТМО на код Населенного пункта?';
+			else
+				if v_vb is not null then
+					::[RUNTIME].[CSMD].command(p_vb, 'MsgBox "'|| v_vb || '",VbOkOnly,"Внимание"');
+				end if;
+			end if;
+		end if;
+	end if;
+
+	&debug ('<<check_stat_codes', 0)
+end;
+
+EDIT#AUTO (
+	@name('Тип адреса')
+	P_TYPE in [ADDRESS_TYPE_REF],
+	@name('Почтовый индекс')
+	P_ZIP in [STRING_6],
+	@name('Населенный пункт')
+	P_CITY in [NAME_CITY_REF],
+	@name('Улица населенного пункта')
+	P_STREET_REF in [STREET_REF],
+	@name('Адрес строкой')
+	P_IMP_STR in [STRING_250],
+	@name('Дом')
+	P_HOUSE in [STRING_40],
+	@name('Корпус')
+	P_KORPUS in [STRING_100],
+	@name('Квартира / комната')
+	P_FLAT in [STRING_50],
+	@name('Район населенного пункта')
+	P_DISTRICT in [REGION_REF],
+	@name('Дом')
+	P_HOUSE_REF in [HOUSES_REF] default null,
+	@name('Улица')
+	P_STREET_STR in [STRING_250] default null,
+	@name('Фиксировать')
+	P_FIX_PRINT in [BOOLEAN] default null,
+	@name('Дата регистрации')
+	P_REG_DATE in [DATE] default null,
+	@name('Дата окончания регистрации')
+	P_REG_END_DATE in [DATE] default null,
+	@name('Адресный объект')
+	P_ADDR_OBJ in [ADDRESS_OBJ_REF] default null,
+	@name('Тип адресного деления')
+	P_STRUCT in [SHORT2] default null, -- 1, null - административно-территориальное, 2 - муниципальное
+	@name('Наименование регистрирующего органа')          
+	P_REG_PLACE_NAME in [STRING_250] default null,
+	@name('Код подразделения, осуществившего регистрацию') 
+	P_REG_PLACE_CODE in [STRING_20] default null
+) return [PERSONAL_ADDRESS] is
+
+validate is
+	PrntClass string;
+	TuneVal number;
+	v_OKATO ::[TERRITORY].[CODE]%type;
+	v_OKTMO ::[OKTMO].[CODE]%type;
+
+	v_list_house rtl.string_table;
+	idx integer;
+
+	d [LIST_DOMA];
+	type h_data_t is table of [LIST_DOMA];
+	h_data h_data_t;
+
+	v_strHouse		::[PERSONAL_ADDRESS].[HOUSE];	
+	v_strSeparators	varchar2(4000);
+	v_house	[HOUSES];
+	v_house_name ::[HOUSES].[NAME]%type;
+	
+	v_city ref [NAMES_CITY];
+	v_street ref [STREET];
+
+	procedure setHouseStr is
+		v_house_obj_rectype ::[PERSONAL_ADDRESS].[API_LIB].house_obj_rectype%type;
+		procedure add_str (p_put_str1 varchar2(1000), p_put_str2 varchar2(1000)) is
+		begin
+			if p_put_str2 is not null then
+				if V_STR_HOUSE is not null then
+					V_STR_HOUSE := V_STR_HOUSE || '; ';
+				end if;
+				V_STR_HOUSE := rtrim(V_STR_HOUSE || p_put_str1 || ' ' || p_put_str2);
+			end if;
+		end;
+	begin
+		V_STR_HOUSE := null;
+	
+		if P_HOUSE_REF is not null then
+			v_house_obj_rectype := ::[PERSONAL_ADDRESS].[API_LIB].get_house_obj(P_HOUSE_REF);
+			add_str(v_house_obj_rectype.NUM.TYPE_NAME, v_house_obj_rectype.NUM.NUM);
+			add_str(v_house_obj_rectype.NUM_ADD1.TYPE_NAME, v_house_obj_rectype.NUM_ADD1.NUM);
+			add_str(v_house_obj_rectype.NUM_ADD2.TYPE_NAME, v_house_obj_rectype.NUM_ADD2.NUM);
+			
+			if v_house_obj_rectype.is_actual then
+				[CSMD].Set_Validate_Prop (V_VB, 'P_HOUSE_REF.NAME', 'P', '.ForeColor = vbBlack');
+			else
+				[CSMD].Set_Validate_Prop (V_VB, 'P_HOUSE_REF.NAME', 'P', '.ForeColor = vbRed');
+			end if;
+		end if;
+	end;
+
+	procedure setEnableFixPrintAndImpStr is
+	begin
+		if this%parentclass in (::[CL_PRIV]%class, ::[CL_ORG]%class) then
+			if tn_no_str_addr and v_country = ::[SYSTEM].[COUNTRY] then
+				::[RUNTIME].[CSMD].Disable(v_vb, 'P_IMP_STR');
+				::[RUNTIME].[CSMD].Disable(v_vb, 'P_FIX_PRINT');
+			else
+				::[RUNTIME].[CSMD].Enable(v_vb, 'P_IMP_STR');
+				::[RUNTIME].[CSMD].Enable(v_vb, 'P_FIX_PRINT');
+			end if;
+		end if;			
+	end;
+	
+	procedure SetShowDate is
+	begin
+		if P_TYPE = ::[ADDRESS_TYPE]([KOD]='TEMPORARY_REG') then
+			::[RUNTIME].[CSMD].Show(v_vb, 'P_REG_END_DATE');
+			::[RUNTIME].[CSMD].Command(v_vb, 'lblRegDate.Caption="Дата регистрации"');
+		elsif P_TYPE = ::[ADDRESS_TYPE]([KOD]='REAL_LIVE') then
+			::[RUNTIME].[CSMD].Hide(v_vb, 'P_REG_END_DATE');
+			::[RUNTIME].[CSMD].Command(v_vb, 'lblRegDate.Caption="Проживает по адресу с"');
+		else
+			::[RUNTIME].[CSMD].Command(v_vb, 'lblRegDate.Caption="Дата регистрации"');
+			::[RUNTIME].[CSMD].Hide(v_vb, 'P_REG_END_DATE');
+		end if; 
+	end;
+	
+	procedure setEnableHouse is
+	begin
+		if V_KLADR_MODE = 4 or P_HOUSE_REF is not null and not regexp_like(P_HOUSE_REF.[NAME],',|[ЧН]\(|\d-\d') then 
+			::[RUNTIME].[CSMD].Disable(v_vb, 'P_HOUSE', equal_name==true);
+		else
+			::[RUNTIME].[CSMD].Enable(v_vb, 'P_HOUSE', equal_name==true);
+		end if;
+	end;
+	
+	procedure SetEnableStreetStr is
+	begin
+		if V_KLADR_MODE >= 3 or ::[PERSONAL_ADDRESS].[API_LIB].get_street(P_ADDR_OBJ) is not null then
+			::[RUNTIME].[CSMD].Disable(v_vb, 'P_STREET_STR');
+		else
+			::[RUNTIME].[CSMD].Enable(v_vb, 'P_STREET_STR');
+		end if;
+	end;
+	
+	function get_addr_obj_str (p_addr_obj ::[PERSONAL_ADDRESS].[API_LIB].addr_obj_expanded_rectype%type) return [MEMO] is
+		v_str [MEMO];
+		
+		procedure add_str (p_title varchar2(100), p_put_str varchar2(1000)) is
+		begin
+			if p_put_str is not null then
+				if v_str is not null then
+					v_str := v_str || NL$;
+				end if;
+				v_str := v_str || p_title || case when length(p_title) < 8 then TB$ else ' ' end || p_put_str || ';';
+			end if;
+		end;
+	begin
+		v_str := null;
+		if V_STRUCT.[0] = 1 then
+			add_str('Страна:', p_addr_obj.COUNTRY.full_name);
+			add_str('Регион:', p_addr_obj.REGION.full_name);
+			add_str('Район:', p_addr_obj.DISTRICT.full_name);
+			add_str('Город:', p_addr_obj.CITY.full_name);
+			add_str('Населённый пункт:', p_addr_obj.TOWN.full_name);
+			add_str('ЭПС:', p_addr_obj.subarea.full_name);
+			add_str('Улица:', p_addr_obj.street.full_name);
+		elsif V_STRUCT.[0] = 2 then
+			add_str('Страна:', p_addr_obj.COUNTRY.full_name);
+			add_str('Регион:', p_addr_obj.REGION.full_name);
+			add_str('Муниципальный район:', p_addr_obj.DISTRICT.full_name);
+			add_str('Сельское/городское поселение:', p_addr_obj.SETTLEMENT.full_name);
+			add_str('Город:', p_addr_obj.CITY.full_name);
+			add_str('Населённый пункт:', p_addr_obj.TOWN.full_name);
+			add_str('ЭПС:', p_addr_obj.subarea.full_name);
+			add_str('Улица:', p_addr_obj.street.full_name);
+		end if;
+		return rtrim(v_str, ';');
+	end;
+	
+	procedure get_addr_obj_exp is
+	begin
+		v_addr_obj_exp := ::[PERSONAL_ADDRESS].[API_LIB].get_addr_obj_expanded(P_ADDR_OBJ, V_STRUCT.[0], V_OKTMO_REF);
+		V_COUNTRY := v_addr_obj_exp.COUNTRY.ID;
+		V_STR := get_addr_obj_str(v_addr_obj_exp); 
+	end;
+	
+	procedure calc_Imp_Str is 
+	begin
+		if not nvl(P_FIX_PRINT, false) then
+
+			v_personal_addr%init;
+			v_personal_addr.[ADDR_OBJ] := P_ADDR_OBJ;
+			v_personal_addr.[POST_CODE] := P_ZIP;
+			v_personal_addr.[STREET_STR] := P_STREET_STR;
+			
+			v_personal_addr.[HOUSE_REF] := P_HOUSE_REF;
+			v_personal_addr.[HOUSE] := P_HOUSE;
+			v_personal_addr.[KORPUS] := P_KORPUS;
+			v_personal_addr.[FLAT] := P_FLAT;
+			
+			v_personal_addr.[DISTRICT] := P_DISTRICT;
+			v_personal_addr.[IMP_STR] := P_IMP_STR;
+			v_personal_addr.[METRO_STATIONS] := V_METRO_STATIONS;
+			v_personal_addr.[TYPE] := P_TYPE;
+			
+			v_personal_addr.[FIX_PRINT] := P_FIX_PRINT;
+			v_personal_addr.[LATITUDE] := this.[LATITUDE];
+			v_personal_addr.[LONGITUDE] := this.[LONGITUDE];
+			v_personal_addr.[REG_DATE] := P_REG_DATE;
+			v_personal_addr.[REG_END_DATE] := P_REG_END_DATE;
+			v_personal_addr.[REG_PLACE_NAME] := P_REG_PLACE_NAME;
+			v_personal_addr.[REG_PLACE_CODE] := P_REG_PLACE_CODE;
+			
+			P_IMP_STR := ::[PERSONAL_ADDRESS].[LIB].Get_For_Print ( v_personal_addr );
+		end if;
+	end;
+	
+	-- Установка признака автоматического вычисления индекса
+	procedure set_auto_zip(p_init boolean := false) is
+	begin
+		if tn_kladr_zip or P_ZIP is null then
+			v_Auto_Zip	:= true;
+		else
+			v_Auto_Zip := nvl((P_ZIP = coalesce(P_HOUSE_REF.[ZIP],P_ADDR_OBJ.[ZIP],chr(0))),true) and (nvl(p_init,false) or nvl(v_Auto_Zip,true));
+		end if;
+	end;
+	
+	-- установка индекса
+	procedure set_zip(p_zip_changed boolean := false) is
+	begin
+		if v_Auto_Zip and (tn_kladr_zip or not nvl(p_zip_changed,false)) then
+			P_ZIP := coalesce(P_HOUSE_REF.[ZIP],P_ADDR_OBJ.[ZIP], case when p_zip_changed then P_ZIP end);
+		end if;
+	end;
+	
+	procedure check_city is
+		v_ao_ref	[ADDRESS_OBJ_REF] := null;
+		v_ao_exp	::[PERSONAL_ADDRESS].[API_LIB].addr_obj_expanded_rectype%type;
+		v_street	ref [STREET];
+		v_city		ref [NAMES_CITY];
+	begin
+		v_city := ::[PERSONAL_ADDRESS].[API_LIB].get_city(v_addr_obj_cur_ref);
+		v_street := ::[PERSONAL_ADDRESS].[API_LIB].get_street(v_addr_obj_cur_ref);
+		if V_KLADR_MODE >= 1 then
+			v_ao_ref := P_ADDR_OBJ;
+			v_ao_exp := ::[PERSONAL_ADDRESS].[API_LIB].get_addr_obj_expanded(v_ao_ref);
+
+			if (v_city <> coalesce (v_ao_exp.TOWN.ID, v_ao_exp.CITY.ID, v_ao_exp.district_city, v_ao_exp.region_city) or v_city is null) and v_street is not null then
+				if v_city is not null or coalesce (v_ao_exp.TOWN.ID, v_ao_exp.CITY.ID, v_ao_exp.district_city, v_ao_exp.region_city) is not null then
+					P_STREET_STR = P_HOUSE_REF := null;
+				end if;
+			end if;
+		end if;
+		
+		if V_KLADR_MODE >= 1 then
+			v_ao_ref := P_DISTRICT;
+			v_ao_exp := ::[PERSONAL_ADDRESS].[API_LIB].get_addr_obj_expanded(v_ao_ref);
+
+			if v_city <> coalesce (v_ao_exp.TOWN.ID, v_ao_exp.CITY.ID, v_ao_exp.district_city, v_ao_exp.region_city) or v_city is null then
+				P_DISTRICT := null;
+			end if;
+		end if;
+						
+		if v_street is null and V_KLADR_MODE >= 3 then
+			P_STREET_STR := null;
+		end if;
+	end;
+	
+	function str2arr
+		(p_str varchar2(32767)
+		,p_delimiter varchar2 := ','
+		)
+		return rtl.string_table
+	is
+		v_arr rtl.string_table;
+		v_pos1 pls_integer := 1;
+		v_pos2 pls_integer;
+		v_one varchar2(32767);
+		v_str_size constant integer := length(p_str);
+		v_dlm_size constant integer := length(p_delimiter);
+	begin
+		if p_str is null or p_delimiter is null then
+			return v_arr;
+		end if;
+		loop
+			v_pos2 := instr(p_str,p_delimiter,v_pos1);
+			v_one := trim(substr(p_str, v_pos1, case when v_pos2 > 0 then v_pos2 else v_str_size + 1 end - v_pos1));
+			if v_one is not null then
+				v_arr(v_arr.count+1) := v_one;
+			end if;
+			exit when v_pos2 = 0 or v_pos2 is null;
+			v_pos1 := v_pos2 + v_dlm_size;
+		end loop;
+		return v_arr;
+	end;
+	
+	function get_kladr_house_list_nums (p_intervals varchar2) return rtl.string_table is
+	-- Функция возвращает массив номеров по списку с интервалами номеров в формате КЛАДР.
+	-- Номера/интервалы разделены запятыми. В интервале номера разделяются знаком "-". Номера могут ограничиваться только чётными "Ч(2-8)" или нечётными "Н(1-9)".
+		v_result rtl.string_table;
+		v_tokens rtl.string_table;
+		procedure parse_interval(p_interval varchar2) is
+			v_min integer;
+			v_max integer;
+			v_step integer := 1;
+			v_interval varchar2(1000) := p_interval;
+			v_odd boolean; 
+		begin
+			v_odd := case substr(v_interval,1,1) when 'Ч' then true when 'Н' then false end; -- Определяем признак четных/нечетных номеров
+			if v_odd is not null then -- Если есть признак чётности/нечетности
+				v_interval := regexp_substr(v_interval,'[^()]+',2); -- убираем его из строки вместе со скобками, оставляя только интервал 
+				v_step := 2;
+			end if;
+			v_min := to_number(regexp_substr(v_interval,'^\d+'));
+			v_max := to_number(regexp_substr(v_interval,'\d+$'));
+			if mod(v_min,2) != (case when v_odd then 0 when not v_odd then 1 end) then
+				v_min := v_min + 1; -- Приводим минимальный номер к нужной чётности
+			end if;
+			while v_min <= v_max loop -- Получаем номера из интервала
+				v_result(v_result.count+1) := v_min;
+				v_min := v_min + v_step;
+			end loop;
+		end;
+	begin
+		v_tokens := str2arr(regexp_replace(p_intervals,'\s+'));-- Номера/интервалы разделены запятыми
+		for i in 1..v_tokens.count loop
+			if regexp_like(v_tokens(i),'^[ЧН]\(.*\)$') or regexp_like(v_tokens(i),'^\d+-\d+$') then -- Это интервал
+				parse_interval(v_tokens(i));
+			else -- Отдельный номер
+				v_result(v_result.count+1) := v_tokens(i);
+			end if;
+		end loop;
+		return v_result;
+	end;
+	
+begin
+	&debug_var2(P_MESSAGE, 0)
+	&debug_var2(P_INFO, 0)
+
+	if P_MESSAGE = 'DEFAULT' then
+		::[RUNTIME].[STORAGE_MGR].init_temp_table('LIST_DOMA');
+		P_TYPE := this.[TYPE];
+		P_ZIP := this.[POST_CODE];
+		P_IMP_STR := this.[IMP_STR];
+		P_HOUSE := this.[HOUSE];
+		P_KORPUS := this.[KORPUS];
+		P_FLAT := this.[FLAT];
+		P_DISTRICT := this.[DISTRICT];
+		P_HOUSE_REF := this.[HOUSE_REF];
+		P_STREET_STR := this.[STREET_STR];
+		P_FIX_PRINT := this.[FIX_PRINT];
+		P_REG_DATE := this.[REG_DATE];
+		P_REG_END_DATE := this.[REG_END_DATE];
+		P_REG_PLACE_NAME := this.[REG_PLACE_NAME];
+		P_REG_PLACE_CODE := this.[REG_PLACE_CODE];
+		P_ADDR_OBJ := this.[ADDR_OBJ];
+		V_METRO_STATIONS := this.[METRO_STATIONS];
+		P_ADDR_OBJ := coalesce(P_ADDR_OBJ%id, P_STREET_REF%id, P_CITY%id);
+		V_STRUCT.[0] := coalesce(this.[INPUT_STRUCT], 1);
+		P_STRUCT := V_STRUCT.[0];
+		V_OKTMO_REF := this.[OKTMO];
+		v_direct_run := false;
+		
+		v_metro_station_before.delete;
+		for (select t(t : c_id)
+				in this.[METRO_STATIONS]
+			)
+		loop
+			declare
+				v_ref ref [METRO_STATION];
+			begin
+				v_ref := t.c_id;
+				v_metro_station_before(t.c_id) := v_ref;
+			end;
+		end loop;
+		
+		::[RUNTIME].[CSMD].Init_Form(V_VB, &METHOD$CLASS, &METHOD$SNAME );
+		n1 := 0;
+		::[RUNTIME].[COMP_OBJ].p_make_table( t1, n1, '', this%class, this, '', '', this%class );
+		
+		PrntClass := this%parentclass;
+		TuneVal := nvl(::[FP_TUNE].[LIB].get_num_value('AVAIL_ADDR_TYPES', ::[FP_TUNE].[LIB].set_canons('METACLASS', PrntClass), '0'), 0);
+		::[PERSONAL_ADDRESS].[LIB].set_addr_type_context(TuneVal, [TYPE]);
+
+		::[RUNTIME].[CSMD].Command(v_vb, 'call SetEnableControl(ImpStr, chkFixPrint.Value = "1")');
+
+		v_addr_obj_cur_ref := P_ADDR_OBJ;
+		v_oktmo_cur_ref := V_OKTMO_REF;
+		get_addr_obj_exp;
+		tn_no_str_addr := ::[FP_TUNE].[LIB].get_bool_value ('NO_STR_ADDR', throw_error == '0');
+		tn_kladr_zip := nvl(::[FP_TUNE].[LIB].get_bool_value('STRONG_KLADR', ::[FP_TUNE].[LIB].set_canons('<KLADR_REQ>', 'ZIP'), '0'), false);
+		tn_strong_street := nvl(::[FP_TUNE].[LIB].get_bool_value('STRONG_KLADR', ::[FP_TUNE].[LIB].set_canons('<KLADR_REQ>', 'STREET'), '0'), true);
+		set_auto_zip(true);
+		
+		v_city := ::[PERSONAL_ADDRESS].[API_LIB].get_city(P_ADDR_OBJ);
+		
+		if V_COUNTRY is null then 
+			V_COUNTRY := v_city.[COUNTRY];
+		end if;
+		if v_country is null and P_IMP_STR is null then
+			v_country := ::[SYSTEM].[COUNTRY];
+		end if;
+
+		V_KLADR_MODE := ::[PERSONAL_ADDRESS].[LIB].GET_KLADR_MODE(P_TYPE, v_city, V_COUNTRY);
+		
+		setEnableFixPrintAndImpStr;
+		setShowDate;
+		setEnableHouse;
+		setHouseStr;
+		SetEnableStreetStr;
+		
+	elsif P_MESSAGE = 'VALIDATE' then
+		::[RUNTIME].[CSMD].Init_Form(V_VB, null, null);
+		
+		if P_INFO in ('OK', 'CANCEL') then
+			::[PERSONAL_ADDRESS].[LIB].set_addr_type_context(null, null);
+			v_city := ::[PERSONAL_ADDRESS].[API_LIB].get_city(P_ADDR_OBJ);
+			v_street := ::[PERSONAL_ADDRESS].[API_LIB].get_street(P_ADDR_OBJ);
+			if P_INFO = 'OK' then
+				--	Делаем категоричные проверки, вызывающие прагмы
+				ValidateWithPragma(this
+					, P_TYPE 			
+					, P_ZIP 			
+					, P_IMP_STR			
+					, P_HOUSE			
+					, P_KORPUS			
+					, P_FLAT			
+					, P_DISTRICT		
+					, P_HOUSE_REF		
+					, P_STREET_STR		
+					, P_FIX_PRINT		
+					, P_REG_DATE		
+					, P_REG_END_DATE
+					, P_ADDR_OBJ
+					, P_REG_PLACE_NAME
+					, P_REG_PLACE_CODE);
+			
+				--	Проверяем, если заполнен массив станций метро, а мы изменили адрес:
+				if V_METRO_STATIONS%size(1)>0 then
+					if		(this.[HOUSE_REF] != nvl (P_HOUSE_REF, -1))
+						or	(this.[ADDR_OBJ] != nvl (P_ADDR_OBJ, -1))
+						or	(this.[HOUSE] != nvl (P_HOUSE , '-'))
+						or	(this.[KORPUS] != nvl (P_KORPUS , '-'))
+						or	(this.[IMP_STR] != nvl (P_IMP_STR , '-'))
+					then
+						::[RUNTIME].[CSMD].command(V_VB, 'if MsgBox("Адрес объекта был изменен. Возможно, существует необходимость в изменении станций метро. Продолжить?", vbQuestion + vbYesNo) <> vbYes Then' || NL$ ||
+											'	Main = null' || NL$ ||
+											'end if' || NL$);
+					end if;
+				end if;
+			
+				--  Проверка на совпадение адреса с адресом террориста
+				--  Выполним, только если в массив зашли напрямую
+				if sys_context(user_context, 'RUN_BY_EDIT') is null then
+					declare
+						v_err	string(32000);
+					begin
+						if ::[RUNTIME].[LIB].Is_Parent('CLIENT', this%parentclass) then
+							::[CLIENT_INTERFACE].[PRX_LEGAL].legal_address_validate(this%parent, v_city, v_street, P_HOUSE, P_KORPUS, P_FLAT, P_IMP_STR, v_checks, v_err, P_DISTRICT, P_TYPE);
+							if v_err is not null then
+								::[RUNTIME].[CSMD].command(V_VB, 'MsgBox "'||replace(replace(v_err,'"','""'),NL$,'" & vbLF & "')||'", ,"Внимание"');
+							end if;
+						end if;
+					end;
+				end if;
+				check_stat_codes(null, this%collection, P_TYPE, v_city
+						,	v_OKATO,		v_OKTMO
+						,	V_OKATO_CODE,	V_OKTMO_CODE
+						,	V_VB, P_HOUSE_REF);
+				Save_Stat_Codes(this%parent, v_OKATO, v_OKTMO); -- Сразу сохраняем новые безусловные значения
+				if V_STRUCT.[0] = 2 then
+					V_OKTMO_REF := coalesce(V_OKTMO_REF, P_HOUSE_REF.[OKTMO], P_ADDR_OBJ.[OKTMO]);
+				end if;
+			else
+				declare
+					v_idx_metro_station varchar2(200);
+				begin
+					for (select t(t : c_id, t.[STATION] : c_station, t.[DISTANCE] : c_distance)
+							in this.[METRO_STATIONS]
+						)
+					loop
+						declare
+							v_ref ref [METRO_STATION];
+						begin
+							v_ref := t.c_id;
+							
+							if not v_metro_station_before.exists(t.c_id) then
+								v_ref.[DELETE_AUTO];
+							else
+								if nvl(t.c_station, -1) != nvl(v_metro_station_before(t.c_id).[STATION], -1) then
+									v_ref.[STATION] := v_metro_station_before(t.c_id).[STATION];
+								end if;
+								if nvl(t.c_distance, 0) != nvl(v_metro_station_before(t.c_id).[DISTANCE], 0) then
+									v_ref.[DISTANCE] := v_metro_station_before(t.c_id).[DISTANCE];
+								end if;
+								v_metro_station_before.delete(t.c_id);
+							end if;
+						end;
+					end loop;
+					
+					v_idx_metro_station := v_metro_station_before.first;
+					while v_idx_metro_station is not null loop
+						this.[METRO_STATIONS]%insert(v_metro_station_before(v_idx_metro_station));
+						v_idx_metro_station := v_metro_station_before.next(v_idx_metro_station);
+					end loop;
+				end;
+				v_metro_station_before.delete;
+				v_direct_run := null;
+			end if;
+			V_CURRENT_CITY := null;
+		end if;
+
+		if P_INFO = 'P_TYPE' then
+			setShowDate;
+			v_city := ::[PERSONAL_ADDRESS].[API_LIB].get_city(P_ADDR_OBJ);
+			V_KLADR_MODE := ::[PERSONAL_ADDRESS].[LIB].GET_KLADR_MODE(P_TYPE, v_city, V_COUNTRY);
+			check_city;
+
+		elsif P_INFO = 'P_FIX_PRINT' then
+			::[RUNTIME].[CSMD].Command(v_vb, 'call SetEnableControl(ImpStr, chkFixPrint.Value = "1")');
+
+		end if;
+		
+		if P_INFO = 'UPDATE_ADDR_OBJ' then
+			V_STRUCT.[0] := coalesce(P_STRUCT, V_STRUCT.[0], 1);
+			if nvl(v_addr_obj_cur_ref, 1) <> nvl(P_ADDR_OBJ,2) or (V_OKTMO_REF is not null and nvl(v_oktmo_cur_ref, 1) <> nvl(V_OKTMO_REF, 2)) then
+				get_addr_obj_exp;
+
+				P_STREET_STR := ::[PERSONAL_ADDRESS].[API_LIB].get_street(P_ADDR_OBJ).[SHORT_NAME]; 
+				if P_HOUSE is not null then
+					begin
+						locate P_HOUSE_REF in ::[HOUSES] where P_HOUSE_REF.[AOGUID] = P_ADDR_OBJ 
+						and upper(P_HOUSE_REF.[NAME])= upper(P_HOUSE) 
+						and upper(coalesce(P_KORPUS, '~NULL~')) = upper(coalesce(P_HOUSE_REF.[KORP]||P_HOUSE_REF.[STRUCNUM], '~NULL~')) 
+							and (V_OKTMO_REF is null or V_OKTMO_REF is not null and P_HOUSE_REF.[OKTMO] = V_OKTMO_REF)
+							and coalesce(P_HOUSE_REF.[ARCHAIC], false) = false
+						;
+					exception when NO_DATA_FOUND then
+						P_HOUSE_REF := null;
+					end;
+				end if;
+				
+				V_CURRENT_CITY := ::[PERSONAL_ADDRESS].[API_LIB].get_city(P_ADDR_OBJ); -- Сохраняем значение, чтобы достучаться потом при выборе станций метро
+				
+				V_KLADR_MODE := ::[PERSONAL_ADDRESS].[LIB].GET_KLADR_MODE(P_TYPE, null, V_COUNTRY);
+				v_addr_obj_cur_ref := P_ADDR_OBJ;
+				
+				check_city;
+				
+				v_oktmo_cur_ref := V_OKTMO_REF;
+				setEnableFixPrintAndImpStr;
+				SetEnableStreetStr;
+				P_INFO := 'ZIP_UPD';
+			end if;
+		end if;
+		
+		if P_INFO = 'P_HOUSE_REF' then
+			if P_HOUSE_REF is null then
+				P_HOUSE = P_KORPUS = V_HOUSE_REF := null;
+			elsif P_HOUSE_REF.[HOUSEGUID] is null then
+				v_list_house.delete;
+				V_HOUSE_ARR%delete;
+				V_HOUSE_REF := null;
+				V_HOUSE_ARR := rtl.next_value('SEQ_ID');
+				v_list_house := get_kladr_house_list_nums(P_HOUSE_REF.[NAME]);
+
+				idx := v_list_house.first;
+
+				while idx is not null loop
+					d.[HOUSE] := v_list_house(idx);
+					d.[REC_DOMA] := P_HOUSE_REF%id;
+					d.[SORT_HOUSE] := nvl(regexp_substr(v_list_house(idx), '\d{1,6}'), 999999);
+					h_data(h_data.count + 1) := d;
+					idx := v_list_house.next(idx);
+				end loop;
+				
+				insert into V_HOUSE_ARR for i in h_data loop
+					r(
+						r.[HOUSE] = h_data(i).[HOUSE]
+						, r.[REC_DOMA] = h_data(i).[REC_DOMA]
+						, r.[SORT_HOUSE] = h_data(i).[SORT_HOUSE]
+					 );
+				
+				if V_HOUSE_ARR%size(0) > 1 then
+					for (select x(x:id) in V_HOUSE_ARR)
+					loop
+						V_HOUSE_REF := x.id;
+						P_HOUSE := V_HOUSE_REF.[HOUSE];
+						P_KORPUS := null;
+						exit;
+					end loop;
+				end if;
+			else
+				P_HOUSE := P_HOUSE_REF.[NAME];
+				P_KORPUS := P_HOUSE_REF.[KORP];
+				V_HOUSE_REF := null;
+			end if;
+			
+			P_HOUSE := replace(P_HOUSE, '*');
+			P_KORPUS := replace(P_KORPUS, '*');
+		
+			if P_KORPUS is not null then
+				if not (
+					   instr(upper(P_KORPUS), 'СТР') = 1
+					or instr(upper(P_KORPUS), 'СООР') = 1
+					or instr(upper(P_KORPUS), 'ЛИТЕР') = 1
+					or instr(upper(P_KORPUS), 'КОРПУС') = 1
+					or regexp_instr(upper(P_KORPUS), '^К\d+.*$') > 0
+					)
+				then
+					v_strHouse := substr(P_HOUSE || korpus_shortname || P_KORPUS, 1, v_strHouse%size);
+				else
+					v_strHouse := substr(P_HOUSE || P_KORPUS, 1, v_strHouse%size);
+				end if;
+			else
+				v_strHouse := P_HOUSE;
+			end if;
+
+			if P_HOUSE_REF is not null then
+				v_house := P_HOUSE_REF;
+				if coalesce(v_oktmo_cur_ref, V_OKTMO_REF) is not null then
+					V_OKTMO_REF := coalesce(P_HOUSE_REF.[OKTMO], V_OKTMO_REF);
+					v_oktmo_cur_ref := V_OKTMO_REF;
+				end if;
+				get_addr_obj_exp;
+			end if;
+			if v_house.[HOUSEGUID] is not null then
+				P_HOUSE	:= case when v_house.[ESTSTATUS].[CODE] = '1'and v_house.[ESTSTATUS].[EST_STR_STAT] = true then nvl(v_house.[ESTSTATUS].[SHORT_NAME],'влд')
+									when v_house.[ESTSTATUS].[CODE] = '3'and v_house.[ESTSTATUS].[EST_STR_STAT] = true then nvl(v_house.[ESTSTATUS].[SHORT_NAME],'двлд')
+								end ||v_house.[NAME];
+				P_KORPUS	:= v_house.[KORP]||case when v_house.[STRSTATUS].[CODE] != 0 and v_house.[STRSTATUS].[EST_STR_STAT] = false then v_house.[STRSTATUS].[SHORT_NAME]||v_house.[STRUCNUM] end;
+			else
+				v_strSeparators := ::[FP_TUNE].[LIB].get_str_value('SEPARAT_HOUSE_KLADR', ::[FP_TUNE].[LIB].set_canons('ADDRESS_TYPE', P_TYPE%id), '0');
+				if v_strSeparators is not null then
+					P_HOUSE	:= regexp_replace(v_strHouse, '(\D*\d+\D*)((' || '('||replace(replace(rtrim(ltrim(v_strSeparators, ','),','), ' '), ',', ')|(')||')' || ').+)', '\1');
+					P_KORPUS	:= regexp_replace(regexp_replace(v_strHouse, '^'||P_HOUSE), '^'||korpus_shortname);
+				else
+					P_HOUSE	:= v_strHouse;
+					P_KORPUS := null;
+				end if;
+			end if;
+			P_INFO := 'ZIP_UPD';
+		end if;
+		
+		if P_INFO = '%VAR%.V_HOUSE_REF' then
+			P_HOUSE := V_HOUSE_REF.[HOUSE];
+		end if;
+		
+		if P_INFO in ('P_HOUSE', 'P_KORPUS') then
+			if P_HOUSE is not null then
+				P_HOUSE := trim(P_HOUSE);
+				P_KORPUS := trim(P_KORPUS);
+				P_HOUSE_REF := null;
+					
+				for (
+					select v_sprav(
+						v_sprav%id: I_D
+						, v_sprav.[HOUSEGUID]: GUID
+						, v_sprav.[NAME]: NAME
+						, v_sprav.[KORP]: KORP
+						, v_sprav.[STRUCNUM]: STRUCT
+						, v_sprav.[STRSTATUS].[SHORT_NAME]: STRSTATUS
+						, case v_sprav.[ESTSTATUS].[CODE] when 1 then 'влд' when 3 then 'двлд' end: ESTSTATUS
+						, v_sprav.[ENDDATE] : ENDDATE
+						)
+					in ::[HOUSES] all
+					where v_sprav.[AOGUID]%id = P_ADDR_OBJ
+					and v_sprav.[HOUSEGUID] is not null
+					and upper(v_sprav.[NAME]) = upper(P_HOUSE)
+					and coalesce(v_sprav.[ARCHAIC], false) = false
+					order by
+						case when v_sprav.[HOUSEGUID] is not NULL then 1 else 2 end
+						, case when v_sprav.[ESTSTATUS] is not NULL then 1 else 2 end
+					)
+				loop
+					v_house_name := v_sprav.[KORP]||bool_char(v_sprav.[STRUCT] is not null, nvl(v_sprav.[STRSTATUS],'стр')||v_sprav.[STRUCT], null);
+					if P_KORPUS is null and v_house_name is null or v_house_name =  P_KORPUS then
+						P_HOUSE_REF := v_sprav.I_D;
+						exit;
+					end if;
+				end loop;
+			end if;
+			P_INFO := 'ZIP_UPD';
+		end if;
+ 		
+		if P_INFO = 'P_ZIP' then
+			set_auto_zip(false);
+			set_zip(true);
+		end if;
+		
+		if P_INFO = 'ZIP_UPD' and p_message != 'DEFAULT' then
+			set_zip(false);
+			setHouseStr;
+			calc_imp_str;
+			setEnableHouse;
+		end if;
+
+		if P_INFO in ('P_FIX_PRINT', 'P_TYPE', 'P_ZIP', 'P_STREET_STR', 'P_DISTRICT', 'P_HOUSE', 'P_KORPUS', 'P_FLAT', '%VAR%.V_HOUSE_REF') then
+			calc_imp_str;
+		end if;
+		
+		if P_INFO = '%VAR%.V_STRUCT.0' then
+			P_STRUCT := V_STRUCT.[0];
+			declare
+				v_cnt integer := 1;
+			begin
+				if V_STRUCT.[0] = 2 then
+					v_cnt := 0; 
+					for (select x(x) in ::[ADDR_OBJ_HIERAR] where x.[ADDR_OBJ] = P_ADDR_OBJ fetch 1)
+					loop
+						v_cnt := 1;
+					end loop;
+				end if;
+				if (P_ADDR_OBJ.[PARENT] is null and V_STRUCT.[0] = 1
+				   or v_cnt = 0
+				    )
+				   and P_ADDR_OBJ%class <> ::[CODE_REGION]%class
+				then
+					V_STR := 'Объект не существует в данном типе адресного деления.';
+				else
+					if V_STRUCT.[0] = 2 then
+						V_OKTMO_REF := coalesce(V_OKTMO_REF, P_HOUSE_REF.[OKTMO], P_ADDR_OBJ.[OKTMO]);
+					end if;			
+					get_addr_obj_exp;
+				end if;
+			end;
+		end if;
+	end if;
+end;
+
+execute is
+	v_cl	ref [CLIENT];
+	vVB		string(32000);
+	vADDS	string(32000);
+begin
+	if ::[RUNTIME].[LIB].Is_Parent('CLIENT', this%parentclass) then
+		v_CL := this%parent;
+	end if;
+	--------------------------------------------------------------------------
+	::[HOOK].[CL_CHECK_REQS](
+		P_METH		== &METHOD$CLASS || '.' || &METHOD$SNAME	--Операция
+		, P_CALL	== 'DEFAULT'			--Тип вызова
+		, P_OP_INFO	== null					--Вид изменения
+		, P_CLIENT	== v_CL					--Клиент, ссылка
+		, P_CL_PRIV	== null					--Физическое лицо
+		, P_CL_ORG	== null					--Юридическое лицо
+		, P_ADDS	== vADDS				--Дополнительные параметры
+		, P_ADDRESS	== null					--Адреса
+		, P_DOC		== null					--Удостоверение
+		, P_DOCS		== null				--Доп. удостоврения
+		, P_REGISTER	== null				--Регистрация
+		, P_LINKS_OTHER	== null				--Связи с другими клиентами
+		, P_ALL_BOSS	== null				--Должностные лица
+		, P_VB			== vVB				--Клиент-скрипт
+		);	
+	--------------------------------------------------------------------------
+
+	::[PERSONAL_ADDRESS].[API_LIB].use_addr_obj;
+
+	executor(
+		this
+		, P_TYPE 			
+		, P_ZIP 			
+		, P_IMP_STR			
+		, P_HOUSE			
+		, P_KORPUS			
+		, P_FLAT			
+		, P_DISTRICT		
+		, P_HOUSE_REF		
+		, P_STREET_STR		
+		, P_FIX_PRINT		
+		, P_REG_DATE		
+		, P_REG_END_DATE
+		, coalesce(P_ADDR_OBJ%id, P_STREET_REF%id, P_CITY%id)
+		, V_OKTMO_REF
+		, V_STRUCT.[0]
+		, P_REG_PLACE_NAME
+		, P_REG_PLACE_CODE
+		);
+			
+	if v_CL is not null then
+		v_CL.[RECALC_IDENT_LVL](&METHOD$CLASS, &METHOD$SNAME);
+	end if;
+
+	--------------------------------------------------------------------------
+	::[HOOK].[CL_CHECK_REQS](
+		P_METH		== &METHOD$CLASS || '.' || &METHOD$SNAME	--Операция
+		, P_CALL	== 'EXECUTE'			--Тип вызова
+		, P_OP_INFO	== null					--Вид изменения
+		, P_CLIENT	== v_CL					--Клиент, ссылка
+		, P_CL_PRIV	== null					--Физическое лицо
+		, P_CL_ORG	== null					--Юридическое лицо
+		, P_ADDS	== vADDS				--Дополнительные параметры
+		, P_ADDRESS	== null					--Адреса
+		, P_DOC		== null					--Удостоверение
+		, P_DOCS		== null				--Доп. удостоврения
+		, P_REGISTER	== null				--Регистрация
+		, P_LINKS_OTHER	== null				--Связи с другими клиентами
+		, P_ALL_BOSS	== null				--Должностные лица
+		, P_VB			== vVB				--Клиент-скрипт
+		);	
+
+	V_CURRENT_CITY := null;
+	v_direct_run := null;
+end;
+end;
+end;

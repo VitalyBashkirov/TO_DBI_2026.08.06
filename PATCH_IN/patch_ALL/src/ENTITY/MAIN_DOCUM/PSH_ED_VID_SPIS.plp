@@ -1,0 +1,30 @@
+class MAIN_DOCUM;
+
+@name('[ПСХ] Изменить вид документа (списочная)')
+@tag('COPIED')
+batch method PSH_ED_VID_SPIS is
+PSH_ED_VID_SPIS (
+	@name('Вид документа')              P_VID  in [NAME_DOC_REF],
+	@name('Зачистить усл. обозн(шифр)') P_ZACH in [BOOLEAN]
+) is
+
+execute is
+/*********************************************************************
+Назначение:
+
+kokorin, последнее изменение 7 Июль 2014 г.
+*********************************************************************/
+i integer;
+begin
+	 if P_VID is null then
+	 	pragma error('Не задан Вид документа!');
+	 else
+	 	for i in this.first..this.last loop
+	 		this(i).[VID_DOC] := P_VID;
+	 		if P_ZACH then this(i).[CODE_DOC] := null; end if;
+		end loop;
+	 end if;
+
+end;
+end;
+end;

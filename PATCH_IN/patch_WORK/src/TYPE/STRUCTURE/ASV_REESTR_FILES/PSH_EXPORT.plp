@@ -1,0 +1,1165 @@
+class ASV_REESTR_FILES;
+
+@import_plsql(true)
+@archive(value:='all_archive')
+@name('[ПСБ] Экспорт файлов в АСВ')
+@tag('COPIED')
+method PSH_EXPORT is
+pragma include (::[DEFVALS].[SLIB]);
+pragma include (::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma include (::[RUNTIME].[MACRO_LIB]);
+
+cASV_VID_DOCUM_REQUIR		const ref [UD_CODE_NAME] := ::[UD_CODE_NAME]([UD_CODE]='ASV_VID_DOCUM' and [CODE]='ASV_REQUIR');
+cASV_VID_DOCUM_COMPENS_DIS	const ref [UD_CODE_NAME] := ::[UD_CODE_NAME]([UD_CODE]='ASV_VID_DOCUM' and [CODE]='ASV_COMPENS_DIS');
+
+SPLITTER varchar2(1) := '^';
+format_date_time string:='dd.mm.yyyy hh24:mi:ss';
+format_date string:='dd.mm.yyyy';
+
+to_server boolean;
+
+
+--процедура логирования ошибок
+procedure log_err(p_txt varchar2(255),p_only_namepipe boolean default false)
+is
+begin
+	if p_only_namepipe then
+		debug(p_txt,0,true,'ASV');
+	else	
+		&debug(p_txt,0)
+		debug(p_txt,0,true,'ASV');
+	end if;
+end;
+
+--функция преобразования числа в строку
+function num_to_char(p_val number) return varchar2
+	is
+	begin
+		return rtrim(to_char(p_val,'fm999999999999999990d99'),',.');
+	end;
+
+function MakeFilePath(pPath string(250), pFileName string(250)) return string(250) is
+DefSlash	string;
+TmpPath		string(1000);
+begin
+	pPath		:= trim(pPath);
+	pFileName	:= trim(pFileName);
+	DefSlash	:= SysInfo.GetValue('DEF_SLASH');
+	if substr(pPath, -1) = DefSlash then
+		TmpPath := pPath || pFileName;
+	elsif pPath is null then
+		TmpPath := PFileName;	
+	else
+		TmpPath := pPath || DefSlash || pFileName;
+	end if;
+
+	return substr(TmpPath, 1, 250);
+end;
+
+
+function file2blob(p_filedir varchar2, p_filename varchar2) return BLOB is
+v_blob 	BLOB;
+file 	integer;
+amount 	integer := 32767;
+offset 	integer := 1;
+buffer 	raw(32767);
+cnt 	integer;
+sFile	string(250);
+begin
+	dbms_lob.createtemporary(v_blob, true, dbms_lob.call);
+	sFile := MakeFilePath(p_filedir, p_filename);
+	file  := stdio.f_open(sFile, 'r');
+	if file < 0 then
+		pragma error('Ошибка при загрузке файла: '||sFile||', open='||file||', error: '||stdio.error_message(file));
+	end if;
+
+	begin
+	loop
+		cnt := stdio.f_read(file, buffer, amount);
+	exit when cnt <= 0;
+		if buffer is not null then
+			dbms_lob.write(v_blob, cnt, offset, buffer);
+			offset := offset + cnt;
+		end if;
+	end loop;
+	exception when others then null;
+	end;
+
+	cnt := stdio.f_close(file);
+	return v_blob;
+end;
+
+procedure blob2file(p_blob BLOB, p_filedir varchar2, p_filename varchar2) is
+file 			integer;
+LnMove 			number := 32000;
+LnBLOB 			number;
+MAX_BLOB_CNT	number;
+buffer			raw(32000);
+sFile			string(250);
+begin
+	sFile := MakeFilePath(p_filedir, p_filename);
+	file  := stdio.f_open(sFile, 'w');
+	if file < 0 then
+		pragma error('Ошибка при записи файла: '||sFile||', open='||file||', error: '||stdio.error_message(file));
+	end if;
+
+	if p_blob is not null AND dbms_lob.getlength(p_blob) != 0 then
+			LnBLOB := dbms_lob.getlength(p_blob);
+			MAX_BLOB_CNT := ceil(LnBLOB/LnMove);
+			for i in 1..MAX_BLOB_CNT loop
+				dbms_lob.read(p_blob, LnMove, to_number((i-1)*LnMove + 1), buffer);
+				stdio.f_write(file, buffer);
+			end loop;
+	end if;
+
+	stdio.f_close(file);
+end;
+
+
+--данные о документе, удостоверяющего личность
+function get_data_certificate(p_id number)
+return varchar2(200)
+is
+vStr varchar2(200);
+begin
+	begin
+		select x(x.[SER]||' '||x.[NUM]||' '||x.[WHO]||' '||to_char(x.[DATE],'dd.mm.yyyy'))
+			in ::[CERTIFICATE] all
+		where x%collection=p_id
+		into vStr;
+	exception
+		when NO_DATA_FOUND then vStr := null;
+	end;
+	return vStr;
+end;
+
+--получить код асв по документу, удостоверяющему лучность
+function get_type_certificate(p_id number)
+return varchar2(4)
+is
+vStr varchar2(4);
+begin
+	begin
+		select x(x.[TYPE].[CODE_ASV])
+			in ::[CERTIFICATE] all
+		where x%collection=p_id
+		into vStr;
+	exception
+		when NO_DATA_FOUND then vStr := null;
+	end;
+	return vStr;
+end;
+
+--4.2	Функция получения кода типа отношений по Id
+function get_code_relation(p_id ref [UD_CODE_NAME])
+return varchar2(4)
+is
+vStr varchar2(4);
+begin
+	begin
+		select x(x.[CODE])
+			in ::[UD_CODE_NAME]
+			where x%id=p_id%id
+			into vStr;
+	exception
+		when no_data_found then vStr := null;
+	end;
+	return vStr;
+end;
+
+-- по коллекции на адрес возвращает строку адреса из кладр или адрес строкой
+public function  GetAddrByArr(p_coll in number
+	, p_addrtype in varchar2 default 'POST'
+	, p_id out number
+	, p_format varchar2(512) default 'COUNTRY,ZIP,REGION_NCT,DISTRICT,MAIN_CITY,CITY,STREET,HOUSE,KORPUS,FLAT')
+return  varchar2(500) is
+	res varchar2(500);
+	vAddr$rec 	PERSONAL_ADDRESS;
+begin
+	for (select c1(b1%ID :ADR_ID, b1.IMP_STR :impstr )
+			in ADDRESS_TYPE , (PERSONAL_ADDRESS all :b1 ) all
+			where 1=1
+			   and b1.TYPE = c1%ID
+			   and  b1%COLLECTION = p_coll
+			   and c1.KOD = p_addrtype
+			order by   b1%id desc
+	    )
+	loop
+		p_id := c1.ADR_ID; --Башкиров В.Г. 27.11.2024
+		
+		vAddr$rec := cast_to(PERSONAL_ADD_REF,c1.adr_id);
+		--res:=[PERSONAL_ADDRESS].[API_LIB].addr_to_str(vAddr$rec, p_format,',', p_struct == 1);
+		--debug_pipe('.GetAddrByArr -- p_format='||p_format,0);
+		--debug_pipe('.GetAddrByArr -- res='||res,0);
+		res := coalesce(
+							   [PERSONAL_ADDRESS].[API_LIB].addr_to_str(vAddr$rec, p_format,',', p_struct == 1)
+							  ,	c1.impstr
+						);
+		exit;
+	end loop;
+	return res;
+end;
+
+
+--данные об адресе
+public function get_data_addr_post(p_id number, p_id_out out number) return varchar2(200) is
+vStr 		varchar2(500);	
+begin
+	vStr:=GetAddrByArr(p_id,'REAL_LIVE', p_id_out);
+	
+	if vStr is null then
+		vStr:=GetAddrByArr(p_id,'POST', p_id_out);
+	end if;
+	
+	if vStr is null then
+		vStr:=GetAddrByArr(p_id,'REGISTRATION',p_id_out);
+	end if;
+	
+	return vStr;
+end;
+
+-- функция определения есть ли требования кредитора для заявления
+function IsRequirForClaim(p_id in number) return varchar2
+is
+res varchar2(1);
+begin
+	select x(to_char(coalesce(max(1),0)))
+	in ASV_REQUIREMENT all
+	where x.claim = p_id
+	  and x.VID_DOC = cASV_VID_DOCUM_REQUIR
+	  and x%state = 'REGISTR'
+	into res;
+	return res;
+end;
+
+-- функция определения требования кредитора для заявления
+function GetRequirForClaim(p_id in number) return ref ASV_REQUIREMENT
+is
+res$r ref ASV_REQUIREMENT;
+begin
+	select x(x :ID)
+	in ASV_REQUIREMENT all
+	where x.claim = p_id
+	  and x.VID_DOC = cASV_VID_DOCUM_REQUIR
+	  and x%state = 'REGISTR'
+	into res$r;
+	return res$r;
+exception when others then
+	return null;	
+end;
+
+--Определение дополнительных документов
+function get_advanced_doc(p_claim ref [ASV_REEST_CLAIM]) return number
+is
+ iCount number;
+begin
+  select a(count(1)) in p_claim.[ADVANCED_DOC] into iCount;
+  if iCount>0 then
+   return 1;
+  else
+   return 0;
+  end if;
+end;
+
+--получение рег номера заявления
+function Get_reg_num_claim(p_id number)
+return varchar2(200)
+is
+vStr 		varchar2(200);
+begin
+	begin
+		vStr := to_char(p_id);
+	exception
+		when NO_DATA_FOUND then vStr := null;
+	end;
+	return vStr;
+end;
+
+--Импорт платежей до 20141120
+procedure ImportPayBefore_20141120(p_asv 		 in ref [ASV],
+								   p_date_begin  in[DATE],
+								   p_date_end 	 in [DATE],
+								   p_RegNumBank  in varchar2,
+								   p_RegNumAgent in varchar2,
+								   p_iTxt		 in out integer,
+								   i			 in out integer)
+is
+ vStr		varchar2(1000);
+ crt 		number;
+begin
+	
+	for (select asv(dep.[DEPOSITOR].[NUM]     		: NUM,
+						dep							: DEPID,
+						dep.[DEPOSITOR].LAST_NAME 	: LAST_NAME,
+						dep.[DEPOSITOR].FIRST_NAME 	: FIRST_NAME,
+						dep.[DEPOSITOR].MIDDLE_NAME	: MIDDLE_NAME,					
+						a.TYPE_RELATION			  	: TYPE_RELATION,
+						a.LAST_NAME 			  	: C_LAST_NAME,
+						a.FIRST_NAME			  	: C_FIRST_NAME,
+						a.MIDDLE_NAME 		  	  	: C_MIDDLE_NAME,
+						a.CERTIFICATE				: CERTIFICATE,	
+						a.DATE_DOC			 	 	: DOCUMENT_DATE,
+						m.[DATE_PROV]				: DATE_EXEC,	
+						dep.[DEPOSITOR]  		  	: DEPOSITOR,
+						m.[SUM]					  	: C_SUM,
+						d.PATT_REF.CODE			  	: CODE,	
+						m.DOCUMENT_NUM			  	: DOCUMENT_NUM,
+						m.[DATE_DOC]			  	: DATE_DOC,
+						m.[KL_KT].[2].[3].[BIC]		  : BIC,
+						m.[KL_KT].[2].[3].[KS]		  : KS,
+						m.[KL_KT].[2].[1]		  	  : KL_KT,
+						m.[KL_KT].[0]				  : CLIENT_TYPE,
+						m.[KL_KT].[1].[2].[MAIN_V_ID] : MAIN_V_ID )								
+			in ::[ASV]
+			, (::[ASV_REESTR_DEP] all :dep)
+			, (::[ASV_REEST_CLAIM] all :a)
+			, (::[DOC_IN_FOLD] all : d)
+			, (::[MAIN_DOCUM] all : m)
+			where   asv = p_asv
+				and asv.[ARRAY_REESTR_DEP] = dep%collection
+				and dep.[CLAIMS] =  a%collection			
+				and a.[CHECKPOINT].[POINT].[CODE] in ('ASV_PROCESSED','ASV_PROCESSING')
+				and (p_date_begin is null or m.[DATE_PROV] >= p_date_begin)
+				and (p_date_end   is null or m.[DATE_PROV] < p_date_end+1)
+				and a.[PAY_IN_FOLDER].[DOCS_IN_FOLD] = d%collection
+				and d.[DOCUMENT]=m%id
+				and m%state='PROV')
+		loop
+				vStr := null;
+				crt:= asv.[CERTIFICATE];
+				vStr := asv.[NUM];
+				
+				vStr := vStr || SPLITTER || asv.[LAST_NAME];
+				vStr := vStr || SPLITTER || asv.[FIRST_NAME];
+				vStr := vStr || SPLITTER || asv.[MIDDLE_NAME];
+				vStr := vStr || SPLITTER || get_code_relation(asv.[TYPE_RELATION]);
+				vStr := vStr || SPLITTER || asv.[C_LAST_NAME];
+				vStr := vStr || SPLITTER || asv.[C_FIRST_NAME];
+				vStr := vStr || SPLITTER || asv.[C_MIDDLE_NAME];
+				vStr := vStr || SPLITTER || get_type_certificate(crt);
+				vStr := vStr || SPLITTER || get_data_certificate(crt); 					--10. Реквизиты документа, удостоверяющего личность заявителя
+				vStr := vStr || SPLITTER || to_char(asv.[DOCUMENT_DATE],format_date);   --11. Дата регистрации в Банке-агенте заявления о выплате возмещения по вкладам
+				vStr := vStr || SPLITTER || to_char(asv.[DATE_EXEC],format_date);
+				vStr := vStr || SPLITTER || ::[ASV_REEST_CLAIM].[LIB].get_sum_obligation(asv.[DEPID]); --13. Сумма подлежащая выплате (в рублях)
+				vStr := vStr || SPLITTER || num_to_char(asv.[C_SUM]);					--14. Сумма произведенной выплаты (в рублях)
+				if asv.CODE in ('PAYOUT_ASV_1','PAYOUT_ASV_2', 'PAYOUT_ASV_11') then
+				 vStr := vStr || SPLITTER || '2' ; 										-- 15. Способ выплаты (налтчный)
+				else
+				 vStr := vStr || SPLITTER || '1' ; 										-- 15. Способ выплаты (безналичный)
+				end if;				
+				vStr := vStr || SPLITTER || ::[ASV].[LIB].get_type_payment(asv.CODE); 	-- 16. Вид выплаты
+				vStr := vStr || SPLITTER || asv.[DOCUMENT_NUM];						    -- 17. Номер документа подтверждающего выплату
+				vStr := vStr || SPLITTER || to_char(asv.[DATE_DOC],format_date);		-- 18. Дата документа, подтверждающего выплату
+				
+				if asv.CODE in ('PAYOUT_ASV_1','PAYOUT_ASV_2', 'PAYOUT_ASV_11') then
+					vStr := vStr || SPLITTER || SPLITTER || SPLITTER;
+				else	
+					if asv.CLIENT_TYPE = 2 then --если не клиент банка
+						vStr := vStr || SPLITTER ||asv.[BIC];
+						vStr := vStr || SPLITTER ||asv.[KS];
+						vStr := vStr || SPLITTER ||asv.[KL_KT];
+					elsif asv.CLIENT_TYPE = 1 then
+							vStr := vStr || SPLITTER ||::[SYSTEM].[VARIABLES].[OURBANK].[BIC];  --19. БИК банка получателя
+							vStr := vStr || SPLITTER ||::[SYSTEM].[VARIABLES].[OURBANK].[KS];   --20. Расчетный счет филиала банка получателя
+							vStr := vStr || SPLITTER ||asv.[MAIN_V_ID]; 						--21. Лицевой счет получателя
+					end if;
+				end if;	
+				
+				vStr := vStr || SPLITTER || 'I';												-- 22. Тип операции
+				vStr := vStr || SPLITTER || to_char(sysdate,format_date_time);					-- 23. Дата и время формирования записи
+				vStr := vStr || SPLITTER || p_RegNumBank;
+				vStr := vStr || SPLITTER || p_RegNumAgent;
+				vStr := vStr || chr(13)  || chr(10);
+				i:= i+1;
+				log_err(vStr,false);
+				stdio.WRITE_STR(p_iTxt,vStr,null,stdio.WINTEXT,false);
+		end loop;
+end;
+
+--Импорт платежей после 20141120
+procedure ImportPayAfter_20141120(p_asv 		in ref [ASV],
+								  p_date_begin  in [DATE],
+								  p_date_end 	in [DATE],
+								  p_RegNumBank  in varchar2,
+								  p_RegNumAgent in varchar2,
+								  p_iTxt		in out integer,
+								  i				in out integer)
+is
+ vStr 		varchar2(1000);
+ vPayType$i pls_integer;
+ crt 		number;
+ vIsReqCl$c	varchar2(1);
+ vRequr$rec	ASV_REQUIREMENT;
+ vTypeCl$b	boolean;
+ 
+ p_id ref [PERSONAL_ADDRESS]; --Башкиров В.Г 2024
+begin
+	for (select asv(dep%id					  		: DEPID,	
+		                dep.[DEPOSITOR].[NUM]     	: NUM,
+						dep.[DEPOSITOR].LAST_NAME   : LAST_NAME,
+						dep.[DEPOSITOR].FIRST_NAME  : FIRST_NAME,
+						dep.[DEPOSITOR].MIDDLE_NAME : MIDDLE_NAME,
+						dep.[DEPOSITOR]  		  	: DEPOSITOR,
+						a%id					  	: CLMID,		
+						a.[ADDRESS_REG]			  	: ADR_REG,
+						a.TYPE_RELATION			  	: TYPE_RELATION,
+						a.LAST_NAME 			  	: C_LAST_NAME,
+						a.FIRST_NAME			  	: C_FIRST_NAME,
+						a.MIDDLE_NAME 		  	  	: C_MIDDLE_NAME,
+						a.CERTIFICATE			  	: CERTIFICATE,	
+						a.DATE_DOC			 	  	: DOCUMENT_DATE,
+						m.[DATE_PROV]			  	: DATE_EXEC,	
+						m.[SUM]					  	: DOC_SUM,
+						d.PATT_REF.CODE			  	: CODE,	
+						m.DOCUMENT_NUM			  	: DOCUMENT_NUM,
+						m.[DATE_DOC]			  	: DATE_DOC,
+						m.[KL_KT].[2].[3].[BIC]		  : BIC,
+						m.[KL_KT].[2].[3].[KS]		  : KS,
+						m.[KL_KT].[2].[1]		  	  : KL_KT,
+						m.[KL_KT].[0]				  : CLIENT_TYPE,
+						m.[KL_KT].[1].[2].[MAIN_V_ID] : MAIN_V_ID,
+						(select br(br%id)
+							in ::[BRANCH] all
+							where br.[BANK] = m.[KL_KT].[2].[3]
+						  	fetch 1
+						)							: FIL
+					)								
+			in ::[ASV]
+			, (::[ASV_REESTR_DEP] all :dep)
+			, (::[ASV_REEST_CLAIM] all :a)
+			, (::[DOC_IN_FOLD] all : d)
+			, (::[MAIN_DOCUM] all : m)
+			where   asv = p_asv
+				and asv.[ARRAY_REESTR_DEP] = dep%collection
+				and dep.[CLAIMS] =  a%collection			
+				and a.[CHECKPOINT].[POINT].[CODE] in ('ASV_PROCESSED','ASV_PROCESSING')
+				and (p_date_begin is null or m.[DATE_PROV] >= p_date_begin)
+				and (p_date_end   is null or m.[DATE_PROV] < p_date_end+1)
+				and a.[PAY_IN_FOLDER].[DOCS_IN_FOLD] = d%collection
+				and d.[DOCUMENT] = m%id
+				and m%state = 'PROV'
+				)
+		loop
+				vStr := null;
+				crt	 :=asv.[CERTIFICATE];
+				
+				--Способ выплаты (2-наличный,1-безналичный)
+				if asv.CODE in ('PAYOUT_ASV_1','PAYOUT_ASV_2', 'PAYOUT_ASV_11') then
+					vPayType$i := 2;
+				else
+					vPayType$i := 1;
+				end if;		
+				
+				-- определение требования для заявления(1 -есть,0 - нет)
+				vIsReqCl$c := IsRequirForClaim(asv.ClmId);
+				--===================================================================================================================================
+				vStr := asv.[NUM];																-- 1. Номер вкладчика по реестру
+				vStr := vStr || SPLITTER || asv.[LAST_NAME];									-- 2. Фамилия вкладчика
+				vStr := vStr || SPLITTER || asv.[FIRST_NAME];									-- 3. Имя вкладчика
+				vStr := vStr || SPLITTER || asv.[MIDDLE_NAME];									-- 4. Отчество вкладчика
+				vStr := vStr || SPLITTER || get_code_relation(asv.[TYPE_RELATION]);				-- 5. Тип отношения заявителя к вкладчику
+				vStr := vStr || SPLITTER || asv.[C_LAST_NAME];									-- 6. Фамилия заявителя
+				vStr := vStr || SPLITTER || asv.[C_FIRST_NAME];                         		-- 7. Имя заявителя
+				vStr := vStr || SPLITTER || asv.[C_MIDDLE_NAME];                        		-- 8. Отчество заявителя
+				vStr := vStr || SPLITTER || get_type_certificate(crt);							-- 9. Вид документа, удостоверяющего личность заявителя
+				vStr := vStr || SPLITTER || get_data_certificate(crt); 							-- 10. Реквизиты документа, удостоверяющего личность заявителя
+				vStr := vStr || SPLITTER || get_data_addr_post(asv.ADR_REG,p_id);				-- 11. Адрес для почтовых уведомлений заявителя
+				vStr := vStr || SPLITTER || to_char(asv.[DOCUMENT_DATE],format_date);   		-- 12. Дата регистрации в Банке-агенте заявления о выплате возмещения по вкладам
+				vStr := vStr || SPLITTER || Get_reg_num_claim(asv.clmid);						-- 13. Регистрационный номер заявления
+				vStr := vStr || SPLITTER || to_char(asv.[DATE_EXEC],format_date);				-- 14. Дата выплаты
+				vStr := vStr || SPLITTER || ::[ASV_REEST_CLAIM].[LIB].get_sum_obligation(asv.[DEPID]);	-- 15. Сумма подлежащая выплате (в рублях)				
+				vStr := vStr || SPLITTER || num_to_char(asv.[DOC_SUM]);							-- 16. Сумма произведенной выплаты (в рублях)
+				vStr := vStr || SPLITTER || vPayType$i ; 										-- 17. Способ выплаты (безналичный)							
+				vStr := vStr || SPLITTER || ::[ASV].[LIB].get_type_payment(asv.CODE); 			-- 18. Вид выплаты
+				vStr := vStr || SPLITTER || asv.[DOCUMENT_NUM];						   			-- 19. Номер документа подтверждающего выплату
+				vStr := vStr || SPLITTER || to_char(asv.[DATE_DOC],format_date);				-- 20. Дата документа, подтверждающего выплату
+				
+				if vPayType$i  = 2 then
+					vStr := vStr || SPLITTER ||'';                          					-- 21. БИК банка получателя
+					vStr := vStr || SPLITTER ||'';                         						-- 22. Расчетный счет филиала банка получателя
+					vStr := vStr || SPLITTER ||'';                         						-- 23. Лицевой счет получателя
+				else --vPayType$i  = 1
+					if asv.CLIENT_TYPE = 2 then --если не клиент банка
+						vStr := vStr || SPLITTER ||asv.[BIC];
+						vStr := vStr || SPLITTER ||asv.[KS];
+						vStr := vStr || SPLITTER ||asv.[KL_KT];
+					elsif asv.CLIENT_TYPE = 1 then
+							vStr := vStr || SPLITTER ||::[SYSTEM].[VARIABLES].[OURBANK].[BIC]; 	-- 21. БИК банка получателя
+							vStr := vStr || SPLITTER ||::[SYSTEM].[VARIABLES].[OURBANK].[KS]; 	-- 22. Расчетный счет филиала банка получателя
+							vStr := vStr || SPLITTER ||asv.[MAIN_V_ID]; 						-- 23. Лицевой счет получателя
+					end if;
+				end if;	
+				if asv.[FIL] is not null then
+					-- получатель средств - филиал нашего банка
+					vStr := vStr || SPLITTER || asv.Doc_sum;
+				else
+					vStr := vStr || SPLITTER || ASV_REEST_CLAIM.LIB.get_money_in_bank_by_client(asv.Code, asv.Doc_sum);
+				end if;
+																								-- 24. Сумма денежных средств, оставшаяся в банке-агенте
+																								-- 	   на дату выплаты возмещения  (в рублях)
+				vRequr$rec := GetRequirForClaim(asv.ClmId);
+				
+				--
+				if vIsReqCl$c = '1' then -- есть требование кредитора
+					
+					vStr := vStr || SPLITTER || vRequr$rec.INN;										-- 25. ИНН получателя	
+					vTypeCl$b  := [ASV].LIB.get_dep_type(asv.Depid); --ФЛ+ИП = true ; ИП = False; ФЗ= null
+					--
+					if vTypeCl$b is not null then --vTypeCl$b
+						--ФЛ+ИП (берем реквизиты получателя ИП)
+						--ИП (берем реквизиты получателя ИП)
+						if vRequr$rec.CLIENT_REQ_IP.[0]  = 2 then -- наличные
+								vStr := vStr || SPLITTER ||'';                          								-- 26. БИК банка получателя (кредитора)	
+								vStr := vStr || SPLITTER ||'';                         									-- 27. Расчетный счет филиала банка получателя (кредитора)										
+								vStr := vStr || SPLITTER ||'';                         									-- 28. ФИО (наименование) получателя (кредитора)
+								vStr := vStr || SPLITTER ||'';                         									-- 29. Лицевой счет получателя (кредитора)
+						else --vPayType$i  = 1  безналичные
+								if vRequr$rec.[CLIENT_REQ_IP].[MEMO].[0] = 2 then --не клиент банка
+									vStr := vStr || SPLITTER ||vRequr$rec.CLIENT_REQ_IP.[MEMO].[2].[3].[BIC]; 			-- 26. БИК банка получателя (кредитора)	
+									vStr := vStr || SPLITTER ||vRequr$rec.CLIENT_REQ_IP.[MEMO].[2].[3].[KS];  			-- 27. Расчетный счет филиала банка получателя (кредитора)										
+									vStr := vStr || SPLITTER ||vRequr$rec.CLIENT_REQ_IP.[MEMO].[2].[2];  	  			-- 28. ФИО (наименование) получателя (кредитора)
+									vStr := vStr || SPLITTER ||vRequr$rec.CLIENT_REQ_IP.[MEMO].[2].[1];  	  			-- 29. Лицевой счет получателя (кредитора)
+								elsif vRequr$rec.[CLIENT_REQ_IP].[MEMO].[0] = 1 then -- клиент банка
+										vStr := vStr || SPLITTER ||::[SYSTEM].[VARIABLES].[OURBANK].[BIC]; 				-- 26. БИК банка получателя (кредитора)	
+										vStr := vStr || SPLITTER ||::[SYSTEM].[VARIABLES].[OURBANK].[KS]; 				-- 27. Расчетный счет филиала банка получателя (кредитора)										
+										vStr := vStr || SPLITTER ||vRequr$rec.CLIENT_REQ_IP.[MEMO].[1].[1].[NAME]; 		-- 28. ФИО (наименование) получателя (кредитора)
+										vStr := vStr || SPLITTER ||vRequr$rec.CLIENT_REQ_IP.[MEMO].[1].[2].[MAIN_V_ID];	-- 29. Лицевой счет получателя (кредитора)
+								end if; --CLIENT_TYPE
+						end if;	--vPayType$i					
+					else
+						--ФЗ (берем реквизиты получателя)
+						if vRequr$rec.CLIENT_REQ.[0]  = 2 then -- наличные
+								vStr := vStr || SPLITTER ||'';                          								-- 26. БИК банка получателя (кредитора)	
+								vStr := vStr || SPLITTER ||'';                         									-- 27. Расчетный счет филиала банка получателя (кредитора)										
+								vStr := vStr || SPLITTER ||'';                         									-- 28. ФИО (наименование) получателя (кредитора)
+								vStr := vStr || SPLITTER ||'';                         									-- 29. Лицевой счет получателя (кредитора)
+						else --vPayType$i  = 1  безналичные
+								if vRequr$rec.[CLIENT_REQ].[MEMO].[0] = 2 then --не клиент банка
+									vStr := vStr || SPLITTER ||vRequr$rec.CLIENT_REQ.[MEMO].[2].[3].[BIC]; 				-- 26. БИК банка получателя (кредитора)	
+									vStr := vStr || SPLITTER ||vRequr$rec.CLIENT_REQ.[MEMO].[2].[3].[KS];  				-- 27. Расчетный счет филиала банка получателя (кредитора)										
+									vStr := vStr || SPLITTER ||vRequr$rec.CLIENT_REQ.[MEMO].[2].[2];  	  				-- 28. ФИО (наименование) получателя (кредитора)
+									vStr := vStr || SPLITTER ||vRequr$rec.CLIENT_REQ.[MEMO].[2].[1];  	  				-- 29. Лицевой счет получателя (кредитора)
+								elsif vRequr$rec.[CLIENT_REQ].[MEMO].[0] = 1 then -- клиент банка
+										vStr := vStr || SPLITTER ||::[SYSTEM].[VARIABLES].[OURBANK].[BIC]; 				-- 26. БИК банка получателя (кредитора)	
+										vStr := vStr || SPLITTER ||::[SYSTEM].[VARIABLES].[OURBANK].[KS]; 				-- 27. Расчетный счет филиала банка получателя (кредитора)										
+										vStr := vStr || SPLITTER ||vRequr$rec.CLIENT_REQ.[MEMO].[1].[1].[NAME]; 		-- 28. ФИО (наименование) получателя (кредитора)
+										vStr := vStr || SPLITTER ||vRequr$rec.CLIENT_REQ.[MEMO].[1].[2].[MAIN_V_ID];	-- 29. Лицевой счет получателя (кредитора)
+								end if; --CLIENT_TYPE
+						end if;	--vPayType$i						
+					end if; -- vTypeCl$b
+				else --vIsReqCl$c = '0'  -- нет требования кредитора
+					vStr := vStr || SPLITTER || '';												-- 25. ИНН получателя																	
+					vStr := vStr || SPLITTER || '';												-- 26. БИК банка получателя (кредитора)														
+					vStr := vStr || SPLITTER || '';												-- 27. Расчетный счет филиала банка получателя (кредитора)										
+					vStr := vStr || SPLITTER || '';												-- 28. ФИО (наименование) получателя (кредитора)												
+					vStr := vStr || SPLITTER || '';												-- 29. Лицевой счет получателя (кредитора)																	
+				end if;
+				
+				vStr := vStr || SPLITTER || '';													-- 30. Номер пластиковой карты																					
+				vStr := vStr || SPLITTER || 'I';												-- 31. Тип операции
+				vStr := vStr || SPLITTER || to_char(sysdate,format_date_time);					-- 32. Дата и время формирования записи
+				vStr := vStr || SPLITTER || p_RegNumBank;										-- 33. Регистрационный номер банка
+				vStr := vStr || SPLITTER || p_RegNumAgent;										-- 34. Регистрационный номер Банка-агента
+				vStr := vStr || chr(13)  || chr(10);
+				--===================================================================================================================================
+				i:= i+1;
+				log_err(vStr,false);
+				stdio.WRITE_STR(p_iTxt,vStr,null,stdio.WINTEXT,false);
+		end loop;
+end;		
+
+-- формирование файла Сведения о принятых Банком-агентом заявлениях о несогласии
+procedure ExportDoc_PAY(p_asv 		in ref [ASV],
+								  p_date_begin  in [DATE],
+								  p_date_end 	in [DATE],
+								  p_RegNumBank  in varchar2,
+								  p_RegNumAgent in varchar2,
+								  p_iTxt		in out integer,
+								  i				in out integer)
+is
+ vStr 		varchar2(1000);
+ crt 		number;
+begin
+	for (select asv(dep.[DEPOSITOR].[NUM]     : NUM,
+						r.LAST_NAME 			  : LAST_NAME,
+						r.FIRST_NAME			  : FIRST_NAME,
+						r.MIDDLE_NAME 		  	  : MIDDLE_NAME,
+						dep.[DEPOSITOR]  		  : DEPOSITOR,
+						r%id					  : R_CLMID,
+						a%id					  : CLMID,												
+						a.TYPE_RELATION			  : TYPE_RELATION,
+						a.LAST_NAME 			  : C_LAST_NAME,
+						a.FIRST_NAME			  : C_FIRST_NAME,
+						a.MIDDLE_NAME 		  	  : C_MIDDLE_NAME,
+						r.CERTIFICATE			  : CERTIFICATE,	
+						r.DATE_REG			 	  : DATE_REG )								
+			in ::[ASV]
+			, (::[ASV_REESTR_DEP] all :dep)
+			, (::[ASV_REEST_CLAIM] all :a)
+			, (::[ASV_REQUIREMENT] all :r)			
+			where asv=p_asv
+			 	and asv.[ARRAY_REESTR_DEP] = dep%collection
+				and dep.[CLAIMS] =  a%collection			
+				and a=r.CLAIM
+				and (r.[DATE_REG] >= p_date_begin or p_date_begin is null)
+				and (r.[DATE_REG] < p_date_end+1 or p_date_end is null)
+				and r.[VID_DOC] = cASV_VID_DOCUM_COMPENS_DIS
+		)
+		loop
+				vStr := null;
+				crt	 :=asv.[CERTIFICATE];
+
+				--===================================================================================================================================
+				vStr := asv.[NUM];																-- 1. Номер вкладчика по реестру
+				vStr := vStr || SPLITTER || asv.[LAST_NAME];									-- 2. Фамилия вкладчика
+				vStr := vStr || SPLITTER || asv.[FIRST_NAME];									-- 3. Имя вкладчика
+				vStr := vStr || SPLITTER || asv.[MIDDLE_NAME];									-- 4. Отчество вкладчика
+				vStr := vStr || SPLITTER || get_code_relation(asv.[TYPE_RELATION]);				-- 5. Тип отношения заявителя к вкладчику
+				vStr := vStr || SPLITTER || asv.[C_LAST_NAME];									-- 6. Фамилия заявителя
+				vStr := vStr || SPLITTER || asv.[C_FIRST_NAME];                         		-- 7. Имя заявителя
+				vStr := vStr || SPLITTER || asv.[C_MIDDLE_NAME];                        		-- 8. Отчество заявителя
+				vStr := vStr || SPLITTER || get_type_certificate(crt);							-- 9. Вид документа, удостоверяющего личность заявителя
+				vStr := vStr || SPLITTER || get_data_certificate(crt); 							-- 10. Реквизиты документа, удостоверяющего личность заявителя
+				vStr := vStr || SPLITTER || to_char(asv.[DATE_REG],format_date);   				-- 11. Дата регистрации в Банке-агенте заявления о несогласии
+				vStr := vStr || SPLITTER || Get_reg_num_claim(asv.r_clmid);						-- 12. Регистрационный номер заявления
+				vStr := vStr || SPLITTER || to_char(sysdate,format_date);						-- 13. Дата передачи о несогласии в Агентство
+				vStr := vStr || SPLITTER || get_advanced_doc(asv.ClmId);						-- 14. Наличие дополнительных документов
+				vStr := vStr || SPLITTER || 'I';												-- 15. Тип операции
+				vStr := vStr || SPLITTER || to_char(sysdate,format_date_time);					-- 16. Дата и время формирования записи
+				vStr := vStr || SPLITTER || p_RegNumBank;										-- 17. Регистрационный номер банка
+				vStr := vStr || SPLITTER || p_RegNumAgent;										-- 18. Регистрационный номер Банка-агента
+				vStr := vStr || chr(13)  || chr(10);
+				--===================================================================================================================================
+				i:= i+1;
+				log_err(vStr,false);
+				stdio.WRITE_STR(p_iTxt,vStr,null,stdio.WINTEXT,false);
+		end loop;
+end; --ExportDoc_PAY
+
+function export_file(p_reestr ref [ASV_REESTR_FILES], p_file ref [ASV_TYPE_PACKAGE], p_date_begin [DATE], p_date_end [DATE], p_path [STRING_255] default null)
+return varchar2(255)
+is
+i				integer;
+vStr			varchar2(1000);
+vPath  			varchar2(255);		--путь для создания файла
+rFile			ref [ASV_FILE];		--ссылка на "АСВ. Реестр файлов"
+rFile_name 		varchar2(255);		--имя создаваемого файла
+rFile_name_ar 	varchar2(255);		--имя создаваемого архива
+iNum			integer;			--порядковый номер за день
+vNum			::[ASV_REESTR_FILES].[NUM]%type;  -- Порядковый номер пакета
+dDate			date;
+iTxt			integer;
+vRegNumBank 	::[ASV_REESTR_FILES].[REG_NUM]%type; 		-- Регистрационный номер
+vRegNumAgent 	::[ASV_REESTR_FILES].[REG_NUM_BANK]%type; 	-- Регистрационный номер Банка-агента
+rReestr			ref [ASV_REESTR_FILES];
+v_blob			blob;
+v_blob_zip		blob;
+p_asv 			ref [ASV];
+crt				number;
+begin
+	log_err('Запуск экспорта файла: '||p_file.[CODE],false);
+	--определеяем порядковый номер пакета
+	iNum 	:= nvl(::[DEFVALS].[SLIB].RestoreNum(::[SYSTEM],&METHOD$CLASS,&METHOD$SNAME,'NUM_PACKAGE_'||p_file.[CODE]),1);
+	dDate 	:= nvl(::[DEFVALS].[SLIB].RestoreDate(::[SYSTEM],&METHOD$CLASS,&METHOD$SNAME,'DATE_PACKAGE_'||p_file.[CODE]),trunc(sysdate,'dd')-1);
+	if dDate<trunc(sysdate,'dd') then
+		iNum 	:= 1;
+		dDate 	:= trunc(sysdate,'dd') ;
+	else
+		iNum := iNum + 1;	
+	end if;
+	::[DEFVALS].[SLIB].SaveNum(::[SYSTEM],&METHOD$CLASS,&METHOD$SNAME,'NUM_PACKAGE_'||p_file.[CODE],iNum);
+	::[DEFVALS].[SLIB].SaveDate(::[SYSTEM],&METHOD$CLASS,&METHOD$SNAME,'DATE_PACKAGE_'||p_file.[CODE],dDate);
+	log_err('Номер пакета:'||iNum,false);	
+	vNum := LPAD(iNum, 6, '0');
+	if p_path is not null then
+		vPath := p_path;
+	else	
+		vPath := ::[SYSTEM_PARAMS].[GET](
+				'PATH_ASV'		--Код параметра
+				,false			--Искл.ситуация при неудачном поиске
+				,null			--Подразделение
+				);
+	end if;	
+	vRegNumBank := trim(to_char(p_reestr.[REG_NUM],'0000'));
+	vRegNumAgent:= trim(to_char(p_reestr.[REG_NUM_BANK],'0000'));
+	p_asv:= p_reestr.[ASV_LINK];
+	
+		
+	log_err('Регистрационный номер банка-банкрота:'||vRegNumBank,false);
+	log_err('Регистрационный номер банка-агента:'||vRegNumAgent,false);
+	if p_file.[CODE]='P_ERB' then
+		i := 1;
+		rFile_name 	:= 'I_ERB_'||vRegNumBank||'_'||vRegNumAgent||'_'||vNum||to_char(sysdate,'ddmmyy')||'.txt';
+		rFile_name_ar 	:= 'ERB_'||vRegNumBank||'_'||vRegNumAgent||'_'||vNum||to_char(sysdate,'ddmmyy')||'.zip';
+		log_err('Имя создаваемого файла:'||rFile_name_ar,false);
+		log_err('Строки в файле:',false);
+		iTxt := stdio.open(vPath,rFile_name,'w');
+		for x in ::[ASV_ERRORCONTROL]
+			where x.[FILE].[REESTR_FILES]=p_reestr
+		loop
+			vStr := x.[FILE].[FILE_NAME];
+			vStr := vStr || SPLITTER || to_char(x.[NUM_STRING]);
+			vStr := vStr || SPLITTER || to_char(x.[NUM_FIELD]);
+			vStr := vStr || SPLITTER || to_char(x.[CODE_ERROR].[CODE]);
+			vStr := vStr || SPLITTER || to_char(x.[CODE_ERROR].[ERROR_TEXT]);
+			vStr := vStr || SPLITTER || to_char(x.[REG_NUM_BANK].[REG_NUM_BANK].[REG_NUM]);
+			vStr := vStr || SPLITTER || to_char(x.[REG_NUM_AGENT]);
+			vStr := vStr || chr(13)  || chr(10);
+			log_err(vStr,false);
+
+			stdio.WRITE_STR(iTxt,vStr,null,stdio.WINTEXT,false);
+			i := i+1;	
+		end loop;
+		
+		
+		if i=1 then
+			stdio.put_line_buf('Сообщения о ошибках отсутствуют. Файл ERB пустой');
+			stdio.WRITE_STR(iTxt,chr(10),null,stdio.WINTEXT,false);
+		end if;
+		stdio.close(iTxt);
+		v_blob := file2blob(vPath,rFile_name);
+		
+		--Создадим запись в "АСВ. Реестр архивных файлов"
+		rReestr := ::[ASV_REESTR_FILES].[NEW_AUTO](
+				p_file.[CODE]		--Идентификатор пакета обмена
+				,sysdate			--Дата формирования
+				,rFile_name_ar		--Наименование файла
+				,vRegNumBank		--Регистрационный номер
+				,vRegNumAgent		--Регистрационный номер Банка-агента
+				,iNum				--Порядковый номер пакета
+				,sysdate			--Дата формирования пакета
+				,p_asv
+			);
+		
+		--Создадим запись в "АСВ. Реестр файлов"
+		rFile :=::[ASV_FILE].[NEW_AUTO](
+				'EPA'							--Идентификатор пакета обмена
+				,rFile_name						--Наименование файла
+				,vRegNumBank					--Регистрационный номер
+				,vRegNumAgent					--Регистрационный номер Банка-агента
+				,iNum							--Порядковый номер пакета
+				,sysdate						--Дата формирования пакета
+				,null							--Статус файла
+				,i-1							--Количество записей
+				,rReestr						--Файлы пакета
+				,null							--Сообщение об ошибке
+			);
+		rFile.[STATUS] := 'UNLOAD';
+		--создадим архив	
+		begin
+			::[RUNTIME].[ZIP].add_file(v_blob_zip,rFile_name,v_blob);
+		exception
+			when others then log_err('Ошибка при добавлении файла в архив:'||rFile_name,false);
+		end;
+		::[RUNTIME].[ZIP].finish_zip(v_blob_zip);
+		--сохраним архив
+		blob2file(v_blob_zip,vPath,rFile_name_ar);
+		
+	--*****Экспорт выплат****	
+	elsif p_file.[CODE]='P_PAY' then
+		declare
+			package_info	::[ASV_REESTR_FILES].[LIB_EXPORT].gt_package_info;
+			file_info		::[ASV_REESTR_FILES].[LIB_EXPORT].gt_file_info;
+		begin
+		
+			--=========================================================
+			rFile_name_ar 	:= 'PAY_'||vRegNumBank||'_'||vRegNumAgent||'_'||vNum||to_char(sysdate,'ddmmyy')||'.zip';
+			log_err('Имя создаваемого файла:'||rFile_name_ar,false);
+			log_err('Строки в файле:',false);
+			
+	
+			rReestr := ::[ASV_REESTR_FILES].[NEW_AUTO](
+					p_file.[CODE]		--Идентификатор пакета обмена
+					,sysdate			--Дата формирования
+					,rFile_name_ar		--Наименование файла
+					,vRegNumBank		--Регистрационный номер
+					,vRegNumAgent		--Регистрационный номер Банка-агента
+					,iNum				--Порядковый номер пакета
+					,sysdate			--Дата формирования пакета
+					,p_asv
+				);
+		
+			package_info.asv := p_asv;
+			package_info.package_num := iNum;
+			package_info.bank_reg_num := vRegNumBank;
+			package_info.agent_reg_num := vRegNumAgent;
+			package_info.path := vPath;
+			
+			------------------------------------------------------------------------------------------------------
+			---------------------------------------DEC------------------------------------------------------------
+			------------------------------------------------------------------------------------------------------
+			file_info := ::[ASV_REESTR_FILES].[LIB_EXPORT].form_dec( i_package_info	==	package_info
+																	,i_date_begin	==	p_date_begin
+																	,i_date_end		==	p_date_end
+																   );
+			rFile := ::[ASV_REESTR_FILES].[LIB_EXPORT].create_asv_file(	 i_package_info		==	package_info
+																		,i_file_info		==	file_info
+																		,i_reestr			==	rReestr
+																	  );
+			log_err('Создан файл:'||vPath||file_info.file_name,false);
+			--создадим архив				
+			v_blob := file2blob(vPath,file_info.file_name);
+			begin
+				::[RUNTIME].[ZIP].add_file(v_blob_zip,file_info.file_name,v_blob);
+			exception
+				--	если при добавлении файла к архиву возникла ошибка, то работу необходимо продолжать
+				when others then null;
+			end;
+			------------------------------------------------------------------------------------------------------
+			------------------------------------------------------------------------------------------------------
+			------------------------------------------------------------------------------------------------------
+			
+			------------------------------------------------------------------------------------------------------
+			---------------------------------------PAY------------------------------------------------------------
+			------------------------------------------------------------------------------------------------------
+			file_info := ::[ASV_REESTR_FILES].[LIB_EXPORT].form_pay( i_package_info	==	package_info
+																	,i_date_begin	==	p_date_begin
+																	,i_date_end		==	p_date_end
+																   );
+			rFile := ::[ASV_REESTR_FILES].[LIB_EXPORT].create_asv_file(	 i_package_info		==	package_info
+																		,i_file_info		==	file_info
+																		,i_reestr			==	rReestr
+																	  );
+			log_err('Создан файл:'||vPath||file_info.file_name,false);
+			--создадим архив				
+			v_blob := file2blob(vPath,file_info.file_name);
+			begin
+				::[RUNTIME].[ZIP].add_file(v_blob_zip,file_info.file_name,v_blob);
+			exception
+				--	если при добавлении файла к архиву возникла ошибка, то работу необходимо продолжать
+				when others then null;
+			end;
+			------------------------------------------------------------------------------------------------------
+			------------------------------------------------------------------------------------------------------
+			------------------------------------------------------------------------------------------------------
+			
+			------------------------------------------------------------------------------------------------------
+			---------------------------------------ZON------------------------------------------------------------
+			------------------------------------------------------------------------------------------------------
+			file_info := ::[ASV_REESTR_FILES].[LIB_EXPORT].form_zon( i_package_info	==	package_info
+																	,i_date_begin	==	p_date_begin
+																	,i_date_end		==	p_date_end
+																   );
+			rFile := ::[ASV_REESTR_FILES].[LIB_EXPORT].create_asv_file(	 i_package_info		==	package_info
+																		,i_file_info		==	file_info
+																		,i_reestr			==	rReestr
+																	  );
+			log_err('Создан файл:'||vPath||file_info.file_name,false);
+			--создадим архив				
+			v_blob := file2blob(vPath,file_info.file_name);
+			begin
+				::[RUNTIME].[ZIP].add_file(v_blob_zip,file_info.file_name,v_blob);
+			exception
+				--	если при добавлении файла к архиву возникла ошибка, то работу необходимо продолжать
+				when others then null;
+			end;
+			------------------------------------------------------------------------------------------------------
+			------------------------------------------------------------------------------------------------------
+			------------------------------------------------------------------------------------------------------
+			
+			
+			------------------------------------------------------------------------------------------------------
+			---------------------------------------ZON_1----------------------------------------------------------
+			------------------------------------------------------------------------------------------------------
+			file_info := ::[ASV_REESTR_FILES].[LIB_EXPORT].form_zon_1(	 i_package_info	==	package_info
+																		,i_date_begin	==	p_date_begin
+																		,i_date_end		==	p_date_end
+																	   );
+			rFile := ::[ASV_REESTR_FILES].[LIB_EXPORT].create_asv_file(	 i_package_info		==	package_info
+																		,i_file_info		==	file_info
+																		,i_reestr			==	rReestr
+																	  );
+			log_err('Создан файл:'||vPath||file_info.file_name,false);
+			--создадим архив				
+			v_blob := file2blob(vPath,file_info.file_name);
+			begin
+				::[RUNTIME].[ZIP].add_file(v_blob_zip,file_info.file_name,v_blob);
+			exception
+				--	если при добавлении файла к архиву возникла ошибка, то работу необходимо продолжать
+				when others then null;
+			end;
+			------------------------------------------------------------------------------------------------------
+			------------------------------------------------------------------------------------------------------
+			------------------------------------------------------------------------------------------------------
+			
+			::[RUNTIME].[ZIP].finish_zip(v_blob_zip);
+			--сохраним архив
+			blob2file(v_blob_zip,vPath,rFile_name_ar);
+		end;
+	
+
+
+
+		
+		
+	elsif p_file.[CODE]='P_RET' then
+		i := 1; -- для подсчета количества добавленных записей
+		rFile_name 	:= 'I_RET_'||vRegNumBank||'_'||vRegNumAgent||'_'||vNum||to_char(sysdate,'ddmmyy')||'.txt';
+		rFile_name_ar 	:= 'RET_'||vRegNumBank||'_'||vRegNumAgent||'_'||vNum||to_char(sysdate,'ddmmyy')||'.zip';
+		log_err('Имя создаваемого файла:'||rFile_name_ar,false);
+		log_err('Строки в файле:',false);
+		iTxt := stdio.open(vPath,rFile_name,'w');
+		--выберем заявления по банку в состоянии "АСВ.Возврат"
+	  for (select asv(dep.[DEPOSITOR].[NUM]     : NUM
+						,trim(case when dep.[DEPOSITOR_TYPE] = &ud('ASV_TYPE_DEPOSITOR', '2') then dep.[FULL_NAME_CORP]		-- полное наименоваение организации (Нужно сокращенное)
+						 else dep.[LAST_NAME] || ' '|| dep.[FIRST_NAME] || ' '|| dep.[MIDDLE_NAME]							-- ФИО
+						 end)									: CLIENT_NAME												-- полное имя
+						,m.[DATE_EXEC]							: DATE_EXEC													-- дата возврата
+						,m.[SUM]								: SUMM														-- сумма возврата
+						,case when d.[PATT_REF].[CODE] in ('PAYOUT_ASV_9','PAYOUT_ASV_10') then 3	-- ИП
+							  when d.[PATT_REF].[CODE] in ('PAYOUT_ASV_14','PAYOUT_ASV_15')then 2	-- ЮЛ
+						 	  when d.[PATT_REF].[CODE] in ('PAYOUT_ASV_5','PAYOUT_ASV_6')  then 1	-- ФЛ 	(коды должны соответствовать запросу на поиск докуменов в операции "Привязать документ возврата" ::[ASV_REEST_CLAIM].[RETURN_DOCUM])		
+						 end									: DEPOSITOR_TYPE											-- тип лица
+						,case when d.[PATT_REF].[CODE] in ('PAYOUT_ASV_1','PAYOUT_ASV_2', 'PAYOUT_ASV_11') then 2			-- наличный
+						 else 1																								-- безналичный		
+						 end									: RETURN_MONEY												-- способ возврата
+						,a.[TYPE_COMPENS].[CODE]				: TYPE_COMPENS												-- вид страхование?
+						,m.[DOCUMENT_NUM]						: DOCUMENT_NUM												-- Номер документа возврата
+						,m.[DATE_DOC]							: DATE_DOC													-- Дата документа возврата
+						,case when d.[PATT_REF].[CODE] in ('PAYOUT_ASV_1','PAYOUT_ASV_2', 'PAYOUT_ASV_11') then
+								SPLITTER || SPLITTER || SPLITTER || SPLITTER												-- для наличного вернем пусто
+						 	when m.[KL_DT].[0] = 2 then 						--если не клиент банка
+						 		m.[KL_DT].[2].[2]		|| SPLITTER ||			--Имя организации
+						 		m.[KL_DT].[2].[3].[BIC] || SPLITTER || 			--БИК
+						 		m.[KL_DT].[2].[3].[INN] || SPLITTER ||  		--ИНН
+						 		m.[KL_DT].[2].[3].[KS]	|| SPLITTER ||  		--РС
+						 		m.[KL_DT].[2].[1]								--ЛС
+						 	when m.[KL_DT].[0] = 1 then 								--если наш клиент
+						 		m.[KL_DT].[1].[1].[NAME]			|| SPLITTER ||		--Наименование
+								::[SYSTEM].[VARIABLES].[OURBANK].[BIC] || SPLITTER ||	--БИК
+						 		::[SYSTEM].[VARIABLES].[OURBANK].[INN] || SPLITTER ||	--ИНН
+						 		::[SYSTEM].[VARIABLES].[OURBANK].[KS]  || SPLITTER ||  	--РС
+								m.[KL_DT].[1].[2].[MAIN_V_ID]							--ЛС
+						 	end 								: REQ_DECLARE												-- БИК/ИНН/РС/ЛС (Заявитель)
+						,m.[NAZN]					 			: NAZN														-- Назначение платежа
+						,'I'									: TYPE_OPER													-- Тип операции (по умолчанию I)	
+				
+						)
+			in ::[ASV]
+			, (::[ASV_REESTR_DEP] all :dep)
+			, (::[ASV_REEST_CLAIM] all :a)
+			, (::[DOC_IN_FOLD] all : d)
+			, (::[MAIN_DOCUM] all : m)
+			where   asv = p_asv
+				and asv.[ARRAY_REESTR_DEP] = dep%collection
+				and dep.[CLAIMS] =  a%collection			
+				and (p_date_begin is null or m.[DATE_PROV] >= p_date_begin)
+				and (p_date_end   is null or m.[DATE_PROV] < p_date_end+1)
+				and a.[RETURN_IN_FOLDER].[DOCS_IN_FOLD] = d%collection
+				and d.[DOCUMENT] = m%id
+				and m%state='PROV')
+			loop
+
+				vStr := asv.[NUM];													--1. Уникальный номер вкладчика
+				vStr := vStr || SPLITTER || asv.[CLIENT_NAME];						--2. Полное имя(ФИО. сокращенное наименование юл.)
+				vStr := vStr || SPLITTER || to_char(asv.[DATE_EXEC], format_date);	--3. Дата возврата
+				vStr := vStr || SPLITTER || num_to_char(asv.[SUMM]);				--4. Сумма возвращенной выплаты (в рублях)
+				vStr := vStr || SPLITTER || asv.[DEPOSITOR_TYPE];					--5. Тип лица	
+				vStr := vStr || SPLITTER || asv.[RETURN_MONEY];						--6. Способ возврата (1-безнал/2-нал.)	
+				vStr := vStr || SPLITTER || asv.[TYPE_COMPENS];						--7. Вид страхования		
+				vStr := vStr || SPLITTER || asv.[DOCUMENT_NUM];						--8. Номер документа подтверждающего выплату
+				vStr := vStr || SPLITTER || to_char(asv.[DATE_DOC], format_date);	--9. Дата документа, подтверждающего выплату
+				vStr := vStr || SPLITTER || asv.[REQ_DECLARE];						--10. Наименование плат. /11. БИК/12. ИНН /13. расчетный счет/ 14. лицевой счет (Заявителя)	
+				vStr := vStr || SPLITTER || asv.[NAZN];								--15. Назначение платежа
+				vStr := vStr || SPLITTER || asv.[TYPE_OPER];						--16. Тип операции		
+				vStr := vStr || SPLITTER || to_char(sysdate, format_date_time);		--17. Дата и время формирования записи	
+				vStr := vStr || SPLITTER || vRegNumBank;							--18. Регистрационный номер банка
+				vStr := vStr || SPLITTER || vRegNumAgent;							--19. Регистрационный номер банка
+				
+				
+				vStr := vStr || chr(13) || chr(10);			-- непонятно для чего выполняем дважды нужно проверить пока оставим
+				vStr := vStr || chr(13) || chr(10);
+				
+				
+				i := i +1;
+				log_err(vStr,false);
+				stdio.WRITE_STR(iTxt,vStr,null,stdio.WINTEXT,false);
+			end loop;
+
+		
+		if i=1 then
+			stdio.put_line_buf('Возвраты отсутствуют. Файл RET пустой');
+			stdio.WRITE_STR(iTxt,chr(10),null,stdio.WINTEXT,false);
+		end if;
+		stdio.close(iTxt);
+				
+		rReestr := ::[ASV_REESTR_FILES].[NEW_AUTO](
+				p_file.[CODE]		--Идентификатор пакета обмена
+				,sysdate			--Дата формирования
+				,rFile_name_ar		--Наименование файла
+				,vRegNumBank		--Регистрационный номер
+				,vRegNumAgent		--Регистрационный номер Банка-агента
+				,iNum				--Порядковый номер пакета
+				,sysdate			--Дата формирования пакета
+				,p_asv
+			);
+		
+		--Создадим запись в "АСВ. Реестр файлов"
+		rFile :=::[ASV_FILE].[NEW_AUTO](
+				'RET'							--Идентификатор пакета обмена
+				,rFile_name						--Наименование файла
+				,vRegNumBank					--Регистрационный номер
+				,vRegNumAgent					--Регистрационный номер Банка-агента
+				,iNum							--Порядковый номер пакета
+				,sysdate						--Дата формирования пакета
+				,null							--Статус файла
+				,i-1							--Количество записей
+				,rReestr						--Файлы пакета
+				,null							--Сообщение об ошибке
+			);
+		rFile.[STATUS] := 'UNLOAD';	
+		
+		log_err('Создан файл:'||vPath||rFile_name,false);
+		v_blob := file2blob(vPath,rFile_name);
+
+		begin
+		::[RUNTIME].[ZIP].add_file(v_blob_zip,rFile_name,v_blob);
+		exception
+			when others then null;
+		end;
+		::[RUNTIME].[ZIP].finish_zip(v_blob_zip);
+		--сохраним архив
+		blob2file(v_blob_zip,vPath,rFile_name_ar);
+	end if;
+	
+	return rFile_name_ar;
+end;
+PSH_EXPORT (
+	@name('Файл экспорта')                 P_FILE         in [FILE$LOAD],
+	@name('Дата с')                        P_DATE_BEGIN   in [DATE],
+	@name('Дата по')                       P_DATE_END     in [DATE],
+	@name('Экспортировать все файлы')      P_EXPORT_ALL   in [BOOLEAN],
+	@name('Экспортировать файлы')          P_EXPORT       in [BOOLEAN],
+	@name('Типы файлов обмена')            P_TYPE_PACKAGE in [ASV_TYPE_PAC_REF],
+	@name('Путь для сохранения')           P_PATH         in [STRING_256],
+	@name('Экспортировать за весь период') P_TOTAL_REPORT in [BOOLEAN]
+) is
+
+validate is
+begin
+	if p_message = 'DEFAULT' then
+		P_DATE_BEGIN 	:= trunc(sysdate - 7);
+		P_DATE_END 		:= trunc(sysdate);
+		P_EXPORT 		:= false;
+		P_EXPORT_ALL	:= nvl(::[DEFVALS].[SLIB].RestoreBool(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_EXPORT_ALL'),true);
+		p_FILE.[SRC_TYPE] := null;
+		P_FILE.[DST_TYPE] := nvl(::[DEFVALS].[SLIB].RestoreBool(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_TO_SERVER'),false);
+		P_FILE.[DST_PATH] := ::[DEFVALS].[SLIB].RestoreStr(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_PATH');
+		P_PATH := P_FILE.[DST_PATH];
+	elsif p_message = 'VALIDATE' then
+		--если период указан более чем за год или даты формирования относятся
+		--к годам ранее или годам еще не наступившим, тогда выдавать сообщение пользователю
+		if p_info in ('P_DATE_BEGIN','P_DATE_END') then
+			if P_DATE_END-P_DATE_BEGIN>356 then
+				stdio.put_line_buf('Вы выбрали период более чем за год');
+			elsif sysdate<=P_DATE_BEGIN or sysdate>=P_DATE_END then
+				stdio.put_line_buf('Текущая дата не входит в период');	
+			end if;
+		--Может быть выбрана или "Экспортировать все файлы" или "Экспортировать файлы"	
+		elsif p_info ='P_EXPORT_ALL' then
+			if P_EXPORT_ALL=true then
+				P_EXPORT := false;
+			else
+				p_EXPORT := true;
+			end if;		
+		elsif p_info ='P_EXPORT' then
+			if P_EXPORT=true then
+				P_EXPORT_ALL := false;
+			else
+				P_EXPORT_ALL := true;		
+			end if;	
+		-- запись в параметр P_FILE выбранной папки
+		elsif p_info ='GET_PATH' then
+			P_FILE.[DST_PATH]:=	P_PATH;	
+		elsif p_info = 'OK' then
+			to_server := P_FILE.[DST_TYPE];	
+			P_FILE.[DST_TYPE] := null;
+		end if;
+	end if;
+end;
+
+execute is
+/*
+ * Дата     Автор       BFS         Описание
+ * -------- ----------  ----------- ---------------------------------------------------
+ * 11.01.16 Ionov		RP0453548	В процедурах ImportPayBefore_20141120 и ImportPayAfter_20141120 cумма подлежащая выплате (в рублях) рассчитывается через ::[ASV_REEST_CLAIM].[LIB].get_sum_obligation.
+ 									Удалена функция SumObligation.
+ * 20.01.16 Saraskin	RP0459877	В процедуре ImportPayAfter_20141120 сумма, оставшаяся в банке-агенте, определяется с учетом принадлежности банка получателя к филиальной сети
+ * 24.02.16 Ionov		RP0482211	В процедурах ImportPayBefore_20141120 и ImportPayAfter_20141120 ФИО для полей с номерами 2-4 берутся из ссылки на ASV_DEPOSITOR
+ * 11.03.16 Ionov		RP0487374	В процедурe ImportPayAfter_20141120 расчет полей 26-29 делается в зависимости от реквизитов получателя из требования
+ * 01.06.16 Ionov		RP0529687	Добавлена обработка шаблона документа с кодом PAYOUT_ASV_11
+ * 17.06.16 Saraskin	RP0529687	Удалена функция get_type_payment, обращения к ней переключены на библиотеку [ASV].[LIB]. Удалена переменная isIPandInherit в функции ImportPayAfter_20141120
+ * 28.11.16 Nikaev		RP0543615	В функции GetRequirForClaim в запросе для определения требования кредитора для заявления добавлено условие на вид документа,
+ 									в GetRequirForClaim и IsRequirForClaim добавлена проверка состояния документа.
+ * 27.12.16 ikuzmina	RP0545867	В get_data_addr_post добавлены приоритеты вывода типов адресов: 1.REAL_LIVE 2.POST 3.REGISTRATION
+ * 10.06.20 nechaev		RP0622882	В функции export_file исправлен вывод в файл I_RET_ поля DEPOSITOR_TYPE (тип лица).
+*/
+begin
+	if P_FILE.[DST_PATH] is null then
+		pragma error('Путь для сохранения не выбран');
+	end if;
+	--пути исходного файла и путь для сохранения
+	P_FILE.[SRC_PATH] := ::[SYSTEM_PARAMS].[GET](
+			'PATH_ASV'		--Код параметра
+			,false			--Искл.ситуация при неудачном поиске
+			,null			--Подразделение
+			);
+	P_PATH := P_FILE.[DST_PATH];
+	if P_TOTAL_REPORT=true then
+		P_DATE_BEGIN := null;
+		P_DATE_END	 := null;
+	end if;
+	--Убираем время из даты
+	P_DATE_BEGIN:=trunc(P_DATE_BEGIN);
+	P_DATE_END:=trunc(P_DATE_END);	
+	--если экспортируется один файл
+	if P_EXPORT=true then
+		if to_server=true then
+			P_FILE.[SRC_NAME] := export_file(this,P_TYPE_PACKAGE,P_DATE_BEGIN,P_DATE_END,P_PATH);
+		else	
+			P_FILE.[SRC_NAME] := export_file(this,P_TYPE_PACKAGE,P_DATE_BEGIN,P_DATE_END);
+		end if;
+		P_FILE.[DST_NAME] := P_FILE.[SRC_NAME];
+		if P_FILE.[SRC_NAME] is not null then
+			if to_server=false then
+			stdio.put_line_buf('<% PLPCALL [ASV_REESTR_FILES].[COPY_FILE](%PARAM%.P_FILENAME=>'''||P_FILE.[DST_NAME]
+  				||''', %PARAM%.P_DST_PATH=>'''||P_PATH ||''' '
+  				||', %PARAM%.P_SRC_PATH=>'''||P_FILE.[SRC_PATH]||''' '||') %>');
+			end if;	
+		end if;		
+	else
+	--если экспортировать все файлы, то выберем все типы пакетов обмена
+	--предназначенные для экспорта
+		for type_pack in ::[ASV_TYPE_PACKAGE]
+			where type_pack.[TYPE_PACKAGE]=1
+				and type_pack.[PARENT_PACKAGE] is null
+		loop
+			if to_server=true then
+				P_FILE.[SRC_NAME] := export_file(this,type_pack,P_DATE_BEGIN,P_DATE_END, P_PATH);
+			else
+				P_FILE.[SRC_NAME] := export_file(this,type_pack,P_DATE_BEGIN,P_DATE_END);
+			end if;
+			--обработаем возможную ошибку при создании файла
+			if P_FILE.[SRC_NAME] is null then
+				stdio.put_line_buf('Ошибка при создании файла: '||type_pack.[FILE_NAME]);
+				continue;
+			end if;
+			P_FILE.[DST_NAME] := P_FILE.[SRC_NAME];
+			if to_server=false then
+			stdio.put_line_buf('<% PLPCALL [ASV_REESTR_FILES].[COPY_FILE](%PARAM%.P_FILENAME=>'''||P_FILE.[DST_NAME]
+  				||''', %PARAM%.P_DST_PATH=>'''||P_PATH ||''' '
+  				||', %PARAM%.P_SRC_PATH=>'''||P_FILE.[SRC_PATH]||''' '||') %>');
+			end if;	
+		end loop;	
+		P_FILE.[SRC_PATH] := null;
+		P_FILE.[DST_PATH] := null;
+		P_FILE.[SRC_NAME] := null;
+		P_FILE.[DST_NAME] := null;
+		P_FILE.[SRC_TYPE] := null;
+		P_FILE.[DST_TYPE] := null;
+	end if;	
+	::[DEFVALS].[SLIB].SaveStr(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_PATH',P_PATH);
+	::[DEFVALS].[SLIB].SaveBool(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_TO_SERVER',to_server);
+end;
+end;
+end;

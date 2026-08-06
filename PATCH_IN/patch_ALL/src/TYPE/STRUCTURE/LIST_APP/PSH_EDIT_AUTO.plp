@@ -1,0 +1,29 @@
+class LIST_APP;
+
+@name('[ПСБ] Изменить')
+@tag('CREATED')
+method PSH_EDIT_AUTO is
+PSH_EDIT_AUTO (
+	@name('Код приложения')          P_CODE in [NAME],
+	@name('Наименование приложения') P_NAME in [SBRF_NAME]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_CODE := this.[CODE];
+	P_NAME := this.[NAME];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+begin
+	-- Установка значения реквизита "Код приложения"
+	[CODE] := P_CODE;
+	-- Установка значения реквизита "Наименование приложения"
+	[NAME] := P_NAME;
+end;
+end;
+end;

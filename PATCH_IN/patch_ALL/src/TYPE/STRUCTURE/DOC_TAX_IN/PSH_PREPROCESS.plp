@@ -1,0 +1,391 @@
+class DOC_TAX_IN;
+
+@import_plsql(true)
+@name('[ПСБ] Предобработка')
+batch method PSH_PREPROCESS is
+pragma include (::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma macro ('xdb', '::[RUNTIME].[XML_DB]', substitute);
+pragma macro ('lib', '::[TAX_IC_REQUESTS].[LIB]', substitute);
+l_ROO_REF 	const ref [TAX_EXC_DOC_TYPE] := ::[TAX_EXC_DOC_TYPE]([CODE] = 'ROO');
+PSH_PREPROCESS is
+
+execute is
+	type r_Tax is record (f_taxNum	varchar2(32767)
+						, f_taxName	varchar2(32767)
+						, f_taxInn	varchar2(12)
+						, f_taxKpp	varchar2(9)
+						);
+
+	function parseTax(p_node &xdb.DomNode) return r_tax
+	is
+	v_elem	&xdb.DomElement;
+	v_tax	r_tax;	
+	begin
+		if not &xdb.Isnull(p_node) then
+			v_elem := &xdb.makeElement(p_node);
+			v_tax.f_taxNum	:= &xdb.GetAttribute(v_elem, 'КодНО');
+			v_tax.f_taxName	:= &xdb.GetAttribute(v_elem, 'НаимНО');	
+			
+			begin
+				select x(x.[NAME].[INN], x.[NAME].[KPP]) in ::[TAX_INSPECT] where x.[NUM] = trim(v_tax.f_taxNum) --клиент для получения реквизитов налоговой
+				into v_tax.f_taxInn, v_tax.f_taxKpp;
+			exception when NO_DATA_FOUND then
+				null;
+			end;	
+		end if;	
+		
+		return v_tax;
+	end;
+
+	type r_rpo is record(f_numDec	varchar2(32767) --varchar2(20) 	-- номер решения
+						,f_sumDec	varchar2(32767)
+						,f_dateDec	date			--date			-- дата решения
+						,f_numF		varchar2(32767)	--varchar2(4)	-- номер филиала
+						,f_bankBIC	varchar2(32767)	--varchar2(9)	-- БИК
+						,f_bankName varchar2(32767)	--varchar2(317)	-- наименование банка
+						,f_cond		varchar2(32767)	--varchar2(1000)  Обстоят
+						,f_tax		r_tax
+						);
+
+
+
+
+acc				ref	[AC_FIN];
+found			boolean;
+one_msg_size 	const integer := 410;
+msg				varchar2(32000);
+cnt_docs_all	number:= 0;
+val_docs_all	number:= 0;
+v_info_size		integer;
+
+v_rpo			r_rpo;
+
+x				XMLType;
+v_path_rpo		varchar2 := '/Файл/РЕШНОПРИОС';
+v_path_roo		varchar2 := '/Файл/РЕШНООТМЕН';
+v_doc			&xdb.DOMDocument;
+v_node 			&xdb.DOMNode;
+v_node1			&xdb.DOMNode;
+v_elem			&xdb.DOMElement;
+v_nodeList		&xdb.DOMNodeList;
+i				integer;
+n				integer;
+v_accs			&lib.t_Accs;
+v_Raccs			&lib.t_refAccs;
+v_clients		&lib.t_clients;
+v_branch		ref [BRANCH];
+v_allBranches	boolean; 	-- нужно ли обрабатывать решение в банке, если оно пришло в головной филиал. Условия: НомФ = '0' и значение настройки 'TAX_RXO_IN_MAIN' = 'Нет' или 'Пусто'
+vNumUnique		integer;
+vtptype 		integer;
+vacctype		integer;
+v_sysDate		date;
+
+v_err_code 		varchar2(2);
+v_err_note		varchar2(512);
+v_file_content 	[CLOB];
+begin
+	DEBUG_PIPE(&METHOD$ || '-----------------------------------------------------------------------'  , 0);
+	DEBUG_PIPE(&METHOD$ || ' Начало обработки' , 0);
+
+	&debug('this.count = ' || this.count, 0)
+
+	if this.count > 0 then
+
+		&debug('000', 0)
+	
+		for m in this.first..this.last
+		loop
+
+			&debug('001', 0)
+		
+			v_accs    := null;
+			v_Raccs   := null;
+			v_clients := null;
+		
+			v_info_size := ::[FP_TUNE].[LIB].get_num_value('FNS_PART_SIZE',::[FP_TUNE].[LIB].set_canons(::[BRANCH]%class, this(m).[BRANCH]%id), '0');
+			v_info_size :=  nvl(v_info_size, 512);
+
+			if this(m).[PSB_STATE] is not null then -- updated CHANGE_QUALIFIER PSB_STATE->PSB_STATE 13/10/25
+				&debug('002', 0)
+				msg :=/* msg ||NL$ ||*/  'Над файлом ' || this(m).[FILE_NAME] || ' операция "' || &METHOD$NAME || '" уже запускалась';
+				DEBUG_PIPE(&METHOD$ || ' ' || msg , 0);
+			end if;
+
+			
+			-->> По счетам ------------------------------------------------------------------------------------
+			&debug('this(m).[FILE_CONTENT] = ' || this(m).[FILE_CONTENT],0)
+
+			x := XMLType(this(m).[FILE_CONTENT]);
+
+			if    x.existsNode(v_path_rpo) = 1 then
+				&debug('003 RPO', 0)
+				x := x.extract(v_path_rpo);
+			elsif x.existsNode(v_path_roo) = 1 then
+				&debug('004 ROO', 0)
+				x := x.extract(v_path_roo);
+			else
+				&debug('005 continue', 0)
+				continue;
+			end if;
+
+			begin
+				v_file_content := x.GetClobVal();
+				v_doc := &xdb.newDOMDocument(v_file_content);
+			exception when others then
+				&xdb.freeDocument(v_doc);
+				&debug('Некорректный формат файла ',0)
+				return;
+			end;
+
+			v_node 	:= &xdb.makeNode(&xdb.getDocumentElement(v_doc));
+
+			&debug('010 NodeName = ' || &xdb.getNodeName(v_node), 0)
+
+			-------------------------------- РЕШНООТМЕН , РЕШНОПРИОС ----------------------------------------------------------
+			if &xdb.getNodeName(v_node) in ('РЕШНООТМЕН', 'РЕШНОПРИОС') then
+
+				&debug('011 ', 0)
+
+				v_elem	:= &xdb.makeElement(v_node);
+
+				v_rpo.f_numDec 	:= &xdb.GetAttribute(v_elem,'НомРешПр');
+				v_rpo.f_dateDec	:= to_date(&xdb.GetAttribute(v_elem,'ДатаРешПр'), 'YYYY-MM-DD');
+				v_rpo.f_numF 	:= &xdb.GetAttribute(v_elem,'НомФ');	
+				v_rpo.f_bankBIC	:= &xdb.GetAttribute(v_elem,'БИК');
+				v_rpo.f_bankName:= &xdb.GetAttribute(v_elem,'НаимБ');
+				v_rpo.f_sumDec	:= &xdb.GetAttribute(v_elem,'СумВзыск');
+				v_rpo.f_cond 	:= &xdb.GetAttribute(v_elem,'Обстоят');
+				
+				&debug('v_rpo.f_numDec = ' || v_rpo.f_numDec,0)
+				&debug('v_rpo.f_dateDec = ' || v_rpo.f_dateDec,0)
+				&debug('v_rpo.f_numF = ' || v_rpo.f_numF,0)
+				&debug('v_rpo.f_bankBIC = ' || v_rpo.f_bankBIC,0)
+				&debug('v_rpo.f_bankName = ' || v_rpo.f_bankName,0)
+				
+				&debug('v_rpo.f_sumDec = ' || v_rpo.f_sumDec,0)
+				&debug('v_rpo.f_cond = ' || v_rpo.f_cond,0)
+				
+				/*begin
+					v_branch := ::[BRANCH]([BANK].[BIC] = v_bankBIC);
+				exception
+					when NO_DATA_FOUND then
+						&debug('  not found branch (BIC = ' || v_bankBIC || ')', 0)
+						continue;
+				end;
+				*/
+				
+				v_nodeList := &xdb.getChildNodes(v_node);
+				
+				if not &xdb.IsNull(v_nodeList) then
+					&debug('  if not &xdb.IsNull(v_nodeList)',0)
+
+					n := 1;
+					for j in 0..&xdb.getLength(v_nodeList)-1 loop
+
+						&debug('j = ' || j, 0)
+
+						v_node1 := &xdb.item(v_nodeList, j);	
+						
+						&debug('Имя элемента = ' || &xdb.GetNodename(v_node1), 0)
+						
+						case &xdb.GetNodename(v_node1) of
+							
+							:'СвНО':
+								v_rpo.f_tax := parseTax(v_node1);								
+							:'СвПл':
+								v_clients := &lib.parseClient(v_node1, vNumUnique, vtptype, v_err_code, v_err_note, this(m).[DOC_TYPE], '3.00', v_file_content);
+							:'Счет':
+								v_elem	:= &xdb.makeElement(v_node1);		
+								v_accs(n).f_num	:= &xdb.getAttribute(v_elem, 'НомСч');
+								v_accs(n).f_vid	:= &xdb.getAttribute(v_elem, 'ВидСч');						
+								n := n + 1;
+								vacctype := 1;
+							:'КЭСП':			
+								v_elem	:= &xdb.makeElement(v_node1);		
+								v_accs(n).f_num := &xdb.getAttribute(v_elem, 'ИдКЭСП');
+								v_accs(n).f_vid	:= 'КЭСП';									
+								n := n + 1;
+								vacctype := 3;
+						end;
+					end loop;
+				end if;
+			end if;
+
+			&xdb.freeDocument(v_doc);
+
+			-- Логические действия.
+			
+			v_allBranches := v_rpo.f_numF = '0' and not nvl(::[FP_TUNE].[LIB].get_bool_value('TAX_RXO_IN_MAIN', null, '0'), false);
+			v_sysDate := trunc(sysdate);
+
+			-- проверка бик, поиск филиала по бик
+			v_branch := ::[TAX_IC_REQUESTS].[LIB].findBranch(v_rpo.f_bankBIC, v_rpo.f_numF, p_internal == not v_allBranches); -- если запрос по всем филиалам, тогда филиал из запроса может быть не централизованным
+
+			&debug('021 v_clients.count = ' || v_clients.count, 0)
+
+			if v_clients.count > 0 then
+				n := v_clients.first;
+
+				if this(m).[DOC_TYPE]  = ::[DOC_TAX].LIB_TC.typeRPO then
+					declare
+						llv_id				::[DOC_TAX]%id;
+						llv_roo_filename	::[DOC_TAX].[FILE_NAME];
+						llv_inn				::[CLIENT].[INN]	:= v_clients(n).[INN];
+						rpo_cr_date			date 	:= trunc(this(m).[DOC_CR_DATE]);
+					begin
+						&debug('v_rpo.f_dateDec	 = '||v_rpo.f_dateDec,10)
+						&debug('rpo_cr_date	 = '||rpo_cr_date,10)
+						&debug('llv_inn	 = '||llv_inn,10)
+						
+						-- begin pl/sql
+						begin
+							select tax.id, tax.C_FILE_NAME
+							into llv_id, llv_roo_filename
+							from
+								Z#DOC_TAX tax,
+								XMLTABLE(
+								              /*'//РЕШНОПРИОС'*/
+								              '//РЕШНООТМЕН'
+								              PASSING xmltype(tax.C_FILE_CONTENT)
+								              COLUMNS
+								              ORD_NUM VARCHAR2(20) PATH '@НомРешПр'
+								              ,ORD_DATE date PATH '@ДатаРешПр'
+								              ,INN VARCHAR2(12) PATH 'СвПл/ПлЮЛ/@ИННЮЛ'
+								         )
+								where
+								--C_FILE_NAME like 'ROO%'
+								C_DOC_TYPE = l_ROO_REF
+								and C_DOC_CR_DATE >= v_rpo.f_dateDec	-- 'ДатаРешПр'
+								and C_DOC_CR_DATE < ( rpo_cr_date + 1 )
+								and INN = llv_inn						-- ИНН
+								and ORD_NUM = v_rpo.f_numDec 			-- 'НомРешПр'
+								and rownum < 2;
+						exception
+							when NO_DATA_FOUND then
+								null;
+						end;
+						-- end pl/sql
+						if llv_id is null then
+							&debug('Не нашли отмену!',10)
+						else
+							DEBUG_PIPE(&METHOD$ || ' Для решения о приостановлении из файла: ' || this(m).[FILE_NAME]
+								|| ' найдена отмена в файле: ' || llv_roo_filename || ' , id = ' || llv_id, 0);
+						end if;
+					exception when NO_DATA_FOUND then
+						null;
+					end;
+				end if;	
+			end if;
+			
+			vacctype := nvl(vacctype, 1);
+
+			for br in ::[BRANCH]
+			where (br.[MAIN_FIL] = v_branch and v_allBranches
+					or br = v_branch)
+					and (br.[DATE_BEGIN] is null or br.[DATE_BEGIN] <= v_sysDate)
+					and (br.[DATE_END] is null or br.[DATE_END] >= v_sysDate)
+					and br.[INTERNAL] -- исполняем только по централизованным филиалам
+			loop
+				&debug('022 ', 0)
+			
+				::[TAX_IC_REQUESTS].[LIB].findAccs(
+					 v_clients
+					,v_accs
+					,v_Raccs
+					,p_branch == br
+					,p_on_date == ::[SYSTEM].[VARIABLES].Br2OpDate(br%id)
+					,p_tpType == vtptype
+					,p_accType == vacctype
+					,p_closed == true
+					,p_err_code == v_err_code
+					,p_err_note == v_err_note
+					,p_file_content == v_file_content
+				);
+			end loop;
+
+			-- поиск счетов по филиалу, номеру счета. Если в запросе НомФ = 0 и указан БИК головного филиала, тогда нужно найти счета без учета филиала.
+			-- по каждому счету нужно найти договор РКО.
+			-- установить ограничение
+			&debug('030 v_Raccs.count = ' || v_Raccs.count, 0)
+			if v_Raccs.count > 0 then
+				i := v_Raccs.first;
+				while i is not null loop
+					&debug('031 v_Raccs(i).f_acc.[MAIN_V_ID] = ' || v_Raccs(i).f_acc.[MAIN_V_ID], 0)
+					if v_Raccs(i).f_dateClose is not null then
+						DEBUG_PIPE(&METHOD$ || ' Счет ' || v_Raccs(i).f_acc.[MAIN_V_ID]
+							|| ' филиала ' || v_Raccs(i).f_branch.[CODE]
+							|| ' закрыт ' || to_char(v_Raccs(i).f_dateClose, 'dd/mm/yyyy') , 0);
+					end if;
+					------------------------------------------------------------------------------------				
+					
+					-->> 440-P ? alert for Overdraft Product
+					for c
+					in ::[OVERDRAFTS]
+					where c.[CLIENT] = v_Raccs(i).f_acc.[CLIENT_V]
+					  and c.[ACCOUNT].[MAIN_V_ID] like '45201%'
+					  and (c.[COM_STATUS] = ::[COM_STATUS_PRD]([CODE] = 'WORK'))
+					loop
+						for r in ::[RKO]
+						where r = c.[OVER_ON_PROD]
+						loop
+							msg := 'В файле ' || this(m).[FILE_NAME] || ' у владельца cчета ' || v_Raccs(i).f_acc.[MAIN_V_ID]
+										||  ' есть действующий овердрафт ' || c.[ACCOUNT].[MAIN_V_ID] || ' по счету ' || r.[ACCOUNT].[MAIN_V_ID];
+							exit;
+						end loop;
+
+						for r in ::[DEPN]
+						where r = c.[OVER_ON_PROD]
+						loop
+							msg := 'В файле ' || this(m).[FILE_NAME] || ' у владельца cчета ' || v_Raccs(i).f_acc.[MAIN_V_ID]
+										||  ' есть действующий овердрафт ' || c.[ACCOUNT].[MAIN_V_ID] || ' по счету ' || r.[ACCOUNT].[MAIN_V_ID];
+							exit;
+						end loop;
+					
+						DEBUG_PIPE(&METHOD$ || ' ' || msg , 0);
+
+						&debug('043 ' ||  msg, 0)
+
+						exit;
+					end loop;
+					&debug('044 ', 0)
+					
+					--<<
+				
+					i := v_Raccs.next(i);
+				end loop;
+
+				&debug('050 this(m).[PSB_STATE] = ' || this(m).[PSB_STATE], 0) -- updated CHANGE_QUALIFIER PSB_STATE->PSB_STATE 13/10/25
+				
+				if this(m).[PSB_STATE] is null then -- updated CHANGE_QUALIFIER PSB_STATE->PSB_STATE 13/10/25
+					this(m).[PSB_STATE] := '1'; -- updated CHANGE_QUALIFIER PSB_STATE->PSB_STATE 13/10/25
+					&debug('051 this(m).[PSB_STATE] = ' || this(m).[PSB_STATE], 0) -- updated CHANGE_QUALIFIER PSB_STATE->PSB_STATE 13/10/25
+				end if;
+			else
+				-- Не нашли счета: Тоже отметим
+				&debug('055 this(m).[PSB_STATE] = ' || this(m).[PSB_STATE], 0) -- updated CHANGE_QUALIFIER PSB_STATE->PSB_STATE 13/10/25
+				
+				if this(m).[PSB_STATE] is null then -- updated CHANGE_QUALIFIER PSB_STATE->PSB_STATE 13/10/25
+					this(m).[PSB_STATE] := '1'; -- updated CHANGE_QUALIFIER PSB_STATE->PSB_STATE 13/10/25
+					&debug('056 this(m).[PSB_STATE] = ' || this(m).[PSB_STATE], 0) -- updated CHANGE_QUALIFIER PSB_STATE->PSB_STATE 13/10/25
+				end if;
+					
+			end if;
+------------------------------------------------------------------------------------				
+		end loop;
+	end if;
+	
+	&debug('060 ', 0)
+	
+	if cnt_docs_all > 0  then
+		&debug('061 ', 0)
+		DEBUG_PIPE(&METHOD$ || ' Количество проведенных документов по всем запрашиваемым счетам ' || lpad(cnt_docs_all, 10) , 0);
+		val_docs_all := cnt_docs_all * one_msg_size/1024;
+		DEBUG_PIPE(&METHOD$ || '     Объем документов ( из расчета ' || one_msg_size || ' байт на документ ) = ' || round(val_docs_all, 3) || ' K' , 0);
+		DEBUG_PIPE(&METHOD$ || '     Количество файлов = ' || ceil(val_docs_all / v_info_size), 0);
+	end if;
+
+	DEBUG_PIPE(&METHOD$ || ' Обработка завершена' , 0);
+	DEBUG_PIPE(&METHOD$ || '-----------------------------------------------------------------------'  , 0);
+end;
+end;
+end;

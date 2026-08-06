@@ -1,0 +1,134 @@
+class GIS_ZHKH_COND;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Импорт. ИНН + КПП')
+static method PSH_IMPORT_INN is
+PSH_IMPORT_INN (
+	@name('Файл')                                P_FILE    in [FILE$LOAD],
+	@name('Полное удаление записей справочника') P_DELETE  in [BOOLEAN],
+	@name('Позиция ИНН в csv файле')             P_INN_POS in [INTEGER],
+	@name('Позиция КПП в csv файле')             P_KPP_POS in [INTEGER]
+) is
+
+validate is
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		P_DELETE := true;
+		P_INN_POS := 2;
+		P_KPP_POS := 3;
+		P_FILE.[SRC_TYPE] 	:= false;
+		P_FILE.[SRC_PATH]	:= ::[SYSTEM_PARAMS].[GET]('PATH_LOCAL', Null);
+		P_FILE.[DST_TYPE] 	:= true;
+		P_FILE.[DST_DELETE] := True;
+		P_FILE.[DST_PATH]	:= ::[SYSTEM_PARAMS].[GET]('PATH', Null);
+		
+		P_INFO := 'OK';
+	elsif P_MESSAGE = 'VALIDATE' then
+		if P_INFO = 'OK' then
+			if P_FILE.[SRC_NAME] is NULL then
+				debug_pipe('Не указан файл для импорта', 0);
+				pragma error('Не указан файл для импорта');
+			end if;
+			
+			if trim(upper(P_FILE.[SRC_NAME])) not like '%.CSV' then
+				debug_pipe('Файл ' || P_FILE.[SRC_NAME] || ': Неверный формат. Формат файла должен быть .CSV, кодировка WIN1251', 0);
+				pragma error('Файл ' || P_FILE.[SRC_NAME] || ': Неверный формат. Формат файла должен быть .CSV, кодировка WIN1251');
+			end if;
+			
+			debug_pipe( 'Начинаем загрузку файла на сервер ...', 0 );
+		end if;
+	end if;
+end;
+
+execute is
+type strTable is table of string;
+
+v_tmpStr 	varchar2(32000);
+v_file		integer;
+v_tmpTable	strTable;
+v_ref		ref [GIS_ZHKH_COND];
+v_Str		[GIS_ZHKH_COND];
+i			integer;
+j			integer;
+v_add		integer;
+v_upd		integer;
+v_all		integer;
+begin
+	debug_pipe( 'Открываем файл ... ', 0);
+
+	v_file := stdio.open(P_FILE.[DST_PATH], P_FILE.[DST_NAME], 'r');
+
+	if P_DELETE then
+		debug_pipe( 'Полное удаление записей справочника' , 0 );
+		delete x in ::[GIS_ZHKH_COND];
+		debug_pipe( 'Полное удаление записей справочника завершено' , 0 );
+	end if;
+
+	debug_pipe( 'Начало импорта файла ' || nvl(P_FILE.[SRC_NAME], P_FILE.[DST_NAME]), 0);
+
+	i = j = v_add = v_upd = v_all :=0;
+	
+	while stdio.get_line( v_file, v_tmpStr, false, stdio.WINTEXT, NULL) loop
+		if i = 0 then
+			i:= 1;
+		else
+			begin
+				v_all := v_all + 1;
+				
+				if mod(v_all, 10000) = 0 then
+					debug_pipe( 'Обработано  : ' || v_all || ' строк', 0);
+				end if;
+						
+				select x(
+						substr(v_tmpStr
+						, decode(level, 1, 1, instr(v_tmpStr, ';',1, level-1)+1)
+						, decode(level, 1, instr(v_tmpStr, ';', 1, level) - 1,
+						  decode(instr(v_tmpStr, ';', 1, level), 0, length(v_tmpStr) - instr(v_tmpStr, ';', 1, level-1), instr(v_tmpStr, ';', 1, level)- instr(v_tmpStr, ';', 1, level-1)- 1 )
+				))) in dual%rowtype()
+				connect by level <= REGEXP_COUNT(v_tmpStr,';') + 1 into v_tmpTable;
+				
+				if v_tmpTable.count > 0 then
+					j := v_tmpTable.first;
+				end if;
+				if v_tmpTable.exists(P_INN_POS) then 			
+					--v_str.[GZC_INN] := substr(trim(regexp_replace(v_tmpTable(j), '\s+')), 1, v_str.[GZC_INN]%size);
+					v_str.[GZC_INN] := substr(trim(regexp_replace(v_tmpTable(P_INN_POS), '\s+')), 1, v_str.[GZC_INN]%size);
+				end if;
+				if v_tmpTable.exists(P_KPP_POS) then 			
+					v_str.[GZC_KPP] := substr(trim(regexp_replace(v_tmpTable(P_KPP_POS), '\s+', ' ')), 1, v_str.[GZC_KPP]%size);
+				end if;
+
+	
+				begin
+					select x(x) in ::[GIS_ZHKH_COND]
+					where x.[GZC_INN] = v_str.[GZC_INN]
+					--where (x.[GZC_INN] = v_str.[GZC_INN] or x.[GZC_INN] is null and v_str.[GZC_INN] is null)
+					and (x.[GZC_KPP] = v_str.[GZC_KPP] or x.[GZC_KPP] is null and v_str.[GZC_KPP] is null)
+					into v_Ref;
+					v_Ref := v_str;
+					v_upd := v_upd + 1;
+				exception
+				when no_data_found then
+					::[GIS_ZHKH_COND]%insert(v_str);
+					v_add := v_add + 1;
+				when too_many_rows then
+					null;
+				end;
+			
+			exception
+				when others then
+					debug_pipe('Ошибка :' || [RUNTIME]::[PRINTFUN].SQLERRM_INF,0);
+			end;
+		end if;		
+	end loop;
+	
+	stdio.close(v_file);
+	
+	debug_pipe( 'Всего обработано  : '	|| v_all || ' строк',0);
+	debug_pipe( 'Добавлено  : '	|| v_add,0);
+	debug_pipe( 'Обновлено  : '	|| v_upd,0);
+	debug_pipe( 'Завершён импорт из файла ' || nvl(P_FILE.[SRC_NAME],P_FILE.[DST_NAME]),0);
+end;
+end;
+end;

@@ -1,0 +1,211 @@
+class STOCK_REPS;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('Интерфейсы для отчетности')
+library LIB_REPS is
+pragma include (::[STOCK].[DEFINES] );
+pragma include (::[PROPERTY_FT].[FT_DEF]);
+pragma include(::[STOCK].[MSG]);
+
+public type rec_type is record (code [STRING_20]);
+public type tab_type is table of rec_type index by varchar2(20);
+public tabType tab_type;
+public F_711_VER	number;
+public ukaz			string(10);
+public tab_CB 		::[FP_INTERFACE].[INT_F_711_001].tab_CBDataOnDate;
+
+/* Структура rec_CBDataOnDate для таблицы tab_CBDataOnDate
+	vFTName			varchar2(100),	-- Наименование фин. инструмента
+	ISSUER			ref [CLIENT],	-- Эмитент
+	vFTClass		varchar2(20),	-- Код категории ЦБ, участвующей в сделке
+	CB_CODE			varchar2(10),	-- строка с кодом ЦБ
+	REG_NUM			varchar2(30),	-- Регистрационный номер ЦБ
+	ISIN_NUM		varchar2(16),	-- Регистрационный номер ISIN
+	IS_EMISSION		integer,		-- Признак эмиссионной ЦБ
+	DATE_EMISSION	date,			-- Дата регистрации ЦБ
+	DATE_MATURITY	date,			-- Дата погашения ЦБ
+	CB_CUR			ref [FT_MONEY]	-- Валюта ЦБ
+*/
+
+/*	Функция позволяющая получать информацию о кодах типов ценных бумаг.*/
+public function GetCBDataOnDate
+(	 P_CB_ARR 		type_number_table default null
+	--  таблица идентификаторов ЦБ	
+	,P_VEKS_ARR 	type_number_table default null	
+	-- таблица идентификаторов из ФП Реестр векселей
+	,P_DATE			date
+	-- дата отчета 
+	,P_CB_CODE_VAR	number
+) 
+	return ::[FP_INTERFACE].[INT_F_711_001].GetCBDataOnDate
+is
+	idx_cb	string_1000;
+	idx_vek	string_1000;
+	
+	procedure get_CBData( p_d 		in date
+						, v_ns	 	in ref [PAPER]
+						, v_vek		in ref [VEKSEL_GUIDE]
+						)
+	is
+		rec 			::[FP_INTERFACE].[INT_F_711_001].rec_CBDataOnDate;
+		emi_client	ref [CLIENT];
+		emi_resident 	varchar2(1);
+		emi_class		varchar2(9);
+		emi_owner_type	[OWNERSHIP_TYPE].[SHORT_NAME]%type;
+		typ_org			integer;
+		oksm			string(3);
+		typ				string(20);
+		reg_num			string(30);
+		d_EMIS			date;
+		d_MAT			date;
+		cb_cur			[FT_MONEY_REF];
+		idx				integer;
+	begin		
+		rec.vFTClass := v_ns%class;
+		if rec.vFTClass  = 'DR_SHARE' then
+			emi_client 	 := v_ns->(true,::[DERIVATIVE])[ASSET].[ID_CLIENT];
+			emi_class 	 := emi_client%class;
+			emi_resident := ::[FP_INTERFACE].[PRX_CLIENT_711].resident_t(emi_client);
+		else
+			emi_client 	 := v_ns.[ID_CLIENT];
+			emi_class 	 := emi_client%class;
+			if emi_class = 'CL_PRIV' and rec.vFTClass = 'MG_INSTR' then
+				emi_resident := null;
+			else
+				emi_resident := ::[FP_INTERFACE].[PRX_CLIENT_711].resident_t(emi_client);
+			end if;
+		end if;
+		oksm := ::[STOCK_REPS].[LIB_711].get_oksm(emi_client, p_d-1, emi_resident, typ, typ_org);
+		if ::[RUNTIME].[LIB].IS_PARENT('CL_CORP',emi_class) then 			-- ЮЛ
+			emi_owner_type	:= emi_client->(::[CL_CORP])[OWNERSHIP].[SHORT_NAME];
+		elsif ::[RUNTIME].[LIB].IS_PARENT('CL_BANK_F',emi_class) then		-- Участник СВИФТ 
+			emi_owner_type	:= emi_client->(::[CL_CORP])[OWNERSHIP].[SHORT_NAME];
+		elsif ::[RUNTIME].[LIB].IS_PARENT('CL_BANK_N',emi_class) then		-- Банк 
+			emi_owner_type	:= emi_client->(::[CL_CORP])[OWNERSHIP].[SHORT_NAME];
+		else
+			emi_owner_type := null;											-- ФЛ
+		end if;
+		if rec.vFTClass  = 'INV_PAY' and emi_resident = '1' then
+			reg_num	:= substr(v_ns.[REG_NU],1,4);
+		elsif rec.vFTClass  = 'ISU' then
+			reg_num	:= 'ISU'||substr(v_ns.[REG_NU],1,4);
+		else
+			reg_num	:= v_ns.[REG_NU];
+		end if;
+		if v_ns%class in ('VEKSEL_S','CERTIF_DS','MG_INSTR','WH_INSTR') then		
+			d_EMIS := v_vek.[DT_CREATE];		
+			d_MAT  := v_vek.[TERM_PAY].[DATE_PAY];	
+		elsif v_ns.[ISSUE].[0] = 1 then
+			if rec.vFTClass  = 'DR_SHARE' then
+				d_EMIS	:= v_ns.[DATE_EM];
+			else
+				d_EMIS := COALESCE(v_ns.[DATE_GOS_REG], v_ns.[DATE_REG], v_ns.[DATE_EM]);
+			end if;
+		elsif rec.vFTClass in ('INV_PAY','ISU') then
+			d_EMIS := v_ns.[DATE_GOS_REG];
+		else
+			d_EMIS := v_ns.[DATE_REG];		
+		end if;
+		if lib.IS_PARENT('OBLIGATION', rec.vFTClass) = 1 then	
+			d_MAT	:= v_ns->(true,::[OBLIGATION])[MAT_DATE];		 
+		end if;
+		if rec.vFTClass = 'DR_SHARE' then
+			if nvl(v_ns->(true,::[DERIVATIVE])[ASSET].[CUR_ONE].[SUM],0) = 0 then
+				cb_cur := v_ns->(true,::[DERIVATIVE])[ASSET].[CUR_ONE].[CURR_NOMI];
+			else
+				cb_cur := v_ns->(true,::[DERIVATIVE])[ASSET].[CUR_ONE].[CURRENCY];
+			end if;	
+		elsif rec.vFTClass in ('VEKSEL_S','CERTIF_DS','MG_INSTR','WH_INSTR') then
+			cb_cur := v_vek.[SUM_VEKSEL].[CURRENCY];
+		else 
+			cb_cur := v_ns.[CUR_ONE].[CURRENCY];
+		end if;
+		
+		rec.vFTName 		:= v_ns.[NAME]; 
+		rec.ISSUER			:= emi_client;
+		rec.REG_NUM 		:= reg_num; 
+		rec.ISIN_NUM 		:= v_ns.[ISIN_NUM];
+		rec.IS_EMISSION 	:= nvl(v_ns.[ISSUE].[0],0);
+		rec.DATE_EMISSION	:= d_EMIS;
+		rec.DATE_MATURITY 	:= d_MAT;
+		rec.CB_CODE			:= ::[STOCK_REPS].[LIB].Get_CB_type_code( v_ns
+																	, rec.vFTClass
+																	, emi_client%class
+																	, emi_resident
+																	, emi_owner_type
+																	, v_ns.[PROP_FT].[FIRST]
+																	, p_d == p_d-1
+																	, p_vek == v_vek
+																	, p_ukaz == ukaz
+																	, p_typ_org == typ_org
+																	);
+		if not tabType.exists(rec.CB_CODE) then
+			rec.CB_CODE := 'OTHER';
+		end if;																		
+																	
+		if rec.CB_CODE not in ('DOL3','DOL4','DOL5','DOL7') then
+			rec.CB_CUR 	:= cb_cur;
+		end if;
+																	
+		tab_CB(to_char(v_ns%id))	:= rec;
+	end;
+
+begin
+	if P_DATE is null then
+		pragma error('Не указана дата отчета!');
+	end if;
+	if P_CB_CODE_VAR is null then
+		P_CB_CODE_VAR := 0;
+	end if;
+	-- определим версию по дате отчета	
+	F_711_VER := coalesce(::[STOCK_REPS].[LIB_711].getVersion(P_DATE),7);
+	if nvl(F_711_VER,6) >= 7 then
+		ukaz := '7047';
+	else
+		ukaz := '6800';	
+	end if;
+	&dmess('P_CB_CODE_VAR = '||P_CB_CODE_VAR);
+	-- соберем допустимые типы кодов ЦБ в соответствии с номером таблицы
+	tabtype.delete;
+	for (select x(x.[CODE] : CODE)
+			in ::[FP_F711_NS_CODE] all 
+			where (P_CB_CODE_VAR = 1 and coalesce(x.[TAB_1],false) = true)
+				or (P_CB_CODE_VAR = 2 and coalesce(x.[TAB_2],false) = true)
+				or (P_CB_CODE_VAR = 0)
+		)
+	loop
+		tabtype(x.CODE).code := x.CODE;
+	end loop;		 
+	
+	idx_cb := P_CB_ARR.first;
+	idx_vek:= P_VEKS_ARR.first;
+	if idx_cb is not null then 
+		&dmess('Обработка ЦБ');
+		tab_CB.delete;
+		
+		for (select x(x : ns) in ::[PAPER] all
+				where x%id in (select y(y.column_value) in cast(P_CB_ARR,type_number_table))
+			)
+		loop
+			get_CBData(P_DATE, x.ns, null);
+		end loop;	
+
+	elsif idx_vek is not null then
+		&dmess('Обработка векселей');
+		tab_CB.delete;
+		for (select x(x : vek, x.[IDENT] : ns) in ::[VEKSEL_GUIDE] all
+				where x%id in (select y(y.column_value) in cast(P_VEKS_ARR,type_number_table))
+			)
+		loop
+			get_CBData(P_DATE, x.ns, x.vek);
+		end loop;	
+	else
+		pragma error('Не передан массив ЦБ или Векселей');	
+	end if;	
+	
+	return tab_CB;
+
+end;
+
+end;

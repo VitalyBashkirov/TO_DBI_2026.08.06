@@ -1,0 +1,6 @@
+class PSH_MAG;
+
+@name('[ПСБ] Удалить')
+@tag('CREATED')
+destructor PSH_DELETE_AUTO is
+end;

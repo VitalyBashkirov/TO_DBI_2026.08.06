@@ -1,0 +1,98 @@
+class RUNTIME;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Процедуры и функции')
+library PSH_LIB is
+-- шаблон для вывода суммы
+pragma macro( SUMMA_PAT, '''FM999G999G999G999G999G999G990D90''' );
+-- шаблон для вывода даты
+pragma macro( DATE_PAT, '''DD.MM.YYYY''' );
+
+
+-- вывод даты
+public function printDate( d date )
+return varchar2 is 
+begin
+  return to_char( d, &DATE_PAT );
+end;
+pragma restrict_references( printDate, wnds, wnps );
+
+
+-- вывод суммы
+public function printSum( s [SUMMA] )
+return varchar2 is 
+begin
+  return trim( to_char( s, &SUMMA_PAT ) );
+end;
+pragma restrict_references( printSum, wnds, wnps );
+
+
+public pragma macro(forcursor
+, '&forcursor_(''[1]'', ''[2]'', nvl(''[3]'', ''[''||''3]''))', substitute);
+
+/** Закрывающий макрос для для цикла массового (bulk) чтения данных из курсора.
+  */
+public pragma macro(end_forcursor
+, '			end;
+		end loop;	--	закрываем цикл по прочитанным данным
+	end loop;	--	закрываем цикл чтения курсора
+end'
+);
+
+/**	Служебный макрос для макроса &forcursor, определяющий умолчательные значения и внутренний анализ
+  */
+public pragma macro(forcursor_
+, '
+declare
+	v	varchar2(32767);	--	результирующий текст
+	v1	varchar2(33);		--	значение первого параметра макроса
+	v2	varchar2(100);		--	значение второго параметра макроса
+	v3	varchar2(33);		--	значение третьего параметра макроса
+	vCur	varchar2(40);	--	имя курсора
+	vStruct	varchar2(40);	--	тип структуры
+begin
+	v1 := [1];
+	v2 := [2];
+	v3 := [3];
+	if v3 = ''[''||''3]'' then
+		v3 := ''1000'';
+	end if;
+
+	if regexp_like(	upper(v2)
+				,	''[ 	''||chr(10)||chr(13)||'']*''
+				||	''AS''
+				||	''[ 	''||chr(10)||chr(13)||'']+''
+		)
+	then
+		vCur :=		rtrim(regexp_substr(
+							upper(v2)
+						,	''(.*)[ 	''||chr(10)||chr(13)||'']*''
+						||	''AS''
+						||	''[ 	''||chr(10)||chr(13)||'']+(.*)$''
+						,	1, 1, ''i'', 1
+					));
+		vStruct :=	ltrim(regexp_substr(
+							upper(v2)
+						,	''(.*)[ 	''||chr(10)||chr(13)||'']*''
+						||	''AS''
+						||	''[ 	''||chr(10)||chr(13)||'']+(.*)$''
+						,	1, 1, ''i'', 2
+					));
+		v := ''&for_opened_cursor_({I}, {C}, {S}, {X})'';
+	else
+		vCur := v2;
+		vStruct := v2;
+		v := ''&for_cursor_({I}, {S}, {X})'';
+	end if;
+
+	v := replace(v, ''{I}'', v1);
+	v := replace(v, ''{C}'', vCur);
+	v := replace(v, ''{S}'', vStruct);
+	v := replace(v, ''{X}'', v3);
+
+	[0] := v;
+end;'
+, process);
+	
+end;

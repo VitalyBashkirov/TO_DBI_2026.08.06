@@ -1,0 +1,273 @@
+class MAIN_DOCUM;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('ПСХ. Печать подробного реестра')
+@tag('COPIED')
+@speciality('print')
+method PSH_PRINT_REE_P is
+
+@name('Кор.счёт') public C_KS [ACCNUM];
+public type tbl_doc is table of ref [MAIN_DOCUM];  -- табличный тип
+public docs tbl_doc; -- массив документов
+public dat [DATE];
+public v_worker	ref [USER];
+public v_controler	ref [USER];
+PSH_PRINT_REE_P (
+	@name('Заголовок')         P_HEAD      in [STRING],
+	@name('Дата опердня')      P_DAT       in [STRING],
+	@name('Итого Сумма')       P_SUM_STR   in [MEMO],
+	@name('Итого кол-во')      P_KOL_STR   in [STRING],
+	@name('Мемо1')             P_M1        in [MEMO_BIG],
+	@name('Мемо2')             P_M2        in [MEMO_BIG],
+	@name('Мемо3')             P_M3        in [MEMO_BIG],
+	@name('Мемо4')             P_M4        in [MEMO_BIG],
+	@name('Мемо5')             P_M5        in [MEMO_BIG],
+	@name('Мемо6')             P_M6        in [MEMO_BIG],
+	@name('Временное Мемо')    P_M         in [MEMO_BIG],
+	@name('Руководитель')      P_MANAGER   in [STRING],
+	@name('Главный бухгалтер') P_BUH       in [STRING],
+	@name('Исполнитель')       P_WORKER    in [STRING],
+	@name('Мемо7')             P_M7        in [MEMO_BIG],
+	@name('Мемо8')             P_M8        in [MEMO_BIG],
+	@name('Мемо9')             P_M9        in [MEMO_BIG],
+	@name('Мемо10')            P_M10       in [MEMO_BIG],
+	@name('Мемо11')            P_M11       in [MEMO_BIG],
+	@name('Мемо12')            P_M12       in [MEMO_BIG],
+	@name('Мемо13')            P_M13       in [MEMO_BIG],
+	@name('Мемо14')            P_M14       in [MEMO_BIG],
+	@name('Мемо15')            P_M15       in [MEMO_BIG],
+	@name('Мемо16')            P_M16       in [MEMO_BIG],
+	@name('Мемо17')            P_M17       in [MEMO_BIG],
+	@name('Мемо18')            P_M18       in [MEMO_BIG],
+	@name('Контролер')         P_CONTROLER in [STRING_128]
+) is
+
+validate is
+	doc			ref [MAIN_DOCUM];
+	vSumma      string;
+	num			integer	:= 1;
+	numStr		integer	:= 0;		-- Количество строк
+	bank_pl 	ref [CL_BANK_N];
+	bank_po 	ref [CL_BANK_N];
+	our_bank 	ref [CL_BANK_N];
+	nazn        [MEMO];
+	AcDtName	[PAYER_NAME];--varchar2(160);
+	AcKtName	[PAYER_NAME];--varchar2(160);
+	v_summa		[SUMMA];
+	v_summa_str	varchar2(1024);
+	v_currency	Ref [FT_MONEY];
+	v_val_name	::[FT_MONEY].[CUR_SHORT]%TYPE;
+	acc_dt		::[AC_FIN].[MAIN_V_ID]%type;
+	acc_kt		::[AC_FIN].[MAIN_V_ID]%type;
+	type sum_val_t is table of [SUMMA] index by string;
+	sum_val 	sum_val_t;
+	str_idx		string;
+	v_pos 	number;
+	fil ref [BRANCH];
+	
+	Procedure SaveMemo is
+	Begin
+	  If    num = 1 Then P_M1 := P_M; P_M := null; num := 2;
+	  ElsIf num = 2 Then P_M2 := P_M; P_M := null; num := 3;
+	  ElsIf num = 3 Then P_M3 := P_M; P_M := null; num := 4;
+	  ElsIf num = 4 Then P_M4 := P_M; P_M := null; num := 5;
+	  ElsIf num = 5 Then P_M5 := P_M; P_M := null; num := 6;
+	  ElsIf num = 6 Then P_M6 := P_M; P_M := null; num := 7;
+	  ElsIf num = 7 Then P_M7 := P_M; P_M := null; num := 8;
+	  ElsIf num = 8 Then P_M8 := P_M; P_M := null; num := 9;
+	  ElsIf num = 9 Then P_M9 := P_M; P_M := null; num := 10;
+	  ElsIf num = 10 Then P_M10 := P_M; P_M := null; num := 11;
+	  ElsIf num = 11 Then P_M11 := P_M; P_M := null; num := 12;
+	  ElsIf num = 12 Then P_M12 := P_M; P_M := null; num := 13;
+	  ElsIf num = 13 Then P_M13 := P_M; P_M := null; num := 14;
+	  ElsIf num = 14 Then P_M14 := P_M; P_M := null; num := 15;
+	  ElsIf num = 15 Then P_M15 := P_M; P_M := null; num := 16;
+	  ElsIf num = 16 Then P_M16 := P_M; P_M := null; num := 17;
+	  ElsIf num = 17 Then P_M17 := P_M; P_M := null; num := 18;
+	  ElsIf num = 18 Then P_M18 := P_M; P_M := null; num := 19;
+	  else
+	  	pragma error ('Внимание! Операция не предназначена для печати ресстров с содержимым > 256К.'||NL$||' Уменьшите выборку или воспользуйтесь операций типа "Отчет');
+	  End If;
+	End;
+	
+	procedure add_str(p_str varchar2(32000)) is
+	begin
+		if length(P_M) + length(p_str) > P_M%size then
+			SaveMemo;
+			P_M := p_str;
+		else
+			P_M := P_M || p_str;
+		end if;
+	end;
+
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		P_DAT:=to_char(dat,'DD.MM.YYYY');
+		for idx in docs.first..docs.last loop
+			doc := docs(idx);
+			if doc.[FILIAL] is null then
+				pragma error ('Не указан филиал документа '|| doc.[DOCUMENT_NUM] || ' от '|| to_char (doc.[DOCUMENT_DATE], 'DD.MM.YYYY'));
+			end if;
+			
+			our_bank := ::[SYSTEM].[VARIABLES].Br2Bank(doc.[FILIAL]);
+			
+			bank_pl := nvl(doc.[KL_DT].[2].[3], our_bank);
+			bank_po := nvl(doc.[KL_KT].[2].[3], our_bank);
+			-->> BS00150838
+			if doc.[KL_DT].[0] = 1 then
+				acc_dt := doc.[KL_DT].[1].[2].[MAIN_V_ID];
+				if length(acc_dt) = 25 and doc.[KL_DT].[1].[2].[COM_STATUS] = ::[COM_STATUS_PRD](CODE = 'SHIFR') then
+  								acc_dt := doc.[KL_DT].[1].[2].[ACC_SUMMARY].[MAIN_V_ID];
+  							end if;
+			elsif doc.[KL_DT].[0] = 2 then
+				acc_dt := doc.[KL_DT].[2].[1];							
+			end if;
+			
+			if doc.[KL_KT].[0] = 1 then
+				acc_kt := doc.[KL_KT].[1].[2].[MAIN_V_ID];
+				if length(acc_kt) = 25 and doc.[KL_KT].[1].[2].[COM_STATUS] = ::[COM_STATUS_PRD](CODE = 'SHIFR') then
+  								acc_kt := doc.[KL_KT].[1].[2].[ACC_SUMMARY].[MAIN_V_ID];
+  							end if;
+			elsif doc.[KL_KT].[0] = 2 then
+				acc_kt := doc.[KL_KT].[2].[1];
+			end if;
+			--<< BS00150838
+			AcDtName := rpad(nvl(nvl(doc.[KL_DT].[1].[1].[Name],doc.[KL_DT].[2].[2]),' '),160);
+			AcKtName := rpad(nvl(nvl(doc.[KL_KT].[1].[1].[Name],doc.[KL_KT].[2].[2]),' '), 160);
+			-- Заменяем LF и CR на пробелы, а затем двойные пробелы на один
+			-- и увеличиваем строку до 210 символов...
+			nazn := RPAD(replace(replace(replace(nvl(doc.[NAZN],' '),chr(13),' '),chr(10),' '),'  ',' '),210);
+			
+			v_summa := nvl(doc.[SUM], 0);
+			if v_summa = 0 then
+				v_summa := nvl(doc.[SUM_PO], 0);
+				v_val_name := doc.[VALUTA_PO].[CUR_SHORT];
+			else
+				v_val_name := doc.[VALUTA].[CUR_SHORT];
+			end if;
+			if  v_val_name is not null then
+				if  sum_val.exists(v_val_name) then
+					sum_val(v_val_name) := nvl(sum_val(v_val_name), 0) + v_summa;
+				else
+					sum_val(v_val_name) :=  v_summa;				
+				end if;
+			end if;
+			vSumma := ltrim(to_char(v_summa, '99999999990.99'));
+			-- 1
+			add_str(
+			  '|'
+			||to_char(doc.[DATE_DOC], 'dd/mm/yy')||'|'
+			||nvl(bank_pl.[BIC], lpad(' ', 9))||' '||nvl(bank_pl.[KS], lpad(' ', 20))||'      |'
+			||nvl(bank_po.[BIC], lpad(' ', 9))||' '||nvl(bank_po.[KS], lpad(' ', 20))||'      |'
+			||rpad(substr(nazn,  1, 30), 30)||'|'
+			||lpad(substr(vSumma, 1, 14), 14)||'|'--14
+			||doc.[PRIORITET]||'|' -- "Очерёдность" ("Приоритет")
+			||LF$);
+
+			-- 2
+			add_str(
+			  '|'||rpad(bool_char(doc.[VID_OBOROTA] = ::[VID_OBOROT]([SHORT_NAME]='3'), '  Закл.', '  Осн.'),8)||'|'
+			||rpad(substr([DOCUM_RC].[LIB].get_bank_name(bank_pl), 1, 36), 36)||'|'--40
+			||rpad(substr([DOCUM_RC].[LIB].get_bank_name(bank_po), 1, 36), 36)||'|'--40
+			||rpad(substr(nazn, 31, 30), 30)||'|'
+			||lpad(' ', 14)||'| |'	--11
+			||LF$);
+
+			-- 3
+			add_str('|N.док   '||'|'
+			||rpad(nvl(nvl(doc.[KL_DT].[2].[INN], doc.[KL_DT].[1].[1].[INN]),' '), 10)||' '
+			||rpad(nvl(nvl(acc_dt, doc.[ACC_DT].[MAIN_V_ID]), ' '),25)||'|'
+			||rpad(nvl(nvl(doc.[KL_KT].[2].[INN], doc.[KL_KT].[1].[1].[INN]),' '), 10)||' '
+			||rpad(nvl(nvl(acc_kt, doc.[ACC_KT].[MAIN_V_ID]), ' '),25)||'|'
+			||rpad(substr(nazn, 61, 30), 30)||'|'--||lpad(' ', 14)
+			||lpad(nvl(substr('              '||v_currency->[CODE_ISO],-14),'  '),14)||'| |'	--11
+			||LF$);
+
+			-- 4
+			add_str('|'||rpad(substr(doc.[DOCUMENT_NUM]||'        ',1,8),8)||'|' --?
+			||rpad(substr(AcDtName,1,36),36)||'|'
+			||rpad(substr(AcKtName,1,36),36)||'|'
+			||rpad(substr(nazn, 91, 30), 30)||'|'
+			||lpad(' ', 14)||'| |'	--11
+			||LF$);
+			
+				-- 5
+			if replace(substr(AcDtName,37,40), ' ') is not null
+			or replace(substr(AcKtName,37,40), ' ') is not null
+			or replace(substr(nazn,121, 30), ' ') is not null  then
+					add_str('|'||lpad(' ', 8)||'|'	--11
+					||rpad(substr(AcDtName,37,36),36)||'|'
+					||rpad(substr(AcKtName,37,36),36)||'|'
+					||rpad(substr(nazn,121, 30), 30)||'|'
+					||lpad(' ', 14)||'| |'	--11
+					||LF$);
+			end if;
+				-- 6
+			if replace(substr(AcDtName,73,40), ' ') is not null
+			or replace(substr(AcKtName,73,40), ' ') is not null
+			or replace(substr(nazn,151, 30), ' ') is not null  then
+					add_str('|'||lpad(' ', 8)||'|'	--11
+					||rpad(substr(AcDtName,73,36),36)||'|'
+					||rpad(substr(AcKtName,73,36),36)||'|'
+					||rpad(substr(nazn,151, 30), 30)||'|'
+					||lpad(' ', 14)||'| |'	--11
+					||LF$);
+			end if;
+				-- 7
+			if replace(substr(AcDtName,109,36), ' ') is not null
+			or replace(substr(AcKtName,109,36), ' ') is not null
+			or replace(substr(nazn,181, 30), ' ') is not null  then
+					add_str('|'||lpad(' ', 8)||'|'	--11
+					||rpad(substr(AcDtName,109,36),36)||'|'
+					||rpad(substr(AcKtName,109,36),36)||'|'
+					||rpad(substr(nazn,181, 30), 30)||'|'
+					||lpad(' ', 14)||'| |'	--11
+					||LF$);
+			end if;
+
+			numStr := numStr + 1;
+		end loop;
+		P_KOL_STR := to_char(numStr);
+
+		str_idx := sum_val.first;
+		while str_idx is not null loop
+			--P_SUM_STR := P_SUM_STR||LF$||'| '||str_idx||TB$||rpad(ltrim(to_char(sum_val(str_idx), '99,999,999,990.99')), 17, ' ')||rpad(' ',11, '	')||lpad('|', 17, ' ');
+			-- Сумма строкой
+			v_summa_str := '| '||ltrim(to_char(sum_val(str_idx), '99,999,999,990.99'))||' ('||STDLIB.N2STR( sum_val(str_idx), str_idx)||')';
+			if length(v_summa_str) <= 122 then --92
+				P_SUM_STR := P_SUM_STR||LF$||TB$ || rpad( v_summa_str, 122) || '|';
+			else
+				P_SUM_STR := P_SUM_STR||LF$||TB$ || rpad(::[MAIN_DOCUM].[PRINT_SRV].formating(v_summa_str, 1,122 , v_pos),122) || '|';
+				while v_pos <= length(v_summa_str) loop
+					P_SUM_STR := P_SUM_STR||LF$||TB$ || '|'||rpad(::[MAIN_DOCUM].[PRINT_SRV].formating(v_summa_str, v_pos,113 , v_pos), 112) || '|'; --84
+				end loop;
+			end if;
+			str_idx := sum_val.next(str_idx);
+		end loop;
+		
+		P_WORKER := v_worker.[NAME];
+		P_CONTROLER := v_controler.[NAME];
+		P_KOL_STR := to_char(numStr);
+		
+		--DEBUG_PIPE('v_controler.[NAME]='||v_controler.[NAME], 0);
+		--DEBUG_PIPE('P_CONTROLER='||P_CONTROLER, 0);		
+		
+		SaveMemo;
+
+		-- Определение названия заголовка
+		doc := docs(docs.first);
+		FIL := STDLIB.USERID.DEPART.FILIAL;
+		for (select x(x.[ACCOUNT].[MAIN_V_ID] :C_KORR) in ::[TRC] where x.[CLIENT].[BANK].[BIC]=FIL.[BANK].[BIC_MASTER] and x.[STATUS].[CODE]='WORK')
+		loop C_KS:= x.C_KORR;
+		end loop;
+	end if;
+end;
+
+
+execute is
+begin
+	null;
+end;
+end;
+end;

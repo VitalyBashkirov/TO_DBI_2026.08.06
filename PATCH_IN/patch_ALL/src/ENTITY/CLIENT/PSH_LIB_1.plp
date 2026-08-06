@@ -1,0 +1,377 @@
+class CLIENT;
+
+@name('[ПСБ] Библиотека')
+@tag('KUP_P')
+library PSH_LIB_1 is
+-- Входит Клиент в Коллектив или нет
+-- Function Get_GROUP_Client (cl ref [CLIENT]) return Varchar2(250);
+
+-- Дата последней операции по счетам клиента с кореспондирующим счетом 20202
+-- Function Get_date_oper_kas_acc (cl ref [client]) return date;
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+fmt	   string(10):='dd/mm/yyyy';
+fmtS   string(10):='dd.mm.yy';
+fmtHMS string(22):='dd/mm/yyyy HH24:MI:SS';
+fmt24 string(22):='dd/mm/yyyy HH24:MI:SS';
+
+public function Dubl(this_Cl [CLIENT_REF]) return string is 
+vName [SBRF_NAME];
+begin
+	vName:=this_Cl.[NAME];
+	for cl in ::[CLIENT] all where cl<>this_Cl and cl.[NAME]=vName loop
+		return 'Да';
+	end loop;
+	return 'Нет';
+end;
+
+-- Входит Клиент в Коллектив или нет
+/** /
+Function Get_GROUP_Client (cl ref [CLIENT]) return Varchar2(250) is
+str varchar(250);
+gr ref [GROUP];
+Begin
+  str := '';
+  For grp in ::[MEMBER] all
+where grp.[CL] = cl
+  Loop
+     gr := grp%parent([GROUP]);
+     If str != '' Then
+        str := str||'; ';
+     End If;
+     str := str||gr.[NAME];
+  End Loop;
+     Return str;
+End;
+/**/
+
+-- имеются у клиента ограничения по договору
+public Function Get_Limit_RKO (rko ref [RKO], DateCalc [DATE] default [SYSTEM].[OP_DATE]) return varchar2(32767) is 
+str varchar2(32767);
+strLim varchar2(32767);
+Begin
+   str := '';
+  For lim in rko.[LIMITS_PAY]
+   where nvl(lim.[DATE_BEG],DateCalc)<=DateCalc and
+         (lim.[DATE_END] is null or (lim.[DATE_END]=DateCalc and lim.[VALID_LIMIT]) or DateCalc<lim.[DATE_END])
+   order by lim.[DATE_BEG] desc, lim.[DATE_END] desc
+  Loop
+	   strLim:='';
+	   If str is not null Then str := substr(str||';'||LF$,1,str%size); End If;
+	   strLim:=trim(
+	   		   iif(lim.[DATE_BEG] is not null,     to_char(lim.[DATE_BEG],fmtS),'')||
+	   		   iif(lim.[DATE_END] is not null,'-'||to_char(lim.[DATE_END],fmtS),'')||
+	   		   ' '||lim.[KIND_LIMIT].[NAME]);
+	   if lim.[PRIORITET] is not null     then strLim:=strLim||' МДОП:'||lim.[PRIORITET]; end if;
+	   if lim.[SUM_LIMIT] is not null     then strLim:=strLim||' Сумма ограничения:'||lim.[SUM_LIMIT]||iif(lim.[SUM_CURR] is null,'',' '||lim.[SUM_CURR].[CUR_SHORT]); end if;
+	   if lim.[SUM_LIMIT_RUB] is not null then strLim:=strLim||' Сумма ограничения в руб.:'||lim.[SUM_LIMIT_RUB]; end if;
+	   if lim.[LIMIT_ORIGIN].[CODE]='COURT' then strLim:=strLim||' Источник:Судебный орган'; end if;
+	   if lim.[LIMIT_ORIGIN].[CODE]='FNS'   then strLim:=strLim||' Источник:ФНС'; end if;
+	   if lim.[LIMIT_ORIGIN].[CODE]='FSSP'  then strLim:=strLim||' Источник:ФССП'; end if;
+	   if lim.[LIMIT_ORIGIN].[CODE]='FTS'   then strLim:=strLim||' Источник:ФТС'; end if;
+	   Str := SubStr(str||strLim,1,32767);
+  End Loop;
+    if Length(str)>2000 then str:=Substr('!'||str,1,2000); end if;
+    Return str;
+End;
+
+-- Имеется у счета ограничение или нет
+public Function Get_Limit_ACC (acc ref [AC_FIN], DateCalc [DATE] default [SYSTEM].[OP_DATE]) return varchar2(32767) is 
+rko ref [RKO];
+str varchar2(32767);
+strLim varchar2(32767);
+vSum [SUMMA];
+Begin
+  str=strLim:= '';
+  Begin
+    Locate rko in [RKO]
+     where rko.[ACCOUNT] = acc;
+     For lim in rko.[LIMITS_PAY]
+   where lim.[KIND_LIMIT]=::[RKO_LIMITS]([CODE]='PRIORITET') and --Максимально допустимая очередность платежа
+   	  nvl(lim.[DATE_BEG],DateCalc)<=DateCalc and
+         (lim.[DATE_END] is null or (lim.[DATE_END]=DateCalc and lim.[VALID_LIMIT]) or DateCalc<lim.[DATE_END])
+   order by lim.[DATE_BEG] desc, lim.[DATE_END] desc
+     Loop
+       strLim:='';
+       If str is not null Then str := str||';'||LF$; End If;
+       strLim:=trim(
+       		   iif(lim.[DATE_BEG] is not null,     to_char(lim.[DATE_BEG],fmtS),'')||
+       		   iif(lim.[DATE_END] is not null,'-'||to_char(lim.[DATE_END],fmtS),'')||
+       		   ' '||lim.[KIND_LIMIT].[NAME]);
+
+       if lim.[SUM_LIMIT] is null then return 'Полное ограничение'; end if;
+
+       if lim.[PRIORITET] is not null     then strLim:=strLim||' МДОП:'||lim.[PRIORITET]; end if;
+       if lim.[SUM_LIMIT] is not null     then strLim:=strLim||' Сумма ограничения:'||lim.[SUM_LIMIT]||iif(lim.[SUM_CURR] is null,'',' '||lim.[SUM_CURR].[CUR_SHORT]);
+       		vSum:=nvl(vSum,0)+lim.[SUM_LIMIT];
+       end if;
+       if lim.[SUM_LIMIT_RUB] is not null then strLim:=strLim||' Сумма ограничения в руб.:'||lim.[SUM_LIMIT_RUB]; end if;
+	   Str := SubStr(str||strLim,1,32767);
+     End Loop;
+       if vSum is not null then str:=trim(to_char(vSum,'9999,999,999.99')); str:=iif(SubStr(str,1,1)='.','0'||str,str); end if;
+       if Length(str)>2000 then str:=Substr('!'||str,1,2000); end if;
+       Return str;
+    Exception WHEN NO_DATA_FOUND Then
+       if vSum is not null then str:=to_char(vSum,'9999,999,999.99'); str:=iif(SubStr(str,1,1)='.','0'||str,str); end if;
+       if Length(str)>2000 then str:=Substr('!'||str,1,2000); end if;
+       Return str;
+  End;
+End;
+
+-- Наличие счетов у клиента на дату
+-- '1' - имеется
+-- '0' - не имеется
+-- Наличие счетов у клиента на дату
+public Function Available_Acc_client (cl ref [CLIENT], dt date default sysdate) return varchar2 is 
+Begin
+  For acc in ::[AC_FIN]
+where acc.[CLIENT_V] = cl
+  and (acc.[MAIN_V_ID] like '423%'
+    or acc.[MAIN_V_ID] like '426%'
+    or acc.[MAIN_V_ID] like '455%'
+    or acc.[MAIN_V_ID] like '457%'
+    or acc.[MAIN_V_ID] like '40817%'
+    or acc.[MAIN_V_ID] like '40820%'
+       )
+--  and (acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] > dt)
+  Loop
+    Return '1';
+  End Loop;
+    Return '0';
+End;
+
+-- Наличие договоров РКО
+public Function Get_Client_RKO (cl ref [CLIENT]) return varchar2 is 
+Begin
+  For x in ::[RKO]
+where x.[CLIENT] = cl
+  Loop
+    Return 'Да';
+  End Loop;
+    Return 'Нет';
+End;
+
+-- Дата последней операции по счетам клиента с кореспондирующим счетом 20202
+/** /
+Function Get_date_oper_kas_acc (cl ref [client]) return date is
+dt_beg date;
+acc ref [AC_FIN];
+rec ref [RECORDS];
+Begin
+  acc := ::[CL_PRIV].[VND_WRD_FIZCL_AN].Get_Firs_open_acc(cl);
+  dt_beg := acc.[DATE_OP];
+  FOR x in ::[AC_FIN]
+where x.[CLIENT_V] = cl
+  and Get_ACC(x) = '1'
+  Loop
+    Begin
+    Locate rec in x.[ARC_MOVE]
+     where rec.[ACC_CORR].[MAIN_V_ID] like '20202%'
+       and rec.[DT] = true
+       and x.[CLIENT_V] = rec.[DOC].[REQ_MAN].[CLIENTREF]
+    order by rec.[DATE] desc;
+       If rec.[DATE] > dt_beg Then
+          dt_beg := rec.[DATE];
+       End If;
+    Exception When NO_DATA_FOUND Then
+      null;
+    End;
+  End Loop;
+   Return dt_beg;
+End;
+/**/
+
+-- Перечень счетов для поиска операций
+public Function Get_ACC (acc ref [AC_FIN]) return varchar2 is 
+Begin
+ If acc.[MAIN_V_ID] like '423%' or
+    acc.[MAIN_V_ID] like '426%' or
+    acc.[MAIN_V_ID] like '40817%' or
+    acc.[MAIN_V_ID] like '40820%' Then
+    Return '1';
+ End if;
+    Return '0';
+End;
+
+-- Нужна ли анкета организации
+public Function Get_true_anket (cl ref [CL_ORG]) return varchar2 is 
+fl boolean;
+Begin
+  fl := false;
+  -- Наличие РКО
+  For x in ::[RKO]
+where x.[CLIENT] = cl
+  and x.[FILIAL].[CODE] = '002'
+  and x.[AIM].[AIM] != 'Накопительный счет'
+  Loop
+    fl := true;
+  End Loop;
+  -- Наличие депозитов
+  For x in ::[DEPOSIT_ORG]
+where x.[CLIENT] = cl
+  and x.[FILIAL].[CODE] = '002'
+  Loop
+    fl := true;
+  End Loop;
+  -- Наличие кредитов
+  For x in ::[KRED_CORP]
+where x.[CLIENT] = cl
+  and x.[FILIAL].[CODE] = '002'
+  Loop
+    fl := true;
+  End Loop;
+  If fl = true Then
+     Return '1';
+  End If;
+     Return '0';
+End;
+
+/**********************************************************
+Функция возвращает паспортные данные клиента - физ лица.
+**********************************************************/
+public function Get_passport_cl(p_cl ref [CL_PRIV]) return string is 
+doc [CERTIFICATE];
+begin
+	null;
+	doc := p_cl.[DOC];
+	if p_cl.[doc].[type] is not null then
+	 	return doc.[type].[NAME]||
+	 		   bool_char(p_cl.doc.[SER] is null, null, ' '||p_cl.doc.[SER])||
+ 			   bool_char(p_cl.doc.[NUM] is null, null, ' №'||p_cl.doc.[NUM])||
+			   bool_char(p_cl.doc.[date]is null, null, '  выдан '||to_char(p_cl.doc.[date],'dd/mm/yyyy'))||
+			   bool_char(p_cl.doc.[WHO] is null, null, ' '||doc.[WHO])||
+			   bool_char(p_cl.doc.[DEPART_CODE] is null, null, ' код подр. '||p_cl.doc.[DEPART_CODE]);
+	elsif p_cl.doc.[WHO] is not null then
+		return p_cl.doc.[WHO];
+	end if;
+end;
+
+-- Последний тарифный план
+public function GetLastTarifPlan (r ref [RKO]) return [NAME] is 
+begin
+	for (select tp(to_char(tp.[DATE_BEGIN],'yyyy.mm.dd')||' '||tp.[TAR_PLAN].[NAME] : C_TAR_PLAN) 
+		in r.[TARIF_PLAN] 
+		where tp.[DATE_BEGIN] <= ::[SYSTEM].[OP_DATE]
+		order by tp.[DATE_BEGIN] desc
+	)
+	loop
+		return tp.C_TAR_PLAN;
+	end loop;
+end;
+
+--Глава правления на дату
+public function head_master_fio(p_date	date) return varchar2 is 
+begin
+    if p_date >= to_date('11.02.2026', 'dd.MM.yyyy') then
+		return 'Курстак Владимир Михайлович';		
+	elsif p_date >= to_date('07.08.2024', 'dd.MM.yyyy') then
+		return 'Сысоев Сергей Валентинович';
+	elsif p_date >= to_date('07.12.2022', 'dd.MM.yyyy') then
+		return 'Гулова Мария Михайловна';
+	elsif p_date >= to_date('29.05.2019', 'dd.MM.yyyy') then
+		return 'Фарафонов Иван Александрович';
+	elsif p_date >= to_date('30.11.2018', 'dd.MM.yyyy') then
+		return 'Фарафонов Иван Александрович';
+	elsif p_date >= to_date('12.05.2017', 'dd.MM.yyyy') then
+		return 'Дамаскинский Виктор Алексеевич';
+	elsif p_date >= to_date('23.12.2014', 'dd.MM.yyyy') then
+		return 'Грубенко Владимир Юрьевич';
+	elsif p_date >= to_date('23.09.2010', 'dd.MM.yyyy') then
+		return 'Воронкова Наталья Александровна';
+	elsif p_date >= to_date('23.03.2010', 'dd.MM.yyyy') then
+		return 'Шаповалова Татьяна Николаевна';
+	elsif p_date >= to_date('04.09.2002', 'dd.MM.yyyy') then
+		return 'Калугин Юрий Павлович';
+	else return '-';
+	end if;
+end;
+
+--Должность главы правления на дату
+public function head_master_casta(p_date	date) return varchar2 is 
+begin
+	if p_date >= to_date('07.08.2024', 'dd.MM.yyyy') then
+		return 'Председатель правления';
+	elsif p_date >= to_date('07.12.2022', 'dd.MM.yyyy') then
+		return 'Временно исполняющий обязанности председателя правления';
+	elsif p_date >= to_date('29.05.2019', 'dd.MM.yyyy') then
+		return 'Председатель правления';
+	elsif p_date >= to_date('30.11.2018', 'dd.MM.yyyy') then
+		return 'И.о. председателя правления';
+	elsif p_date >= to_date('12.05.2017', 'dd.MM.yyyy') then
+		return 'Исполняющий обязанности председателя правления';
+	elsif p_date >= to_date('23.12.2014', 'dd.MM.yyyy') then
+		return 'Председатель правления';
+	elsif p_date >= to_date('23.09.2010', 'dd.MM.yyyy') then
+		return 'Председатель правления';
+	elsif p_date >= to_date('23.03.2010', 'dd.MM.yyyy') then
+		return 'Исполняющий обязанности председателя правления';
+	elsif p_date >= to_date('04.09.2002', 'dd.MM.yyyy') then
+		return 'Председатель правления';
+	else return '-';
+	end if;
+end;
+
+--Обоснование риска клиента
+public function risk_reason(cl_id varchar2) return memo is 
+p_data memo;
+is_benef boolean;
+is_country boolean;
+is_prod	boolean;
+is_vid_op	boolean;
+fmt string := 'dd/MM/yyyy';
+op_dat date := ::[SYSTEM].[OP_DATE];
+fc ref [CL_FACTOR];
+rf ref [RISK_FACTOR];
+begin
+	P_DATA := '';
+    is_benef:=false; is_country:=false; is_prod:=false; is_vid_op:=false;
+ 	for(
+		select crit(
+			crit.[CRIT_DATE_BEGIN]	:date_begin
+			,crit.[CRIT_DATE_END]	:date_end
+			,crit.[CRITERIA].[NAME] :NAME
+			,crit.[ACTIVE_FACTORS] :pArr
+			,crit.[CRITERIA].[CODE]:code						
+		)
+		in ::[MONITORING_CRIT] all
+		where crit.[CLIENT] = cl_id
+		and (crit.[CRIT_DATE_BEGIN] is null or crit.[CRIT_DATE_BEGIN] <= op_dat)
+		and (crit.[CRIT_DATE_END] is null or crit.[CRIT_DATE_END] >= op_dat)
+	)
+	loop
+ 	  if    crit.[CODE] like 'PSH_BENEF%'    then is_benef:=true; 	
+      elsif crit.[CODE] like 'PSH_COUNTRY%'  then is_country:=true; 	
+      elsif crit.[CODE] like 'PSH_PROD%'     then is_prod:=true; 	
+      elsif crit.[CODE] like 'PSH_VID_OP%'   then is_vid_op:=true; 	
+      end if;
+      P_DATA := P_DATA||to_char(crit.date_begin, fmt)||' ';
+      if crit.date_end is not null then
+      	P_DATA := P_DATA||'- '||to_char(crit.date_end, fmt)||' ';
+      end if;
+      P_DATA := P_DATA||'- ';					
+      P_DATA := P_DATA||crit.[NAME]||NL$;
+	--далее ищем факторы клиента по текущему критерию
+			for(
+					select x(x%Id : Id)
+					in		crit.[pArr]
+			
+			        where x.[DATE_BEGIN]<= op_dat
+			     			and nvl(x.[DATE_END], op_dat)	>= op_dat
+			     			)
+			     loop
+					fc := x.Id;
+			        rf:= fc.[FACTOR];
+					P_DATA := P_DATA||rf.[NAME]||NL$;
+			    end loop;
+	end loop;
+	
+	if P_DATA = ' ' or P_DATA is null then
+		P_DATA := 'Критерий риска не соответствует ни одному пункту ПВК оценки высокого уровня риска';
+	else
+		P_DATA := ltrim(P_DATA, '; ');
+	end if;
+	return P_DATA;
+end;
+end;

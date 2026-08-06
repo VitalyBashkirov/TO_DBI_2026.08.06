@@ -1,0 +1,469 @@
+class PR_CRED;
+
+@name('[ПСБ] Кредиты. Функции для отчетов')
+library PSH_CRED_REP is
+--Типы для сумм по ПОС'ам
+public type tPtf is record (od number := 0,
+                     exod number := 0,
+                     res number := 0,
+                     resex number := 0,
+                     pcn number := 0,
+                     expcn number := 0,
+                     respcn number := 0,
+                     resexpcn number := 0);
+public type tPtf_tbl is table of tPtf;
+public pPtfData tPtf_tbl;
+
+--Группа риска кредита pDea за дату pDate
+public function fGetRiskGr(pDea in ref [PR_CRED], pDate in date) return [CRED_RISK].GROUP_NUM%type is 
+      GrNum [CRED_RISK].GROUP_NUM%type;
+begin
+--Заглянем в ПОС
+begin
+      select ptf(
+           ptf.[GR_RISK_HIST].[RISK_GROUP].GROUP_NUM
+      ) in ::[SIM_LOAN_PORT] all
+      where
+            ptf.[CREDITS].[PR_CRED] = pDea
+        and ptf.[CREDITS].DATE_BEGIN <= pDate
+        and (ptf.[CREDITS].DATE_END is null or ptf.[CREDITS].DATE_END > pDate)
+        and ptf.[GR_RISK_HIST].DATE_START <= pDate
+        and (ptf.[GR_RISK_HIST].DATE_END is null or ptf.[GR_RISK_HIST].DATE_END >= pDate)
+      into GrNum;
+      if GrNum = 1 then
+          GrNum := 2;
+      end if;
+exception when TOO_MANY_ROWS then
+      GrNum := -1;
+when NO_DATA_FOUND then --непортфельный кредит
+      begin
+            select
+                  gr(gr.[RISK_GROUP].GROUP_NUM)
+            in
+                  pDea.[GR_RISK_HIST]
+            where
+                  gr.DATE_START <= pDate
+            and gr.DATE_END >= pDate
+            into GrNum;
+      exception when NO_DATA_FOUND then
+            GrNum := null;
+      when TOO_MANY_ROWS then
+            GrNum := -1;
+      end;
+end;
+return GrNum;
+end; --fGetRiskGr
+pragma restrict_references(fGetRiskGr, WNDS);
+
+--Ставка резервирования кредита pDea за дату pDate
+public function fGetRiskPrc(pDea in ref [PR_CRED], pDate in date) return [CR_RISK_GR].PRC_RESERV%type is 
+      Prc [CR_RISK_GR].PRC_RESERV%type;
+begin
+--Заглянем в ПОС
+begin
+      select ptf(
+            ptf.[GR_RISK_HIST].PRC_RESERV
+      ) in ::[SIM_LOAN_PORT] all
+      where
+            ptf.[CREDITS].[PR_CRED] = pDea
+        and ptf.[CREDITS].DATE_BEGIN <= pDate
+        and (ptf.[CREDITS].DATE_END is null or ptf.[CREDITS].DATE_END > pDate)
+        and ptf.[GR_RISK_HIST].DATE_START <= pDate
+        and (ptf.[GR_RISK_HIST].DATE_END is null or ptf.[GR_RISK_HIST].DATE_END >= pDate)
+      into Prc;
+exception when TOO_MANY_ROWS then
+      Prc := -1;
+when NO_DATA_FOUND then--непортфельный кредит
+      begin
+            select
+                  gr(gr.PRC_RESERV)
+            in
+                  pDea.[GR_RISK_HIST]
+            where
+                  gr.DATE_START <= pDate
+            and gr.DATE_END >= pDate
+            into Prc;
+      exception when NO_DATA_FOUND then
+            Prc := null;
+      when TOO_MANY_ROWS then
+            Prc := -1;
+      when others then
+            Prc := null;
+      end;
+when others then
+      Prc := null;
+end;
+
+return Prc;
+end; --fGetRiskPrc
+pragma restrict_references(fGetRiskPrc, WNDS);
+
+--Возвращает ссылку на счет типа из pAccType массива счетов pArr за дату pDate
+public function fGetAccInArrByDate(pArr in [HOZ_OP_ACC_ARR], pDate in date, pAccType in varchar2) return ref [AC_FIN] is 
+iAcc ref [AC_FIN];
+begin
+      iAcc := null;
+      select acc(ANALYTIC(max(acc.[ACCOUNT_DOG].[1].[2]), 'KEEP (DENSE_RANK LAST ORDER BY [1])', acc.DATE_BEG)
+      ) in pArr
+      where acc.[NAME_ACCOUNT].COD = pAccType and acc.DATE_BEG <= pDate
+      into iAcc;
+      return iAcc;
+exception when no_data_found then
+      return null;
+end; --fGetAccInArrByDate
+pragma restrict_references(fGetAccInArrByDate, WNDS);
+
+--Возвращает счет пипа pAccType из массива счетов договора pDea за дату pDate
+public function fGetDeaMainAcc(pDea in ref [PR_CRED], pDate in date, pAccType in varchar2) return ref [AC_FIN] is 
+      iAcc ref [AC_FIN];
+begin
+      iAcc := fGetAccInArrByDate(pDea.[ARRAY_DOG_ACC], pDate, pAccType);
+      return iAcc;
+exception when no_data_found then
+      return null;
+end; --fGetDeaMainAcc
+pragma restrict_references(fGetDeaMainAcc, WNDS);
+
+--Возвращает ссылку на счет типа pType из счетов ПОС'а pPtf за дату pDate
+public function fGetPotAcc(pPtf in ref [SIM_LOAN_PORT], pDate in date, pType in varchar2) return ref [AC_FIN] is 
+      iAcc ref [AC_FIN];
+begin
+    select
+           p((select pcres(pcres.[RES_ACC]) in ::[RES_BASE_ACCS] where pcres.[PROD_RES] = p.[RES_PORT_REF]))
+    in pPtf.[SLP_RESP_ARR]
+    where p.[TYPE_ACC_ARR].COD = pType
+    into iAcc;
+    return iAcc;
+exception when no_data_found then
+      return null;
+end; --fGetPotAcc
+pragma restrict_references(fGetPotAcc, WNDS);
+
+--Остаток по счетам типа pAccType по всем траншам линии pDea за дату pDate
+public function fGetLineBal(pDea in ref [PR_CRED], pDate in date, pAccType in varchar2) return number is 
+      vBal number;
+begin
+      select acc(
+            sum(abs(f.a('В'||acc.ac.[ARC_MOVE]||'СН', pDate+1)))
+      ) in (select distinct cr(
+                  ANALYTIC(FIRST_VALUE(cr.[ARRAY_DOG_ACC].[ACCOUNT_DOG].[1].[2]), 'OVER (PARTITION BY [1] ORDER BY [2] desc)', cr, cr.[ARRAY_DOG_ACC].DATE_BEG) :ac
+            ) in ::[PR_CRED] all
+            where
+                  cr.[HIGH_LEVEL_CR] = pDea
+              and cr.[ARRAY_DOG_ACC].[NAME_ACCOUNT].COD = pAccType
+              and cr.[ARRAY_DOG_ACC].DATE_BEG <= pDate)
+      into vBal;
+      return vBal;
+exception when others then
+    return 0;
+end; --fGetLineBal
+pragma restrict_references(fGetLineBal, WNDS);
+
+--Расчет данных по ПОС'ам
+public procedure pCalcPtf(pDate in date) is 
+      vOd number;
+      vExOd number;
+      vOdRes number;
+      vExOdRes number;
+      vPcn number;
+      vExPcn number;
+      vResPcn number;
+      vResExPcn number;
+
+begin
+      for p in ::[SIM_LOAN_PORT] all
+      loop
+            --ОД по портфелю.
+            begin
+                select cr(sum(abs(f.a('В'||coalesce(fGetDeaMainAcc(cr.[PR_CRED], pDate, 'ACCOUNT').[ARC_MOVE], cr.[PR_CRED].[ACCOUNT].[ARC_MOVE])||'СН', pDate+1))))
+                in p.[CREDITS]
+                where cr.DATE_BEGIN <= pDate and (cr.DATE_END is null or cr.DATE_END > pDate)
+                into vOd;
+            exception when NO_DATA_FOUND then
+                vOD := 0;
+            end;
+
+            --Просроченный ОД по портфелю.
+            begin
+                select cr(sum(abs(f.a('В'||coalesce(fGetDeaMainAcc(cr.[PR_CRED], pDate, 'ACC_DEBTS_CR').[ARC_MOVE], cr.[PR_CRED].[ACC_DEBTS_CR].[ARC_MOVE])||'СН', pDate+1))))
+                in p.[CREDITS]
+                where cr.DATE_BEGIN <= pDate and (cr.DATE_END is null or cr.DATE_END > pDate)
+                into vExOd;
+            exception when NO_DATA_FOUND then
+                vExOD := 0;
+            end;
+            --Резерв по ОД
+            vODRes := nvl(abs(f.a('В'||fGetAccInArrByDate(p.[ARRAY_DOG_ACC], pDate, 'ACC_RESERV').[ARC_MOVE]||'СН', pDate+1)), 0);
+            vExODRes := nvl(abs(f.a('В'||fGetAccInArrByDate(p.[ARRAY_DOG_ACC], pDate, 'ACC_RESERV_DEBTS').[ARC_MOVE]||'СН', pDate+1)), 0);
+
+            -------Связанный ПОТ-------------
+            --Срочные %%
+            begin
+                select pot(
+                      sum(abs(f.a('В'||pot.[RES_PORT_REF].[ACCRS].[RES_ACC].[ARC_MOVE]||'СН', pDate+1)))
+                )
+                in p.[SLP_RESP_ARR]
+                where
+                      pot.[TYPE_ACC_ARR].COD = 'ACC_DEMAND_PRC'
+                  and pot.[RES_PORT_REF].[ACCRS].DATE_BEGIN <= pDate
+                  and (pot.[RES_PORT_REF].[ACCRS].DATE_END is null or pot.[RES_PORT_REF].[ACCRS].DATE_END > pDate)
+                into vPcn;
+            exception when NO_DATA_FOUND then
+                vPcn := 0;
+            end;
+            --Просроченные %%
+            begin
+                select pot(
+                      sum(abs(f.a('В'||pot.[RES_PORT_REF].[ACCRS].[RES_ACC].[ARC_MOVE]||'СН', pDate+1)))
+                )
+                in p.[SLP_RESP_ARR]
+                where
+                      pot.[TYPE_ACC_ARR].COD = 'ACC_DEBTS_PRC'
+                  and pot.[RES_PORT_REF].[ACCRS].DATE_BEGIN <= pDate
+                  and (pot.[RES_PORT_REF].[ACCRS].DATE_END is null or pot.[RES_PORT_REF].[ACCRS].DATE_END > pDate)
+                into vExPcn;
+            exception when NO_DATA_FOUND then
+                vExPcn := 0;
+            end;
+
+            vResPcn := abs(f.a('В'||fGetPotAcc(p, pDate, 'ACC_DEMAND_PRC').[ARC_MOVE]||'СН', pDate+1));
+            vResExPcn := abs(f.a('В'||fGetPotAcc(p, pDate, 'ACC_DEBTS_PRC').[ARC_MOVE]||'СН', pDate+1));
+
+            pPtfData(p%id).od := vOd;
+            pPtfData(p%id).exod := vExOd;
+            pPtfData(p%id).res := vOdRes;
+            pPtfData(p%id).resex := vExOdRes;
+            pPtfData(p%id).pcn := vPcn;
+            pPtfData(p%id).expcn := vExPcn;
+            pPtfData(p%id).respcn := vResPcn;
+            pPtfData(p%id).resexpcn := vResExPcn;
+      end loop;
+end; --pCalcPtf
+
+--Возвращает данные (pField) по ПОС'у pID, расчитанные процедурой pCalcPtf
+public function fGetPtfData(pID in number, pField in varchar2) return number is 
+begin
+      if pID is null then
+          return null;
+      end if;
+      case upper(pField) of
+            :'OD': return pPtfData(pID).od;
+            :'EXOD': return pPtfData(pID).exod;
+            :'RESOD': return pPtfData(pID).res;
+            :'RESEXOD': return pPtfData(pID).resex;
+            :'PCN': return pPtfData(pID).pcn;
+            :'RESPCN': return pPtfData(pID).respcn;
+            :'EXPCN': return pPtfData(pID).expcn;
+            :'RESEXPCN': return pPtfData(pID).resexpcn;
+            else return 0;
+      end;
+end;--fGetPtfData
+pragma restrict_references(fGetPtfData, WNDS);
+
+--Возвращает сумму резерва типа pField по договову в ПОС'е pID на сумму pAmnt
+public function fGetPtfDeaRes(pAmnt in number, pID in varchar2, pField in varchar2) return number is 
+begin
+      if fGetPtfData(pID, replace(pField, 'RES')) != 0 then
+            return round(pAmnt/fGetPtfData(pID, replace(pField, 'RES'))*fGetPtfData(pID, pField), 2);
+      else
+            return 0;
+      end if;
+end;--fGetPtfDeaData
+pragma restrict_references(fGetPtfDeaRes, WNDS);
+
+
+--Возвращает сумму ОД по графику с погашением свыше 1 года кредита pDea за дату pDate
+public function fGetAmnt1Y(pDea in ref [PR_CRED], pDate in date) return number is 
+      vAmnt number;
+begin
+    begin
+        select pnt(sum(pnt.[LIST_PLAN_PAY].SUMMA)
+        ) in pDea.[PLAN_HIST]
+        where
+              --pnt.DATE_BEG = (select a(max(a.DATE_BEG)) in pDea.[PLAN_HIST] where a.DATE_BEG <= pDate)
+          pnt%id = (select a(ANALYTIC(max(a%id), 'KEEP (DENSE_RANK LAST ORDER BY [1], [2])', a.DATE_BEG, a.ACTUAL)) in pDea.[PLAN_HIST] where a.DATE_BEG <= pDate
+                         )
+          and pnt.[LIST_PLAN_PAY].[OPER].[CODE] = 'ГАШЕНИЕ_КРЕД'
+          and months_between(pnt.[LIST_PLAN_PAY].DATE, pDate) > 12
+        into vAmnt;
+
+    if vAmnt is null then
+        begin
+	      select pnt(sum(pnt.SUMMA)
+	      ) in pDea.[LIST_PLAN_PAY]
+	      where
+	            pnt.[OPER].[CODE] = 'ГАШЕНИЕ_КРЕД'
+	        and months_between(pnt.DATE, pDate) > 12
+	      into vAmnt;
+        exception when NO_DATA_FOUND then
+            vAmnt := 0;
+        end;
+    end if;
+    exception when NO_DATA_FOUND then
+        begin
+	      select pnt(sum(pnt.SUMMA)
+	      ) in pDea.[LIST_PLAN_PAY]
+	      where
+	            pnt.[OPER].[CODE] = 'ГАШЕНИЕ_КРЕД'
+	        and months_between(pnt.DATE, pDate) > 12
+	      into vAmnt;
+        exception when NO_DATA_FOUND then
+            vAmnt := 0;
+        end;
+        vAmnt := 0;
+    end;
+    return round(nvl(vAmnt, 0)*::[DOCUMENT].LIB_CUR.Get_Rate(pDea.[FT_CREDIT], pDate), 2);
+end;--fGetAmnt1Y
+pragma restrict_references(fGetAmnt1Y, WNDS);
+
+--Возвращает сумму ОД по графику с погашением свыше 1 года со всех траншей линии pDea за дату pDate
+public function fGetAmnt1YLine(pDea in ref [PR_CRED], pDate in date) return number is 
+      vAmnt number;
+begin
+      select tr(sum(fGetAmnt1Y(tr, pDate)))
+      in ::[PR_CRED] all
+      where
+            tr.[HIGH_LEVEL_CR] = pDea
+        and tr.DATE_GIVE <= pDate
+	  and (tr.DATE_CLOSE is null or tr.DATE_CLOSE > pDate)
+      into vAmnt;
+      return nvl(vAmnt, 0);
+exception when others then
+      return 0;
+end;--fGetAmnt1YLine
+pragma restrict_references(fGetAmnt1YLine, WNDS);
+
+--Возвращает ссылку на счет резерва из продукта резервирование по счету pAcc за дату pDate
+public function fGetResAcc(pAcc in ref [AC_FIN], pDate in date) return ref [AC_FIN] is 
+      vAcc ref [AC_FIN];
+begin
+      select r(distinct r.[RES_ACC]
+      ) in [RES_BASE_ACCS]
+      where
+            r.DATE_BEGINING <= pDate
+        and (r.DATE_ENDING is null or r.DATE_ENDING > pDate)
+        and r.[ACC] = pAcc
+      into vAcc;
+      return vAcc;
+exception when no_data_found or too_many_rows then
+      return null;
+end;--fGetResAcc
+pragma restrict_references(fGetResAcc, WNDS);
+
+--Возвращает ПСК в % по договору pDea за дату pDate
+public function fGetPsk(pDea in ref [PR_CRED], pDate in date) return number is 
+	psk number;
+begin
+      select c(
+            c.NUM
+      ) in pDea.[PROPERTIES]
+      where
+            c.[GROUP_PROP].[CODE] = 'IRR'
+        and c.[DATE_BEG] <= pDate
+        and (c.[DATE_END] is null or c.[DATE_END] > pDate)
+      into psk;
+      return psk;
+exception when no_data_found then
+      return null;
+end; --fGetPsk
+pragma restrict_references(fGetPsk, WNDS);
+
+--Единовременная комиссия
+public function fGetCom(pDea in ref [PR_CRED], pDate in date) return number is 
+      vCom number;
+begin
+      select f(
+            sum(round(decode(f.[OPER].[CODE], 'ГАШ_КОМ_ИКУ_НДС', coalesce(f.[DOC](true)->(MAIN_DOCUM)[SUM], 0),
+                      coalesce(f.[DOC](true)->(MAIN_DOCUM)[SUM], f.[SUMMA], f.[REG_CURRENCY_SUM], 0))*::[DOCUMENT].LIB_CUR.Get_Rate(f.[VALUTA], pDate), 2))
+      ) in pDea.[LIST_PAY]
+      where
+            (f.[OPER].[CODE] like 'ГАШ_КОМ%' or f.[OPER].[CODE] in ('STB_КОМИС_ДДУ', 'ПУСТАЯ_ОПЕРАЦИЯ'))
+        and exists(select d(1) in pDea.[LIST_PAY] where d.[OPER].[CODE] in ('ВЫДАЧА_КРЕДИТА', 'ОТКР_ЛИНИИ') and d.[DATE] > f.[DATE]-4 and d.[DATE] <= f.[DATE]+3 )
+      into vCom;
+      return vCom;
+end;
+pragma restrict_references(fGetCom, WNDS);
+
+-- Кокорин А. С.  %%-ставка по задолженности [DEBT].[CODE]='НЕУЧТЕН_ПРОЦЕНТЫ'
+public function GetPrcRateOnDate(p_cred ref [PR_CRED], p_date date) return number is 
+shem_prc ref [PRC_SCHEME];
+begin
+	for kom in p_cred.[COMISS_ARR] where kom.[DEBT].[CODE]='НЕУЧТЕН_ПРОЦЕНТЫ'
+	loop
+		shem_prc:=kom.PRC_SCHEME;
+	end loop;
+	if shem_prc is not null then
+		return ::[CRED_INTERFACE].[PRX_PRC_SCHEME].GetPrcRate(shem_prc,p_date);
+	else
+		return null;
+	end if;	
+end;
+
+--Башкиров В.Г. 28.11.2018 Вернем процент резерва на дату (typeInfo=0-%% резервирования по договору, 1-%% резервирования по клиенту)
+--Башкиров В.Г. 28.11.2018 Вернем процент резерва на дату ((typeInfo=0-%% резервирования по договору, 1-%% резервирования по клиенту)
+public function GetPrcReserv(p_cred ref [PR_CRED], p_date date default null, typeInfo integer default 0) return [PRC12P6] is 
+p_sClassName ref [ACC_PRODUCT];
+pRiskGroup ref [CRED_RISK];
+nPrcMin [PRC12P6];
+nPrcMax [PRC12P6];
+nReservePrc [PRC12P6];
+begin
+	if p_date is null then p_date:=trunc(coalesce(stdlib.UserId.[FILIAL].[OP_DATE],[SYSTEM].[OP_DATE],sysdate)); end if;
+	
+	if typeInfo=0 then --%% резервирования по договору
+		p_sClassName:=::[ACC_PRODUCT]([CODE]='PR_CRED');
+		for g in p_cred.[GR_RISK_HIST]
+		where nvl(g.[DATE_START],p_date)<=p_date and p_date<= nvl(g.[DATE_END],p_date)
+		order by nvl(g.[DATE_START],p_date) desc
+		loop
+			pRiskGroup:=g.[RISK_GROUP];
+			nReservePrc:=g.[PRC_RESERV];
+			exit;
+		end loop;
+	elsif typeInfo=1 then --%% резервирования по клиенту
+		p_sClassName:=::[ACC_PRODUCT]([CODE]='REG_'||p_cred.[CLIENT]%class);
+		for g in p_cred.[CLIENT].[GR_RISK_HIST]
+		where nvl(g.[DATE_START],p_date)<=p_date and p_date<= nvl(g.[DATE_END],p_date)
+		order by nvl(g.[DATE_START],p_date) desc
+		loop
+			pRiskGroup:=g.[RISK_GROUP];
+			nReservePrc:=g.[PRC_RESERV];
+			exit;
+		end loop;
+	end if;
+	/** /
+	if pRiskGroup is not null then
+		::[CR_RISK_GR].[EDIT#AUTO].GetPrcReserve(p_sClassName, pRiskGroup, nPrcMin, nPrcMax, nReservePrc);
+	end if;
+	/**/
+	return nReservePrc;
+end;
+
+--Башкиров В.Г. 28.11.2018 Вернем группу риска на дату (typeInfo=0-Группа риска по договору, 1-Группа риска по клиенту)
+public function GetGroupNum(p_cred ref [PR_CRED], p_date date default null, typeInfo integer default 0) return [CRED_RISK].GROUP_NUM%type is 
+GroupNum [CRED_RISK].GROUP_NUM%type;
+begin
+	if p_date is null then p_date:=trunc(coalesce(stdlib.UserId.[FILIAL].[OP_DATE],[SYSTEM].[OP_DATE],sysdate)); end if;
+	
+
+	if typeInfo=0 then --Группа риска по договору
+		for g in p_cred.[GR_RISK_HIST]
+		where nvl(g.[DATE_START],p_date)<=p_date and p_date<= nvl(g.[DATE_END],p_date)
+		order by nvl(g.[DATE_START],p_date) desc
+		loop
+			GroupNum:=g.[RISK_GROUP].[GROUP_NUM];
+			exit;
+		end loop;
+	elsif typeInfo=1 then --Группа риска по клиенту
+		for g in p_cred.[CLIENT].[GR_RISK_HIST]
+		where nvl(g.[DATE_START],p_date)<=p_date and p_date<= nvl(g.[DATE_END],p_date)
+		order by nvl(g.[DATE_START],p_date) desc
+		loop
+			GroupNum:=g.[RISK_GROUP].[GROUP_NUM];
+			exit;
+		end loop;
+	end if;
+
+	return GroupNum;
+end;
+end;

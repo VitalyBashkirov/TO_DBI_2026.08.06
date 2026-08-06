@@ -1,0 +1,677 @@
+class CLIENT;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Карточка с образцами подписей и оттиска печати (OOXML) 1')
+@tag('COPIED')
+method PSH_044326897640 is
+
+@name('Имя клиента')                           public V_CLIENT                  [STRING_250];
+@name('Полное наименование')                   public V_CLIENT_FULL             [STRING_1000];
+@name('Адрес клиента')                         public V_CLIENT_ADDR             [STRING_250];
+@name('Наш банк')                              public V_BANK                    [BANK_RUS_REF];
+@name('Счета')                                 public V_ACC            table of [STR_BOOL_ID];
+@name('Телефон клиента')                       public V_TEL                     [STRING_1000];
+@name('Список лиц, наделенных правом подписи') public V_SIGN_FIRST     table of [GRID_TEMPLATE];
+@name('Должностное лицо')                      public V_RERSON_FIRST            [PERSONS_POS_REF];
+@name('Имя клиента в родительном падеже')      public V_DECLCLIENTNAME          [STRING_250];
+@name('Коллекция')                             public V_COL                     [PERSONS_POS_ARR];
+@name('Подпись')                               public V_SIGN                    [PERSONS_POS_REF];
+-- Дополнительные коды
+
+PRAGMA INCLUDE(::[DEBUG_TRIGGER].[MACRO_LIB]);
+
+type StrRec is record (val string(250));
+type StrTable	is table of StrRec index by string;
+
+type str 			is record (val string(15));
+type dstr			is record (fval string(20), sval string(20));
+type DStringTable	is table of dstr index by string;
+type StringTable 	is table of str index by string;
+
+OpDate	date;
+
+MonthTbl 			StringTable;
+NumTbl 				DStringTable;
+TenTbl				DStringTable;
+subTbl				StringTable;
+HunTbl				DStringTable;
+ThsTbl				DStringTable;
+
+--Выбранный счет для вызова по PLPCALL (CALL)
+V_SEL_ACC ref [AC_FIN];
+
+function getPhone(pThis ref [CLIENT]) return string is
+ph	string;
+begin
+	ph := ' ';
+	for(select	x(x.[NUMB] : N)
+		in		pThis.[CONTACTS]
+		where	x.[ACTIV]
+				and x.[TYPE] in (::[COMUNICATION]([CODE] = 'PHONE'), ::[COMUNICATION]([CODE] = 'MOBILEPHONE'))
+	)loop
+		if trim(ph) is null then
+			ph := x.N;
+		else
+			exit when length(ph)+length(x.N)+2 > 128;
+			ph := ph ||', '|| x.N;
+		end if;
+	end loop;
+
+	return ph;
+end;
+
+function frm( str varchar2(2000),n integer, kol integer,k out integer) return  varchar2(2000) is
+begin
+	return ::[RUNTIME].[FIN].formating(str, n, kol, k);
+end;
+
+function SplitNames(cName string(2000), cAddr string(2000), bName string(2000)) return StrTable is
+	pos	integer;
+	v_tbl StrTable;
+begin
+	v_tbl('CN1').val := frm(cName, 1, 255, pos);
+--	v_tbl('CN2').val := frm(cName, pos, 55, pos);
+--	v_tbl('CN3').val := frm(cName, pos, 55, pos);
+--	v_tbl('CN4').val := frm(cName, pos, 55, pos);
+
+	v_tbl('BN1').val := frm(bName, 1, 35, pos);
+	v_tbl('BN2').val := frm(bName, pos, 55, pos);
+	v_tbl('BN3').val := frm(bName, pos, 55, pos);
+	v_tbl('BN4').val := frm(bName, pos, 55, pos);
+	v_tbl('BN5').val := frm(bName, pos, 55, pos);
+	v_tbl('BN6').val := frm(bName, pos, 55, pos);
+	v_tbl('BN7').val := frm(bName, pos, 55, pos);
+	v_tbl('BN8').val := frm(bName, pos, 55, pos);
+
+	v_tbl('AD1').val := frm(cAddr, 1, 35, pos);
+	v_tbl('AD2').val := frm(cAddr, pos, 55, pos);
+	v_tbl('AD3').val := frm(cAddr, pos, 55, pos);
+	v_tbl('AD4').val := frm(cAddr, pos, 55, pos);
+	v_tbl('AD5').val := frm(cAddr, pos, 55, pos);
+	v_tbl('AD6').val := frm(cAddr, pos, 55, pos);
+	return v_tbl;
+end;
+
+function DateToString(P_DATE [DATE]) return  varchar2(120) is
+	dd_str varchar2(25);
+	mm_str varchar2(10);
+	yy_str varchar2(75);
+	tmp_one varchar2(1);
+	tmp_ten varchar2(1);
+	tmp_hun varchar2(1);
+	tmp_tho varchar2(1);
+	str 	varchar2(100);
+begin
+	if P_DATE is null then
+		return ' ';
+	end if;
+
+	--День прописью
+	tmp_one := substr(to_char(P_DATE, 'dd'),2,1);
+	tmp_ten := substr(to_char(P_DATE, 'dd'),1,1);
+
+	if tmp_ten = '0' then
+		dd_str := INITCAP(NumTbl(tmp_one).sval);
+	else
+		if tmp_one = '0' then
+			dd_str := INITCAP(TenTbl(tmp_ten).sval);
+		else
+			if tmp_ten = '1' then
+				dd_str := INITCAP(subTbl(tmp_ten || tmp_one).val);
+			else
+				dd_str := (INITCAP(TenTbl(tmp_ten).fval) || ' ' || NumTbl(tmp_one).sval);
+			end if;
+		end if;
+	end if;
+
+	--Месяц прописью
+	mm_str := MonthTbl(to_char(P_DATE, 'mm')).val;
+
+	--Год прописью
+	tmp_one := substr(to_char(P_DATE, 'yyyy'),4,1);
+	tmp_ten := substr(to_char(P_DATE, 'yyyy'),3,1);
+	tmp_hun := substr(to_char(P_DATE, 'yyyy'),2,1);
+	tmp_tho := substr(to_char(P_DATE, 'yyyy'),1,1);
+
+	if tmp_one = '0' AND tmp_ten = '0' AND tmp_hun = '0' then
+		yy_str := ThsTbl(tmp_tho).sval;
+
+	elsif tmp_one = '0' AND tmp_ten = '0' then
+		yy_str := ThsTbl(tmp_tho).fval || ' ' || HunTbl(tmp_hun).sval;
+
+	elsif tmp_tho = '0' then
+		if tmp_ten = '0' then
+			yy_str := HunTbl(tmp_hun).fval || ' ' || NumTbl(tmp_one).sval;
+		else
+			if tmp_one = '0' then
+				yy_str := HunTbl(tmp_hun).fval || ' ' || TenTbl(tmp_ten).sval;
+			else
+				if tmp_ten = '1' then
+					yy_str := HunTbl(tmp_hun).fval || ' ' || subTbl(tmp_ten || tmp_one).val;
+				else
+					yy_str := HunTbl(tmp_hun).fval || ' ' || TenTbl(tmp_ten).fval || ' ' || NumTbl(tmp_one).sval;
+				end if;
+			end if;
+		end if;
+
+	elsif  tmp_hun = '0' then
+		if tmp_ten = '0' then
+			yy_str := ThsTbl(tmp_tho).fval || ' ' || NumTbl(tmp_one).sval;
+		else
+			if tmp_one = '0' then
+				yy_str := ThsTbl(tmp_tho).fval || ' ' || TenTbl(tmp_ten).sval;
+			else
+				if tmp_ten = '1' then
+					yy_str := ThsTbl(tmp_tho).fval || ' ' || subTbl(tmp_ten || tmp_one).val;
+				else
+					yy_str := ThsTbl(tmp_tho).fval || ' ' || TenTbl(tmp_ten).fval || ' ' || NumTbl(tmp_one).sval;
+				end if;
+			end if;
+		end if;
+	end if;
+
+	str := dd_str || ' ' || mm_str || ' ' || yy_str || ' ' || 'года';
+	return str;
+end;
+
+begin
+
+/*-----------------------------Месяцы-----------------------------*/
+	MonthTbl('01').val := 'января';
+	MonthTbl('02').val := 'февраля';
+	MonthTbl('03').val := 'марта';
+	MonthTbl('04').val := 'апреля';
+	MonthTbl('05').val := 'мая';
+	MonthTbl('06').val := 'июня';
+	MonthTbl('07').val := 'июля';
+	MonthTbl('08').val := 'августа';
+	MonthTbl('09').val := 'сентября';
+	MonthTbl('10').val := 'октября';
+	MonthTbl('11').val := 'ноября';
+	MonthTbl('12').val := 'декабря';
+
+	/*-----------------------------Единицы-----------------------------*/
+	NumTbl('1').fval := 'первый';		NumTbl('1').sval := 'первого';
+	NumTbl('2').fval := 'второе';		NumTbl('2').sval := 'второго';
+	NumTbl('3').fval := 'третье';		NumTbl('3').sval := 'третьего';
+	NumTbl('4').fval := 'четвертое';	NumTbl('4').sval := 'четвертого';
+	NumTbl('5').fval := 'пятое';		NumTbl('5').sval := 'пятого';
+	NumTbl('6').fval := 'шестое';		NumTbl('6').sval := 'шестого';
+	NumTbl('7').fval := 'седьмое';		NumTbl('7').sval := 'седьмого';
+	NumTbl('8').fval := 'восьмое';		NumTbl('8').sval := 'восьмого';
+	NumTbl('9').fval := 'девятое';		NumTbl('9').sval := 'девятого';
+
+	/*-----------------------------Десятки-----------------------------*/
+	TenTbl('1').fval := '';				TenTbl('1').sval := 'десятого';
+	TenTbl('2').fval := 'двадцать';		TenTbl('2').sval := 'двадцатого';
+	TenTbl('3').fval := 'тридцать';		TenTbl('3').sval := 'тридцатого';
+	TenTbl('4').fval := 'сорок';		TenTbl('4').sval := 'сорокового';
+	TenTbl('5').fval := 'пятьдесят';	TenTbl('5').sval := 'пятидесятого';
+	TenTbl('6').fval := 'шестьдесят';	TenTbl('6').sval := 'шестидесятого';
+	TenTbl('7').fval := 'семьдесят';	TenTbl('7').sval := 'семидесятого';
+	TenTbl('8').fval := 'восемьдесят';	TenTbl('8').sval := 'восьмидесятого';
+	TenTbl('9').fval := 'девяносто';	TenTbl('9').sval := 'девяностого';
+
+	/*------------------------------Сотни------------------------------*/
+	HunTbl('0').fval := '';				HunTbl('0').sval := 'сотого';
+	HunTbl('1').fval := 'сто';			HunTbl('1').sval := 'сотого';
+	HunTbl('2').fval := 'двести';       HunTbl('2').sval := 'двухсотого';
+	HunTbl('3').fval := 'триста';       HunTbl('3').sval := 'трехсотого';
+	HunTbl('4').fval := 'четыреста';    HunTbl('4').sval := 'четырехсотого';
+	HunTbl('5').fval := 'пятьсот';      HunTbl('5').sval := 'пятисотого';
+	HunTbl('6').fval := 'шестьсот';     HunTbl('6').sval := 'шестисотого';
+	HunTbl('7').fval := 'семьсот';      HunTbl('7').sval := 'семисотого';
+	HunTbl('8').fval := 'восемьсот';    HunTbl('8').sval := 'восьмисотого';
+	HunTbl('9').fval := 'девятьсот';    HunTbl('9').sval := 'девятисотого';
+
+	/*------------------------------Тысячи------------------------------*/
+	ThsTbl('0').fval := '';				ThsTbl('0').sval := '';
+	ThsTbl('1').fval := 'тысяча';		ThsTbl('1').sval := 'тысячного';
+	ThsTbl('2').fval := 'две тысячи';	ThsTbl('2').sval := 'двухтысячного';
+	ThsTbl('3').fval := 'три тысячи';	ThsTbl('3').sval := 'трехтысячного';
+	ThsTbl('4').fval := 'четыре тысячи';ThsTbl('4').sval := 'четырёхтысячного';
+	ThsTbl('5').fval := 'пять тысяч';	ThsTbl('5').sval := 'пятитысячного';
+	ThsTbl('6').fval := 'шесть тысяч';	ThsTbl('6').sval := 'шеститысячного';
+	ThsTbl('7').fval := 'семь тысяч';	ThsTbl('7').sval := 'семитысячного';
+	ThsTbl('8').fval := 'восемь тысяч';	ThsTbl('8').sval := 'восьмитысячного';
+	ThsTbl('9').fval := 'девять тысяч';	ThsTbl('9').sval := 'девятитысячного';
+
+	/*------------------------------10-19------------------------------*/
+	subTbl('11').val := 'одиннадцатого';
+	subTbl('12').val := 'двенадцатого';
+	subTbl('13').val := 'тринадцатого';
+	subTbl('14').val := 'четырнадцатого';
+	subTbl('15').val := 'пятнадцатого';
+	subTbl('16').val := 'шестнадцатого';
+	subTbl('17').val := 'семнадцатого';
+	subTbl('18').val := 'восемнадцатого';
+	subTbl('19').val := 'девятнадцатого';
+	/*----------------------------------------------------------------*/
+end;
+
+-- проверка на отсутствие дубликатов ФИО в таблице подписывающих лиц
+function CheckForUniqueName (p_name string (250), p_sign_tbl  V_SIGN_FIRST%type)
+return boolean
+is
+tbl_idx number;
+begin
+	tbl_idx := p_sign_tbl.first;
+	while tbl_idx is not null
+	loop
+		if p_sign_tbl(tbl_idx).[FIELD_1] = p_name then
+			return false;
+		end if;
+		tbl_idx := p_sign_tbl.next(tbl_idx);			
+	end loop;
+	
+	return true;
+end;
+
+-- проверка подписывающих лиц, указанных на ЭФ
+procedure ValidateSignTables is
+	SignFirstTbl_tmp    V_SIGN_FIRST%type;
+	idx number;
+	tmp_idx number;
+begin
+	-- удалим пустые записи
+	idx := V_SIGN_FIRST.first;
+	while idx is not null
+	loop
+		if V_SIGN_FIRST(idx).[FIELD_1] is not null then
+			tmp_idx := SignFirstTbl_tmp.count + 1;
+			SignFirstTbl_tmp(tmp_idx).[FIELD_1] := V_SIGN_FIRST(idx).[FIELD_1];
+			SignFirstTbl_tmp(tmp_idx).[FIELD_3] := V_SIGN_FIRST(idx).[FIELD_3];
+			SignFirstTbl_tmp(tmp_idx).[FIELD_2] := to_char(V_SIGN_FIRST(idx).[DATE_1], 'dd.mm.yyyy');  	
+		end if;
+		idx := V_SIGN_FIRST.next(idx);
+	end loop;
+
+	V_SIGN_FIRST := SignFirstTbl_tmp;
+	SignFirstTbl_tmp.delete;
+
+end;
+
+-- автозаполнение списка подписывающих лиц при запуске операции
+procedure FillSigns(pOrg ref [CL_CORP]) is
+idx number;
+begin
+	V_SIGN_FIRST.delete;
+	
+	-- руководители и главный бухгалтер с признаком "Подписывает сегодня"
+	for x in pOrg.[ALL_BOSS]
+		where 	x.[SIGN_TODAY]
+			and (x.[CHIEF] or x.[GENERAL_ACC])
+			and (nvl(x.[WORK_END], OpDate) >= OpDate)
+	loop
+		idx := V_SIGN_FIRST.count + 1;
+		V_SIGN_FIRST(idx).[FIELD_1] := x.[FASE].[NAME];
+		V_SIGN_FIRST(idx).[FIELD_3] := ::[CASE_GRAM].[LIB].get_case(x.[FASE].[DECL_FIO],::[CASE_GRAM]([CODE]='Р'));
+		
+	end loop;
+	
+end;
+
+--подготовка к печати (определение значений параметров/переменных). Использовать при вызове без поднятия формы
+public procedure prepare(P_THIS ref [CLIENT], P_ON_DATE in out date) is
+	clp	ref [CL_PRIV];
+	idx integer;
+	v_chp_type	integer;
+	v_address	ref [PERSONAL_ADDRESS];
+	clpDatePers	::[CL_PRIV].[DATE_PERS];
+	clpName		[CL_PRIV].[DOC].[TYPE].[NAME];
+	clpSer		[CL_PRIV].[DOC].[SER];
+	clpNum		[CL_PRIV].[DOC].[NUM];
+	clpWho		[CL_PRIV].[DOC].[WHO];
+	clpDate		[CL_PRIV].[DOC].[DATE];
+	clpDepart	[CL_PRIV].[DOC].[DEPART_CODE];
+	optSelectType		number;
+begin
+	if P_THIS%class not in ('CL_ORG', 'CL_PRIV') then
+		pragma error('Печать карточки возможна только для Организаций или Физлица');
+	end if;
+
+	OpDate 			:= ::[SYSTEM].[VARIABLES].OpDate;
+	P_ON_DATE		:= nvl(P_ON_DATE, OpDate);
+	
+	if P_THIS%class = 'CL_ORG' then
+		V_COL :=  P_THIS->([CL_ORG])[ALL_BOSS];
+		FillSigns(P_THIS);
+		V_CLIENT := coalesce(P_THIS.[NAME], P_THIS->([CL_ORG])[LONG_NAME]);
+		V_CLIENT_FULL := coalesce(P_THIS->([CL_ORG])[LONG_NAME],V_CLIENT);
+		V_DECLCLIENTNAME := substr(V_CLIENT_FULL, 1, 250);		
+
+		for
+			(select a(a:id)
+				in P_THIS.[ADDRESSES]
+				where a.[TYPE].[KOD] in ('CORP','FACT')
+				order by decode(a.[TYPE].[KOD],'CORP',1,'FACT',2)
+			)
+		loop
+			v_address := a.id;
+			exit;
+		end loop;
+
+		v_chp_type := ::[CLIENT].[LIB].getCHPType(P_THIS);
+		if v_chp_type in (1,2,3,4) then -- переопределяем для ИП наименование и полное наименование
+			-- Ищем физ.лицо индивидуального предпринимателя
+			clp := ::[CLIENT].[LIB].getCHPclPriv(P_THIS);
+			if clp is not null then
+				V_CLIENT := clp.[NAME];
+				V_CLIENT_FULL := V_CLIENT || to_char(clp.[DATE_PERS],'", "dd.mm.yyyy') ||', '|| case when v_chp_type = 1 then 'нотариус' when v_chp_type = 2 then 'адвокат' when v_chp_type in (3,4) then 'индивидуальный предприниматель' end;
+				V_CLIENT := V_CLIENT || ', ' || case when v_chp_type = 1 then 'нотариус' when v_chp_type = 2 then 'адвокат' when v_chp_type in (3,4) then 'индивидуальный предприниматель' end;
+			end if;
+		end if;
+	else
+		V_CLIENT 	:= P_THIS.[NAME];
+		clp			:= P_THIS;
+		begin
+			select a(a.[DATE_PERS], a.[DOC].[TYPE].[NAME], a.[DOC].[SER], a.[DOC].[NUM], a.[DOC].[WHO], a.[DOC].[DATE], a.[DOC].[DEPART_CODE])
+			in ::[CL_PRIV] all WHERE a = clp
+			into clpDatePers, clpName, clpSer, clpNum, clpWho, clpDate, clpDepart;
+		exception
+			when NO_DATA_FOUND then null;
+		end;
+
+		V_CLIENT_FULL :=	V_CLIENT || to_char(clpDatePers,'", "dd.mm.yyyy');
+		optSelectType	:= ::[FP_TUNE].[LIB].get_num_value('SELECT_CLIENT_PATTERN_TYPE', ::[FP_TUNE].[LIB].set_canons('BRANCH', stdlib.userId.[FILIAL]%id));
+		
+		if optSelectType = 1 then
+			V_CLIENT_FULL :=	V_CLIENT_FULL || ', ' || clpName ||', Серия '||clpSer||', № '||clpNum || ', ' || 'выдан ' || clpWho || ' ' || to_char(clpDate,' dd.mm.yyyy, ') || 'к-п ' || clpDepart;
+		end if;
+		V_DECLCLIENTNAME :=	::[RUNTIME].[VIEWFUN].ClientDecl(P_THIS, 'Р');
+	end if;
+	
+	if clp is not null then
+		for
+			(select a(a:id)
+				in clp.[ADDRESSES]
+				where a.[TYPE].[KOD] in ('REAL_LIVE','REGISTRATION')
+				order by decode(a.[TYPE].[KOD],'REAL_LIVE',1,'REGISTRATION',2)
+			)
+		loop
+			v_address := a.id;
+			exit;
+		end loop;
+	end if;
+
+	V_BANK	:= ::[SYSTEM].[VARIABLES].OurBank;
+	--найдем адрес
+	V_CLIENT_ADDR	:= ::[RUNTIME].[VIEWFUN].GetAddressByRef(v_address,'ALL');
+	V_TEL := GetPhone(P_this);
+
+	for	(select x(x : AC_REF, x.[MAIN_V_ID] : num)
+			in ::[AC_FIN] all
+			where (x.[CLIENT_V] = P_this or x.[CLIENT_R] = P_this)
+				and x.[DATE_CLOSE] is null
+				and decode
+						( x.[COM_STATUS]
+						, ::[COM_STATUS_PRD]([CODE]='FREEZED'),		0
+						, ::[COM_STATUS_PRD]([CODE]='FREEZED_CT'),	0
+						, ::[COM_STATUS_PRD]([CODE]='FREEZED_DT'),	0
+						, 1
+						) = 1
+			order by x.[MAIN_V_ID]
+		)
+	loop
+		idx := V_ACC.count + 1;
+		V_ACC(idx).[BOOL] 	:= nvl(x.AC_REF = V_SEL_ACC, false);
+		V_ACC(idx).[IDENT]	:= x.AC_REF%id;
+		V_ACC(idx).[STR] 	:= x.NUM;
+	end loop;
+	V_SEL_ACC := null;
+end;
+
+public procedure PLPCALL_SIGN_CARD (p_client ref [CLIENT], p_account ref [AC_FIN] default null) is
+begin
+	V_SEL_ACC := p_account;
+	stdio.put_line_buf('<% CALL CLIENT REPORT_0401026_N '||p_client||' %>');
+end;
+
+-- Дополнительные коды
+type T_PARAMS_TAB is table of [ADD_PARAM];
+V_ADD_CODES T_PARAMS_TAB;
+
+public procedure clear_codes
+/* Очистка списка дополнительных кодов */
+ is
+begin
+	V_ADD_CODES.delete;
+end;
+
+/* Формирование списка дополнительных кодов для отчета.
+Добавление дополнительного значения с дистрибутивным кодом переопределяет дистрибутивное значение.
+Если есть несколько значений одного кода, то будет использовано значение добавленное последним. */
+public procedure add_code
+/* Добавляет дополнительный код в список */
+(
+	code string(32)
+	/* Код. Этот код указывается в шаблоне отчета */
+	, value string(4000)
+	/* Значение для подстановки */
+) is
+	c [ADD_PARAM];
+begin
+	c.[CODE] := substr(code, 1, c.[CODE]%size);
+	c.[VALUE] := substr(value, 1, c.[VALUE]%size);
+	if c.[CODE] is not NULL then
+		V_ADD_CODES(nvl(V_ADD_CODES.last, 0) + 1) := c;
+	end if;
+end;
+PSH_044326897640 (
+	@name('Дата печати')           P_ON_DATE in [DATE],
+	@name('Список счетов строкой') P_ACC_NUM in [STRING_2000],
+	@name('Показать отчет')        P_SHOW    in [BOOLEAN]         default null,
+	@name('Шаблон документа')      P_SHABLON in [SHABLON_DOC_REF] default null
+) return [STRING] is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_ON_DATE := [SYSTEM]::[OP_DATE];
+	V_SIGN:=	nvl(::[DEFVALS].[SLIB].RestoreRef(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME, 'V_SIGN'),V_SIGN);
+end if;
+-- End initialization of parameters and variables
+declare
+-- добавление лица для первой подписи
+procedure AddPersonFirst is
+	idx integer;
+begin
+	debug_pipe(::[CASE_GRAM].[LIB].get_case(V_RERSON_FIRST.[FASE].[DECL_FIO],::[CASE_GRAM]([CODE]='Р')),0);
+	
+	if not CheckForUniqueName(V_RERSON_FIRST.[FASE].[NAME], V_SIGN_FIRST) then
+		V_RERSON_FIRST := null;
+		return;
+	end if;
+	
+	
+	if V_RERSON_FIRST is not null then
+		idx := nvl(V_SIGN_FIRST.last, 0) + 1;
+		
+		
+		V_SIGN_FIRST(idx).[FIELD_1] := V_RERSON_FIRST.[FASE].[NAME];
+		V_SIGN_FIRST(idx).[FIELD_3] := ::[CASE_GRAM].[LIB].get_case(V_RERSON_FIRST.[FASE].[DECL_FIO],::[CASE_GRAM]([CODE]='Р'));
+		V_SIGN_FIRST(idx).[DATE_1] 	:= null;
+		V_RERSON_FIRST := null;
+	end if;   	
+end;
+
+begin
+	if P_MESSAGE = 'DEFAULT' and P_INFO is NULL
+		or P_MESSAGE = 'VALIDATE' and P_INFO = '%PLPCALL%'
+	then
+		P_SHOW := true;
+		prepare(this, P_ON_DATE);
+	elsif P_MESSAGE = 'VALIDATE' then
+		-- Добавление подписывающих лиц в грид из массива должностных лиц организации
+		if P_INFO like '%VAR%.V_RERSON_FIRST' then
+			AddPersonFirst;	
+		end if;
+	end if;
+end;
+end;
+
+execute is
+	pragma macro(wd, '::[OOXML].[API_DOC_SAX]');
+	idx integer;
+	v_shablon_code const varchar2(15) := 'FRM_0401026_NN';
+	v_rep_tmpl blob;
+	v_str_tab constant.MEMO_TABLE_S;
+	ClientAccounts		string(2000);
+	UserName			[NAME];
+	UserCasta			[CASTA]::[VALUE];
+	UserDepart			[DEPART]::[NAME];
+	tbl					StrTable;
+	vRepId string;
+	add_code [ADD_PARAM];
+	C_NVL_CHAR const string(1) := '-';
+	text varchar2(512);
+	P_USER ref [USER]:=STDLIB.USERID;
+	podpisi varchar2(512);
+	
+begin
+	::[DEFVALS].[SLIB].SaveRef(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME, 'V_SIGN', V_SIGN, 'PERSONS_POS');
+	if this%class='CL_PRIV' then
+	V_DECLCLIENTNAME :=	::[RUNTIME].[VIEWFUN].ClientDecl(this, 'Р');
+	podpisi:=', '||nvl(V_DECLCLIENTNAME,V_CLIENT);
+
+end if;
+
+/*for i in 1..8 loop
+	podpisi := podpisi||', '||case when V_SIGN_FIRST.exists(i) then V_SIGN_FIRST(i).[FIELD_1] end;
+end loop;
+podpisi := substr(podpisi,3);
+podpisi := substr(podpisi,1,instr(podpisi,', ,')-1);
+text:='Я, '||P_USER.[CASTA].[VALUE]||' '||P_USER.[FILIAL].[BANK].[NAME]||', '||::[RUNTIME].[STDLIB].FIO(P_USER.[NAME])||', свидетельствую подлинность подписи '||podpisi
+			||', которая сделана в моем присутствии '||to_char(sysdate,'DD.MM.YYYY')||' г. ' ||CHR(10)||'Личность установлена.';
+--*/			
+--::[CLIENT].[REPORT_0401026_N].add_code('PSH_SVIDETEL', text);
+--::[CLIENT].[REPORT_0401026_N].add_code('PSH_PROCHIE1', 'Выдача выписок');
+--::[CLIENT].[REPORT_0401026_N].add_code('PSH_PROCHIE2', 'по требованию.');
+--::[CLIENT].[REPORT_0401026_N].add_code('PSH_PROCHIE3', '');
+	
+	
+	
+	begin
+		select a(a.[NAME], a.[CASTA].[VALUE], a.[DEPART].[NAME])
+		in ::[USER] all WHERE a = stdlib.userid
+		into UserName, UserCasta, UserDepart;
+	exception
+		when NO_DATA_FOUND then null;
+	end;
+
+	tbl := SplitNames(V_CLIENT_FULL, V_CLIENT_ADDR, V_BANK.[LONG_NAME]);
+	
+	-- Формирование списка счетов
+	ClientAccounts	:= rtrim(trim(P_ACC_NUM),', ');
+	idx := V_ACC.first;
+	while idx is not null
+	loop
+		if V_ACC(idx).[BOOL] and nvl(length(ClientAccounts),0) + length(V_ACC(idx).[STR]) + 2 <= ClientAccounts%size then
+			ClientAccounts := ClientAccounts || case when ClientAccounts is not null then ', ' end || V_ACC(idx).[STR];
+		end if;
+		idx := V_ACC.next(idx);
+	end loop;
+
+	ValidateSignTables;
+	
+	::[SHABLON_DOC].[LIB_OOXML].load_blob
+	(
+		p_shablon_code == nvl(P_SHABLON.[CODE], v_shablon_code)
+		,p_shablon_blob == v_rep_tmpl
+		,p_shablon_tbp == null
+		,p_shablon_grp == null
+		,p_shablon_ref == null
+		,p_filial == null
+	);
+		
+	if v_rep_tmpl is null then
+		pragma error ('Для выбранного шаблона не задан файл');
+	end if;
+	
+	if &wd.open_file(v_rep_tmpl) then
+ 		v_str_tab('OWN_NAME1') := tbl('CN1').val;
+ 		v_str_tab('OWN_NAME2') :='';-- tbl('CN2').val;
+		v_str_tab('OWN_NAME3') :='';-- tbl('CN3').val;
+ 		v_str_tab('OWN_NAME4') :='';-- tbl('CN4').val;
+ 		
+		v_str_tab('OWN_ADDR1') := tbl('AD1').val;
+		v_str_tab('OWN_ADDR2') := tbl('AD2').val;
+		v_str_tab('OWN_ADDR3') := tbl('AD3').val;
+ 		v_str_tab('OWN_ADDR4') := tbl('AD4').val;
+		v_str_tab('OWN_ADDR5') := tbl('AD5').val;
+		v_str_tab('OWN_ADDR6') := tbl('AD6').val;
+		v_str_tab('OWN_TEL') := V_TEL;
+		v_str_tab('BANK_NAME1') := tbl('BN1').val;
+		v_str_tab('BANK_NAME2') := tbl('BN2').val;
+		v_str_tab('BANK_NAME3') := tbl('BN3').val;
+		v_str_tab('BANK_NAME4') := tbl('BN4').val;
+		v_str_tab('BANK_NAME5') := tbl('BN5').val;
+		v_str_tab('BANK_NAME6') := tbl('BN6').val;
+		v_str_tab('BANK_NAME7') := tbl('BN7').val;
+		v_str_tab('BANK_NAME8') := tbl('BN8').val;
+		v_str_tab('OWN_SHORT') := V_CLIENT;
+		v_str_tab('ACC_NUM') := ClientAccounts;
+		v_str_tab('SIGN_DATE') := to_char(P_ON_DATE,'dd.mm.yyyy');
+		
+		for i in 1..8 loop
+			if V_SIGN_FIRST.exists(i) then
+	 			v_str_tab('FIRST_SIGN_'||i) := V_SIGN_FIRST(i).[FIELD_1];
+	 			v_str_tab('FIRST_SIGN_R'||i) := V_SIGN_FIRST(i).[FIELD_3];
+	 			v_str_tab('FIRST_SIGN_FIO_'||i) := [STDLIB].FIO(V_SIGN_FIRST(i).[FIELD_1], 'Ф И. О.');
+	 			v_str_tab('FIRST_SIGN_SIGN_'||i) := NULL;
+	 			v_str_tab('CRED_DATE_FIRST_'||i) := V_SIGN_FIRST(i).[FIELD_2];
+	 		else
+	 			v_str_tab('FIRST_SIGN_'||i) := C_NVL_CHAR;
+	 			v_str_tab('FIRST_SIGN_R'||i) := C_NVL_CHAR;
+	 			v_str_tab('FIRST_SIGN_FIO_'||i) := C_NVL_CHAR;
+	 			v_str_tab('FIRST_SIGN_SIGN_'||i) := C_NVL_CHAR;
+	 			v_str_tab('CRED_DATE_FIRST_'||i) := C_NVL_CHAR;
+	 		end if;
+		end loop;
+-- Несколько лиц наделенных правом подписи через запятую в родительном падеже IDA2506
+		text := V_SIGN_FIRST(1).[FIELD_3];		
+		for i in 2..8 loop
+			if V_SIGN_FIRST.exists(i) then
+				text := text || ', ' || V_SIGN_FIRST(i).[FIELD_3];
+			end if;
+		end loop;
+		v_str_tab('FIRST_SIGN_RALL') := text;
+ 		
+ 		v_str_tab('DATE_STRING') := DateToString(P_ON_DATE);
+ 		v_str_tab('USER_CASTA') := UserCasta;
+ 		v_str_tab('USER_DEPART') := UserDepart;
+ 		v_str_tab('USER_NAME') := [STDLIB].FIO(UserName, 'Ф И. О.');
+ 		v_str_tab('DECL_NAME') := V_DECLCLIENTNAME;
+ 		v_str_tab('SIGN_CASTA') := V_SIGN.[RANGE].[VALUE];
+ 		v_str_tab('SIGN_NAME') := [STDLIB].FIO(V_SIGN.[FASE].[NAME], 'Ф И. О.');
+
+		-- Доп. коды
+		for i in 1..V_ADD_CODES.count loop
+			add_code := V_ADD_CODES(i);
+			v_str_tab(add_code.[CODE]) := add_code.[VALUE];
+		end loop;
+		clear_codes;
+
+		&wd.PutTextFields(v_str_tab);
+		
+		declare
+ 			v_doc blob;
+ 		begin
+ 			dbms_lob.createtemporary(v_doc,false,dbms_lob.call);
+ 			&wd.Finish(v_doc);
+ 			if P_SHOW then
+ 				-- Отправка файла отчёта пользователю на клиентскую машину
+				vRepId := [OOXML]::[API_ORSA].putReport2Run(v_doc,'docx','['||&METHOD$CLASS||'] "'||&METHOD$NAME||'"');
+ 			else
+ 				vRepId := ::[OOXML].[API_ORSA].putReport(v_doc, 'docx','['||&METHOD$CLASS||'] "'||&METHOD$NAME||'"');
+ 			end if;
+  		end;				
+	else
+		pragma error ('Не удалось открыть файл, связанный с шаблоном ' || nvl(P_SHABLON.[CODE], v_shablon_code));
+	end if;
+	return vRepId;
+end;
+end;
+end;

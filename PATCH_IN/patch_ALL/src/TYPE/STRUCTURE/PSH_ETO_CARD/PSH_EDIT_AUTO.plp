@@ -1,0 +1,47 @@
+class PSH_ETO_CARD;
+
+@name('[ПСБ] Изменить')
+@tag('CREATED')
+method PSH_EDIT_AUTO uses PSH_NEW_AUTO is
+PSH_EDIT_AUTO (
+	@name('ID во внешней системе')               P_ID_EXT           in [VARCHAR_36],
+	@name('Номер карты')                         P_CARD_NUMBER      in [STRING_24],
+	@name('ID Клиента')                          P_CUSTOMER_ID      in [VARCHAR_36],
+	@name('Дата истечения срока действия карты') P_EXP_DATE         in [DATE],
+	@name('Тип продукта')                        P_PRODUCT_TYPE     in [STRING_2],
+	@name('Номер счёта')                         P_ACCOUNT_NUMBER   in [STRING_32],
+	@name('ID Карты')                            P_CARD_ID          in [VARCHAR_36],
+	@name('Статус карты')                        P_HOT_CARD_STATUS  in [SHORT2],
+	@name('Типа карты')                          P_CARD_TYPE_NAME   in [STRING_32],
+	@name('ID Персоны')                          P_PERSON_ID        in [VARCHAR_36],
+	@name('ID контракта карты')                  P_CARD_CONTRACT_ID in [VARCHAR_36],
+	@name('Дата создания карты')                 P_CARD_CREATION_DT in [DATE],
+	@name('Валюта (цифровой код)')               P_CURRENCY         in [STRING_3],
+	@name('Валюта (буквенный код)')              P_CURRENCY_AL_CODE in [STRING_3],
+	@name('Клиент')                              P_CLIENT           in [CL_PRIV_REF],
+	@name('Счёт карты')                          P_CARD_ACCOUNT     in [AC_FIN_REF],
+	@name('Счета карты')                         P_CARD_ACCOUNTS    in [PSH_ETO_C_AC_ARR]
+) is
+
+validate is
+	v_this ref [PSH_ETO_CARD];
+begin
+	if this is not null then
+		v_this := this;
+		&BASE$SETVARS;
+		&BASE$VALIDATE(v_this);
+		&BASE$GETVARS;
+	end if;
+end;
+
+execute is
+	v_this ref [PSH_ETO_CARD];
+begin
+	if this is not null then
+		v_this := this;
+		&BASE$SETVARS;
+		v_this := &BASE$EXECUTE(v_this);
+	end if;
+end;
+end;
+end;

@@ -1,0 +1,7 @@
+class TEST;
+-- Тестовый файл в кодировке 1251
+-- Проверка кириллицы: абвгдежзийкл
+procedure test;
+begin
+  dbms_output.put_line('Тест 1251');
+end;

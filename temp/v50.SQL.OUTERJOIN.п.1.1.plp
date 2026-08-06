@@ -1,0 +1,108 @@
+-- ============================================================================
+-- Правило: v50.SQL.OUTERJOIN.п.1.1
+-- Описание: Замена (+) на LEFT/RIGHT JOIN
+-- Категория: SQL
+-- Приоритет: high
+-- Теги: outer join, oracle, ansi
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Oracle оператор (+) в ANSI не поддерживается. Далее нельзя использовать PLPlus параметризацию типа соединения (true/false) в where. Вместо этого нужно использовать явные left/right join on.
+--   plplus_materials_note: Согласно учебному курсу (Глава 5.8), конструкция '&collection(true)' является упрощённым синтаксисом LOCATE для поиска в коллекции и используется для организации внешних соединений (outer joins).
+--   search_prompt: Найти в PLPlus коде использование устаревших синтаксисов внешних соединений: 1. Оператор Oracle '(+)' в условии WHERE; 2. Конструкцию '&collection(true)' в условии WHERE; 3. Конструкцию '[REF](true)' или '[REF](false)' в условии WHERE.
+--   code_example_bad: select * from t1, t2 where t1.id = t2.id(+)
+--   code_example_bad2: where ac%id = gj.[ACCOUNT](true)
+--   code_example_bad3: where cr.[LIST_PAY] = fo&collection(true)
+--   fix_instruction: Преобразовать устаревший синтаксис в ANSI SQL: 1. a=b(+) -> LEFT JOIN b ON a=b; 2. a(+)=b -> RIGHT JOIN b ON a=b; 3. &collection(true) -> LEFT JOIN (::[TABLE] all : alias) ON условие; 4. [REF](true) -> удалить (true) и преобразовать в LEFT JOIN
+-- ============================================================================
+PUBLIC PROCEDURE v50_SQL_OUTERJOIN_p_1_1 IS
+	v_ref REF [PRICE_LIST];
+	v_result VARCHAR2(4000);
+BEGIN
+	BEGIN
+		savepoint sp1;
+		debug_pipe('-= v50.SQL.OUTERJOIN.п.1.1 Замена (+) на LEFT/RIGHT JOIN =-', 0);
+		
+		-- [-] НЕПРАВИЛЬНО
+		-- Пример 1: простой outer join (+)
+		-- begin pl/sql
+		select * from t1, t2 where t1.id = t2.id(+);
+		-- end pl/sql
+		
+		-- Пример 2: ссылка с параметром true
+		-- Пример 3: коллекция с параметром true
+		for (
+			select  ac (	ac%id 					: id
+						,	gj.[WORKING_DATETIME]	: WORKING_DATETIME
+						,	gj.[FILENAME]			: FILENAME
+						,	ac.[MAIN_V_ID] 			: MAIN_V_ID
+						,	st.tm					: tm
+						,	st.val					: val
+						)
+			in ::[AC_FIN]
+			,(select gj(  gj.[WORKING_DATETIME] : WORKING_DATETIME
+						, gj.[FILENAME] 		: FILENAME
+						, gj.[ACCOUNT]			: ACCOUNT
+						, gj.[IN_FILE_HISTORY]	: IN_FILE_HISTORY
+						)
+						 in [GNI_JOUR]
+				)
+			,(select distinct st(	  st%collection : collection_id
+						, analytic(first_value(substr(st.[TO_FILENAME], 3, 1)), 'over (partition by [1] order by [2] desc)', st%collection, st.[IN_FILE_DATETIME]) : val
+						, analytic(first_value(st.[IN_FILE_DATETIME]), 'over (partition by [1] order by [2] desc)', st%collection, st.[IN_FILE_DATETIME]) : tm
+				)
+				in	::[GNI_JOUR_HISTORY] collections
+				where st.[IN_FILE_DATETIME] < sysdate
+			)
+			where
+				ac%id = gj.[ACCOUNT](true)
+				and gj.[IN_FILE_HISTORY] = st.collection_id(true)
+			)
+		LOOP
+			EXIT;
+		END LOOP;
+
+		-- [+] ПРАВИЛЬНО
+		-- Исправление для примера 1
+		-- begin pl/sql
+		select * from t1 left join t2 on t1.id = t2.id;
+		-- end pl/sql
+		
+		-- Исправление для примера 2
+		-- Исправление для примера 3
+		for (
+			with gj(WORKING_DATETIME,FILENAME,ACCOUNT,IN_FILE_HISTORY)
+			as (select gj(gj.[WORKING_DATETIME] : WORKING_DATETIME
+						, gj.[FILENAME] 		: FILENAME
+						, gj.[ACCOUNT]			: ACCOUNT
+						, gj.[IN_FILE_HISTORY]	: IN_FILE_HISTORY
+							)
+						 in [GNI_JOUR]
+				)
+			, st(collection_id,val,tm)
+			as (select distinct st(	  st%collection : collection_id
+						, analytic(first_value(substr(st.[TO_FILENAME], 3, 1)), 'over (partition by [1] order by [2] desc)', st%collection, st.[IN_FILE_DATETIME]) : val
+						, analytic(first_value(st.[IN_FILE_DATETIME]), 'over (partition by [1] order by [2] desc)', st%collection, st.[IN_FILE_DATETIME]) : tm
+				)
+				in	::[GNI_JOUR_HISTORY] collections
+				where st.[IN_FILE_DATETIME] < sysdate
+			)
+			select  ac (	ac%id 					: id
+						,	gj.[WORKING_DATETIME]	: WORKING_DATETIME
+						,	gj.[FILENAME]			: FILENAME
+						,	ac.[MAIN_V_ID] 			: MAIN_V_ID
+						,	st.tm					: tm
+						,	st.val					: val
+						)
+			in ::[AC_FIN]
+			left join (gj :gj) on ac%id =gj.[ACCOUNT]
+			left join (st :st) on gj.[IN_FILE_HISTORY]=st.collection_id
+			)
+		LOOP
+			EXIT;
+		END LOOP;
+
+		RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+	EXCEPTION WHEN OTHERS THEN
+		debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+		ROLLBACK TO sp1;
+	END;
+END;

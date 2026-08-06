@@ -1,0 +1,45 @@
+"v50.SQL.CAST.п.1.5": {
+  "code": "v50.SQL.CAST.п.1.5",
+  "short_description": "Явное приведение типов",
+  "documentation_text": "У Oracle и PostgreSQL разные правила неявного приведения типов данных. Необходимо писать код с совместимыми типами или явным преобразованием. LIKE применим только к строкам.",
+  "plplus_materials_note": "В PostgreSQL оператор + не работает между строкой и числом. LIKE не работает с числовыми типами.",
+  "search_prompt": "Найти операции сложения/вычитания между разными типами (строка + число), а также LIKE с числовыми полями.",
+  "regex_patterns": {
+    "for_search": [
+      {
+        "pattern": "\\w+\\s*\\+\\s*\\d+|\\d+\\s*\\+\\s*\\w+",
+        "description": "Сложение строки с числом",
+        "flags": ""
+      },
+      {
+        "pattern": "\\bLIKE\\s+['\"].*['\"]\\s*(?!WHERE)",
+        "description": "LIKE оператор (проверить тип поля)",
+        "flags": "i"
+      }
+    ],
+    "for_ignore": [
+      {
+        "pattern": "'.*\\+.*'",
+        "description": "Строковый литерал"
+      }
+    ]
+  },
+  "code_example_bad": "select c_code + 1 from \"Z#DEPART\"",
+  "code_example_bad2": "select * from t where numeric_column like '123%'",
+  "fix_instruction": "Использовать явное приведение типов:\n- строка + число -> to_number(строка) + число\n- число + строка -> число + to_number(строка)\n- LIKE с числом -> to_char(число) like 'pattern'",
+  "fix_prompt": "Выполни явное приведение типов: оберни строковые поля в to_number() при сложении с числом, и числовые поля в to_char() при использовании LIKE.",
+  "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.SQL.CAST.п.1.5' с операциями сложения строки и числа, а также LIKE с числовыми полями.",
+  "examples": {
+    "string_plus_number": {
+      "bad": "select c_code + 1 from \"Z#DEPART\"",
+      "good": "select to_number(c_code) + 1 from \"Z#DEPART\""
+    },
+    "like_on_number": {
+      "bad": "select * from t where id like '123%'",
+      "good": "select * from t where to_char(id) like '123%'"
+    }
+  },
+  "priority": "high",
+  "category": "SQL",
+  "subcategory": "SQL.DML.OTHER"
+}

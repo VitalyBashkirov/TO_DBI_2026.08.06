@@ -1,0 +1,279 @@
+-- ============================================================================
+-- ТЕСТОВЫЙ ФАЙЛ: Все правила v50
+-- Источник: 3.RUBRICATOR_FIXES.md, документация v50.docx
+-- Дата генерации: 2026-05-04 06:47:38
+-- ============================================================================
+
+-- ============================================================================
+-- v50.SQL.OUTERJOIN.п.1.1
+-- Описание: Замена (+) на LEFT/RIGHT JOIN
+-- ============================================================================
+PROCEDURE v50_SQL_OUTERJOIN_п_1_1 IS
+BEGIN
+    -- [-] НЕПРАВИЛЬНО
+    FOR rec IN (SELECT x.*
+    FROM folder.[DOCS_IN_FOLD] x, (::[MAIN_DOCUM]) md
+    WHERE x%id = md%id(+)
+    AND x.[DOCUMENT]%class = ::[MAIN_DOCUM]%class
+    ORDER BY 2 DESC)
+    LOOP
+    NULL;
+    END LOOP;
+
+    -- [+] ПРАВИЛЬНО
+    FOR rec IN (SELECT x.*
+    FROM folder.[DOCS_IN_FOLD] x
+    LEFT JOIN (::[MAIN_DOCUM]) md ON x%id = md%id
+    AND x.[DOCUMENT]%class = ::[MAIN_DOCUM]%class
+    ORDER BY 2 DESC)
+    LOOP
+    NULL;
+    END LOOP;
+END;
+
+
+-- ============================================================================
+-- v50.SQL.ROWNUM.п.1.2
+-- Описание: Замена rownum на FETCH FIRST
+-- ============================================================================
+PROCEDURE v50_SQL_ROWNUM_п_1_2 IS
+    v_ref REF [PRICE_LIST];
+BEGIN
+    -- [-] НЕПРАВИЛЬНО
+    SELECT p(p) INTO v_ref
+    FROM ::[PRICE_LIST] p
+    WHERE p.[CODE] = UPPER('CODE')
+    AND ROWNUM = 1;
+
+    -- [+] ПРАВИЛЬНО
+    SELECT p(p) INTO v_ref
+    FROM ::[PRICE_LIST] p
+    WHERE p.[CODE] = UPPER('CODE')
+    FETCH FIRST 1 ROWS ONLY;
+END;
+
+
+-- ============================================================================
+-- v50.SQL.UDF.п.1.3
+-- Описание: Запрет UDF в WHERE/GROUP BY/ORDER BY
+-- ============================================================================
+PROCEDURE v50_SQL_UDF_п_1_3 IS
+    FUNCTION my_func(p_id NUMBER) RETURN NUMBER IS
+    BEGIN
+    RETURN p_id * 2;
+    END my_func;
+BEGIN
+    -- [-] НЕПРАВИЛЬНО
+    FOR rec IN (SELECT id FROM ::[CLIENT] WHERE my_func(id) > 100)
+    LOOP
+    NULL;
+    END LOOP;
+
+    -- [+] ПРАВИЛЬНО
+    FOR rec IN (SELECT id, my_func(id) AS calc_val FROM ::[CLIENT] WHERE calc_val > 100)
+    LOOP
+    NULL;
+    END LOOP;
+END;
+
+
+-- ============================================================================
+-- v50.SQL.DECODE.п.1.6.1
+-- Описание: Замена DECODE на CASE
+-- ============================================================================
+PROCEDURE v50_SQL_DECODE_п_1_6_1 IS
+    v_status NUMBER := 1;
+    v_result VARCHAR2(100);
+BEGIN
+    -- [-] НЕПРАВИЛЬНО
+    SELECT DECODE(v_status, 1, 'Активен', 2, 'Закрыт', 'Неизвестно') INTO v_result FROM DUAL;
+
+    -- [+] ПРАВИЛЬНО
+    SELECT CASE v_status
+    WHEN 1 THEN 'Активен'
+    WHEN 2 THEN 'Закрыт'
+    ELSE 'Неизвестно'
+    END INTO v_result FROM DUAL;
+END;
+
+
+-- ============================================================================
+-- v50.SQL.CONNECTBY.п.1.8
+-- Описание: Замена CONNECT BY на WITH RECURSIVE
+-- ============================================================================
+PROCEDURE v50_SQL_CONNECTBY_п_1_8 IS
+    v_dep_id NUMBER := 100;
+    v_high_dep REF [DEPART];
+BEGIN
+    -- [-] НЕПРАВИЛЬНО
+    SELECT d(d%id) INTO v_high_dep
+    FROM (SELECT d(d%id, d.[HIGH]) FROM ::[DEPART] d
+    CONNECT BY d%id = PRIOR d.[HIGH]
+    START WITH d%id = v_dep_id)
+    WHERE d.[HIGH] IS NULL AND ROWNUM = 1;
+
+    -- [+] ПРАВИЛЬНО
+    WITH RECURSIVE t(id, high) AS (
+    SELECT d%id, d.[HIGH] FROM ::[DEPART] WHERE d%id = v_dep_id
+    UNION ALL
+    SELECT d.d%id, d.[HIGH]
+    FROM ::[DEPART] d
+    JOIN t ON t.high = d.d%id
+    )
+    SELECT t.id INTO v_high_dep FROM t WHERE t.high IS NULL FETCH FIRST 1 ROWS ONLY;
+END;
+
+
+-- ============================================================================
+-- v50.SQL.SYSVIEW.п.1.9
+-- Описание: Замена v$session на VW_DB_SESSION
+-- ============================================================================
+PROCEDURE v50_SQL_SYSVIEW_п_1_9 IS
+    v_session_info VW_DB_SESSION%ROWTYPE;
+BEGIN
+    -- [-] НЕПРАВИЛЬНО
+    SELECT * INTO v_session_info FROM v$session WHERE ROWNUM = 1;
+
+    -- [+] ПРАВИЛЬНО
+    SELECT SESSION_SID, STATUS, MODULE, ACTION INTO v_session_info
+    FROM VW_DB_SESSION
+    FETCH FIRST 1 ROWS ONLY;
+END;
+
+
+-- ============================================================================
+-- v50.SQL.CONTEXT.п.1.23
+-- Описание: Замена sys_context
+-- ============================================================================
+PROCEDURE v50_SQL_CONTEXT_п_1_23 IS
+    v_dbname VARCHAR2(100);
+    v_sessionid VARCHAR2(100);
+    v_user VARCHAR2(100);
+BEGIN
+    -- [-] НЕПРАВИЛЬНО
+    v_dbname := SYS_CONTEXT('USERENV', 'DB_NAME');
+    v_sessionid := SYS_CONTEXT('USERENV', 'SESSIONID');
+    v_user := SYS_CONTEXT('USERENV', 'CURRENT_USER');
+
+    -- [+] ПРАВИЛЬНО
+    v_dbname := ::[RUNTIME].[ENVIRONMENT].ClassStorage('ТБП').dbName;
+    v_sessionid := rtl.session_id;
+    v_user := rtl.usr$;
+END;
+
+
+-- ============================================================================
+-- v50.STOR.DATE.п.2.2
+-- Описание: Замена DATE на DATE_TIME
+-- ============================================================================
+PROCEDURE v50_STOR_DATE_п_2_2 IS
+BEGIN
+    -- [-] НЕПРАВИЛЬНО
+    -- DateTimeEnd DATE;
+
+    -- [+] ПРАВИЛЬНО
+    DateTimeEnd DATE_TIME;
+    BEGIN
+    DateTimeEnd := SYSDATE;
+END;
+
+
+-- ============================================================================
+-- v50.PROC.WHENOTHERS.п.3.5
+-- Описание: Добавление ROLLBACK или RAISE в WHEN OTHERS
+-- ============================================================================
+PROCEDURE v50_PROC_WHENOTHERS_п_3_5 IS
+    v_val NUMBER;
+BEGIN
+    -- [-] НЕПРАВИЛЬНО
+    BEGIN
+    SELECT 1/0 INTO v_val FROM DUAL;
+    EXCEPTION
+    WHEN OTHERS THEN
+    NULL;
+    END;
+
+    -- [+] ПРАВИЛЬНО
+    BEGIN
+    SELECT 1/0 INTO v_val FROM DUAL;
+    EXCEPTION
+    WHEN OTHERS THEN
+    ROLLBACK;
+    RAISE;
+    END;
+END;
+
+
+-- ============================================================================
+-- v50.PROC.EXECUTE.п.3.3
+-- Описание: Экранирование имён таблиц в execute immediate
+-- ============================================================================
+PROCEDURE v50_PROC_EXECUTE_п_3_3 IS
+BEGIN
+    -- [-] НЕПРАВИЛЬНО
+    EXECUTE IMMEDIATE 'truncate table Z#TEMP';
+
+    -- [+] ПРАВИЛЬНО
+    EXECUTE IMMEDIATE 'truncate table "Z#TEMP"';
+END;
+
+
+-- ============================================================================
+-- v50.PROC.CRYPTO.п.3.1.2
+-- Описание: Замена dbms_crypto на INT_EXT_CALL_001
+-- ============================================================================
+PROCEDURE v50_PROC_CRYPTO_п_3_1_2 IS
+    v_hash VARCHAR2(100);
+    v_blob BLOB;
+BEGIN
+    -- [-] НЕПРАВИЛЬНО
+    -- v_hash := dbms_crypto.hash(v_blob, dbms_crypto.hash_md5);
+
+    -- [+] ПРАВИЛЬНО
+    v_hash := ::[PCORE_INTERFACE].[INT_EXT_CALL_001].HSH_B(v_blob, ::[PCORE_INTERFACE].[INT_EXT_CALL_001].H_2);
+END;
+
+
+-- ============================================================================
+-- v50.PROC.BULK.п.1.28
+-- Описание: Включение batch для bulk операций
+-- ============================================================================
+PROCEDURE v50_PROC_BULK_п_1_28 IS
+    TYPE t_num_array IS TABLE OF NUMBER INDEX BY PLS_INTEGER;
+    v_arr t_num_array;
+BEGIN
+    -- [-] НЕПРАВИЛЬНО
+    -- без batch
+
+    -- [+] ПРАВИЛЬНО
+    PRAGMA HINT('jdbc_batch(true)');
+    FOR i IN 1..1000 LOOP
+    v_arr(i) := i;
+    END LOOP;
+    FORALL i IN 1..v_arr.COUNT
+    INSERT INTO Z#TEMP VALUES (v_arr(i));
+END;
+
+
+-- ============================================================================
+-- v50.CACHE.REF.п.6.10
+-- Описание: Получение полей сразу в курсоре
+-- ============================================================================
+PROCEDURE v50_CACHE_REF_п_6_10 IS
+    v_value VARCHAR2(100);
+BEGIN
+    -- [-] НЕПРАВИЛЬНО
+    -- FOR rec IN (SELECT ref_col FROM ::[CLIENT]) LOOP
+    --     v_value := rec.ref_col.[FIELD];
+    -- END LOOP;
+
+    -- [+] ПРАВИЛЬНО
+    FOR rec IN (SELECT ref_col.[FIELD] FROM ::[CLIENT]) LOOP
+    v_value := rec.[FIELD];
+    END LOOP;
+END;
+
+
+-- ============================================================================
+-- КОНЕЦ ФАЙЛА
+-- ============================================================================

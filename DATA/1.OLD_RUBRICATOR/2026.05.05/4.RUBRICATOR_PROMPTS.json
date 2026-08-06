@@ -1,0 +1,1214 @@
+{
+  "version": "2.2.0",
+  "based_on": "Рекомендации по адаптации кода на PLPlus для работы с DBI приложением v50.docx, spr_plplus.doc, Программирование_PLPlus_Материалы_курса.doc",
+  "rules": {
+    "v50.SQL.OUTERJOIN.п.1.1": {
+      "code": "v50.SQL.OUTERJOIN.п.1.1",
+      "short_description": "Замена (+) на LEFT/RIGHT JOIN",
+      "documentation_text": "Oracle оператор (+) в ANSI не поддерживается. Далее нельзя использовать PLPlus параметризацию типа соединения (true/false) в where. Вместо этого нужно использовать явные left/right join on.",
+      "plplus_materials_note": "Согласно учебному курсу (Глава 5.8), конструкция '&collection(true)' является упрощённым синтаксисом LOCATE для поиска в коллекции и используется для организации внешних соединений (outer joins). Аналогично, конструкция '[REF](true)' или '[REF](false)' применяется к реквизитам-ссылкам для указания типа соединения.",
+      "search_prompt": "Найти в PLPlus коде использование устаревших синтаксисов внешних соединений:\n1. Оператор Oracle '(+)' в условии WHERE.\n2. Конструкцию '&collection(true)' в условии WHERE.\n3. Конструкцию '[REF](true)' или '[REF](false)' в условии WHERE.\nИгнорировать: строки с 'LEFT/RIGHT JOIN', закомментированные строки (--), строки внутри PL/SQL блоков (/* ... */).",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(\\w+)\\.(\\w+)\\s*=\\s*(\\w+)\\.(\\w+)\\(\\+\\)",
+            "description": "Левая часть без (+), правая с (+)",
+            "flags": "i"
+          },
+          {
+            "pattern": "(\\w+)\\.(\\w+)\\(\\+\\)\\s*=\\s*(\\w+)\\.(\\w+)",
+            "description": "Левая часть с (+), правая без (+)",
+            "flags": "i"
+          },
+          {
+            "pattern": "&collection\\(true\\)",
+            "description": "Параметризованное внешнее соединение с коллекцией",
+            "flags": ""
+          },
+          {
+            "pattern": "(\\w+)\\.\\[(\\w+)\\]\\(true\\)",
+            "description": "Внешнее соединение через реквизит-ссылку с параметром true",
+            "flags": "i"
+          },
+          {
+            "pattern": "(\\w+)\\.\\[(\\w+)\\]\\(false\\)",
+            "description": "Строгое соединение через реквизит-ссылку с параметром false",
+            "flags": "i"
+          },
+          {
+            "pattern": "(\\w+)\\.(\\w+)\\(true\\)",
+            "description": "Внешнее соединение через реквизит-ссылку (без квадратных скобок) с параметром true",
+            "flags": "i"
+          },
+          {
+            "pattern": "(\\w+)%?(\\w+)\\s*=\\s*(\\w+)\\.\\[(\\w+)\\]\\(true\\)",
+            "description": "Конструкция like ac%id = gj.[ACCOUNT](true)",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*(\\(\\+\\)|&collection\\(true\\)|\\]?\\(true\\)|\\]?\\(false\\))",
+            "description": "Игнорировать если в комментарии"
+          },
+          {
+            "pattern": "'.*(\\(\\+\\)|&collection\\(true\\).)*'",
+            "description": "Игнорировать если в строковом литерале"
+          },
+          {
+            "pattern": "(LEFT|RIGHT|INNER|OUTER)\\s+JOIN",
+            "description": "Игнорировать если уже ANSI JOIN"
+          },
+          {
+            "pattern": "&collection\\(true\\)(?!.*\\bWHERE\\b)",
+            "description": "Игнорировать &collection(true), если она не в секции WHERE"
+          }
+        ]
+      },
+      "code_example_bad": "select * from t1, t2 where t1.id = t2.id(+)",
+      "code_example_bad2": "where ac%id = gj.[ACCOUNT](true)",
+      "code_example_bad3": "where cr.[LIST_PAY] = fo&collection(true)",
+      "lines_to_fix": "Строки, содержащие оператор (+), &collection(true), или [REF](true)/[REF](false) в условии WHERE.",
+      "fix_instruction": "Преобразовать устаревший синтаксис в ANSI SQL:\n1. a=b(+) -> LEFT JOIN b ON a=b\n2. a(+)=b -> RIGHT JOIN b ON a=b\n3. &collection(true) -> LEFT JOIN (::[TABLE] all : alias) ON условие\n4. [REF](true) -> удалить (true) и преобразовать в LEFT JOIN",
+      "fix_prompt": "Выполни исправление согласно fix_instruction. Определи тип проблемы и примени соответствующее преобразование.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.SQL.OUTERJOIN.п.1.1'. Файл должен содержать все типы проблемных конструкций: (+), &collection(true), [REF](true), REF(true).",
+      "examples": {
+        "simple_case": {
+          "bad": "select * from t1, t2 where t1.id = t2.id(+)",
+          "good": "select * from t1 left join t2 on t1.id = t2.id"
+        },
+        "parametrized_collection": {
+          "bad": "where cr.[LIST_PAY] = fo&collection(true)",
+          "good": "left join (::[FACT_OPER] all : fo) on cr.[LIST_PAY] = fo&collection"
+        },
+        "parametrized_ref": {
+          "bad": "where ac%id = gj.[ACCOUNT](true)",
+          "good": "left join [GNI_JOUR] gj on ac%id = gj.[ACCOUNT]"
+        }
+      },
+      "priority": "high",
+      "category": "SQL",
+      "source_files": [
+        "v50.docx",
+        "spr_plplus.doc"
+      ],
+      "source_sections": [
+        "п.1.1",
+        "Глава 5.8"
+      ],
+      "plplus_references": [
+        "Глава 5.8: &collection(true)",
+        "Раздел 19.2.3: параметры соединения"
+      ]
+    },
+    "v50.SQL.ROWNUM.п.1.2": {
+      "code": "v50.SQL.ROWNUM.п.1.2",
+      "short_description": "Замена rownum на FETCH FIRST",
+      "documentation_text": "Псевдоколонка rownum не поддерживается в PostgreSQL. Использовать FETCH FIRST N ROWS ONLY.",
+      "plplus_materials_note": "В PL+ rownum используется в WHERE для ограничения выборки. В DBI его нет.",
+      "search_prompt": "Найти использование псевдоколонки rownum в WHERE, ORDER BY или SELECT. Игнорировать комментарии и строковые литералы.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bROWNUM\\s*[<>=]\\s*\\d+",
+            "description": "ROWNUM в условии WHERE",
+            "flags": "i"
+          },
+          {
+            "pattern": "\\bROWNUM\\b",
+            "description": "Любое использование ROWNUM",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*ROWNUM",
+            "description": "Игнорировать в комментарии"
+          },
+          {
+            "pattern": "'.*ROWNUM.*'",
+            "description": "Игнорировать в строковом литерале"
+          }
+        ]
+      },
+      "code_example_bad": "select * from t where rownum = 1",
+      "code_example_bad2": "select * from t where rownum <= 10",
+      "lines_to_fix": "Строки, содержащие ROWNUM в WHERE или ORDER BY.",
+      "fix_instruction": "Заменить ROWNUM на FETCH FIRST:\n- rownum = 1 -> fetch first 1 rows only\n- rownum <= N -> fetch first N rows only\n- rownum между значениями -> использовать offset on",
+      "fix_prompt": "Выполни замену ROWNUM на FETCH FIRST. Удали условие с ROWNUM из WHERE и добавь FETCH FIRST в конец запроса.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.SQL.ROWNUM.п.1.2' с различными вариантами использования ROWNUM.",
+      "examples": {
+        "simple": {
+          "bad": "select * from t where rownum = 1",
+          "good": "select * from t fetch first 1 rows only"
+        },
+        "with_order": {
+          "bad": "select * from t where rownum <= 10 order by id",
+          "good": "select * from t order by id fetch first 10 rows only"
+        }
+      },
+      "priority": "high",
+      "category": "SQL",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.1.2"
+      ]
+    },
+    "v50.SQL.UDF.п.1.3": {
+      "code": "v50.SQL.UDF.п.1.3",
+      "short_description": "Запрет UDF в WHERE/GROUP BY/ORDER BY",
+      "documentation_text": "Пользовательские функции нельзя в условиях фильтрации, группировки и сортировки. Только в SELECT-листе верхнего уровня.",
+      "plplus_materials_note": "UDF в PL+ могут вызываться в SELECT, но не в WHERE/GROUP BY/ORDER BY для DBI.",
+      "search_prompt": "Найти вызовы пользовательских функций (UDF) в WHERE, GROUP BY, ORDER BY, HAVING. Игнорировать системные функции.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "WHERE\\s+.*\\b(\\w+)\\s*\\(",
+            "description": "UDF в WHERE",
+            "flags": "i"
+          },
+          {
+            "pattern": "GROUP\\s+BY\\s+.*\\b(\\w+)\\s*\\(",
+            "description": "UDF в GROUP BY",
+            "flags": "i"
+          },
+          {
+            "pattern": "ORDER\\s+BY\\s+.*\\b(\\w+)\\s*\\(",
+            "description": "UDF в ORDER BY",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "\\b(NVL|DECODE|CASE|COALESCE|TO_CHAR|TO_DATE|TO_NUMBER|SUBSTR|INSTR|LENGTH|TRIM|UPPER|LOWER)\\s*\\(",
+            "description": "Системные функции"
+          }
+        ]
+      },
+      "code_example_bad": "where my_func(id) > 0",
+      "code_example_bad2": "order by my_func(name)",
+      "lines_to_fix": "Строки с вызовом UDF в WHERE, GROUP BY, ORDER BY, HAVING.",
+      "fix_instruction": "Переписать запрос: вычислить значение UDF до запроса или использовать в SELECT-листе.",
+      "fix_prompt": "Вынеси вызов UDF из условия в SELECT-лист или в подзапрос.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.SQL.UDF.п.1.3' с UDF в WHERE, GROUP BY, ORDER BY.",
+      "examples": {
+        "where": {
+          "bad": "select * from t where my_func(id) > 0",
+          "good": "select id, my_func(id) as val from t where val > 0"
+        }
+      },
+      "priority": "high",
+      "category": "SQL",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.1.3"
+      ]
+    },
+    "v50.SQL.DECODE.п.1.6.1": {
+      "code": "v50.SQL.DECODE.п.1.6.1",
+      "short_description": "Замена DECODE на CASE",
+      "documentation_text": "Функция DECODE специфична для Oracle. Заменять на ANSI-конструкцию CASE WHEN.",
+      "plplus_materials_note": "DECODE не поддерживается в PostgreSQL.",
+      "search_prompt": "Найти вызовы функции DECODE в SQL-запросах. Игнорировать комментарии.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bDECODE\\s*\\([^)]+\\)",
+            "description": "Вызов DECODE",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*DECODE",
+            "description": "Игнорировать в комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select decode(status,1,'A',2,'B','?') from t",
+      "lines_to_fix": "Строки с вызовом DECODE.",
+      "fix_instruction": "Заменить DECODE на CASE WHEN:\nDECODE(expr, v1, r1, v2, r2, default) -> CASE expr WHEN v1 THEN r1 WHEN v2 THEN r2 ELSE default END",
+      "fix_prompt": "Выполни замену DECODE на CASE WHEN.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.SQL.DECODE.п.1.6.1' с различными вариантами DECODE.",
+      "examples": {
+        "simple": {
+          "bad": "select decode(status,1,'A',2,'B','?') from t",
+          "good": "select case status when 1 then 'A' when 2 then 'B' else '?' end from t"
+        }
+      },
+      "priority": "high",
+      "category": "SQL",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.1.6.1"
+      ]
+    },
+    "v50.SQL.CONNECTBY.п.1.8": {
+      "code": "v50.SQL.CONNECTBY.п.1.8",
+      "short_description": "Замена CONNECT BY на WITH RECURSIVE",
+      "documentation_text": "Иерархические запросы с CONNECT BY не поддерживаются. Использовать рекурсивные CTE: WITH RECURSIVE.",
+      "plplus_materials_note": "CONNECT BY — Oracle синтаксис, в PostgreSQL нет.",
+      "search_prompt": "Найти использование CONNECT BY в запросах. Игнорировать комментарии.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bCONNECT\\s+BY\\b",
+            "description": "CONNECT BY",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*CONNECT\\s+BY",
+            "description": "Игнорировать в комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select * from t connect by prior id = parent_id start with parent_id is null",
+      "lines_to_fix": "Строки с CONNECT BY.",
+      "fix_instruction": "Преобразовать CONNECT BY в WITH RECURSIVE:\nWITH RECURSIVE cte AS (\n  SELECT * FROM t WHERE start_condition\n  UNION ALL\n  SELECT t2.* FROM t t2 JOIN cte ON t2.parent_id = cte.id\n) SELECT * FROM cte",
+      "fix_prompt": "Выполни преобразование CONNECT BY в WITH RECURSIVE.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.SQL.CONNECTBY.п.1.8' с иерархическими запросами.",
+      "examples": {
+        "simple": {
+          "bad": "select * from t connect by prior id = parent_id start with parent_id is null",
+          "good": "with recursive cte as (select * from t where parent_id is null union all select t2.* from t t2 join cte on t2.parent_id = cte.id) select * from cte"
+        }
+      },
+      "priority": "high",
+      "category": "SQL",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.1.8"
+      ]
+    },
+    "v50.SQL.SYSVIEW.п.1.9": {
+      "code": "v50.SQL.SYSVIEW.п.1.9",
+      "short_description": "Замена v$session на VW_DB_SESSION",
+      "documentation_text": "Системные представления Oracle недоступны. Использовать VW_DB_SESSION.",
+      "plplus_materials_note": "V$SESSION и другие системные представления Oracle не работают в DBI.",
+      "search_prompt": "Найти обращения к системным представлениям Oracle: v$session, gv$session, user_tables, all_objects и др.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bV\\$\\w+\\b",
+            "description": "V$ представления",
+            "flags": "i"
+          },
+          {
+            "pattern": "\\bGV\\$\\w+\\b",
+            "description": "GV$ представления",
+            "flags": "i"
+          },
+          {
+            "pattern": "\\bUSER_\\w+\\b",
+            "description": "USER_ представления",
+            "flags": "i"
+          },
+          {
+            "pattern": "\\bALL_\\w+\\b",
+            "description": "ALL_ представления",
+            "flags": "i"
+          },
+          {
+            "pattern": "\\bDBA_\\w+\\b",
+            "description": "DBA_ представления",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*V\\$",
+            "description": "Игнорировать в комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select * from v$session",
+      "code_example_bad2": "select * from user_tables",
+      "lines_to_fix": "Строки с обращениями к системным представлениям Oracle.",
+      "fix_instruction": "Заменить v$session на VW_DB_SESSION. Другие системные представления заменить на альтернативы из документации.",
+      "fix_prompt": "Выполни замену системных представлений Oracle на DBI-совместимые.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.SQL.SYSVIEW.п.1.9' с обращениями к v$session, user_tables и др.",
+      "examples": {
+        "v_session": {
+          "bad": "select * from v$session",
+          "good": "select * from VW_DB_SESSION"
+        }
+      },
+      "priority": "high",
+      "category": "SQL",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.1.9"
+      ]
+    },
+    "v50.SQL.CONTEXT.п.1.23": {
+      "code": "v50.SQL.CONTEXT.п.1.23",
+      "short_description": "Замена sys_context('USERENV','DB_NAME')",
+      "documentation_text": "Контекст USERENV не поддерживается. Использовать ::[RUNTIME].[ENVIRONMENT].ClassStorage('ТБП').dbName.",
+      "plplus_materials_note": "SYS_CONTEXT с USERENV — Oracle специфика.",
+      "search_prompt": "Найти вызовы SYS_CONTEXT с контекстом USERENV.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "SYS_CONTEXT\\s*\\(\\s*['\"]USERENV['\"]\\s*,\\s*['\"](\\w+)['\"]\\s*\\)",
+            "description": "SYS_CONTEXT с USERENV",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*SYS_CONTEXT",
+            "description": "Игнорировать в комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "sys_context('USERENV','DB_NAME')",
+      "code_example_bad2": "sys_context('USERENV','SESSIONID')",
+      "lines_to_fix": "Строки с SYS_CONTEXT('USERENV', ...).",
+      "fix_instruction": "Заменить:\n- DB_NAME -> ::[RUNTIME].[ENVIRONMENT].ClassStorage('ТБП').dbName\n- SESSIONID -> rtl.session_id или rtl.USERID\n- CURRENT_USER -> rtl.usr$",
+      "fix_prompt": "Выполни замену SYS_CONTEXT('USERENV', ...) на DBI-альтернативы.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.SQL.CONTEXT.п.1.23' с различными атрибутами USERENV.",
+      "examples": {
+        "db_name": {
+          "bad": "sys_context('USERENV','DB_NAME')",
+          "good": "::[RUNTIME].[ENVIRONMENT].ClassStorage('ТБП').dbName"
+        },
+        "session_id": {
+          "bad": "sys_context('USERENV','SESSIONID')",
+          "good": "rtl.session_id"
+        }
+      },
+      "priority": "high",
+      "category": "SQL",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.1.23"
+      ]
+    },
+    "v50.SQL.FUNC_REQ.п.1.14": {
+      "code": "v50.SQL.FUNC_REQ.п.1.14",
+      "short_description": "Ограничения функциональных реквизитов",
+      "documentation_text": "Функциональные реквизиты можно использовать только в SELECT-листе запроса верхнего уровня.",
+      "plplus_materials_note": "Функциональные реквизиты вычисляются на лету и не могут использоваться в WHERE.",
+      "search_prompt": "Найти использование функциональных реквизитов в WHERE, GROUP BY, ORDER BY, HAVING.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\[\\w+\\]\\s*(?:WHERE|GROUP\\s+BY|ORDER\\s+BY|HAVING)",
+            "description": "Функциональный реквизит в ограничивающих клаузах",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": []
+      },
+      "code_example_bad": "where [FUNC_ATTR] > 0",
+      "lines_to_fix": "Строки с использованием функциональных реквизитов в WHERE/GROUP BY/ORDER BY/HAVING.",
+      "fix_instruction": "Переписать запрос: вычислить значение функционального реквизита до запроса или использовать в SELECT-листе.",
+      "fix_prompt": "Вынеси использование функционального реквизита из WHERE/GROUP BY/ORDER BY/HAVING в SELECT-лист.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.SQL.FUNC_REQ.п.1.14'.",
+      "examples": {
+        "where": {
+          "bad": "select id from t where [FUNC_ATTR] > 0",
+          "good": "select id, [FUNC_ATTR] as val from t where val > 0"
+        }
+      },
+      "priority": "medium",
+      "category": "SQL",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.1.14"
+      ]
+    },
+    "v50.SQL.SIMPLE_VIEW.п.1.21": {
+      "code": "v50.SQL.SIMPLE_VIEW.п.1.21",
+      "short_description": "Запрет простых представлений",
+      "documentation_text": "Простые представления отсутствуют в dbi проекте. Нужно переписать в PlPlus представления.",
+      "plplus_materials_note": "В DBI проекте нет простых VIEW, только PL+ представления.",
+      "search_prompt": "Найти простые представления (VIEW) в SQL. Игнорировать PL+ представления.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bVIEW\\b",
+            "description": "Ключевое слово VIEW",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": []
+      },
+      "code_example_bad": "create view v as select * from t",
+      "lines_to_fix": "Строки с CREATE VIEW.",
+      "fix_instruction": "Переписать простое представление в PL+ представление с курсором MAIN.",
+      "fix_prompt": "Преобразуй CREATE VIEW в PL+ представление с типом main.",
+      "test_generation_prompt": "Сгенерируй тестовый файл для проверки правила 'v50.SQL.SIMPLE_VIEW.п.1.21'.",
+      "examples": {
+        "simple": {
+          "bad": "create view v as select * from t",
+          "good": "class T; view VW_CRIT_T { type main is select * from ::[T]; }"
+        }
+      },
+      "priority": "medium",
+      "category": "SQL",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.1.21"
+      ]
+    },
+    "v50.STOR.DATE.п.2.2": {
+      "code": "v50.STOR.DATE.п.2.2",
+      "short_description": "Замена DATE на DATE_TIME",
+      "documentation_text": "В PostgreSQL тип DATE не хранит время. Использовать тип DATE_TIME (timestamp(0)).",
+      "plplus_materials_note": "Тип DATE в PL+ отображается на Oracle DATE. Для DBI нужен DATE_TIME.",
+      "search_prompt": "Найти объявления переменных, параметров и реквизитов типа DATE. Игнорировать вызовы функций to_date.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(?<!\\[)\\bdate\\b(?!\\s*\\[)",
+            "description": "Тип DATE",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "TO_DATE\\s*\\(",
+            "description": "Игнорировать to_date"
+          },
+          {
+            "pattern": "'.*date.*'",
+            "description": "Игнорировать в строковом литерале"
+          }
+        ]
+      },
+      "code_example_bad": "DateTimeEnd date;",
+      "code_example_bad2": "p_date in date",
+      "lines_to_fix": "Строки с объявлением типа DATE.",
+      "fix_instruction": "Заменить тип DATE на DATE_TIME. Для присвоений и арифметики использовать INTERVAL.",
+      "fix_prompt": "Выполни замену типа DATE на DATE_TIME. Проверь операции с датами.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.STOR.DATE.п.2.2' с объявлениями DATE.",
+      "examples": {
+        "variable": {
+          "bad": "DateTimeEnd date;",
+          "good": "DateTimeEnd date_time;"
+        },
+        "parameter": {
+          "bad": "p_date in date",
+          "good": "p_date in date_time"
+        }
+      },
+      "priority": "medium",
+      "category": "STOR",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.2.2"
+      ]
+    },
+    "v50.STOR.TEMP.п.2.8": {
+      "code": "v50.STOR.TEMP.п.2.8",
+      "short_description": "Замена временных таблиц на VARRAY",
+      "documentation_text": "Временные таблицы приводят к проблемам производительности. Заменять на VARRAY (до 10 000 записей).",
+      "plplus_materials_note": "GLOBAL TEMPORARY TABLE не рекомендуется в DBI.",
+      "search_prompt": "Найти создание и использование GLOBAL TEMPORARY TABLE, TEMP TABLE.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bCREATE\\s+GLOBAL\\s+TEMPORARY\\s+TABLE\\b",
+            "description": "GLOBAL TEMPORARY TABLE",
+            "flags": "i"
+          },
+          {
+            "pattern": "\\bON\\s+COMMIT\\s+(PRESERVE|DELETE)\\s+ROWS\\b",
+            "description": "TEMP TABLE параметры",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*TEMPORARY",
+            "description": "Игнорировать в комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "create global temporary table t (id number) on commit preserve rows",
+      "lines_to_fix": "Строки с созданием временных таблиц.",
+      "fix_instruction": "Заменить GLOBAL TEMPORARY TABLE на VARRAY: type t_varray is varray(10000) of ...",
+      "fix_prompt": "Преобразуй временную таблицу в VARRAY.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.STOR.TEMP.п.2.8' с временными таблицами.",
+      "examples": {
+        "varray": {
+          "bad": "create global temporary table t (id number)",
+          "good": "type t_varray is varray(10000) of number"
+        }
+      },
+      "priority": "medium",
+      "category": "STOR",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.2.8"
+      ]
+    },
+    "v50.STOR.INDEX.п.2.6.3": {
+      "code": "v50.STOR.INDEX.п.2.6.3",
+      "short_description": "Учёт ограничения 2704 байт для BTREE",
+      "documentation_text": "Размер строки BTREE индекса не более 2704 байт. При превышении переходить на GIST/GIN.",
+      "plplus_materials_note": "PostgreSQL ограничивает размер BTREE индекса.",
+      "search_prompt": "Найти создание индексов на текстовых полях. Проверить потенциальное превышение 2704 байт.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bCREATE\\s+INDEX\\b",
+            "description": "CREATE INDEX",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": []
+      },
+      "code_example_bad": "create index idx on t(long_text)",
+      "lines_to_fix": "Строки с CREATE INDEX на длинных текстовых полях.",
+      "fix_instruction": "Если размер индексируемых полей > 676 символов, заменить BTREE на GIST или GIN: create index idx on t using gin(long_text gin_trgm_ops)",
+      "fix_prompt": "Проанализируй индексируемые поля. При необходимости замени BTREE на GIST/GIN.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.STOR.INDEX.п.2.6.3' с индексами.",
+      "examples": {
+        "gin": {
+          "bad": "create index idx on t(long_text)",
+          "good": "create index idx on t using gin(long_text gin_trgm_ops)"
+        }
+      },
+      "priority": "low",
+      "category": "STOR",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.2.6.3"
+      ]
+    },
+    "v50.PROC.CRYPTO.п.3.1.2": {
+      "code": "v50.PROC.CRYPTO.п.3.1.2",
+      "short_description": "Замена dbms_crypto на INT_EXT_CALL_001",
+      "documentation_text": "Пакет dbms_crypto недоступен. Использовать ::[PCORE_INTERFACE].[INT_EXT_CALL_001].",
+      "plplus_materials_note": "DBMS_CRYPTO — Oracle пакет, не поддерживается в DBI.",
+      "search_prompt": "Найти вызовы DBMS_CRYPTO функций.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bDBMS_CRYPTO\\.\\w+\\b",
+            "description": "DBMS_CRYPTO вызовы",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*DBMS_CRYPTO",
+            "description": "Игнорировать в комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "dbms_crypto.hash(src, dbms_crypto.hash_md5)",
+      "lines_to_fix": "Строки с вызовами DBMS_CRYPTO.",
+      "fix_instruction": "Заменить DBMS_CRYPTO на ::[PCORE_INTERFACE].[INT_EXT_CALL_001]. Функции hash, mac, randombytes меняют только имя библиотеки.",
+      "fix_prompt": "Выполни замену DBMS_CRYPTO на INT_EXT_CALL_001.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.PROC.CRYPTO.п.3.1.2' с вызовами DBMS_CRYPTO.",
+      "examples": {
+        "hash": {
+          "bad": "dbms_crypto.hash(src, dbms_crypto.hash_md5)",
+          "good": "::[PCORE_INTERFACE].[INT_EXT_CALL_001].HSH_B(...)"
+        }
+      },
+      "priority": "high",
+      "category": "PROC",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.3.1.2"
+      ]
+    },
+    "v50.PROC.SMTP.п.3.1.3": {
+      "code": "v50.PROC.SMTP.п.3.1.3",
+      "short_description": "Замена utl_smtp на INT_EMAIL_001",
+      "documentation_text": "Пакет utl_smtp недоступен. Использовать ::[PCORE_INTERFACE].[INT_EMAIL_001].",
+      "plplus_materials_note": "UTL_SMTP — Oracle пакет, не поддерживается в DBI.",
+      "search_prompt": "Найти вызовы UTL_SMTP функций.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bUTL_SMTP\\.\\w+\\b",
+            "description": "UTL_SMTP вызовы",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*UTL_SMTP",
+            "description": "Игнорировать в комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "utl_smtp.mail(...)",
+      "lines_to_fix": "Строки с вызовами UTL_SMTP.",
+      "fix_instruction": "Заменить UTL_SMTP на ::[PCORE_INTERFACE].[INT_EMAIL_001]. Функции меняют только имя библиотеки.",
+      "fix_prompt": "Выполни замену UTL_SMTP на INT_EMAIL_001.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.PROC.SMTP.п.3.1.3' с вызовами UTL_SMTP.",
+      "examples": {
+        "mail": {
+          "bad": "utl_smtp.mail(...)",
+          "good": "::[PCORE_INTERFACE].[INT_EMAIL_001].SendMail(...)"
+        }
+      },
+      "priority": "high",
+      "category": "PROC",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.3.1.3"
+      ]
+    },
+    "v50.PROC.HTTP.п.3.1.6": {
+      "code": "v50.PROC.HTTP.п.3.1.6",
+      "short_description": "Замена utl_http на HTTP_MGR",
+      "documentation_text": "Пакет utl_http недоступен. Использовать ::[RUNTIME].[HTTP_MGR].",
+      "plplus_materials_note": "UTL_HTTP — Oracle пакет, не поддерживается в DBI.",
+      "search_prompt": "Найти вызовы UTL_HTTP и UTL_URL функций.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bUTL_HTTP\\.\\w+\\b",
+            "description": "UTL_HTTP вызовы",
+            "flags": "i"
+          },
+          {
+            "pattern": "\\bUTL_URL\\.\\w+\\b",
+            "description": "UTL_URL вызовы",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*UTL_HTTP",
+            "description": "Игнорировать в комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "utl_http.request(...)",
+      "code_example_bad2": "utl_url.escape(...)",
+      "lines_to_fix": "Строки с вызовами UTL_HTTP или UTL_URL.",
+      "fix_instruction": "Заменить UTL_HTTP и UTL_URL на ::[RUNTIME].[HTTP_MGR]. Функции: url_escape, url_unescape.",
+      "fix_prompt": "Выполни замену UTL_HTTP и UTL_URL на HTTP_MGR.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.PROC.HTTP.п.3.1.6' с вызовами UTL_HTTP и UTL_URL.",
+      "examples": {
+        "http": {
+          "bad": "utl_http.request(...)",
+          "good": "::[RUNTIME].[HTTP_MGR].url_escape(...)"
+        }
+      },
+      "priority": "high",
+      "category": "PROC",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.3.1.6"
+      ]
+    },
+    "v50.PROC.EXECUTE.п.3.3": {
+      "code": "v50.PROC.EXECUTE.п.3.3",
+      "short_description": "Экранирование имён таблиц в execute immediate",
+      "documentation_text": "В execute immediate имена таблиц экранировать двойными кавычками: \"Z#MY_TABLE\".",
+      "plplus_materials_note": "PostgreSQL требует экранирования имён таблиц в динамическом SQL.",
+      "search_prompt": "Найти вызовы EXECUTE IMMEDIATE. Проверить экранирование имён таблиц.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bEXECUTE\\s+IMMEDIATE\\b",
+            "description": "EXECUTE IMMEDIATE",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": []
+      },
+      "code_example_bad": "execute immediate 'truncate table Z#T'",
+      "lines_to_fix": "Строки с EXECUTE IMMEDIATE без экранирования.",
+      "fix_instruction": "Добавить двойные кавычки вокруг имён таблиц: 'truncate table \"Z#T\"'",
+      "fix_prompt": "Выполни экранирование имён таблиц в EXECUTE IMMEDIATE.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.PROC.EXECUTE.п.3.3' с EXECUTE IMMEDIATE.",
+      "examples": {
+        "quote": {
+          "bad": "execute immediate 'truncate table Z#T'",
+          "good": "execute immediate 'truncate table \"Z#T\"'"
+        }
+      },
+      "priority": "high",
+      "category": "PROC",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.3.3"
+      ]
+    },
+    "v50.PROC.WHENOTHERS.п.3.5": {
+      "code": "v50.PROC.WHENOTHERS.п.3.5",
+      "short_description": "Добавление ROLLBACK или RAISE в WHEN OTHERS",
+      "documentation_text": "В PostgreSQL после ошибки транзакция прерывается. В WHEN OTHERS обязательно делать ROLLBACK или RAISE.",
+      "plplus_materials_note": "WHEN OTHERS без обработки портит транзакцию в PostgreSQL.",
+      "search_prompt": "Найти блоки WHEN OTHERS без ROLLBACK или RAISE.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "WHEN\\s+OTHERS\\s+THEN\\s+(?!.*?(ROLLBACK|RAISE))",
+            "description": "WHEN OTHERS без ROLLBACK/RAISE",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": []
+      },
+      "code_example_bad": "exception when others then null;",
+      "lines_to_fix": "Строки с WHEN OTHERS без ROLLBACK или RAISE.",
+      "fix_instruction": "Добавить ROLLBACK или RAISE в блок WHEN OTHERS.",
+      "fix_prompt": "Выполни добавление ROLLBACK или RAISE в WHEN OTHERS.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.PROC.WHENOTHERS.п.3.5' с WHEN OTHERS.",
+      "examples": {
+        "rollback": {
+          "bad": "exception when others then null;",
+          "good": "exception when others then rollback; raise;"
+        }
+      },
+      "priority": "high",
+      "category": "PROC",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.3.5"
+      ]
+    },
+    "v50.PROC.BULK.п.1.28": {
+      "code": "v50.PROC.BULK.п.1.28",
+      "short_description": "Включение batch для bulk операций",
+      "documentation_text": "Для массовых операций включить batch через APPLICATION.DBI=1 или pragma hint('jdbc_batch(true)').",
+      "plplus_materials_note": "Bulk операции с batch значительно быстрее.",
+      "search_prompt": "Найти конструкции FORALL и BULK COLLECT. Проверить наличие batch.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bFORALL\\b",
+            "description": "FORALL",
+            "flags": "i"
+          },
+          {
+            "pattern": "\\bBULK\\s+COLLECT\\b",
+            "description": "BULK COLLECT",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": []
+      },
+      "code_example_bad": "forall i in 1..100",
+      "lines_to_fix": "Строки с bulk операциями без batch.",
+      "fix_instruction": "Добавить pragma hint('jdbc_batch(true)') или убедиться, что APPLICATION.DBI=1.",
+      "fix_prompt": "Добавь включение batch для bulk операций.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.PROC.BULK.п.1.28' с bulk операциями.",
+      "examples": {
+        "hint": {
+          "bad": "forall i in 1..100",
+          "good": "pragma hint('jdbc_batch(true)')\nforall i in 1..100"
+        }
+      },
+      "priority": "medium",
+      "category": "PROC",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.1.28"
+      ]
+    },
+    "v50.PROC.JSON.п.3.1.4": {
+      "code": "v50.PROC.JSON.п.3.1.4",
+      "short_description": "Использование [RUNTIME].[LIB_JSON] для JSON",
+      "documentation_text": "Для работы с JSON использовать только ::[RUNTIME].[LIB_JSON].",
+      "plplus_materials_note": "Объектные типы Oracle JSON не поддерживаются.",
+      "search_prompt": "Найти использование JSON_Object_T, JSON_Array_T и других Oracle JSON типов.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bJSON_(OBJECT|ARRAY|ELEMENT|SCALAR)_T\\b",
+            "description": "Oracle JSON типы",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": []
+      },
+      "code_example_bad": "JSON_Object_T",
+      "lines_to_fix": "Строки с Oracle JSON типами.",
+      "fix_instruction": "Заменить Oracle JSON типы на ::[RUNTIME].[LIB_JSON].",
+      "fix_prompt": "Замени Oracle JSON типы на LIB_JSON.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.PROC.JSON.п.3.1.4'.",
+      "examples": {
+        "json": {
+          "bad": "obj JSON_Object_T;",
+          "good": "obj ::[RUNTIME].[LIB_JSON];"
+        }
+      },
+      "priority": "medium",
+      "category": "PROC",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.3.1.4"
+      ]
+    },
+    "v50.PROC.TRIGGER.п.3.8": {
+      "code": "v50.PROC.TRIGGER.п.3.8",
+      "short_description": "Замена триггеров БД на операции-триггеры",
+      "documentation_text": "Триггеры БД заменить на операции типа «Триггер» в PL+.",
+      "plplus_materials_note": "Database triggers не поддерживаются в DBI.",
+      "search_prompt": "Найти создание триггеров БД (CREATE TRIGGER).",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bCREATE\\s+TRIGGER\\b",
+            "description": "CREATE TRIGGER",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": []
+      },
+      "code_example_bad": "create trigger trg on t",
+      "lines_to_fix": "Строки с CREATE TRIGGER.",
+      "fix_instruction": "Переписать триггер как операцию типа «Триггер» в PL+.",
+      "fix_prompt": "Преобразуй триггер БД в операцию-триггер.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.PROC.TRIGGER.п.3.8'.",
+      "examples": {
+        "trigger": {
+          "bad": "create trigger trg on t",
+          "good": "class T; trigger TVR_TRIG is ..."
+        }
+      },
+      "priority": "high",
+      "category": "PROC",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.3.8"
+      ]
+    },
+    "v50.PROC.XML.п.3.6": {
+      "code": "v50.PROC.XML.п.3.6",
+      "short_description": "Использование [RUNTIME].[XML_DB] для XML",
+      "documentation_text": "Для работы с XML использовать только библиотеки [RUNTIME].[XML_DB], [RUNTIME].[XML_DOM], [RUNTIME].[XT], [RUNTIME].[XQ].",
+      "plplus_materials_note": "DBMS_XMLDOM и другие Oracle XML пакеты не поддерживаются.",
+      "search_prompt": "Найти использование DBMS_XMLDOM, DBMS_XMLPARSER, XMLType в SQL.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bDBMS_XMLDOM\\b",
+            "description": "DBMS_XMLDOM",
+            "flags": "i"
+          },
+          {
+            "pattern": "\\bDBMS_XMLPARSER\\b",
+            "description": "DBMS_XMLPARSER",
+            "flags": "i"
+          },
+          {
+            "pattern": "\\bXMLType\\b",
+            "description": "XMLType",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": []
+      },
+      "code_example_bad": "dbms_xmldom",
+      "code_example_bad2": "XMLType",
+      "lines_to_fix": "Строки с Oracle XML пакетами.",
+      "fix_instruction": "Заменить Oracle XML пакеты на [RUNTIME].[XML_DB] и связанные библиотеки.",
+      "fix_prompt": "Выполни замену Oracle XML пакетов на RUNTIME.XML_DB.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.PROC.XML.п.3.6'.",
+      "examples": {
+        "xml": {
+          "bad": "dbms_xmldom",
+          "good": "[RUNTIME].[XML_DB]"
+        }
+      },
+      "priority": "medium",
+      "category": "PROC",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.3.6"
+      ]
+    },
+    "v50.PROC.EXCEPTIONLOOP.п.1.25": {
+      "code": "v50.PROC.EXCEPTIONLOOP.п.1.25",
+      "short_description": "Запрет конструкции exceptionloop",
+      "documentation_text": "Конструкция exceptionloop запрещена, так как в PostgreSQL при возникновении исключения в SQL портится вся транзакция.",
+      "plplus_materials_note": "Exceptionloop несовместим с PostgreSQL.",
+      "search_prompt": "Найти ключевое слово EXCEPTIONLOOP.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bEXCEPTIONLOOP\\b",
+            "description": "EXCEPTIONLOOP",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": []
+      },
+      "code_example_bad": "exceptionloop",
+      "lines_to_fix": "Строки с EXCEPTIONLOOP.",
+      "fix_instruction": "Удалить EXCEPTIONLOOP, переписать логику с использованием обычных циклов и обработки ошибок.",
+      "fix_prompt": "Удали EXCEPTIONLOOP и перепиши логику.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.PROC.EXCEPTIONLOOP.п.1.25'.",
+      "examples": {
+        "remove": {
+          "bad": "exceptionloop",
+          "good": "loop"
+        }
+      },
+      "priority": "high",
+      "category": "PROC",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.1.25"
+      ]
+    },
+    "v50.PROC.MACROS.п.3.4": {
+      "code": "v50.PROC.MACROS.п.3.4",
+      "short_description": "Запрет макросов execute и process",
+      "documentation_text": "Макросы execute и process не поддерживаются в DBI.",
+      "plplus_materials_note": "Макросы с execute и process не работают в DBI.",
+      "search_prompt": "Найти макросы с опциями EXECUTE или PROCESS.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "pragma\\s+macro\\([^,]+,[^,]+,(EXECUTE|PROCESS)",
+            "description": "Макрос с EXECUTE/PROCESS",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": []
+      },
+      "code_example_bad": "pragma macro(xxx,'[1]+[2]',execute)",
+      "lines_to_fix": "Строки с макросами EXECUTE или PROCESS.",
+      "fix_instruction": "Удалить макрос или переписать без EXECUTE/PROCESS.",
+      "fix_prompt": "Удали или перепиши макрос с EXECUTE/PROCESS.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.PROC.MACROS.п.3.4'.",
+      "examples": {
+        "remove": {
+          "bad": "pragma macro(xxx,'text',execute)",
+          "good": "-- макрос удалён"
+        }
+      },
+      "priority": "medium",
+      "category": "PROC",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.3.4"
+      ]
+    },
+    "v50.PROC.DYNAMIC_SQL.п.3.3": {
+      "code": "v50.PROC.DYNAMIC_SQL.п.3.3",
+      "short_description": "Замена DBMS_SQL на [RUNTIME].[CALC]",
+      "documentation_text": "Динамический SQL через DBMS_SQL заменить на ::[RUNTIME].[CALC] или ::[RUNTIME].[PLP].",
+      "plplus_materials_note": "DBMS_SQL — Oracle пакет.",
+      "search_prompt": "Найти вызовы DBMS_SQL.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bDBMS_SQL\\.",
+            "description": "DBMS_SQL вызовы",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": []
+      },
+      "code_example_bad": "dbms_sql.open_cursor",
+      "lines_to_fix": "Строки с вызовами DBMS_SQL.",
+      "fix_instruction": "Заменить DBMS_SQL на ::[RUNTIME].[CALC] или ::[RUNTIME].[PLP].",
+      "fix_prompt": "Выполни замену DBMS_SQL на RUNTIME.CALC или RUNTIME.PLP.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.PROC.DYNAMIC_SQL.п.3.3'.",
+      "examples": {
+        "calc": {
+          "bad": "dbms_sql.open_cursor",
+          "good": "::[RUNTIME].[CALC].plp_c"
+        }
+      },
+      "priority": "high",
+      "category": "PROC",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.3.3"
+      ]
+    },
+    "v50.INT.DBLINK.п.4.2": {
+      "code": "v50.INT.DBLINK.п.4.2",
+      "short_description": "Замена Database Link на REST/SOAP",
+      "documentation_text": "Database Link не поддерживается. Использовать веб-сервисы: REST или SOAP.",
+      "plplus_materials_note": "Database Link не работает в DBI.",
+      "search_prompt": "Найти обращения к Database Link (@dblink).",
+      "regex_patterns": {
+        "for_search": [
+          {"pattern": "\\b\\w+@\\w+\\b", "description": "Database Link в SQL запросах", "flags": "i"}
+        ],
+        "for_ignore": [
+          {"pattern": "^\\s*@import_plsql", "description": "Игнорировать @import_plsql"},
+          {"pattern": "^\\s*@this\\(", "description": "Игнорировать @this"},
+          {"pattern": "^\\s*@name\\(", "description": "Игнорировать @name"},
+          {"pattern": "^\\s*@.*\\(", "description": "Игнорировать другие директивы @"}
+        ]
+      },
+      "code_example_bad": "select * from table@dblink",
+      "lines_to_fix": "Строки с Database Link.",
+      "fix_instruction": "Заменить Database Link на вызов REST/SOAP веб-сервиса: 1B060230, 1B060220 (REST) или 1B060250, 1B060240 (SOAP).",
+      "fix_prompt": "Выполни замену Database Link на REST/SOAP веб-сервис.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.INT.DBLINK.п.4.2'.",
+      "examples": {
+        "rest": {
+          "bad": "select * from table@dblink",
+          "good": "-- использовать REST веб-сервис 1B060230"
+        }
+      },
+      "priority": "high",
+      "category": "INT",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.4.2"
+      ]
+    },
+    "v50.INT.QUEUE.п.4.4": {
+      "code": "v50.INT.QUEUE.п.4.4",
+      "short_description": "Использование [RUNTIME].[AQ_LIB] для очередей",
+      "documentation_text": "Для работы с очередями использовать библиотеку ::[RUNTIME].[AQ_LIB].",
+      "plplus_materials_note": "Oracle AQ заменяется на AQ_LIB.",
+      "search_prompt": "Найти использование Oracle AQ (DBMS_AQ).",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bDBMS_AQ\\.",
+            "description": "DBMS_AQ",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": []
+      },
+      "code_example_bad": "dbms_aq.enqueue",
+      "lines_to_fix": "Строки с DBMS_AQ.",
+      "fix_instruction": "Заменить DBMS_AQ на ::[RUNTIME].[AQ_LIB].",
+      "fix_prompt": "Выполни замену DBMS_AQ на RUNTIME.AQ_LIB.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.INT.QUEUE.п.4.4'.",
+      "examples": {
+        "aq": {
+          "bad": "dbms_aq.enqueue",
+          "good": "::[RUNTIME].[AQ_LIB]"
+        }
+      },
+      "priority": "medium",
+      "category": "INT",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.4.4"
+      ]
+    },
+    "v50.CACHE.REF.п.6.10": {
+      "code": "v50.CACHE.REF.п.6.10",
+      "short_description": "Получение полей сразу в курсоре",
+      "documentation_text": "Разыменование ссылок в цикле вызывает точечные запросы. Получать нужные поля сразу в SELECT-листе курсора.",
+      "plplus_materials_note": "Кэш Hibernate: 1 уровень — 200 объектов, 2 уровень — 1 млн объектов.",
+      "search_prompt": "Найти циклы FOR с разыменованием ссылок (REF.FIELD).",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "FOR\\s+\\w+\\s+IN\\s+.*?\\w+\\.\\[\\w+\\]\\.\\[\\w+\\]",
+            "description": "Разыменование в цикле",
+            "flags": "i"
+          }
+        ],
+        "for_ignore": []
+      },
+      "code_example_bad": "for rec in (select ref_col from t) loop v := rec.ref_col.field; end loop;",
+      "lines_to_fix": "Строки с разыменованием ссылок в цикле.",
+      "fix_instruction": "Переписать запрос, добавив поле в SELECT-лист: select ref_col.field from t",
+      "fix_prompt": "Выполни оптимизацию — вынеси поле в SELECT-лист курсора.",
+      "test_generation_prompt": "Сгенерируй тестовый PLPlus файл для проверки правила 'v50.CACHE.REF.п.6.10'.",
+      "examples": {
+        "cursor": {
+          "bad": "for rec in (select ref_col from t) loop v := rec.ref_col.field; end loop;",
+          "good": "for rec in (select ref_col.field from t) loop v := rec.field; end loop;"
+        }
+      },
+      "priority": "medium",
+      "category": "CACHE",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.6.10"
+      ]
+    },
+    "v50.CACHE.CONFIG.п.6.13": {
+      "code": "v50.CACHE.CONFIG.п.6.13",
+      "short_description": "Настройка кэша 2 уровня в config_orm.xml",
+      "documentation_text": "Для часто используемых ТБП настроить кэш 2 уровня в config_orm.xml с параметрами read-only, read-write, nonstrict_read_write.",
+      "plplus_materials_note": "Кэш 2 уровня Hibernate.",
+      "search_prompt": "Найти ТБП, которые часто используются в запросах и не закэшированы.",
+      "regex_patterns": {
+        "for_search": [],
+        "for_ignore": []
+      },
+      "code_example_bad": "Нет кэша",
+      "lines_to_fix": "Отсутствие настройки кэша в config_orm.xml.",
+      "fix_instruction": "Добавить в config_orm.xml: <cache usage=\"read-only\">CLIENT</cache>",
+      "fix_prompt": "Добавь настройку кэша для часто используемых ТБП.",
+      "test_generation_prompt": "Сгенерируй рекомендацию по настройке кэша.",
+      "examples": {
+        "cache": {
+          "bad": "<!-- нет кэша -->",
+          "good": "<cache usage=\"read-only\">CLIENT</cache>"
+        }
+      },
+      "priority": "low",
+      "category": "CACHE",
+      "source_files": [
+        "v50.docx"
+      ],
+      "source_sections": [
+        "п.6.13"
+      ]
+    }
+  }
+}

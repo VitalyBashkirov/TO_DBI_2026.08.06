@@ -1,0 +1,52 @@
+# Временные файлы IDE
+*.bak
+*.tmp
+*.log
+*.mcs
+*.mp
+
+# Бэкапы АРМ
+backup_*.zip
+
+# Логи АРМ
+logs/
+
+# Временные файлы Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# Настройки
+*.swp
+*.swo
+*~
+
+# Бэкапы файлов
+*.2026*
+*.MODIFIED*
+
+# IDE
+.vscode/
+.idea/
+
+# Результаты работы АРМа
+PATCH_OUT/
+RESULTS/
+temp_fix/
+
+# ������� ���������� (�� ��������� � git)
+*.mp4
+*.pdf
+*.docx
+*.doc
+*.rar
+*.mp3
+*.wav
+macro.cache
+*.7z
+*.tar.gz

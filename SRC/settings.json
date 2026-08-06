@@ -1,0 +1,16 @@
+{
+  "source_dir": "F:\\TO_DBI\\PATCH_IN\\patch_TEST_DS",
+  "result_dir": "F:\\TO_DBI\\PATCH_OUT\\patch_TEST_DS",
+  "file_pattern": "**/*.*",
+  "log_level": "Подробный",
+  "recursive": true,
+  "only_modified": true,
+  "preserve_structure": false,
+  "selected_rules": [
+    "v50",
+    "тдс20240828",
+    "тклоик20240828",
+    "README"
+  ],
+  "max_log_size_mb": 2
+}

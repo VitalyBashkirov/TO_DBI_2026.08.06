@@ -1,0 +1,8 @@
+rubricator_v3.0.0/
+├── 1.RUBRICATOR_FILES.md          # Список файлов для анализа
+├── 2.RUBRICATOR_CATEGORIES.md     # Категории и подкатегории правил (30 шт)
+├── 3.RUBRICATOR_FIXES.md          # Полный список исправлений (118 правил)
+├── 4.RUBRICATOR_PROMPTS.json      # AI-промпты (38 правил, v3.0.0)
+├── 5.RUBRICATOR_PARSER_SQL.json   # Гибридный SQL-парсер (v2.0.0)
+├── README_RUBRICATOR.md           # Документация по использованию
+└── find_issues.sql                # SQL-скрипт поиска проблем (25 запросов)

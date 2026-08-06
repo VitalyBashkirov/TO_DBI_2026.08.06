@@ -1,6 +1,0 @@
-Manifest-Version: 1.0
-CFT-Stream-Version: 1
-CFT-Platform-IDE: 2.36.406
-CFT-Deploy-Mode: EXACT
-Datetime: 29/04/2026 19:22:56
-

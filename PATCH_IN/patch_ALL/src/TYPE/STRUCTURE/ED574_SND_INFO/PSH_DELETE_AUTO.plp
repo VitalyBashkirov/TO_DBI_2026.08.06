@@ -1,6 +1,0 @@
-class ED574_SND_INFO;
-
-@name('[ПСБ] Удалить (служебная)')
-@tag('CREATED')
-destructor PSH_DELETE_AUTO is
-end;

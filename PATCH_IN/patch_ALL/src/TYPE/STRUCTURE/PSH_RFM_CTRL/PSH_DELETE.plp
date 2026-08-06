@@ -1,5 +1,0 @@
-class PSH_RFM_CTRL;
-
-@name('[ПСБ] Удалить')
-destructor PSH_DELETE is
-end;

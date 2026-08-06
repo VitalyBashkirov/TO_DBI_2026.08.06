@@ -1,0 +1,1437 @@
+class PSH_BASE_VAL_EXP;
+
+@this(create_on_start:=true)
+@name('[ПСБ] Дай значение реквизита')
+@tag('COPIED')
+method PSH_GET_VALUE is
+pragma macro(p_cur_oper_date, 'case [1]
+				when ''EXPECTED_DATE'' then rec.[EXPECTED_DATE]
+				when ''TERM_REFUND'' then rec.[TERM_REFUND] end',substitute);
+
+pragma macro(sm, 'trim(to_char([1], ''99999999999999999999999990D00''))', substitute);
+
+function GetDocCurOper(p_doc ref [MAIN_DOCUM]) return varchar2(10) is
+ret GetDocCurOper%type;
+begin
+	select	md(md.[CURR_OPER].[HIGH].[CODE] || md.[CURR_OPER].[CODE])
+	in		::[MAIN_DOCUM]
+	where	md = p_doc
+	into 	ret;
+	return ret;
+exception
+	when NO_DATA_FOUND then
+		return null;	
+end;
+
+function GetValCode
+/*Функция вычислния кода валюты в зависмости от направления платежа*/
+(
+	p_doc ref [MAIN_DOCUM]
+		/*ссылка на документ*/
+	, p_payment_type ::[BASE_VAL_OP].[PAYMENT_TYPE]%type
+		/*тип платежа: 1 - зачисление, 2 - списание*/
+	, p_type varchar(1) default 'S'
+		/*тип кода: P - валюта платежа, S - валюта корреспондирующего счета*/
+)
+/*Возвращает код валюты*/
+return ::[FT_MONEY].[CODE_ISO]%type
+is
+vCurDt		ref [FT_MONEY];
+vCurKt		ref [FT_MONEY];
+vCurCodeDt ::[FT_MONEY].[CODE_ISO]%type;
+vCurCodeKt ::[FT_MONEY].[CODE_ISO]%type;
+vAccDt		::[AC_FIN].[MAIN_V_ID]%type;
+vAccKt		::[AC_FIN].[MAIN_V_ID]%type;
+vBranch		ref [BRANCH];
+vNazn		::[MAIN_DOCUM].[NAZN]%type;
+ret_str		GetValCode%type;
+dt_var 		integer;
+kt_var 		integer;
+begin
+	select md(	
+				  nvl(md.[ACC_DT].[MAIN_V_ID], md.[KL_DT].[2].[1])
+				, nvl(md.[ACC_KT].[MAIN_V_ID], md.[KL_KT].[2].[1])
+				, md.[VALUTA]
+				, md.[VALUTA_PO]
+				, md.[VALUTA].[CODE_ISO]
+				, md.[VALUTA_PO].[CODE_ISO]
+				, md.[FILIAL]
+				, md.[NAZN]
+				, md.[KL_DT].[0]
+				, md.[KL_KT].[0]
+			)
+	in		::[MAIN_DOCUM]
+	where	md = p_doc
+	into	  vAccDt
+			, vAccKt
+			, vCurDt
+			, vCurKt
+			, vCurCodeDt
+			, vCurCodeKt
+			, vBranch
+			, vNazn
+			, dt_var
+			, kt_var;
+
+	if vCurDt = vCurKt then
+		ret_str := vCurCodeDt;
+
+	elsif p_payment_type = '2' then
+		case p_type of
+			:'P': ret_str := vCurCodeDt;
+			:'S': ret_str := vCurCodeKt;
+		end;
+
+	elsif p_payment_type = '1' then
+		case p_type of
+			:'P': ret_str := vCurCodeKt;
+			:'S': ret_str := vCurCodeDt;
+		end;
+
+	elsif ::[I93_ACCS].[LIB].check_vo_acc(vAccDt, vAccKt, true, false, vBranch, vNazn, dt_var, kt_var) then
+		ret_str := vCurCodeDt;
+
+	else
+		ret_str := vCurCodeKt;
+
+	end if;
+
+	return ret_str;
+
+exception
+	when NO_DATA_FOUND then
+		return null;
+
+end;
+
+function GetSumma
+(
+	p_doc ref [MAIN_DOCUM]
+	, p_payment_type ::[BASE_VAL_OP].[PAYMENT_TYPE]%type
+	, p_type varchar(1) default 'S'
+)
+return ::[MAIN_DOCUM].[SUM]%type
+is
+ret		GetSumma%type;
+vCurDt	ref [FT_MONEY];
+vCurKt	ref [FT_MONEY];
+vAccDt	::[AC_FIN].[MAIN_V_ID]%type;
+vAccKt	::[AC_FIN].[MAIN_V_ID]%type;
+vBranch ref [BRANCH];
+vSumDt	::[MAIN_DOCUM].[SUM]%type;
+vSumKt	::[MAIN_DOCUM].[SUM_PO]%type;
+vNazn	::[MAIN_DOCUM].[NAZN]%type;
+dt_var 	integer;
+kt_var 	integer;
+begin
+	select md(	
+				  nvl(md.[ACC_DT].[MAIN_V_ID], md.[KL_DT].[2].[1])
+				, nvl(md.[ACC_KT].[MAIN_V_ID], md.[KL_KT].[2].[1])
+				, md.[VALUTA]
+				, md.[VALUTA_PO]
+				, md.[FILIAL]
+				, md.[SUM]
+				, md.[SUM_PO]
+				, md.[NAZN]
+				, md.[KL_DT].[0]
+				, md.[KL_KT].[0]
+			)
+	in		::[MAIN_DOCUM]
+	where	md = p_doc
+	into	vAccDt
+			, vAccKt
+			, vCurDt
+			, vCurKt
+			, vBranch
+			, vSumDt
+			, vSumKt
+			, vNazn
+			, dt_var
+			, kt_var;
+
+	if vCurDt = vCurKt then
+		ret := vSumDt;
+
+	elsif p_payment_type = '2' then
+		case p_type of
+			:'P': ret := vSumDt;
+			:'S': ret := vSumKt;
+		end;
+
+	elsif p_payment_type = '1' then
+		case p_type of
+			:'P': ret := vSumKt;
+			:'S': ret := vSumDt;
+		end;
+
+	elsif ::[I93_ACCS].[LIB].check_vo_acc(vAccDt, vAccKt, true, false, vBranch, vNazn, dt_var, kt_var) then
+		ret := vSumDt;
+
+	else
+		ret := vSumKt;
+
+	end if;
+
+	return ret;
+	
+exception
+	when NO_DATA_FOUND then
+		return null;
+	
+end;
+
+
+function GetDateReg(p_client ref [CLIENT])return date
+is
+	vDate date;
+begin
+	select	c(c.[REGISTER].[DATE_REG])
+	in 		::[CL_CORP]
+	where 	c%id = p_client%id
+	into 	vDate;
+	return vDate;
+exception
+	when NO_DATA_FOUND then
+		return null;	
+end;
+
+
+function get_bik_swift(mdoc ref [MAIN_DOCUM], it_dt boolean) return boolean
+is
+	doc_rc ref [DOCUM_RC];
+	bank_rc ref [CL_BANK];
+	part_rc	ref [CL_PART];
+	pragma macro(get_bic, 'if [1]%class = ''CL_BANK_N'' then
+		                   		return true;
+							else
+								return false;
+							end if', substitute);
+begin
+	if it_dt then
+		if mdoc.[KL_DT].[0] = 1 then -- наш банк
+			return true;
+		else
+			doc_rc := ::[BASE_VAL_OP].[LIB].get_doc_rc(mdoc);
+			if doc_rc is not null then
+				bank_rc := doc_rc.[PAYER].[BANK_REF];
+				if bank_rc is null then
+					part_rc := ::[DOCUM_RC].[LIB_NEW].get_sd_part(doc_rc);
+					bank_rc := part_rc.[BANK];
+					if bank_rc is null then
+						bank_rc := part_rc.[BANK_F];
+					end if;
+					if bank_rc is null then
+						bank_rc := mdoc.[KL_DT].[2].[3];
+					end if;
+				end if;
+				&get_bic(bank_rc, bank_bic);				
+			else								
+				return true;
+			end if;							
+		end if;
+	else
+		if mdoc.[KL_KT].[0] = 1 then -- наш банк
+			return true;
+		else
+			doc_rc := ::[BASE_VAL_OP].[LIB].get_doc_rc(mdoc);
+			if doc_rc is not null then
+				bank_rc := doc_rc.[RECEIVER].[BANK_REF];
+				if bank_rc is null then
+					part_rc := ::[DOCUM_RC].[LIB_NEW].get_dog_rc(doc_rc).[CLIENT];
+					bank_rc := part_rc.[BANK];
+					if bank_rc is null then
+						bank_rc := part_rc.[BANK_F]; 	
+					end if;
+					if bank_rc is null then
+						bank_rc := mdoc.[KL_KT].[2].[3];
+					end if;
+				end if;
+				&get_bic(bank_rc, bank_bic);
+			else
+				return true;   							
+			end if;									
+		end if;
+	end if;		
+end;
+
+/*
+Универсальная функция которая возвращает тип клиента
+Возвращаемые значения можно преобразовывать в другие
+"U" - юридическое лицо;
+"F" - физическое лицо;
+"P" - физическое лицо, занимающееся частной практикой;
+"I" - индивидуальный предприниматель;
+"B" - банк
+*/
+function ip_type(p_client ref [CLIENT]) return varchar2(1)
+is
+	cl_org_ref	ref [CL_ORG];
+	op_date		date;
+	cl_class	varchar2(16);
+	chp_type	integer;
+begin
+	op_date := ::[SYSTEM].[VARIABLES].OpDate;
+	cl_class := p_client%class;
+	if cl_class = 'CL_PRIV' then
+		return 'F';
+	elsif cl_class = 'CL_ORG' then
+		cl_org_ref%id := p_client%id;
+		
+		chp_type := ::[DOCUMENT_INT].[PRX_CLIENT].getCHPType(cl_org_ref, op_date);
+		
+		if chp_type > 0 then
+			-- Нотариус, Адвокат
+			if chp_type in (1,2) then
+				return 'P';
+			else
+				return 'I';
+			end if;
+		end if;
+		
+		return 'U';
+	elsif cl_class in ('CL_BANK_N', 'CL_BANK_F', 'CL_PART') then
+		return 'B';
+	end if;
+	return null;
+end;
+
+function get_address(p_client ref [CLIENT]) return ::[PERSONAL_ADDRESS].[API_LIB].address_expanded_rectype is
+a			[PERSONAL_ADDRESS];
+adr_type	ref [ADDRESS_TYPE];
+begin
+	if p_client%class = 'CL_PRIV' then
+		adr_type := ::[ADDRESS_TYPE]([KOD] = 'REGISTRATION');
+	else
+		adr_type := ::[ADDRESS_TYPE]([KOD] = 'CORP');
+	end if;	
+	locate a in p_client.[ADDRESSES] where a.[TYPE] = adr_type;
+	return ::[PERSONAL_ADDRESS].[API_LIB].get_address_expanded(a);
+exception
+	when NO_DATA_FOUND then
+		return null;	
+end;
+
+function get_cur_oper_re_date(p_mdoc ref [MAIN_DOCUM], p_val_contr [BASE_VAL_CONTR], p_val_contr_ps ::[BASE_VAL_CONTR].[PS]%type , p_name string(16)) return date is
+	v_cur_oper_re [PS_F_CUR_OPER_RE];
+	v_date date;
+begin
+	v_date := nvl(p_val_contr.[CONTR_DATE], trunc(sysdate));
+	for rec in ::[PS_F_CUR_OPER_RE] collections
+		where rec.[DOC_REF] = p_mdoc
+			and &p_cur_oper_date(p_name) is not null
+	loop
+		v_cur_oper_re := rec;
+		if p_val_contr%id is not null then -- есть разбивка по контрактам
+			-- поиск записи в "ДПС.Информации о валютной операции" по номеру паспорта
+			if v_cur_oper_re.[PS_NUM] = p_val_contr_ps
+			-- либо по Виду валютной операции, Номеру контракта, Дате контракта
+				or (p_val_contr.[CURR_OPER] = v_cur_oper_re.[CURR_OPER] and nvl(p_val_contr.[CONTR_NUM], 'CONTR_NUM') = nvl(v_cur_oper_re.[CONTR_NUM], 'CONTR_NUM') and v_date = nvl(v_cur_oper_re.[CONTR_DATE], v_date)) then
+					return &p_cur_oper_date(p_name);
+			end if;
+		else -- нет разбивки по контрактам
+			if v_cur_oper_re.[PS_NUM] = p_mdoc.[DEAL_PASP] or v_cur_oper_re.[CURR_OPER] = p_mdoc.[CURR_OPER] then
+				return &p_cur_oper_date(p_name);
+			end if;
+		end if;
+	end loop;
+end;
+PSH_GET_VALUE (
+	@name('Реквизит')                                     P_CODE        in [STRING_250],
+	@name('Дополнительные параметры')                     P_ADDS        in [STRING_32000]    default null,
+	@name('Ссылка ВК. База данных по валютным операциям') P_BASE_VAL_OP in [BASE_VAL_OP_REF]
+) return [STRING_32000] is
+
+execute is
+vContrStr		string(100);
+vViolationStr	string(100);
+ret_sum			number;
+ret_str			string(32000); --::[BASE_VAL_OP].[GET_VALUE]%type;
+vDocPs			::[MAIN_DOCUM].[DEAL_PASP]%type;
+vDate			date;
+vContrPs		::[BASE_VAL_CONTR].[PS]%type;
+vContr			ref [BASE_VAL_CONTR];
+vCurCode		::[FT_MONEY].[CODE_ISO]%type;
+vContrNum		::[BASE_VAL_CONTR].[CONTR_NUM]%type;
+vContrCO		::[BASE_VAL_CONTR].[CURR_OPER]%type;
+vRegNum			string(9);
+--vViolation		::[VAL_CONTROL_308P]; --Не личензировано
+
+-- Массив "Контракты"
+vContrVid		::[CURR_VID_SERV].[CODE]%type;
+vContrCurOper	string(10);
+vContrSum		::[BASE_VAL_CONTR].[SUMMA]%type;
+vContrCurCode	::[FT_MONEY].[CODE_ISO]%type;
+vContrCSum		::[BASE_VAL_CONTR].[CONTR_SUM]%type;
+vContrCWODocs	string(1);
+vSubmisDoc		string(1);
+vExpDate		date;
+
+vClient			ref [CLIENT];
+addr			::[PERSONAL_ADDRESS].[API_LIB].address_expanded_rectype;
+cl_acc			ref [AC_FIN];
+v_val_code		::[FT_MONEY].[CODE_ISO]%type;
+v_summa			[SUMMA];
+
+BaseValOpRef ref [BASE_VAL_OP];
+begin
+	BaseValOpRef:=P_BASE_VAL_OP;
+	
+	::[RUNTIME].[STR].get_par(P_ADDS, 'CONTRACT', vContrStr);
+	::[RUNTIME].[STR].get_par(P_ADDS, 'VIOLATION', vViolationStr);
+
+	if vContrStr is not null then
+		begin
+			select c(	  c
+						, c.[PS]
+						, c.[VID_SERV].[CODE]
+						, c.[CURR_OPER].[HIGH].[CODE] || c.[CURR_OPER].[CODE]
+						, c.[SUMMA]
+						, c.[CONTR_VAL].[INT_CUR_CODE]
+						, c.[CONTR_SUM]
+						, c.[CONTR_WO_DOCS]
+						, c.[SUBMIS_DOC]
+						, c.[EXP_DATE]
+					)
+			in ::[BASE_VAL_CONTR] collections
+			where c = vContrStr
+			into vContr, vContrPs, vContrVid, vContrCurOper, vContrSum, vContrCurCode, vContrCSum, vContrCWODocs, vSubmisDoc, vExpDate;
+		exception
+			when NO_DATA_FOUND then
+				pragma error('Не найден валютный контракт id = '||vContrStr);
+		end;
+	end if;
+	
+	if vViolationStr is not null then
+		null; --Не лицензировано
+		/** /
+		begin
+			select v(v)
+			in ::[VAL_CONTROL_308P]
+			where v = vViolationStr
+			into vViolation;
+		exception
+			when NO_DATA_FOUND then
+				pragma error('Не найдена запись в архиве нарушений валютного законодательства с id = ' || vViolationStr);
+		end;
+		/**/
+	end if;
+	
+	::[RUNTIME].[STR].get_par(P_ADDS, 'CLIENT', vClient%id);
+	if vClient is null then
+		if BaseValOpRef.[PAYMENT_TYPE] = 1 then
+			vClient := nvl(BaseValOpRef.[DOC].[KL_KT].[1].[1], BaseValOpRef.[DOC].[ACC_KT].[CLIENT_V]);
+		elsif BaseValOpRef.[PAYMENT_TYPE] = 2 then
+			vClient := nvl(BaseValOpRef.[DOC].[KL_DT].[1].[1], BaseValOpRef.[DOC].[ACC_DT].[CLIENT_V]);
+		end if;	
+	end if;
+	
+	null; --Не лицензировано
+	/** /
+	if vViolation is not null then
+		
+		if P_CODE in ('PL_SURNAME', 'PL_NAME', 'PL_MIDNAME') then
+			declare
+				v_name 			string(250);
+				v_surname 		string(250);
+				v_midname 			string(250);
+				v_org 			[CL_ORG];
+				v_org_ref ref 	[CL_ORG];
+			begin
+
+				if vViolation.[TU].[0] in (2,3) then
+					v_org_ref := vViolation.[CLIENT_REF];
+
+					select q(
+								q.[FASE].[FAMILY_CL],
+								q.[FASE].[NAME_CL],
+								q.[FASE].[SNAME_CL]
+							)
+					in v_org_ref.[ALL_BOSS]
+					where q.[CHIEF] = 1
+					into v_surname, v_name, v_midname;
+				end if;
+				
+				if P_CODE = 'PL_SURNAME' then
+					if vViolation.[TU].[0] in (4) then
+						return stdlib.fio(vViolation.[NAME], 'Ф');
+					elsif vViolation.[TU].[0] in (2,3) then
+						return v_surname;
+					end if;
+					return null;
+				elsif P_CODE = 'PL_NAME' then
+					if vViolation.[TU].[0] in (4) then
+						return stdlib.fio(vViolation.[NAME], 'И');
+					elsif vViolation.[TU].[0] in (2,3) then
+						return v_name;
+					end if;
+					return null;
+				elsif P_CODE = 'PL_MIDNAME' then
+					if vViolation.[TU].[0] in (4) then
+						return stdlib.fio(vViolation.[NAME], 'О');
+					elsif vViolation.[TU].[0] in (2,3) then
+						return v_midname;
+					end if;
+					return null;
+				end if;
+			end;
+		end if;
+		
+		if P_CODE = 'RES_TYPE' then
+			if vViolation.[IS_RESIDENT] then
+				return vViolation.[TYPE_RESIDENT];
+			end if;
+			return null;
+		elsif P_CODE = 'PRIV_PR_TYPE' then
+			declare
+				v_org 			[CL_ORG];
+				v_org_ref ref 	[CL_ORG];
+				chp_type 		integer;
+			begin
+				if vViolation.[TU].[0] = 3 then
+					v_org_ref := vViolation.[CLIENT_REF];
+					v_org := v_org_ref;
+
+					chp_type := ::[DOCUMENT_INT].[PRX_CLIENT].getCHPType(v_org_ref, vViolation.[DATE_VIOLATION]);
+					
+					if chp_type > 2 then -- Нотариус, Адвокат
+						return 0;
+					else
+						return chp_type;
+					end if;
+				end if;
+			end;
+			return null;
+		elsif P_CODE = 'OGRN_NON_RES' then
+			declare
+				v_org	[CL_ORG];
+				v_org_ref ref [CL_ORG];
+				v_res	string default null;
+				v_date_f	date default null;
+			begin
+				v_org_ref := vViolation.[CLIENT_REF];
+				v_org := v_org_ref;
+	
+				for	( select n (
+							  n : doc
+							, n.[DOC_NUM] : doc_num
+							, n.[DOC_DATE] : doc_date
+							, n.[END_DATE] : end_date
+							, ( select p ( trim(p.[VALUE]) ) in n.[ADD_PARAMS] where p.[CODE] = 'REG_NUM' fetch 1 ) : reg_num -- Запись с кодом "REG_NUM" должна быть ровно одна
+							)
+					in v_org.[DOCS]
+					where n.[DOC_TYPE].[CODE] in ('REG_FOREIGN_BRANCH')
+					and n.[DOC_DATE] is not null -- Пустую дату не учитываем, считая такой документ недействительным
+					and ( n.[DOC_DATE] <= n.[END_DATE] or n.[END_DATE] is null )
+					order by n.[DOC_DATE]
+				)
+				loop
+					v_res := n.reg_num;
+				end loop;
+				if not vViolation.[IS_RESIDENT] then
+					return v_res;
+				end if;
+			exception
+				when NO_DATA_FOUND then
+					return null;
+			end;
+			return null;
+		elsif P_CODE = 'OCATO_CODE' then
+			declare
+				v_org 			[CL_ORG];
+				v_org_ref ref 	[CL_ORG];
+			begin
+				if vViolation.[TU].[0] = 4 then
+					return null;
+				end if;
+				v_org_ref := vViolation.[CLIENT_REF];
+				v_org := v_org_ref;
+				if vViolation.[IS_RESIDENT] then
+					return v_org.[REGISTER].[CITY].[OKATO].[CODE];
+				end if;
+			end;
+			return null;
+		end if;
+	end if;
+	/**/
+
+
+	if P_CODE = 'N_PC' then -- Паспорт сделки
+		vDocPs := BaseValOpRef.[DOC].[DEAL_PASP];
+		return rtrim(substr(nvl(vContrPs, vDocPs),1,8)
+				||'/'||substr(nvl(vContrPs, vDocPs),9,4)
+				||'/'||substr(nvl(vContrPs, vDocPs),13,4)
+				||'/'||substr(nvl(vContrPs, vDocPs),17,1)
+				||'/'||substr(nvl(vContrPs, vDocPs),18),'/');
+	
+	elsif P_CODE = 'BIDK' then
+		vDocPs := BaseValOpRef.[DOC].[DEAL_PASP];
+		if substr(nvl(vContrPs, vDocPs), 17, 1) = '9' then
+			ret_str := coalesce(vContrVid, substr(nvl(vContrPs, vDocPs),17,1));
+		else
+			ret_str := substr(nvl(vContrPs, vDocPs),17,1);
+		end if;
+		return ret_str;
+	
+	elsif P_CODE in ('DATA_SLASH', 'DATA_DOT') then
+		vDate := BaseValOpRef.[DATE_CREATE];
+			
+		if P_CODE = 'DATA_SLASH' then
+			 return to_char(vDate, 'dd/mm/yyyy');
+		elsif P_CODE = 'DATA_DOT' then
+			return to_char(vDate, 'dd.mm.yyyy');
+		end if;	
+		return null;
+	elsif P_CODE = 'N_SHET' then
+		if BaseValOpRef.[PAYMENT_TYPE] = 1 then
+			ret_str := BaseValOpRef.[DOC].[ACC_KT].[MAIN_V_ID];
+		else
+			ret_str := BaseValOpRef.[DOC].[ACC_DT].[MAIN_V_ID];
+		end if;
+		return ret_str;
+	
+	elsif P_CODE = 'NAPRAV' then
+		return to_char(BaseValOpRef.[PAYMENT_TYPE]);
+	elsif P_CODE = 	'NAPRAV_CUR' then
+		if BaseValOpRef.[PAYMENT_TYPE] = 1 then -- Зачисление
+			if BaseValOpRef.[DOC].[VALUTA_PO] = ::[SYSTEM].[VARIABLES].NatCur then
+				return '3'; -- зачисление рубли
+			else
+				return '1'; -- зачисление валюта
+			end if;
+		elsif BaseValOpRef.[PAYMENT_TYPE] = 2 then -- Списание
+			if BaseValOpRef.[DOC].[VALUTA] = ::[SYSTEM].[VARIABLES].NatCur then
+				return '4'; -- списание рубли
+			else
+				return '2'; -- списание валюта
+			end if;
+		end if;
+		return null;			
+	
+	elsif P_CODE = 'BID' then
+		if vContrCurOper is null then
+			return GetDocCurOper(BaseValOpRef.[DOC]);
+		else
+			return vContrCurOper;
+		end if;	
+	
+	elsif P_CODE = 'KVALP' then -- код валюты платежа
+		v_val_code := GetValCode(BaseValOpRef.[DOC], BaseValOpRef.[PAYMENT_TYPE], 'P');
+	
+		return v_val_code;
+
+	elsif P_CODE = 'SUMMAP' then-- сумма операции в валюте платежа
+		return &sm(GetSumma(BaseValOpRef.[DOC], BaseValOpRef.[PAYMENT_TYPE], 'P'));
+		
+	elsif P_CODE = 'KVALS' then -- код валюты счета
+		v_val_code := GetValCode(BaseValOpRef.[DOC], BaseValOpRef.[PAYMENT_TYPE]);
+		if v_val_code = GetValCode(BaseValOpRef.[DOC], BaseValOpRef.[PAYMENT_TYPE], 'P') then
+			return null;	-- если совпадает с валютой платежа, то должно быть пусто
+		else		
+			return v_val_code;
+		end if;
+
+	elsif P_CODE = 'SUMMAS' then-- сумма операции в валюте счета
+		v_summa := GetSumma(BaseValOpRef.[DOC], BaseValOpRef.[PAYMENT_TYPE]);
+		if v_summa = GetSumma(BaseValOpRef.[DOC], BaseValOpRef.[PAYMENT_TYPE], 'P') then
+			return null;	-- если совпадает с суммой платежа, то должно быть пусто
+		else		
+			return &sm(v_summa);
+		end if;
+			
+	elsif P_CODE = 'KVALK' then
+		if vContrCurCode is null then
+			vCurCode := GetValCode(BaseValOpRef.[DOC], BaseValOpRef.[PAYMENT_TYPE],'P');
+		else
+			vCurCode := vContrCurCode;
+		end if;	
+		return vCurCode;
+	
+	elsif P_CODE = 'KVALK_TXT' then
+		return vContrCurCode;
+	
+	elsif P_CODE = 'SUMMAK' then
+		if vContrCSum is null then
+			if vContrSum is null then
+				ret_sum := GetSumma(BaseValOpRef.[DOC], BaseValOpRef.[PAYMENT_TYPE],'P');
+			else
+				ret_sum := vContrSum;				
+			end if;
+		else
+			ret_sum := vContrCSum;
+		end if;
+		
+		return &sm(ret_sum);
+	
+	elsif P_CODE = 'SUMMAK_TXT'	 then
+		return to_char(vContrCSum);
+	
+	elsif P_CODE = 'SUMMAKP' then
+		return &sm(coalesce(vContrSum, BaseValOpRef.[DOC].[SUM_PO], BaseValOpRef.[DOC].[SUM]));
+	
+	elsif P_CODE = 'KSTRANA' then
+		return BaseValOpRef.[COUNTRY_CODE];
+		
+	elsif P_CODE = 'BANK_COUNTRY' then
+		return BaseValOpRef.[BANK_COUNTRY].[CODE];
+	elsif P_CODE = 'BANK_COUNTRY_NR' then
+		if BaseValOpRef.[BIC] is null or BaseValOpRef.[BIC] = 'НР' then
+			return '999';
+		end if;
+		return BaseValOpRef.[BANK_COUNTRY].[CODE];
+	
+	elsif P_CODE = 'BANK_NAME' then
+		return BaseValOpRef.[BANK_NAME];
+	
+	elsif P_CODE = 'BANK_BIC' then
+		if get_bik_swift(BaseValOpRef.[DOC], nvl(BaseValOpRef.[PAYMENT_TYPE] = 1, false)) then
+			return  BaseValOpRef.[BIC];
+		else
+			return null;	
+		end if;
+	elsif P_CODE = 'BANK_BIC_NR' then
+		if BaseValOpRef.[BIC] = 'НР' or BaseValOpRef.[BIC] is null then
+			return null;
+		elsif regexp_instr(BaseValOpRef.[BIC], '^[0-9]{9}$') > 0 then
+			return  BaseValOpRef.[BIC];
+		else
+			return null;	
+		end if;	
+	
+	elsif P_CODE = 'BANK_SWIFT' then
+		if get_bik_swift(BaseValOpRef.[DOC], nvl(BaseValOpRef.[PAYMENT_TYPE] = 1, false)) then
+			return null;
+		else
+			return  BaseValOpRef.[BIC];
+		end if;
+	elsif P_CODE = 'BANK_SWIFT_NR' then
+		if BaseValOpRef.[BIC] = 'НР' or BaseValOpRef.[BIC] is null then
+			return null;
+		elsif regexp_instr(BaseValOpRef.[BIC], '^([A-Z0-9]{8}|[A-Z0-9]{11})$') > 0 then
+			return  BaseValOpRef.[BIC];
+		else
+			return null;
+		end if;	
+		
+	elsif P_CODE = 'NR'	then
+		if BaseValOpRef.[BIC] = 'НР' or BaseValOpRef.[BIC] is null then
+			return 'НР';
+		end if;
+		return null;	
+	elsif P_CODE = 'BANK_BIC_TBSVK'	then
+		if trim(translate(BaseValOpRef.[BIC], '0123456789', '          ')) is null then
+			return BaseValOpRef.[BIC];
+		end if;
+		return null;	
+	
+	elsif P_CODE = 'BANK_SWIFT_TBSVK' then	
+		if trim(translate(BaseValOpRef.[BIC], '0123456789', '          ')) is not null and BaseValOpRef.[BIC] != 'НР' then
+			return BaseValOpRef.[BIC];
+		end if;
+		return null;	
+	
+	elsif P_CODE = 'BANK_NR_TBSVK' then
+		if BaseValOpRef.[BIC] = 'НР' then
+			return '1';
+		end if;
+		return '0';
+	
+	elsif P_CODE = 'ADDRESS' then
+		return BaseValOpRef.[ADDRESS];
+	
+	elsif P_CODE = 'ACC_DATE_OP' then
+		vDate := null;
+		if BaseValOpRef.[PAYMENT_TYPE] = 1 then
+			vDate := BaseValOpRef.[DOC].[KL_KT].[1].[2].[DATE_OP];
+		elsif BaseValOpRef.[PAYMENT_TYPE] = 2 then
+			vDate := BaseValOpRef.[DOC].[KL_DT].[1].[2].[DATE_OP];
+		end if;	
+		return to_char(vDate, 'dd.mm.yyyy');
+	elsif P_CODE = 'CONTR_NAME' then
+		return translate(BaseValOpRef.[CONTR_NAME], LF$||CR$, ' ');
+	elsif P_CODE = 'CONTR_INN' then
+		return BaseValOpRef.[CONTR_INN];
+	elsif P_CODE = 'ONE' then	
+		return '1';
+	elsif P_CODE = 'SURROGAT' then
+		return lpad(nvl(vContr%id, BaseValOpRef%id), 22, '0');
+	elsif P_CODE = 'DATE_DOC_DOT' then
+		return to_char(BaseValOpRef.[DOC].[DATE_DOC], 'dd.mm.yyyy');
+	elsif P_CODE = 'DATE_DOC_SLASH' then
+		return to_char(BaseValOpRef.[DOC].[DATE_DOC], 'dd/mm/yyyy');		
+	elsif P_CODE = 'DOCUMENT_NUM' then
+		return BaseValOpRef.[DOC].[DOCUMENT_NUM];
+	elsif P_CODE = 'N_REFERENCE' then -- служит уникальным ключом при загрузке платежей в АС ВКБ.
+		return substr(nvl(vContr%id, BaseValOpRef%id), 1, 20);
+	elsif P_CODE = 'DATE_VAL_DOT' then
+		vDate := BaseValOpRef.[DOC].[DATE_VAL];
+		if vDate is null then
+			vDate := BaseValOpRef.[DATE_CREATE];
+		end if;
+		return to_char(vDate, 'dd.mm.yyyy');
+	elsif P_CODE = 'NAZN' then
+		return substr(translate(BaseValOpRef.[DOC].[NAZN], LF$||CR$, ' '), 1, 500);
+	elsif P_CODE = 'CODE_COUNTRY_NR' then -- Страна контрагента
+		return BaseValOpRef.[CONTR_COUNTRY].[CODE];	
+	elsif P_CODE = 'NUM_INSTR' then -- 0 = Инструкция 117И, 1 = Инструкция 138И, 2 = Инструкция 181И
+		if ::[FP_TUNE].[LIB].get_date_value('BEGIN_181', null, '0') <= BaseValOpRef.[DATE_CREATE] then	-- 181И
+			return '2';
+		elsif ::[FP_TUNE].[LIB].get_date_value('BEGIN_138', null, '0') <= BaseValOpRef.[DATE_CREATE] and ::[FP_TUNE].[LIB].get_date_value('BEGIN_181', null, '0') > BaseValOpRef.[DATE_CREATE] then -- Действует инструкция 138И
+			return '1';
+		else
+			return '0';
+		end if;					
+
+	elsif P_CODE = 'NUM_INSTR_TBSVK' then -- 1 = Инструкция 117И, 2 = Инструкция 138И, 3 = Инструкция 181И
+		if ::[FP_TUNE].[LIB].get_date_value('BEGIN_181', null, '0') <= BaseValOpRef.[DATE_CREATE] then -- Действует инструкция 181И
+			ret_str := '3';
+		elsif ::[FP_TUNE].[LIB].get_date_value('BEGIN_138', null, '0') <= BaseValOpRef.[DATE_CREATE] then -- Действует инструкция 138И
+			ret_str := '2';
+		else
+			ret_str := '1'; -- Инструкция 117И
+		end if;
+		return ret_str;
+
+	elsif P_CODE = 'EXPECTED_DATE' then -- Ожидаемый срок для ТБСВК
+		return to_char(coalesce(vExpDate, get_cur_oper_re_date(BaseValOpRef.[DOC], vContr, vContrPs, 'EXPECTED_DATE')), 'dd/mm/yyyy');
+		
+	elsif P_CODE = 'DATE_WAIT' then -- Ожидаемый срок для АСВКБ
+		return to_char(coalesce(vExpDate, get_cur_oper_re_date(BaseValOpRef.[DOC], vContr, vContrPs, 'EXPECTED_DATE')), 'dd.mm.yyyy');
+
+	elsif P_CODE = 'D_PREPAY' then -- Срок возврата аванса для АСВКБ
+		return to_char(get_cur_oper_re_date(BaseValOpRef.[DOC], vContr, vContrPs, 'TERM_REFUND'), 'dd.mm.yyyy');
+
+	elsif P_CODE = 'DATAN' then
+		--если заполнен номер паспорта сделки, то номер контракта и дата контракта не должны заполняться
+		if vContrPs is null and BaseValOpRef.[DOC].[DEAL_PASP] is null then
+			vDate:=vContr.[CONTR_DATE];
+			if vDate is null then
+				null; --Не лицензировано
+				/** /
+				begin
+					select val(val.[CONTR_DATE]) in VAL_CONTR_LIST where val.[BASE_VAL_CONTR] = vContr into vDate;
+				exception
+					when NO_DATA_FOUND or TOO_MANY_ROWS then
+						null;
+				end;
+				/**/
+			end if;
+		end if;
+		return to_char(vDate, 'dd/mm/yyyy');
+	elsif P_CODE = 'K_INN' then
+		return BaseValOpRef.[CL_INN];
+	elsif P_CODE = 'K_NAIM' then
+		return BaseValOpRef.[CL_NAME];
+	elsif P_CODE = 'N_KONTRAKT' then
+		--если заполнен номер паспорта сделки, то номер контракта и дата контракта не должны заполняться
+		if vContrPs is null and BaseValOpRef.[DOC].[DEAL_PASP] is null then
+			vContrNum:=vContr.[CONTR_NUM];
+			if vContrNum is null then
+				null; --Не лицензировано
+				/** /
+				begin
+					select val(val.[CONTR_NUM]) in VAL_CONTR_LIST where val.[BASE_VAL_CONTR] = vContr into vContrNum;
+				exception
+					when NO_DATA_FOUND or TOO_MANY_ROWS then
+						null;
+				end;
+				/**/
+			end if;
+		end if;
+		return vContrNum;
+	elsif P_CODE = 'OPER_ID' then
+		return BaseValOpRef.[PAYMENT_TYPE]||lpad(BaseValOpRef.[DOC]%id,19,'9');
+	elsif P_CODE = 'REGNBANK' then
+		if vContr is not null then
+			null; -- Не лицензировано
+			/** /
+			begin
+				select	cc(cc.[ACC_BANK].[REG_NUM])
+				in		::[CURR_CONTRACT], (::[VAL_CONTR_LIST] all : vcl) all
+				where	vcl.[BASE_VAL_CONTR] = vContr
+					and cc.[PAYMENTS] = vcl%collection
+				into	vRegNum;
+			exception
+				when NO_DATA_FOUND then
+					null;
+			end;
+			/**/
+		end if;
+		
+		if vRegNum is null then
+			if BaseValOpRef.[PAYMENT_TYPE] = 1 then
+				cl_acc := BaseValOpRef.[DOC].[ACC_KT];
+			else
+				cl_acc := BaseValOpRef.[DOC].[ACC_DT];
+			end if;		
+
+			vRegNum := cl_acc.[FILIAL].[BANK].[REG_NUM];
+		end if;
+		
+		if instr(vRegNum,'/')>0 then
+			vRegNum:=lpad(regexp_substr(nvl(vRegNum,0),'^[^/]+'),4,'0')||'/'||lpad(regexp_substr(nvl(vRegNum,0),'[^/]+$'),4,'0');
+		else
+			vRegNum:=lpad(regexp_substr(nvl(vRegNum,0),'^[^/]+'),4,'0')||'/'||'0000';
+		end if;		
+		
+		return vRegNum;
+	-------------------------------
+	-- Информация по клиенту
+	-------------------------------	
+	
+	elsif P_CODE = 'CL_NAME' then
+		return BaseValOpRef.[CL_NAME];
+	
+	elsif P_CODE = 'CL_NAME_H' then -- Наименование клиента последнее за дату, по которую выполняется выгрузка	
+		declare
+			v_date		date;
+			v_name		varchar2(4000);
+			v_cl_hist	ref [CL_HIST];
+		begin
+			[STR].get_par(P_ADDS, 'DATE_END', v_date);
+			v_cl_hist := ::[DOCUMENT_INT].[PRX_CLIENT].CL_HIST_GET_VALUE(vClient, 'NAME', v_date + 1, v_name);
+			if v_cl_hist is null then
+				v_name := vClient.[NAME];
+			end if;
+			return v_name;
+		end;	
+	elsif P_CODE = 'CL_INN' then
+		return BaseValOpRef.[CL_INN];
+	
+	elsif P_CODE = 'CL_DATE_REG' then
+		return to_char(GetDateReg(vClient), 'dd.mm.yyyy');
+	
+	elsif P_CODE = 'CL_INN_H' then -- ИНН клиента последний за дату, по которую выполняется выгрузка
+		declare
+			v_date		date;
+			v_inn		varchar2(4000);
+			v_cl_hist	ref [CL_HIST];
+		begin
+			[STR].get_par(P_ADDS, 'DATE_END', v_date);
+			v_cl_hist := ::[DOCUMENT_INT].[PRX_CLIENT].CL_HIST_GET_VALUE(vClient, 'INN', v_date + 1, v_inn);
+			if v_cl_hist is null then
+				v_inn := vClient.[INN];
+			end if;
+			if length(v_inn) > vClient.[INN]%size then
+				pragma error('Превышена допустимая длина ИНН ' || v_inn);
+			end if;
+			return v_inn;
+		end;	
+
+	elsif P_CODE = 'CLIENT_ID' then
+		return substr(vClient%id, 1, 20);
+	elsif P_CODE = 'KLIENT_ID' then
+		return rpad(vClient%id,20,'9');
+	elsif P_CODE = 'DATE_ANK_DOT' then
+		return to_char(vClient.[DATE_ANK], 'dd.mm.yyyy');
+	elsif P_CODE = 'CL_KPP' then
+		return vClient.[KPP];
+	elsif P_CODE = 'CL_OKPO' then
+		if vClient%class != 'CL_PRIV' then
+			return vClient->([CL_CORP])[KOD_OKPO];
+		end if;	
+		return null;	
+	elsif P_CODE = 'CL_OGRN' then
+		if vClient%class != 'CL_PRIV' then
+			return vClient->([CL_ORG])[REGISTER].[GOS_REG_NUM_REC];
+		end if;
+		return null;	
+	elsif P_CODE = 'CL_DATE_REG_DOT' then --Дата получения основного государственного регистрационного номера
+		if vClient%class != 'CL_PRIV' then
+			return to_char(vClient->([CL_CORP])[REGISTER].[DATE_REG], 'dd.mm.yyyy');
+		end if;	
+		return null;	
+	elsif P_CODE = 'CL_DATE_REESTR_DOT' then -- Дата государственной регистрации
+		if vClient%class != 'CL_PRIV' then
+			return to_char(vClient->([CL_CORP])[REGISTER].[DATE_REESTR], 'dd.mm.yyyy');
+		end if;	
+		return null;
+	elsif P_CODE = 'CL_PHONE' then
+		return ::[DOCUMENT_INT].[PRX_CLIENT].GET_CONTACT(vClient);-- рабочий телефон
+		
+	elsif P_CODE = 'CL_TELEGRAPH' then	
+		return ::[DOCUMENT_INT].[PRX_CLIENT].GET_CONTACT(vClient, ::[COMUNICATION]([CODE] = 'TELEGRAPH'));
+	elsif P_CODE = 'CL_EMAIL' then
+		return ::[DOCUMENT_INT].[PRX_CLIENT].GET_CONTACT(vClient, ::[COMUNICATION]([CODE] = 'MAIL'));
+	elsif P_CODE = 'CL_FAX' then
+		return ::[DOCUMENT_INT].[PRX_CLIENT].GET_CONTACT(vClient, ::[COMUNICATION]([CODE] = 'FAX'));
+	elsif P_CODE = 'CL_TYPE' then
+		/*Тип Клиента Банка:
+			"U" - юридическое лицо;
+			"F" - физическое лицо;
+			"P" - физическое лицо, занимающееся частной практикой;
+			"I"  - индивидуальный предприниматель;
+			"B" - банк
+			*/
+		--функция также используется при вычислении параметра CL_TYPE_N
+		return ip_type(vClient);
+	elsif P_CODE = 'CL_TYPE_N' then
+			/*
+			Тип клиента для ТБСВК
+			"0" - юридическое лицо;
+			"1" - физическое лицо;
+			"2" - индивидуальный предприниматель;
+			"3" - банк
+			"4" - физическое лицо, занимающееся частной практикой;
+			*/
+		return case ip_type(vClient) when 'U' then '0' when 'F' then '1' when 'I' then '2' when 'B' then '3' when 'P' then '4' else null end;
+	elsif P_CODE = 'CL_RESIDENT' then
+		/*Признак резидент\нерезидент:
+			"R" -  резидент;
+			"N" -  нерезидент
+			*/
+		return bool_char(::[DOCUMENT_INT].[PRX_CLIENT].resident_f(vClient), 'R', 'N');
+	elsif P_CODE = 'CL_COUNTRY' then --Код страны регистрации Клиента Банка
+		/*	643
+			3 символа
+			Почему всегда "643"? Можно определять страну по Юридическому адресу (для ю/л) и Адресу регистрации (для физ. лиц).
+			*/
+		
+		return	vClient.[COUNTRY].[CODE];
+	elsif P_CODE = 'CL_NOTE' then	
+		/*	Максимально 250 символов
+			Поле "Примечание" в досье клиента?
+		*/
+		return substr(vClient.[NOTES],1 ,250);
+	elsif P_CODE = 'CL_LONG_NAME' then	
+		/*	Карточка клиента - поле К наим:
+			Максимально 300 символов
+		*/
+		if vClient%class = 'CL_PRIV' then
+			return vClient.[NAME];
+		else
+			return vClient->([CL_CORP])[LONG_NAME];
+		end if;	
+	elsif P_CODE = 'CL_KIO' then
+		if vClient%class != 'CL_PRIV' then
+			return vClient->([CL_CORP])[KIO];
+		end if;
+	elsif P_CODE = 'CL_REG_PLACE' then	
+		/*	Карточка клиента - поле Место регистрации:
+			Максимально 500 символов
+			
+			Строка <Страна, Регион, Населенный пункт>?
+			*/
+		if vClient%class != 'CL_PRIV' then
+			return vClient->([CL_CORP])[REGISTER].[REG_PLACE];
+		end if;	
+	elsif P_CODE = 'CL_ADDR_FACT' then	
+		/*	Место нахождения (для юридических лиц)
+			Карточка клиента - поле Фактический адрес:
+			Максимально 500 символов
+			
+			Строка <Страна, Регион, Населенный пункт, Улица, Дом, Квартира/Офис>?
+			*/
+		return substr([VIEWFUN].GetAddress(vClient, 'ALL', 'FACT'), 1, 500);
+	elsif P_CODE = 'CL_ADDR_POST' then	
+		/*Почтовый адрес
+			Карточка клиента - поле
+			Почтовый адрес:
+			Максимально 500 символов
+			
+			Только для физ. лиц?
+		*/
+		if [VIEWFUN].GetAddress(vClient, 'ALL', 'POST') = [VIEWFUN].GetAddress(vClient, 'ALL', 'FACT') then
+			return null;
+		end if;
+		return substr([VIEWFUN].GetAddress(vClient, 'ALL', 'POST'), 1, 500);
+	elsif P_CODE = 'CL_ADDR_REG' then	
+		/*Адрес места жительства
+			Максимально 500 символов
+		
+		Только для физ. лиц?
+		*/
+		return substr([VIEWFUN].GetAddress(vClient, 'ALL', 'REAL_LIVE'), 1, 500);
+	elsif P_CODE = 'CL_ADDR_LIVE' then	
+		/*Адрес места пребывания
+		Максимально 500 символов
+			
+			Только для физ. лиц?
+		*/
+		return substr([VIEWFUN].GetAddress(vClient, 'ALL', 'REAL_LIVE'), 1, 500);
+	elsif P_CODE = 'CL_DOC_CODE' then	
+		/*	Код вида документа, удостоверяющего личность физического лица
+			Карточка клиента - поле Код документа:
+			2 символа
+		*/
+		if vClient%class = 'CL_PRIV' then
+			return vClient->([CL_PRIV])[DOC].[TYPE].[CODE_308P];
+		end if;
+		return null;
+	
+	elsif P_CODE = 'CL_DOC_NUMBER' then	
+		/*	Серия и номер документа, удостоверяющего личность физического лица
+			Карточка клиента ? поле Номер:
+			Максимально 50 символов
+		*/
+		if vClient%class = 'CL_PRIV' then
+			return vClient->([CL_PRIV])[DOC].[SER]||' '||vClient->([CL_PRIV])[DOC].[NUM];
+		end if;
+		return null;
+	
+	elsif P_CODE = 'CL_DOC_WHO_V' then	
+		/*	Наименование органа, выдавшего документ, удостоверяющий личность физического лица
+			Карточка клиента - поле Кем выдан:
+			Максимально 500 символов
+		*/
+		if vClient%class = 'CL_PRIV' then
+			return substr(vClient->([CL_PRIV])[DOC].[WHO], 1, 500);
+		end if;
+		return null;
+	elsif P_CODE = 'CL_DOC_DATE' then	
+		/*	Дата выдачи документа, удостоверяющего личность физического лица
+			Карточка клиента - поле Когда:
+			Формат даты ДД.ММ.ГГГГ
+		*/
+		if vClient%class = 'CL_PRIV' then
+			return to_char(vClient->([CL_PRIV])[DOC].[DATE], 'dd.mm.yyyy');
+		end if;
+		return null;
+	end if;
+	
+	-- Адрес клиента
+	if P_CODE in ('CL_REGION', 'CL_AREA', 'CL_CITY', 'CL_LOCALITY', 'CL_STREET', 'CL_HOUSE', 'CL_KORPUS', 'CL_OFFICE', 'CL_INDEX') then
+		addr := get_address(vClient);
+		if P_CODE = 'CL_REGION' then -- субъект федерации
+			return addr.ADDR_OBJ_EXPANDED.REGION.SHORT_NAME;
+			
+		elsif P_CODE = 'CL_AREA' then -- район
+			return addr.ADDR_OBJ_EXPANDED.DISTRICT.SHORT_NAME;
+			
+		elsif P_CODE = 'CL_CITY' then -- город
+			return addr.ADDR_OBJ_EXPANDED.CITY.SHORT_NAME;
+			
+		elsif P_CODE = 'CL_LOCALITY' then -- населенный пункт
+			return addr.ADDR_OBJ_EXPANDED.TOWN.SHORT_NAME;
+			
+		elsif P_CODE = 'CL_STREET' then -- улица
+			return nvl(addr.ADDR_OBJ_EXPANDED.STREET.SHORT_NAME, addr.ADDRESS.[STREET_STR]);
+			
+		elsif P_CODE = 'CL_HOUSE' then -- номер дома
+			return ::[PERSONAL_ADDRESS].[API_LIB].addr_to_str(addr.ADDRESS, 'HOUSE');
+			
+		elsif P_CODE = 'CL_KORPUS' then -- корпус
+			return ::[PERSONAL_ADDRESS].[API_LIB].addr_to_str(addr.ADDRESS, 'KORPUS');
+			
+		elsif P_CODE = 'CL_OFFICE' then -- номер помещения (офиса, квартиры)
+			return ::[PERSONAL_ADDRESS].[API_LIB].addr_to_str(addr.ADDRESS, 'FLAT');
+			
+		elsif P_CODE = 'CL_INDEX' then -- почтовый индекс
+			return addr.BEST_IDS.ZIP;
+			
+		end if;
+		
+	end if;
+
+
+	if P_CODE = 'TXT_BRANCH' then --Регистрационный номер УБ (филиала УБ)
+		vRegNum := BaseValOpRef.[DOC].[FILIAL].[BANK].[REG_NUM];
+		if instr(vRegNum, '/') > 0 then
+			ret_str := lpad(regexp_substr(nvl(vRegNum, 0), '^[^/]+'), 4, '0') || '/' || lpad(regexp_substr(nvl(vRegNum, 0), '[^/]+$'), 4, '0');
+		else
+			ret_str := lpad(regexp_substr(nvl(vRegNum, 0), '^[^/]+'), 4, '0') || '/0000';
+		end if;
+		return ret_str;
+	elsif P_CODE = 'TXT_EXTERNAL_KEY' then --Внешний ключ (идентификатор) платежа
+		ret_str := BaseValOpRef.[PAYMENT_TYPE] || lpad(BaseValOpRef%id, 19, '9');
+		return ret_str;
+	elsif P_CODE = 'TXT_ACCOUNT_NUM' then --Номер счета резидента или нерезидента
+		if BaseValOpRef.[PAYMENT_TYPE] = 1 then
+			ret_str := BaseValOpRef.[DOC].[ACC_KT].[MAIN_V_ID];
+		else
+			ret_str := BaseValOpRef.[DOC].[ACC_DT].[MAIN_V_ID];
+		end if;
+		return ret_str;
+	elsif P_CODE = 'TXT_OPER_DATE' then --Дата совершения валютной операции
+		ret_str := to_char(BaseValOpRef.[DOC].[DATE_PROV], 'dd.mm.yyyy');
+		return ret_str;
+	elsif P_CODE = 'TXT_PAY_TYPE' then --Направление платежа
+		ret_str := to_char(BaseValOpRef.[PAYMENT_TYPE]);
+		return ret_str;
+	elsif P_CODE = 'TXT_CURR_OPER' then --Код вида валютной операции
+		if vContrCurOper is null then
+			ret_str := GetDocCurOper(BaseValOpRef.[DOC]);
+		else
+			ret_str := vContrCurOper;
+		end if;	
+		return nvl(ret_str, '00000');
+	elsif P_CODE = 'TXT_DIG_CUR_CODE' then --Код валюты счета
+		ret_str := GetValCode(BaseValOpRef.[DOC], BaseValOpRef.[PAYMENT_TYPE], 'P');
+		return ret_str;
+	elsif P_CODE = 'TXT_OPER_SUM' then --Сумма денежных средств, зачисленных на счет (списанных со счета)
+		if vContrCSum is null then
+			if vContrSum is null then
+				ret_sum := GetSumma(BaseValOpRef.[DOC], BaseValOpRef.[PAYMENT_TYPE], 'P');
+			else
+				ret_sum := vContrSum;				
+			end if;
+		else
+			ret_sum := vContrCSum;
+		end if;
+		ret_str := &sm(ret_sum);
+		return ret_str;
+	elsif P_CODE = 'TXT_NOTE' then --Примечание
+		ret_str := substr(translate(BaseValOpRef.[DOC].[NAZN], LF$||CR$, ' '), 1, 250);
+		return ret_str;
+	elsif P_CODE = 'TXT_PO_BANK_NAME' then --Наименование банка получателя перевода или банка плательщика
+		ret_str := BaseValOpRef.[BANK_NAME];
+		return ret_str;
+	elsif P_CODE = 'TXT_PO_BANK_BIC' then --БИК банка получателя перевода или банка плательщика для УБ
+		if get_bik_swift(BaseValOpRef.[DOC], nvl(BaseValOpRef.[PAYMENT_TYPE] = 1, false)) then
+			ret_str := BaseValOpRef.[BIC];
+		else
+			ret_str := '';
+		end if;
+		return ret_str;
+	elsif P_CODE = 'TXT_PO_BANK_SWIFT' then --Код банка по справочнику "СВИФТ" для банка-нерезидента
+		if BaseValOpRef.[BIC] = 'НР' or BaseValOpRef.[BIC] is null then
+			ret_str := '';
+		elsif get_bik_swift(BaseValOpRef.[DOC], nvl(BaseValOpRef.[PAYMENT_TYPE] = 1, false)) then
+			ret_str := '';
+		else
+			ret_str := BaseValOpRef.[BIC];
+		end if;	
+		return ret_str;
+	elsif P_CODE = 'TXT_PO_BANK_HP' then --Код "НР" банка-нерезидента
+		if BaseValOpRef.[BIC] = 'НР' or BaseValOpRef.[BIC] is null then
+			ret_str := 'НР';
+		else
+			ret_str := '';
+		end if;	
+		return ret_str;
+	elsif P_CODE = 'TXT_POPL_BANK_CNTR' then --Код страны регистрации банка получателя перевода или банка плательщика
+		ret_str := BaseValOpRef.[BANK_COUNTRY].[CODE];
+		return ret_str;
+	elsif P_CODE = 'TXT_POPL_NAME' then --Наименование получателя перевода или плательщика
+		ret_str := translate(BaseValOpRef.[CONTR_NAME], LF$||CR$, ' ');
+		return ret_str;
+	elsif P_CODE = 'TXT_POPL_INN' then --ИНН получателя платежа или плательщика
+		ret_str := BaseValOpRef.[CONTR_INN];
+		return ret_str;
+	elsif P_CODE = 'TXT_POPL_COUNTRY' then --Код страны регистрации получателя платежа или плательщика
+		ret_str := BaseValOpRef.[CONTR_COUNTRY].[CODE];
+		return ret_str;
+	elsif P_CODE = 'TXT_ACC_OWNER_KEY' then --Внешний ключ (идентификатор) владельца счета
+		if BaseValOpRef.[PAYMENT_TYPE] = 1 then
+			cl_acc := BaseValOpRef.[DOC].[ACC_KT];
+		else
+			cl_acc := BaseValOpRef.[DOC].[ACC_DT];
+		end if;
+		ret_str := lpad(cl_acc%id, 20, '9');
+		return ret_str;
+	elsif P_CODE = 'TXT_ACC_OWNER_NAME' then --Полное наименование владельца счета
+		if BaseValOpRef.[PAYMENT_TYPE] = 1 then
+			cl_acc := BaseValOpRef.[DOC].[ACC_KT];
+		else
+			cl_acc := BaseValOpRef.[DOC].[ACC_DT];
+		end if;
+		vClient := coalesce(cl_acc.[CLIENT_R], cl_acc.[CLIENT_V]);
+		
+		if vClient%class not in ('CL_PRIV', 'GROUP') then
+			ret_str := vClient->([CL_CORP])[LONG_NAME];
+		else
+			ret_str := vClient.[NAME];
+		end if;
+		return substr(ret_str, 1, 250);
+	elsif P_CODE = 'TXT_ACC_OWNER_SHNM' then --Сокращенное наименование владельца счета
+		if BaseValOpRef.[PAYMENT_TYPE] = 1 then
+			cl_acc := BaseValOpRef.[DOC].[ACC_KT];
+		else
+			cl_acc := BaseValOpRef.[DOC].[ACC_DT];
+		end if;
+		vClient := coalesce(cl_acc.[CLIENT_R], cl_acc.[CLIENT_V]);
+		ret_str := vClient.[NAME];
+		return substr(ret_str, 1, 100);
+	elsif P_CODE = 'TXT_ACC_OWNER_CTRP' then --Код страны места жительства (места регистрации) владельца счета
+		ret_str := BaseValOpRef.[COUNTRY_CODE];
+		return ret_str;
+	elsif P_CODE = 'TXT_ACC_OWNER_INN' then --ИНН владельца счета
+		if BaseValOpRef.[PAYMENT_TYPE] = 1 then
+			cl_acc := BaseValOpRef.[DOC].[ACC_KT];
+		else
+			cl_acc := BaseValOpRef.[DOC].[ACC_DT];
+		end if;
+		vClient := coalesce(cl_acc.[CLIENT_R], cl_acc.[CLIENT_V]);
+		ret_str := vClient.[INN];
+		return ret_str;
+	elsif P_CODE = 'TXT_ACC_OWNER_KPP' then --Код КПП владельца счета
+		if BaseValOpRef.[PAYMENT_TYPE] = 1 then
+			cl_acc := BaseValOpRef.[DOC].[ACC_KT];
+		else
+			cl_acc := BaseValOpRef.[DOC].[ACC_DT];
+		end if;
+		vClient := coalesce(cl_acc.[CLIENT_R], cl_acc.[CLIENT_V]);
+		ret_str := vClient.[KPP];
+		return ret_str;
+	elsif P_CODE = 'TXT_ACC_OWNER_KIO' then --КИО владельца счета
+		if vClient%class not in ('CL_PRIV', 'GROUP') then
+			ret_str := vClient->([CL_CORP])[KIO];
+		else
+			ret_str := '';
+		end if;
+		return ret_str;
+	elsif P_CODE = 'TXT_DOC_NUMBER' then --Номер документа
+		ret_str := BaseValOpRef.[DOC].[DOCUMENT_NUM];
+		return ret_str;
+	elsif P_CODE = 'TXT_DOC_DATE' then --Дата документа
+		ret_str := to_char(BaseValOpRef.[DOC].[DATE_PROV], 'dd.mm.yyyy');
+		return ret_str;
+	elsif P_CODE = 'TXT_DOC_CURRENCY' then --Код валюты платежа
+		if nvl(BaseValOpRef.[DOC].[SUM], 0) = 0 then
+			ret_str := BaseValOpRef.[DOC].[VALUTA].[CODE_ISO];
+		else
+			ret_str := BaseValOpRef.[DOC].[VALUTA_PO].[CODE_ISO];
+		end if;
+		return ret_str;
+	elsif P_CODE = 'TXT_DOC_SUM' then --Сумма валютной операции, в единицах валюты платежа
+		return &sm(coalesce(BaseValOpRef.[DOC].[SUM_PO], BaseValOpRef.[DOC].[SUM]));
+
+	elsif P_CODE = 'TXT_CORR_ACC_CURR' then
+		if BaseValOpRef.[PAYMENT_TYPE] = 1 then
+			cl_acc := BaseValOpRef.[DOC].[ACC_DT];
+		elsif BaseValOpRef.[PAYMENT_TYPE] = 2 then
+			cl_acc := BaseValOpRef.[DOC].[ACC_KT];
+		end if;			
+
+		ret_str := cl_acc.[FINTOOL].[CODE_ISO];
+		return ret_str;
+
+	elsif P_CODE = 'TXT_CORR_SUMM' then
+		if BaseValOpRef.[PAYMENT_TYPE] = 1 then
+			return &sm(BaseValOpRef.[DOC].[SUM]);
+		elsif BaseValOpRef.[PAYMENT_TYPE] = 2 then
+			return &sm(BaseValOpRef.[DOC].[SUM_PO]);
+		end if;
+
+	elsif P_CODE = 'CONTR_WO_DOCS' then --Признак "без документов"
+		return case when vContrCWODocs = '1' then '*' else null end;
+		
+	elsif P_CODE = 'SUBMIS_DOC' then --Признак представления документов, связанных с проведением операций
+		return vSubmisDoc;
+
+	elsif P_CODE = 'DATA_DOC' then
+		return to_char(BaseValOpRef.[DATE_DOC], 'dd.mm.yyyy');
+		
+	elsif P_CODE = 'DATA_PRIN' then
+		return to_char(BaseValOpRef.[DATE_ACCEPT], 'dd.mm.yyyy');	
+
+	elsif P_CODE = 'KVALV' then -- ТБСВК, valoper
+		v_val_code := GetValCode(BaseValOpRef.[DOC], BaseValOpRef.[PAYMENT_TYPE]);
+
+		return v_val_code;
+
+	elsif P_CODE = 'SUMMAV' then -- ТБСВК, valoper
+		v_summa := GetSumma(BaseValOpRef.[DOC], BaseValOpRef.[PAYMENT_TYPE]);
+
+		return &sm(v_summa);
+
+	elsif P_CODE = 'REPAT_INF' then
+		null; --Не лицензировано
+		/** /
+		declare
+			vRepatInf string(4000) := '';
+			vCurRepatRec [CUR_REPAT_INF];
+		begin
+			for ri in vContr.[REPAT_INF]
+			loop
+				vCurRepatRec := ri;
+				if nvl(vCurRepatRec.[MAIN_DEBT_AMOUNT],0) != 0 then
+					vRepatInf := vRepatInf || case when vRepatInf is not null then '|' end
+						|| '1:' || to_char(vCurRepatRec.[EXPECTED_DATE],'dd/mm/yyyy') || ':' || vCurRepatRec.[CURRENCY].[INT_CUR_CODE] || ':' || &sm(vCurRepatRec.[MAIN_DEBT_AMOUNT]) || ': ';
+				end if;
+				if nvl(vCurRepatRec.[PRC_DEBT_AMOUNT],0) != 0 then
+					vRepatInf := vRepatInf || case when vRepatInf is not null then '|' end
+						|| '2:' || to_char(vCurRepatRec.[EXPECTED_DATE],'dd/mm/yyyy') || ':' || vCurRepatRec.[CURRENCY].[INT_CUR_CODE] || ':' || &sm(vCurRepatRec.[PRC_DEBT_AMOUNT]) || ': ';
+				end if;
+			end loop;
+			return vRepatInf;
+		end;
+		/**/
+		
+	elsif P_CODE in ('DATA_PROD_VAL_DOT', 'DATA_PROD_VAL_SLASH', 'SUM_PROD_VAL') then -- RP0649267. Дата и сумма обязательной продажи иностранной валюты
+		if BaseValOpRef.[PAYMENT_TYPE] = 1 then -- Направление платежа "1" - зачисление
+			declare
+				v_data_prod_val			[DATE];
+				v_sum_prod_val			[SUMMA];
+				v_data_prod_val_itog	[DATE];
+				v_sum_prod_val_itog		[SUMMA];
+				v_cur_to_exp			[TO_EXPORT];
+				v_vk_codes_date_pr_vv	string(2000);
+				v_cont ref				[BASE_VAL_CONTR];
+			begin
+				v_vk_codes_date_pr_vv := ::[FP_TUNE].[LIB].GET_STR_VALUE('VK_CODES_DATE_PR_VV', null, '0');
+				
+				if nvl(instr(v_vk_codes_date_pr_vv, GetDocCurOper(BaseValOpRef.[DOC])), 0) = 0 then
+					-- если на документе нет КВВО совпадающего с настройкой, то поищем КВВО в контрактах
+					begin
+						locate v_cont
+						in BaseValOpRef.[CONTRACTS]
+						where instr(v_vk_codes_date_pr_vv, v_cont.[CURR_OPER].[HIGH].[CODE] || v_cont.[CURR_OPER].[CODE]) <> 0;
+					exception
+						when NO_DATA_FOUND then
+							return null; -- если и в контрактах нет КВВО совпадающего с настройкой, то НЕ рассчитываем значение кода 
+					end;
+				end if;
+							
+				-- на документе или контракте есть КВВО совпадающий с настройкой, рассчитываем значение кода для этой валютной операции					
+				for to_exp
+					in ::[TO_EXPORT]
+					where to_exp.[DOC] = BaseValOpRef.[DOC]
+				loop
+					v_cur_to_exp := to_exp;
+					for fs
+						in ::[FOR_SORT] all
+						where fs.[RECEIVE] = to_exp
+					loop
+						::[SALE].[INT_LIB].get_sale_prod_val(fs,v_data_prod_val,v_sum_prod_val);
+						if v_data_prod_val is null then
+							continue; -- пропускаем сделки которые не удалось однозначно определить, либо по которым не проведены документы
+						end if;
+						
+						if v_data_prod_val_itog is null then
+							-- если это первая сделка, то просто заполняем дату и сумму продажи с этой сделки
+							v_data_prod_val_itog := v_data_prod_val;
+							v_sum_prod_val_itog := v_sum_prod_val;
+						elsif v_cur_to_exp.[DATE_14] is null then
+							-- если есть ещё сделки, а дата контроля пустая - то выводим максимальную дату продажи и все сделки суммируем
+							v_data_prod_val_itog := greatest(v_data_prod_val_itog, v_data_prod_val);
+							v_sum_prod_val_itog := v_sum_prod_val_itog + v_sum_prod_val;
+						elsif v_data_prod_val <= v_cur_to_exp.[DATE_14] then
+							-- сделка в периоде "до даты контроля"
+							if v_data_prod_val_itog <= v_cur_to_exp.[DATE_14] then
+								-- если уже были сделки в периоде "до даты контроля", то берем максимальную дату и сделки суммируем
+								v_data_prod_val_itog := greatest(v_data_prod_val_itog, v_data_prod_val);
+								v_sum_prod_val_itog := v_sum_prod_val_itog + v_sum_prod_val;
+							else
+								-- если это первая сделка в периоде "до даты контроля",
+								-- то просто берем дату и сумму сделки, затирая возможные значения посчитанные ранее в периоде "после даты контроля"
+								-- и далее уже работаем только с периодом "до даты контроля", т.к. он приоритетнее периода "после даты контроля"
+								v_data_prod_val_itog := v_data_prod_val;
+								v_sum_prod_val_itog := v_sum_prod_val;
+							end if;
+						elsif v_data_prod_val > v_cur_to_exp.[DATE_14] then
+							-- сделка в периоде "после даты контроля"
+							if v_data_prod_val_itog > v_cur_to_exp.[DATE_14] then
+								-- если ранее были сделки только в периоде "после даты контроля", то берем максимальную дату и сделки суммируем
+								v_data_prod_val_itog := greatest(v_data_prod_val_itog, v_data_prod_val);
+								v_sum_prod_val_itog := v_sum_prod_val_itog + v_sum_prod_val;
+							end if;
+							-- если уже были сделки с периодом "до даты контроля", то сделки с периодом "после даты контроля" - не обрабатываем
+						end if;
+					end loop;
+				end loop;
+				
+				if P_CODE = 'DATA_PROD_VAL_DOT' then
+					return to_char(v_data_prod_val_itog, 'dd.mm.yyyy');
+				elsif P_CODE = 'DATA_PROD_VAL_SLASH' then
+					return to_char(v_data_prod_val_itog, 'dd/mm/yyyy');
+				else
+					return &sm(v_sum_prod_val_itog);
+				end if; 
+			end;
+		end if;
+	end if;
+
+	return null;
+end;
+end;
+end;

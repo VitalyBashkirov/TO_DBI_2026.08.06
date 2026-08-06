@@ -1,0 +1,102 @@
+class HOOK_BANK;
+
+@optimize(false)
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('РКО. Печать документов WORD (OOXML)')
+@tag('COPIED')
+static method RKO_PRINT_WORD_1 is
+
+@name('Расчетный счет')               public V_ACCOUNT        [ACCNUM];
+@name('ФИО открывателя счетаР')       public V_OPEN_ACC       [SBRF_NAME];
+@name('Должность открывателя счетаР') public V_RANGE_OPEN_ACC [STRING_250];
+@name('Должность открывателя счета')  public V_RANGE_OPEN     [STRING_250];
+@name('ФИО открывателя счета')        public V_OPEN           [STRING_250];
+@name('Выбор окончания')              public V_BANK_END       [STRING_3];
+@name('Действует на основании')       public V_BANK_FOUND     [STRING_400];
+pragma include ('APPAUX_CALLPOINT.COMPILE_LIB');
+RKO_PRINT_WORD_1 (
+	@name('Договор РКО')                        P_RKO            in     [RKO_REF],
+	@name('Дополнительные условия по договору') P_CONDITION_PROD in     [CONDITION_PRD_R],
+	@name('Печатный код')                       P_CODE           in     [STRING_250],
+	@name('Значение для печатного кода')        P_DATA           in out [STRING_32000]
+) is
+
+execute is
+ref_user	ref [USER];
+ref_casta   ref[CASTA];
+v_sex		varchar2(50);
+v_basis     varchar2(400);
+
+v_date		varchar2(50);
+
+
+
+begin
+begin
+	select x(x.[ACCOUNT].[USER_OP]) in ::[RKO] all where x%id=p_rko and rownum=1 into ref_user;
+	select x(x.[NAME], x.[CASTA].[VALUE]) in ::[USER] where x%id=ref_user into V_OPEN_ACC, V_RANGE_OPEN_ACC;
+	V_RANGE_OPEN := V_RANGE_OPEN_ACC;	
+	V_OPEN := V_OPEN_ACC;
+	select x( x.[CASTA]) in ::[USER] where x%id=ref_user into ref_casta;	
+	V_RANGE_OPEN_ACC:=nvl([CASE_GRAM].[LIB].get_case(ref_casta.[DECL_CAST]), V_RANGE_OPEN_ACC);
+	V_OPEN_ACC:=nvl([CASE_GRAM].[LIB].get_case(ref_user.[CL_PRIV_REF].[DECL_FIO]), V_OPEN_ACC);	
+exception when NO_DATA_FOUND then 
+	V_OPEN_ACC:='';
+	V_RANGE_OPEN_ACC:='';
+
+end;
+begin
+	select x(x.[CL_PRIV_REF].[SEX].[CODE]) in ::[USER] where x%id=ref_user into v_sex;
+	if v_sex='Ж' then
+		V_BANK_END:='ей';
+	else
+	    V_BANK_END:='его';
+	end if;
+	exception when NO_DATA_FOUND then 
+		V_BANK_END:='ей';
+end;
+begin
+select x(x.[BY_RIGHT].[DECLENSIONS].[NAME]) in ::[USER] where x%id=ref_user and
+	x.[BY_RIGHT].[DECLENSIONS].[CASE_GR].[CODE]='Р' and x.[BY_RIGHT].[DECLENSIONS]%id in 
+	(select x(max(x.[BY_RIGHT].[DECLENSIONS]%id)) in ::[USER] where x%id=ref_user and
+	x.[BY_RIGHT].[DECLENSIONS].[CASE_GR].[CODE]='Р') and rownum =1 into v_basis;
+	  
+	V_BANK_FOUND:=v_basis;
+exception when NO_DATA_FOUND then 
+	V_BANK_FOUND:='';
+end;
+
+
+
+
+
+    
+	if P_CODE='БалансовыйСчет' then
+		P_DATA:= substr(P_RKO.[ACCOUNT].[MAIN_V_ID], 1, 5);
+	elsif P_CODE='ФИООткывателяСчетаР' then
+		P_DATA:=V_OPEN_ACC;	
+	elsif P_CODE='ДолжностьОткрР' then
+		P_DATA:=V_RANGE_OPEN_ACC;
+	elsif P_CODE='ДолжностьОткывателя' then
+		P_DATA:=V_RANGE_OPEN;	
+	elsif P_CODE='ФИООткывателя' then
+		P_DATA:=V_OPEN;
+	elsif P_CODE='Б_ВыборОкончания' then
+	    P_DATA:=V_BANK_END;
+	elsif P_CODE='Б_ОснованиеДействия' then
+		if SYS_CONTEXT(user_context, 'V_BATCH') then
+	  	  P_DATA:=V_BANK_FOUND;   
+		end if;    
+	elsif P_CODE='ДатаДок' then
+	    P_DATA:=SYS_CONTEXT(user_context, 'V_DATE_AGREED');	    
+	    if length(P_DATA) < 6 then
+	        P_DATA:='"____" ____________ 20 ____';
+	    end if;
+
+	end if;	
+		
+	
+end;
+end;
+end;

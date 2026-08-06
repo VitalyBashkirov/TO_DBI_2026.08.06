@@ -1,0 +1,862 @@
+class TMC_LIST;
+
+@optimize(false)
+@this(create_on_start:=true)
+@name('[ПСБ] Добавить экземпляр списания (служебная)')
+@tag('COPIED')
+constructor PSH_LB_NEW_WRITE is
+
+@name('Вид поставляющего счета')                              public V_KIND_EXPL                   [TMC_KIND_REF];
+@name('МОЛ поставщик')                                        public V_MOL                         [USER_REF];
+@name('Тип поставляющего счета')                              public V_SUP_TYPE                    [TMC_TYPE_REF];
+@name('Сумма с НДС')                                          public V_ALL_SUMMA                   [SUMMA];
+@name('Сумма НДС')                                            public V_NDS_SUMMA                   [SUMMA];
+@name('Ставка НДС')                                           public V_NDS                         [PRC12P6];
+@name('НДС в том числе')                                      public V_NDS_KIND                    [BOOLEAN];
+@name('Сумма на счете с НДС')                                 public V_NDS_IN_SUM                  [BOOLEAN];
+@name('Местонахождение')                                      public V_PLACE                       [TMC_PLACE_REF];
+@name('Цена')                                                 public V_PRICE                       [SUMMA_16_6];
+@name('Признак мат. счета')                                   public V_ACC_SIGN                    [BOOLEAN];
+@name('Мат. счет количество')                                 public V_AC_QUANT                    [SUMMA_16_6];
+@name('Мат. счет сумма на счете')                             public V_AC_ALL_SUMMA                [SUMMA];
+@name('Мат. счет сумма НДС')                                  public V_AC_NDS_SUMMA                [SUMMA];
+@name('Мат. счет цена')                                       public V_AC_PRICE                    [SUMMA_16_6];
+@name('Признак редактирования счета расходов')                public V_SIGN_ACC_RASH               [BOOLEAN];
+@name('Признак редактирования счета амортизации')             public V_SIGN_ACC_DEPR               [BOOLEAN];
+@name('Признак редактирования счета расходов для износа')     public V_SIGN_ACC_RASH_DEPR          [BOOLEAN];
+@name('Признак редактирования счета фонда переоценки')        public V_SIGN_ACC_ESTIM              [BOOLEAN];
+@name('Признак редактирования счета реализации при списании') public V_SIGN_ACC_REAL_SPIS          [BOOLEAN];
+@name('Признак редактирования счета НДС')                     public V_SIGN_ACC_NDS                [BOOLEAN];
+@name('Признак редактирования счета расходов для НДС')        public V_SIGN_ACC_RASH_NDS           [BOOLEAN];
+@name('НДС в том числе. Строка для формы')                    public V_NDS_KIND_STR                [STRING_30];
+@name('Сумма на счете с НДС. Строка для формы')               public V_NDS_IN_SUM_STR              [STRING_30];
+@name('Подразделение')                                        public V_DEPART                      [DEPART_REF];
+@name('Филиал')                                               public V_FILIAL                      [BRANCH_REF];
+@name('Банковская деятельность матсчета')                     public V_KIND_BANK                   [BOOLEAN];
+@name('Признак вызова валидатора')                            public V_IS_VALIDATE                 [BOOLEAN];
+@name('Строка валидации')                                     public V_VALID                       [STRING_32000];
+@name('Массив номеров')                                       public V_ZAV_NUMB_ARR                [TMC_NUM_ARR];
+@name('Мемо для номеров')                                     public V_ZAV_NUMB_MEMO               [MEMO_BIG];
+@name('Массив деталей при разборе')                           public V_ARR_DISM_RES       table of [TMC_DISM_RES];
+@name('Текущий индекс массива деталей')                       public V_CUR_ROW                     [SUMMA];
+@name('ID Метода')                                            public V_METHOD                      [METHOD_REF];
+@name('Местонахождение (постав)')                             public V_SUP_PLACE                   [TMC_PLACE_REF];
+@name('Использовать экспертные оценки')                       public V_USE_EXPERT                  [BOOLEAN];
+@name('Родительский мат. документ')                           public V_PARENT_MAT_DOC              [TMC_DOCUM_REF];
+public tune_use_zav_num_arr boolean;
+public tune_use_cli_nds boolean;
+						
+					
+/*
+	Загрузка счетов из таблицы списка ТМЦ и установка признаков редактирования
+*/
+	
+					
+-- Коды используемых типов счетов
+sCode_TMC_RASH_SPIS	::[TIP_ACC].[COD]%type := 'TMC_RASH_SPIS';
+sCode_TMC_RASH_NDS	::[TIP_ACC].[COD]%type := 'TMC_RASH_NDS';
+sCode_TMC_REAL_SPIS	::[TIP_ACC].[COD]%type := 'TMC_REAL_SPIS';
+sCode_TMC_DEPR		::[TIP_ACC].[COD]%type := 'TMC_DEPR';
+sCode_TMC_MAIN		::[TIP_ACC].[COD]%type := 'TMC_MAIN';
+sCode_TMC_RASH_DEPR	::[TIP_ACC].[COD]%type := 'TMC_RASH_DEPR';
+sCode_TMC_ESTIM		::[TIP_ACC].[COD]%type := 'TMC_ESTIM';
+sCode_TMC_NDS		::[TIP_ACC].[COD]%type := 'TMC_NDS';
+sCode_CLI_NDS		::[TIP_ACC].[COD]%type := 'CLI_NDS';
+sCode_TMC_REALIZE	::[TIP_ACC].[COD]%type := 'TMC_REALIZE';
+/**
+	получение местонахождения
+*/
+public function get_place(ac_mat ref [AC_MAT], mat_doc ref [TMC_DOCUM]) return ref [TMC_PLACE] is 
+result ref [TMC_PLACE];
+begin
+   	result:=nvl(ac_mat.[LAST_MOVE].[PLACE], mat_doc.[PLACE]);
+	return result;
+end;
+
+/* Получение настроек
+*/
+public procedure InitTunes is 
+begin
+	tune_use_zav_num_arr	:= ::[TMC_IMPORT].[TUNE_PRODUCT].get_use_zav_num_arr;
+	tune_use_cli_nds 		:= ::[TMC_IMPORT].[TUNE_PRODUCT].get_use_cli_nds;
+end;
+
+/*
+	Сохранение таблицы в массив счетов списка ТМЦ
+*/
+public procedure SaveAccTab(	rList ref [TMC_LIST]
+						,rAccRashod ref [AC_FIN]
+						,rAccMain ref [AC_FIN]
+						,rAccDepr ref [AC_FIN]
+						,rAccRashDepr ref [AC_FIN]
+						,rAccEstim ref [AC_FIN]
+						,rAccRealSpis ref [AC_FIN]
+						,rAccNDS ref [AC_FIN]
+						,rAccRashNDS ref [AC_FIN]) is 
+tTmpTab [TMC_LIST].[TMP_TABLE_LIB].user_acc_table_t;
+begin
+	[TMC_LIST].[TMP_TABLE_LIB].add_entry(sCode_TMC_RASH_SPIS,	rAccRashod,		rAccRashod.[MAIN_V_ID],		null, true,	tTmpTab);
+	[TMC_LIST].[TMP_TABLE_LIB].add_entry(sCode_TMC_MAIN,		rAccMain,		rAccMain.[MAIN_V_ID],		null, false,tTmpTab);
+	[TMC_LIST].[TMP_TABLE_LIB].add_entry(sCode_TMC_DEPR,		rAccDepr,		rAccDepr.[MAIN_V_ID],		true, false,tTmpTab);
+	[TMC_LIST].[TMP_TABLE_LIB].add_entry(sCode_TMC_DEPR,		rAccDepr,		rAccDepr.[MAIN_V_ID],		null, false,tTmpTab);
+	[TMC_LIST].[TMP_TABLE_LIB].add_entry(sCode_TMC_RASH_DEPR,	rAccRashDepr,	rAccRashDepr.[MAIN_V_ID],	null, false,tTmpTab);
+	[TMC_LIST].[TMP_TABLE_LIB].add_entry(sCode_TMC_ESTIM,		rAccEstim,		rAccEstim.[MAIN_V_ID],		null, false,tTmpTab);
+	[TMC_LIST].[TMP_TABLE_LIB].add_entry(sCode_TMC_REALIZE,		rAccRealSpis,	rAccRealSpis.[MAIN_V_ID],	null, true,	tTmpTab);
+	[TMC_LIST].[TMP_TABLE_LIB].add_entry(sCode_TMC_REAL_SPIS,	rAccRealSpis,	rAccRealSpis.[MAIN_V_ID],	null, true,	tTmpTab);
+
+	if tune_use_cli_nds then
+		[TMC_LIST].[TMP_TABLE_LIB].add_entry(sCode_CLI_NDS,		rAccNDS,		rAccNDS.[MAIN_V_ID],		null, false,tTmpTab);
+	else
+		[TMC_LIST].[TMP_TABLE_LIB].add_entry(sCode_TMC_NDS,		rAccNDS,		rAccNDS.[MAIN_V_ID],		null, false,tTmpTab);
+	end if;
+	[TMC_LIST].[TMP_TABLE_LIB].add_entry(sCode_TMC_RASH_NDS,	rAccRashNDS,	rAccRashNDS.[MAIN_V_ID],	null, false,	tTmpTab);
+	
+	-- перенос данных из временной таблицы в реальную
+	[TMC_LIST].[TMP_TABLE_LIB].tmp_to_real(tTmpTab, rList.[TAB_ACC]);
+	
+	tTmpTab.delete;
+end;
+
+/*	Получение счетов по матсчету статье расхода и установка доступности счетов
+*/
+public procedure GetAccsByMat(	rAcMat ref [AC_MAT]
+						,bKindBank boolean
+						,rRashod in out ref [TMC_RASHOD]
+						,rAccRashod in out ref [AC_FIN]
+						,rAccMain in out ref [AC_FIN]
+						,rAccDepr in out ref [AC_FIN]
+						,rAccRashDepr in out ref [AC_FIN]
+						,rAccEstim in out ref [AC_FIN]
+						,rAccRealSpis in out ref [AC_FIN]
+						,rAccNDS in out ref [AC_FIN]
+						,rAccRashNDS in out ref [AC_FIN]
+						,bSignAccRash out boolean
+						,bSignAccDepr out boolean
+						,bSignAccRashDepr out boolean
+						,bSignAccEstim out boolean
+						,bSignAccRealSpis out boolean
+						,bSignAccNDS out boolean
+						,bSignAccRashNDS out boolean
+						) is 
+begin
+	-- Недоступный счет --
+	::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_MAIN, rAcMat, bKindBank, rAccMain, true);
+
+	-- Абсолютно доступняе счета
+	rAccRashod := ::[TMC_RASHOD].[LIB].get_acc(rRashod, bKindBank);
+	
+	if rAccRashod is null then
+		::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_RASH_SPIS, rAcMat, bKindBank, rAccRashod, true);
+	end if;
+	
+	bSignAccRash := rAcMat is not null;
+
+	::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_RASH_NDS, rAcMat, bKindBank, rAccRashNDS, true);
+	
+	bSignAccRashNDS := rAcMat is not null;
+	
+	::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_REAL_SPIS, rAcMat, bKindBank, rAccRealSpis, true);
+	
+	if rAccRealSpis is null then
+		::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_REALIZE, rAcMat, bKindBank, rAccRealSpis, true);
+	end if;
+	
+	bSignAccRealSpis := rAcMat is not null;
+	
+	-- Определение счетов и их доступности
+	
+	bSignAccDepr			:= ::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_DEPR, rAcMat, bKindBank, rAccDepr, true);
+	
+	bSignAccRashDepr	:= ::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_RASH_DEPR, rAcMat, bKindBank, rAccRashDepr, true);
+
+	bSignAccEstim		:= ::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_ESTIM, rAcMat, bKindBank, rAccEstim, true);
+	
+	if tune_use_cli_nds then
+		rAccNDS := ::[TMC_LIST].[PROCESS_UTILS].Get_cli_nds(rAcMat);
+		bSignAccNDS		:= rAcMat is not null;
+	else
+		bSignAccNDS		:= ::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_NDS, rAcMat, bKindBank, rAccNDS, true);
+	end if;
+end;
+
+public procedure LoadAccs(	rList ref [TMC_LIST]
+					,rAcMat ref [AC_MAT]
+					,bKindBank boolean
+					,rRashod ref [TMC_RASHOD]
+					,rAccRashod out ref [AC_FIN]
+					,rAccMain out ref [AC_FIN]
+					,rAccDepr out ref [AC_FIN]
+					,rAccRashDepr out ref [AC_FIN]
+					,rAccEstim out ref [AC_FIN]
+					,rAccRealSpis out ref [AC_FIN]
+					,rAccNDS out ref [AC_FIN]
+					,rAccRashNDS out ref [AC_FIN]
+					,bSignAccRash out boolean
+					,bSignAccDepr out boolean
+					,bSignAccRashDepr out boolean
+					,bSignAccEstim out boolean
+					,bSignAccRealSpis out boolean
+					,bSignAccNDS out boolean
+					,bSignAccRashNDS out boolean
+					) is 
+tTmpTab [TMC_LIST].[TMP_TABLE_LIB].user_acc_table_t;
+begin
+	tTmpTab.delete; --чистим временную таблицу (эта переменная таскается в сессии)
+	[TMC_LIST].[TMP_TABLE_LIB].real_to_tmp(rList.[TAB_ACC], tTmpTab);
+
+	--начальные значения фин.счетов и признаков редактирования
+	::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_MAIN, rAcMat, bKindBank, rAccMain, true);
+	
+	rAccRashod	:= [TMC_LIST].[TMP_TABLE_LIB].get_mat_acc(sCode_TMC_RASH_SPIS, null, tTmpTab);
+	bSignAccRash := true;
+	
+	rAccRashNDS	:= [TMC_LIST].[TMP_TABLE_LIB].get_mat_acc(sCode_TMC_RASH_NDS, null, tTmpTab);
+	bSignAccRashNDS := true;
+	
+	rAccRealSpis	:= [TMC_LIST].[TMP_TABLE_LIB].get_mat_acc(sCode_TMC_REAL_SPIS, null, tTmpTab);
+	if rAccRealSpis is null then
+		rAccRealSpis	:= [TMC_LIST].[TMP_TABLE_LIB].get_mat_acc(sCode_TMC_REALIZE, null, tTmpTab);
+	end if;
+	bSignAccRealSpis := true;
+	
+	rAccDepr		:= [TMC_LIST].[TMP_TABLE_LIB].get_mat_acc(sCode_TMC_DEPR, true, tTmpTab);
+	if rAccDepr is null then
+		rAccDepr	:= [TMC_LIST].[TMP_TABLE_LIB].get_mat_acc(sCode_TMC_DEPR, null, tTmpTab);
+	end if;
+	bSignAccDepr	:= ::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_DEPR, rAcMat, bKindBank, rAccDepr, false);
+	
+	rAccRashDepr	:= [TMC_LIST].[TMP_TABLE_LIB].get_mat_acc(sCode_TMC_RASH_DEPR, null, tTmpTab);
+	bSignAccRashDepr:= ::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_RASH_DEPR, rAcMat, bKindBank, rAccRashDepr, false);
+	
+	rAccEstim		:= [TMC_LIST].[TMP_TABLE_LIB].get_mat_acc(sCode_TMC_ESTIM, null, tTmpTab);
+	bSignAccEstim	:= ::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_ESTIM, rAcMat, bKindBank, rAccEstim, false);
+	
+	if tune_use_cli_nds then
+		rAccNDS	:= [TMC_LIST].[TMP_TABLE_LIB].get_mat_acc(sCode_CLI_NDS, null, tTmpTab);
+		bSignAccNDS	:= true;
+	else
+		rAccNDS	:= [TMC_LIST].[TMP_TABLE_LIB].get_mat_acc(sCode_TMC_NDS, null, tTmpTab);
+		bSignAccNDS	:= ::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_NDS, rAcMat, bKindBank, rAccNDS, false);
+	end if;
+	
+	tTmpTab.delete; -- очистим таблицу после загрузки
+end;
+
+/* Общая валидация параметров для опреций Добавить/Изменить
+*/
+public procedure CommonValidation(	sMessage varchar2 --P_MESSAGE
+							,sInfo varchar2 --P_INFO
+							,rAcMat in out ref [AC_MAT] --P_ACC_MAT
+							,rGroup in out ref [TMC_GRUP] --P_GROUP
+							,rRashod in out ref [TMC_RASHOD] --P_RASHOD
+							,nQuant in out [TMC_LIST].[QUANT]%type --P_QUANT
+							,bKindBank in out boolean --P_KIND_BANK
+							,bKindBankAcc in out boolean --V_KIND_BANK
+							,rAccRashod in out ref [AC_FIN] --P_ACC_RASHOD
+							,rAccRashNDS in out ref [AC_FIN] --P_ACC_RASH_NDS
+							,aZavNumb in out V_ZAV_NUMB_ARR%type --V_ZAV_NUMB_ARR
+							,sZavNumbMemo in out V_ZAV_NUMB_MEMO%type --V_ZAV_NUMB_MEMO
+							,arrDismRes in out  V_ARR_DISM_RES%type -- V_ARR_DISM_RES
+							,curRow in out V_CUR_ROW%type -- V_CUR_ROW
+							,bIsValidate in out boolean --V_IS_VALIDATE
+							) is 
+begin
+	--debug_pipe('sInfo = '||sInfo);
+	if sInfo = 'P_GROUP' Then
+		rAcMat	:= Null;
+		nQuant		:= 1;
+ 		bKindBankAcc	:= Nvl(rGroup.[SIGN_NAZN],'0')='0';	--вид деятельности матсчета
+ 		bKindBank := bKindBankAcc;	--вид деятельнсоти на форме
+	elsif sInfo = 'P_RASHOD' then
+		if rRashod is not null then
+			rAccRashod := ::[TMC_RASHOD].[LIB].get_acc(rRashod, bKindBank);
+			rAccRashNDS := ::[TMC_RASHOD].[LIB].get_nds_acc (rRashod, bKindBank);
+		else
+			::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_RASH_SPIS, rAcMat, bKindBank, rAccRashod, true);
+			::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_RASH_NDS, rAcMat, bKindBank, rAccRashNDS, true);
+		end if;
+	elsif sInfo = '%VAR%.V_ZAV_NUMB_ARR' then
+		if ::[TMC_NUM].[CHOOSE].V_SELECTED.count > 0 then
+			::[TMC_NUM].[LIB].ref_arr_to_numstr(::[TMC_NUM].[CHOOSE].V_SELECTED, sZavNumbMemo, nQuant);
+			::[TMC_NUM].[CHOOSE].V_SELECTED.delete;
+		end if;
+
+	elsif sInfo = 'C' then
+		sZavNumbMemo	:= null;
+
+	elsif sInfo = 'CANCEL' then
+		aZavNumb		:= null;
+		sZavNumbMemo	:= null;
+
+	elsif sInfo = 'P_KIND_BANK' then
+		rAccRashod := ::[TMC_RASHOD].[LIB].get_acc(rRashod, bKindBank);
+		if rAccRashod is null then
+			::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_RASH_SPIS, rAcMat, bKindBank, rAccRashod, true);
+		end if;
+		
+		::[TMC_LIST].[TMP_TABLE_LIB].GetAccAvlByMat(sCode_TMC_RASH_NDS, rAcMat, bKindBank, rAccRashNDS, true);
+		
+	elsif sInfo = '%VAR%.V_ARR_DISM_RES.GR['||nvl(curRow, 1)||']' then
+		arrDismRes(nvl(curRow, 1)).[UNIT_MESS] := [TMC_UNIT] (upper ([CODE]) = 'ШТ.');
+	end if;
+end;
+
+/*	Валидация контролов
+*/
+public procedure ValidateControls(	sValid in out varchar2(32000)--V_VALID
+							,bAccSign in boolean--V_ACC_SIGN
+							,bSignAccRash in boolean--V_SIGN_ACC_RASH
+							,bSignAccRashNDS in boolean --V_SIGN_ACC_RASH_NDS
+							,bSignAccRashDepr in boolean--V_SIGN_ACC_RASH_DEPR
+							,bSignAccDepr in boolean--V_SIGN_ACC_DEPR
+							,bSignAccEstim in boolean--V_SIGN_ACC_ESTIM
+							,bSignAccRealSpis in boolean--V_SIGN_ACC_REAL_SPIS
+							,bSignAccNDS in boolean--V_SIGN_ACC_NDS
+							,aZavNumb in [AC_MAT].[TAB_NUM]%type--V_ZAV_NUMB_ARR
+							,pUnitSave	boolean
+							) is 
+begin
+		--отображение на форме
+	if V_NDS_KIND then V_NDS_KIND_STR := 'Сумма операции с НДС';
+	end if;
+	if V_NDS_IN_SUM then V_NDS_IN_SUM_STR := 'Сумма на счете с НДС';
+	end if;
+
+	if bAccSign then
+		[CSMD].Show(sValid, 'V_NDS_KIND_STR', 'V');
+		[CSMD].Show(sValid, 'V_NDS_IN_SUM_STR', 'V');
+		[CSMD].EnableS(sValid, 'SPISANIE');
+		[CSMD].EnableS(sValid, 'ACC_MAT_INFO');
+		[CSMD].EnableS(sValid, 'FIN_ACCOUNTS');
+		[CSMD].EnableS(sValid, 'V_ZAV_NUMB_FRAME');
+	else
+		[CSMD].Hide(sValid, 'V_NDS_KIND_STR', 'V');
+		[CSMD].Hide(sValid, 'V_NDS_IN_SUM_STR', 'V');
+		[CSMD].DisableS(sValid, 'SPISANIE');
+		[CSMD].DisableS(sValid, 'ACC_MAT_INFO');
+		[CSMD].DisableS(sValid, 'FIN_ACCOUNTS');
+		[CSMD].DisableS(sValid, 'V_ZAV_NUMB_FRAME');
+	end if;
+
+	if bSignAccRash then [CSMD].Enable(sValid, 'P_ACC_RASHOD');
+	else [CSMD].Disable(sValid, 'P_ACC_RASHOD');
+	end if;
+
+	if nvl(bSignAccRashNDS, false) then [CSMD].Enable(sValid, 'P_ACC_RASH_NDS');
+	else [CSMD].Disable(sValid, 'P_ACC_RASH_NDS');
+	end if;
+
+	if bSignAccDepr then [CSMD].Enable(sValid, 'P_ACC_DEPR');
+	else [CSMD].Disable(sValid, 'P_ACC_DEPR');
+	end if;
+
+	if bSignAccRashDepr then [CSMD].Enable(sValid, 'P_ACC_RASH_DEPR');
+	else [CSMD].Disable(sValid, 'P_ACC_RASH_DEPR');
+	end if;
+
+	if bSignAccEstim then [CSMD].Enable(sValid, 'P_ACC_ESTIM');
+	else [CSMD].Disable(sValid, 'P_ACC_ESTIM');
+	end if;
+
+	if bSignAccRealSpis then [CSMD].Enable(sValid, 'P_ACC_REAL_SPIS');
+	else [CSMD].Disable(sValid, 'P_ACC_REAL_SPIS');
+	end if;
+
+	if V_SIGN_ACC_NDS then [CSMD].Enable(sValid, 'P_ACC_NDS');
+	else [CSMD].Disable(sValid, 'P_ACC_NDS');
+	end if;
+
+  	if tune_use_zav_num_arr then
+  		[CSMD].ShowS(sValid, 'V_ZAV_NUMB_FRAME');
+  		if aZavNumb%size(1) > 0 then
+  			[CSMD].DisableS(sValid, 'V_ZAV_NUMB_MEMO');
+  		else
+  			[CSMD].EnableS(sValid, 'V_ZAV_NUMB_MEMO');
+  		end if;
+  	else
+		[CSMD].HideS(sValid, 'V_ZAV_NUMB_FRAME');
+  	end if;
+  	if pUnitSave then
+		[CSMD].Disable(V_VALID, 'P_QUANT');
+	else
+		[CSMD].Enable(V_VALID, 'P_QUANT');
+  	end if;
+end;
+PSH_LB_NEW_WRITE (
+	@name('Мат. счет - поставщик')                      P_ACC_MAT          in [TMC_ACC_MAT_REF],
+	@name('Группа поставщик')                           P_GROUP            in [TMC_GRUP_REF],
+	@name('Количество')                                 P_QUANT            in [SUMMA_16_6],
+	@name('Материальный документ')                      P_MAT_DOC          in [TMC_DOCUM_REF],
+	@name('Обоснование')                                P_BASIS            in [STRING_100],
+	@name('Примечание')                                 P_PRIM             in [STRING_100],
+	@name('Статья расхода')                             P_RASHOD           in [TMC_RASHOD_REF],
+	@name('Счет расходов')                              P_ACC_RASHOD       in [AC_FIN_REF],
+	@name('Счет учета')                                 P_ACC_MAIN         in [AC_FIN_REF],
+	@name('Счет амортизации')                           P_ACC_DEPR         in [AC_FIN_REF],
+	@name('Счет расходов для износа')                   P_ACC_RASH_DEPR    in [AC_FIN_REF],
+	@name('Счет фонда переоценки')                      P_ACC_ESTIM        in [AC_FIN_REF],
+	@name('Счет реализации при списании')               P_ACC_REAL_SPIS    in [AC_FIN_REF],
+	@name('Счет НДС')                                   P_ACC_NDS          in [AC_FIN_REF],
+	@name('Вид деятельности')                           P_KIND_BANK        in [BOOLEAN]         default null,
+	@name('Счет расходов НДС')                          P_ACC_RASH_NDS     in [AC_FIN_REF]      default null,
+	@name('Продолжать начислять налоговую амортизацию') P_CONTINUE_NAL_AMO in [BOOLEAN]         default null,
+	@name('Экспертная оценка')                          P_EXPERT           in [REFERENCE]       default null
+) return ref [TMC_LIST] is
+
+validate is
+procedure GetAccs
+is
+begin
+	GetAccsByMat(	P_ACC_MAT
+					,P_KIND_BANK
+					,P_RASHOD
+					,P_ACC_RASHOD
+					,P_ACC_MAIN
+					,P_ACC_DEPR
+					,P_ACC_RASH_DEPR
+					,P_ACC_ESTIM
+					,P_ACC_REAL_SPIS
+					,P_ACC_NDS
+					,P_ACC_RASH_NDS
+					,V_SIGN_ACC_RASH
+					,V_SIGN_ACC_DEPR
+					,V_SIGN_ACC_RASH_DEPR
+					,V_SIGN_ACC_ESTIM
+					,V_SIGN_ACC_REAL_SPIS
+					,V_SIGN_ACC_NDS
+					,V_SIGN_ACC_RASH_NDS
+					);
+end;
+
+Begin
+
+	V_IS_VALIDATE := true;
+	--отображение на форме
+	V_NDS_KIND_STR := 'Сумма операции без НДС';
+	V_NDS_IN_SUM_STR := 'Сумма на счете без НДС';
+	if P_MESSAGE = 'DEFAULT' Then
+V_METHOD:=&METHOD$ID;
+
+		[CSMD].Init_Form(V_VALID,&METHOD$CLASS,&METHOD$SNAME);
+		if P_INFO = 'NEXT' then
+			P_ACC_MAT	:= NULL;
+			P_QUANT		:= 0;
+			V_ACC_SIGN	:= false;
+			V_PRICE		:= 0;
+			V_KIND_EXPL	:= NULL;
+			P_GROUP		:= NULL;
+			V_ALL_SUMMA	:= 0;
+			V_NDS_SUMMA	:= 0;
+			V_NDS		:= 0;
+			V_NDS_KIND	:= false;
+			V_NDS_IN_SUM	:= false;
+			V_SUP_TYPE	:= NULL;
+			V_MOL		:= NULL;
+			P_ACC_RASHOD	:= null;
+			P_RASHOD	:= null;
+			V_AC_QUANT	:= null;
+			V_AC_PRICE	:= null;
+			V_AC_ALL_SUMMA	:= null;
+			V_AC_NDS_SUMMA	:= null;
+		end if;
+		P_MAT_DOC := this%parent; -- Родительский документ
+		if V_PARENT_MAT_DOC is not null then
+			P_MAT_DOC := V_PARENT_MAT_DOC;
+			V_PARENT_MAT_DOC := null;
+		end if;
+		
+		[PROCESS_UTILS].check_doc(P_MAT_DOC, 'СПИСАНИЕ');--проверка документа
+		------------- Задание начальных значений параметров--------------------
+
+		InitTunes;
+
+		-------переменные используются в фильтрах
+		V_SUP_TYPE	:= P_MAT_DOC.[DOC_NAME_REF].[TYPE_SUP];-- Тип поставляющего счета ТМЦ
+		V_KIND_EXPL	:= P_MAT_DOC.[DOC_NAME_REF].[KIND_EXPL];-- Вид поставляющего счета
+		V_MOL		:= P_MAT_DOC.[SUP_MOL_REF];            -- Поставщик(МОЛ)
+		V_SUP_PLACE := P_MAT_DOC.[SUP_PLACE];				 -- Поставщик (Местонахождения)
+		-------end
+
+        P_GROUP	:= ::[TMC_SAVE_VALUE].[LIB].get_value(P_MAT_DOC.[DOC_NAME_REF].[SAVE_VALUES],
+													::[DEPART].[LIB].get_high(stdlib.userid.[DEPART]),
+													'TMC_GRUP', 'SUP');	-- Поставщик (Группа)
+		V_KIND_BANK	:= Nvl(P_GROUP.[SIGN_NAZN],'0')='0';	--вид деятельности матсчета
+		P_KIND_BANK := V_KIND_BANK;			--вид деятельности на форме
+	    V_DEPART	:= P_MAT_DOC.[SUP_DEPART_REF];
+     	V_PLACE		:= P_MAT_DOC.[PLACE];
+     	V_FILIAL	:= V_DEPART.[FILIAL];    -- филиал
+		V_ACC_SIGN	:= false;
+		P_CONTINUE_NAL_AMO := false;
+		V_USE_EXPERT := nvl(::[FP_TUNE].[LIB].get_bool_value('TMC_USE_EXPERT'),false);
+		
+		if V_USE_EXPERT then
+			--BVG 26/11/2021 обход лицензионных ограничений
+			P_EXPERT := null;
+			/** /
+			begin
+				select a(a) in ::[TMC_EXPERT]
+				where a%id = this.[ACC_MAT_SUP].[ADD_CHARACT](ATTRIBUTE=::[TMC_ATTRIBUTES](CODE='EXPERT')).[VALUE]
+				into P_EXPERT;
+			EXCEPTION when NO_DATA_FOUND then
+				P_EXPERT := null;
+			end;
+			/**/
+		end if;
+		
+--maxx Статья и счет расходов по умолчанию
+    	P_RASHOD := ::[TMC_SAVE_VALUE].[LIB].get_value(P_MAT_DOC.[DOC_NAME_REF].[SAVE_VALUES],
+													::[DEPART].[LIB].get_high(stdlib.userid.[DEPART]),
+													'TMC_RASHOD', null);
+
+		P_INFO := 'P_GROUP, P_ACC_MAT, P_QUANT, P_RASHOD, P_ACC_RASHOD, P_ACC_RASH_NDS, P_ACC_REAL_SPIS, P_ACC_NDS, '||
+					'%VAR%.V_ZAV_NUMB_ARR, C, CANCEL, OK, P_KIND_BANK, %VAR%.V_ARR_DISM_RES.GR';
+		-------------- end P_MESSAGE = 'DEFAULT'------------------------
+	elsIf P_MESSAGE = 'VALIDATE' Then
+		[CSMD].Init_Form(V_VALID, null, null);
+
+		If P_INFO = 'P_ACC_MAT' Then
+			if p_acc_mat is not null then
+				-- Задание начальных значений параметров
+				P_GROUP	:= P_ACC_MAT.[GRUPPA];
+				-- Определение начального значения количества
+				P_QUANT	:= [PROCESS_UTILS].Get_max_quant(P_ACC_MAT);
+				--сумма операции
+				V_ALL_SUMMA	:= [PROCESS_UTILS].get_sum(P_ACC_MAT, P_QUANT);
+				-- подсчёт цены одного экземпляра ТМЦ
+				if P_QUANT <> 0 then
+					V_PRICE := V_ALL_SUMMA / P_QUANT;
+				else
+					V_PRICE := [PROCESS_UTILS].get_price(P_ACC_MAT);
+				end if;
+				--подсчет НДС
+				V_NDS_KIND   := P_ACC_MAT.[NDS_IN_SUM];
+				V_NDS_IN_SUM := P_ACC_MAT.[NDS_IN_SUM];
+				V_NDS_SUMMA	:= [PROCESS_UTILS].get_nds_sum(P_ACC_MAT, P_QUANT);
+				
+				V_NDS := P_ACC_MAT.[NDS_RATE];
+				
+				V_DEPART	:= nvl(P_ACC_MAT.[LAST_MOVE].[DEPART], P_MAT_DOC.[SUP_DEPART_REF]);
+				V_PLACE		:= get_place(P_ACC_MAT, P_MAT_DOC);
+				V_FILIAL	:= V_DEPART.[FILIAL];    -- филиал
+				V_AC_QUANT	:= P_ACC_MAT.[LAST_MOVE].[QUANT]-nvl(P_ACC_MAT.[QUANT_OUT],0);
+				V_AC_PRICE	:= P_ACC_MAT.[LAST_MOVE].[PRICE];
+				V_AC_ALL_SUMMA	:= P_ACC_MAT.[LAST_MOVE].[ACC_SUMMA]-nvl(P_ACC_MAT.[SUMMA_OUT], 0);
+				V_AC_NDS_SUMMA	:= P_ACC_MAT.[SUM_NDS]-nvl(P_ACC_MAT.[SUMMA_NDS_OUT], 0);
+				P_ACC_MAIN	:= P_ACC_MAT.[ACC_FIN];
+				V_ACC_SIGN	:= true;
+				V_KIND_BANK	:= P_ACC_MAT.[LAST_MOVE].[KIND_BANK];	--вид деятельности матсчета
+				P_KIND_BANK := V_KIND_BANK;	--вид деятельности на форме
+				
+				V_ZAV_NUMB_ARR := P_ACC_MAT.[TAB_NUM];
+				::[TMC_NUM].[LIB].arr_to_numstr(V_ZAV_NUMB_ARR, V_ZAV_NUMB_MEMO, P_QUANT, true);
+				if (P_ACC_MAT.[LAST_MOVE].[NAL_SUMMA] - P_ACC_MAT.[LAST_MOVE].[NAL_ALL_DEPR]) > 0
+					and P_ACC_MAT.[LAST_MOVE].[NAL_NORMA] > 0
+					and P_ACC_MAT.[NAL_METHOD].[0] <> 3
+				then
+					[CSMD].EnableS(V_VALID, 'P_CONTINUE_NAL_AMO');
+				else
+					P_CONTINUE_NAL_AMO := false;
+					[CSMD].DisableS(V_VALID, 'P_CONTINUE_NAL_AMO');
+				end if;
+				if V_USE_EXPERT then
+					P_EXPERT := null;
+					--BVG 26/11/2021 обход лицензионных ограничений
+					/** /
+					begin
+						select a(a) in ::[TMC_EXPERT]
+						where a%id = P_ACC_MAT.[ADD_CHARACT](ATTRIBUTE=::[TMC_ATTRIBUTES](CODE='EXPERT')).[VALUE]
+						into P_EXPERT;
+					EXCEPTION when NO_DATA_FOUND then
+						P_EXPERT := null;
+					end;
+					/**/
+				end if;
+				
+				if ::[TMC_LIST].[PROCESS_UTILS].is_give_rent(P_ACC_MAT) = true then
+					pragma error('Данный материальный счет выдан (возможно частично) в аренду/консервацию! Необходимо сначала выполнить все возвраты!');
+				end if;	
+			end if;
+			-- Опеределение счетов
+			GetAccs;
+		--------------конец валидации по выбраннму мат.счету---------------------------
+		-----расчет суммы операции, суммы за единицу по введённому количеству в движении---------
+		elsif P_INFO = 'P_QUANT' Then
+			if P_QUANT > [PROCESS_UTILS].Get_max_quant(P_ACC_MAT) then
+		    	P_QUANT := [PROCESS_UTILS].Get_max_quant(P_ACC_MAT);
+			end If;
+        	V_ALL_SUMMA	:= [PROCESS_UTILS].get_sum(P_ACC_MAT, P_QUANT);
+			if P_QUANT <> 0 then V_PRICE := V_ALL_SUMMA / P_QUANT;
+			else V_PRICE := [PROCESS_UTILS].get_price(P_ACC_MAT);
+			end if;
+
+			V_NDS_SUMMA	:= [PROCESS_UTILS].get_nds_sum(P_ACC_MAT, P_QUANT);
+
+			::[TMC_NUM].[LIB].arr_to_numstr(V_ZAV_NUMB_ARR, V_ZAV_NUMB_MEMO, P_QUANT, true);
+		else
+			CommonValidation(	P_MESSAGE
+								,P_INFO
+								,P_ACC_MAT
+								,P_GROUP
+								,P_RASHOD
+								,P_QUANT
+								,P_KIND_BANK
+								,V_KIND_BANK
+								,P_ACC_RASHOD
+								,P_ACC_RASH_NDS
+								,V_ZAV_NUMB_ARR
+								,V_ZAV_NUMB_MEMO
+								,V_ARR_DISM_RES
+								,V_CUR_ROW
+								,V_IS_VALIDATE
+								);
+		end if;
+		-----конец расчета суммы операции......----------
+	end If;
+	-------------- end P_MESSAGE = 'VALIDATE'------------------------
+
+	if P_ACC_MAT is null then
+    	P_QUANT	:= 1;
+    	V_PRICE	:= 0;
+    	V_ALL_SUMMA	:= 0;
+    	V_NDS_SUMMA	:= 0;
+    	V_NDS_KIND	:= false;
+    	V_NDS_IN_SUM	:= false;
+    	V_NDS		:= 0;
+    	V_NDS_SUMMA	:= 0;
+    	V_ACC_SIGN	:= false;
+		V_AC_QUANT	:= null;
+		V_AC_PRICE	:= null;
+		V_AC_ALL_SUMMA	:= null;
+		V_AC_NDS_SUMMA	:= null;
+		P_ACC_RASHOD	:= null;
+		P_ACC_DEPR		:= null;
+		P_ACC_RASH_DEPR	:= null;
+		P_ACC_ESTIM		:= null;
+		P_ACC_REAL_SPIS	:= null;
+		P_ACC_NDS	:= null;
+		P_ACC_MAIN	:= null;
+		V_ZAV_NUMB_ARR	:= null;
+		V_ZAV_NUMB_MEMO	:= null;
+  	end If;
+
+	--отображение на форме
+	if V_NDS_KIND then V_NDS_KIND_STR := 'Сумма операции с НДС';
+	end if;
+	if V_NDS_IN_SUM then V_NDS_IN_SUM_STR := 'Сумма на счете с НДС';
+	end if;
+
+	-- Валидация контролов
+	if P_ACC_MAT.[NAL_METHOD].[0]= 2 then
+		[CSMD].Show(V_VALID, 'P_CONTINUE_NAL_AMO');
+	else
+		P_CONTINUE_NAL_AMO:=false;
+		[CSMD].Hide(V_VALID, 'P_CONTINUE_NAL_AMO');	
+	end if;
+	ValidateControls(	V_VALID
+						,V_ACC_SIGN
+						,V_SIGN_ACC_RASH
+						,V_SIGN_ACC_RASH_NDS
+						,V_SIGN_ACC_RASH_DEPR
+						,V_SIGN_ACC_DEPR
+						,V_SIGN_ACC_ESTIM
+						,V_SIGN_ACC_REAL_SPIS
+						,V_SIGN_ACC_NDS
+						,V_ZAV_NUMB_ARR
+						,P_ACC_MAT.[LAST_MOVE].[GRUPPA].[UNIT_SAVE]
+						);
+End;
+
+execute is
+/*********************************************************************
+Назначение: Добавление экземпляра Списка ТМЦ
+*********************************************************************/
+/*
+*     Дата        Автор       BFS             Описание
+* ----------   -----------   -----------    ----------------------------------
+* 17.10.2012    eroshenko     BS00463288   Добавлен параметр "Продолжать начислять налоговую амортизацию" P_CONTINUE_NAL_AMO и его обработка
+* 24.10.2012    eroshenko     BS00266835   Вид деятельности определяется из последнего движения мат.счета
+* 21.10.2012	eroshenko	 BS00563365		Инициализации э.ф. [CSMD].Init_Form(V_VALID, &amp;Method$Class, &amp;Method$Name) заменена на
+											[CSMD].Init_Form(V_VALID,&METHOD$CLASS,&METHOD$SNAME)
+*/
+vThisObj [TMC_LIST];
+V_ZAV_NUMB ::[TMC_LIST].[ZAV_NUMB]%type;
+obj ref [TMC_ADD_CHARACT];
+Begin
+	/**
+		признак вызова операции через валидатор (пользователем) или из другой операции (без валидатора).
+	*/
+	V_IS_VALIDATE := nvl(V_IS_VALIDATE, false);
+	P_MAT_DOC := Nvl(P_MAT_DOC,This%Parent); -- Родительский документ
+	--------------- проверка параметров------------------------------------
+	-- Контроль введенных параметров
+	If P_GROUP Is Null Then
+		Pragma Error('Группа поставщик неопределена!');
+  	ElsIf P_ACC_MAT Is Null Then
+ 		Pragma Error('Материальный счет-поставщик неопределен');
+  	ElsIf P_QUANT Is Null Or P_QUANT=0 Then
+     		Pragma Error('Количество неопределено!');
+  	ElsIf P_QUANT < 0
+		or P_QUANT > [PROCESS_UTILS].Get_max_quant(P_ACC_MAT) then
+     		Pragma Error('Задано неверное количество "'||P_QUANT||'"!');
+
+  	End If;
+  	
+  	--установка значений переменных, если не использовался валидатор
+  	if not V_IS_VALIDATE then
+  		begin
+			InitTunes();
+			
+	  		--корректировка колличества
+			if P_QUANT > P_ACC_MAT.[LAST_MOVE].[QUANT]-P_ACC_MAT.[QUANT_OUT] then
+		    	P_QUANT := P_ACC_MAT.[LAST_MOVE].[QUANT]-Nvl(P_ACC_MAT.[QUANT_OUT],0);
+			end If;
+			--сумма операции
+        	V_ALL_SUMMA:= [PROCESS_UTILS].get_sum(P_ACC_MAT, P_QUANT);
+			if P_QUANT <> 0 then V_PRICE := V_ALL_SUMMA / P_QUANT;
+			else V_PRICE := [PROCESS_UTILS].get_price(P_ACC_MAT);
+			end if;
+			--подсчет НДС
+			V_NDS_KIND	:= P_ACC_MAT.[NDS_IN_SUM];
+			V_NDS_IN_SUM:= P_ACC_MAT.[NDS_IN_SUM];
+			V_NDS_SUMMA	:= [PROCESS_UTILS].get_nds_sum(P_ACC_MAT,
+												P_QUANT);
+
+			V_NDS := P_ACC_MAT.[NDS_RATE];
+		    V_DEPART := nvl(P_ACC_MAT.[LAST_MOVE].[DEPART], P_MAT_DOC.[SUP_DEPART_REF]);
+	     	V_FILIAL := V_DEPART.[FILIAL];    -- филиал
+	     	V_PLACE := get_place(P_ACC_MAT, P_MAT_DOC);
+
+			P_KIND_BANK := nvl(P_KIND_BANK, P_ACC_MAT.[LAST_MOVE].[KIND_BANK]);
+
+			if tune_use_zav_num_arr then
+				if P_ACC_MAT.[TAB_NUM]%size(1) > 0 then
+					::[TMC_NUM].[LIB].arr_to_numstr(P_ACC_MAT.[TAB_NUM], V_ZAV_NUMB_MEMO, P_QUANT, true);
+				else
+					V_ZAV_NUMB_MEMO := null;
+				end if;
+			end if;
+  		end;
+  	end if;
+
+	if tune_use_zav_num_arr then
+		V_ZAV_NUMB := V_ZAV_NUMB_MEMO;
+		if V_ZAV_NUMB_ARR is null then
+			if P_ACC_MAT.[TAB_NUM]%size(1) > 0 then
+				::[TMC_NUM].[LIB].arr_to_numstr(P_ACC_MAT.[TAB_NUM], V_ZAV_NUMB, P_QUANT, true);
+			else
+				V_ZAV_NUMB := null;
+			end if;
+		else
+			if ::[TMC_NUM].[LIB].count_num_in_arr(P_ACC_MAT.[TAB_NUM], true) > 0
+			 and ::[TMC_NUM].[LIB].count_num_in_numstr(V_ZAV_NUMB) != P_QUANT then
+				pragma error('Количество выбранных номеров не соответствует количеству!');
+			end if;
+		end if;
+	else
+		V_ZAV_NUMB := P_ACC_MAT.[ZAV_NUMB];
+	end if;
+
+	-- Установка значений реквизитов экземпляра Списка ТМЦ
+	vThisObj := this;
+	vThisObj.[ACC_MAT_SUP]	:= P_ACC_MAT; -- Счет-поставщик
+	vThisObj.[INV_NUMB]		:= P_ACC_MAT.[INV_NUMB];    -- Инвентарный номер
+	vThisObj.[QUANT]		:= P_QUANT;       -- Количество
+	vThisObj.[PRICE]		:= V_PRICE;       -- Цена
+	vThisObj.[ALL_SUMMA]	:= V_ALL_SUMMA;   -- Стоимость
+	vThisObj.[NDS_SUMMA]	:= V_NDS_SUMMA;   -- Сумма НДС
+	vThisObj.[BAL_SUMMA]	:= V_ALL_SUMMA;   -- Сумма балансовая
+	vThisObj.[NDS_KIND]		:= V_NDS_KIND;    -- НДС в том числе
+	vThisObj.[NDS]			:= V_NDS;         -- Ставка НДС
+	vThisObj.[SUM_RASH]		:= 0;    -- Сумма накладных расходов
+	vThisObj.[SUM_TAMOG]	:= 0;   -- Сумма таможенных расходов
+	vThisObj.[NSP_KIND]		:= false;    -- Налог с продаж в том числе
+	vThisObj.[NSP]			:= 0;         -- Ставка налога с продаж
+	vThisObj.[NSP_SUMMA]	:= 0;   -- Сумма налога с продаж
+	vThisObj.[KIND_BANK]	:= P_KIND_BANK;   -- Вид деятельности
+	vThisObj.[UN_SYSTEM]	:= P_ACC_MAT.[UN_SYSTEM];   -- Внесистемный учет
+	vThisObj.[NORMA]		:= P_ACC_MAT.[LAST_MOVE].[NORMA];       -- Норма амортизации
+	vThisObj.[IND_SUMMA]	:= 0;   -- Сумма переоценки
+	vThisObj.[SHIFR_DEPR]	:= P_ACC_MAT.[SHIFR_DEPR];  -- Шифр амортизации
+	vThisObj.[PLACE]		:= V_PLACE;       -- Местонахождение
+	vThisObj.[RASHOD]		:= P_RASHOD;      -- Статья расхода
+	
+	if P_EXPERT is not null then
+		--BVG 26/11/2021 обход лицензионных ограничений
+		/** /
+		if length(P_EXPERT.[NAME]) >= 100 then
+			vThisObj.[BASIS] := SUBSTR(P_EXPERT.[NAME],1,96) || '...';
+		else
+			vThisObj.[BASIS] := P_EXPERT.[NAME];
+		end if;
+		/**/
+		null;
+	else
+		vThisObj.[BASIS] := P_BASIS; -- Обоснование
+	end if;
+	
+	vThisObj.[GRUPPA_SUP]	:= P_GROUP;  -- Группа поставщик
+	vThisObj.[ACC_RASHOD]	:= P_ACC_RASHOD;  -- Счет расходов
+	vThisObj.[NDS_IN_SUM]	:= V_NDS_IN_SUM;  -- Сумма на счет с НДС
+	vThisObj.[ACC_REALIZE]	:= P_ACC_REAL_SPIS; -- Счет реализации
+	vThisObj.[ZAV_NUMB]		:= V_ZAV_NUMB;    -- Заводской номер
+	vThisObj.[PRIM]			:= P_PRIM;        -- Примечание
+	vThisObj.[NAL_GR_DEPR]	:= P_ACC_MAT.[NAL_GR_DEPR]; -- Группа амортизации
+	vThisObj.[NAL_METHOD]	:= P_ACC_MAT.[NAL_METHOD];  -- Способ начисления
+	vThisObj.[OKOF]			:= P_ACC_MAT.[OKOF];        -- Шифр ОКОФ
+	vThisObj.[PER_EXPL]		:= P_ACC_MAT.[PER_EXPL]; -- Срок эксплуатации
+	vThisObj.[USCORENIE]	:= P_ACC_MAT.[USCORENIE]; -- Коэффициент ускорения
+	vThisObj.[TMC_CLASS]	:= P_ACC_MAT.[TMC_CLASS]; -- Класс ТМЦ
+	vThisObj.[CLI_SUMMA]	:= V_ALL_SUMMA - V_NDS_KIND * Nvl(V_NDS_SUMMA, 0);
+	vThisObj.[EXPERT]		:= P_EXPERT;
+	
+	-- Сохраним в базе массив деталей от разбора и создадим доп параметр для хранения COL_ID массива
+	if V_ARR_DISM_RES.count > 0 then
+		[TMC_DISM_RES].[LIB].check_tab (V_ARR_DISM_RES, V_ALL_SUMMA); -- проверка корректности заполнения массива разбора
+		[TMC_PARAM].[LIB].ins_(	 this.[TAB_PARAM]
+								,[TMC_ATTRIBUTES].[VARS].DISM_RES_ARR
+								,[TMC_DISM_RES].[LIB].save_tab (V_ARR_DISM_RES, next_value ('SEQ_ID')) -- функция сохраняет массив в базе и возвращает COL_ID
+								);
+	end if;
+	if P_CONTINUE_NAL_AMO then
+		[TMC_PARAM].[LIB].ins_(	 this.[TAB_PARAM]
+								,[TMC_ATTRIBUTES].[VARS].CONTINUE_NAL_AMO
+								,bool_num (P_CONTINUE_NAL_AMO) -- функция сохраняет массив в базе и возвращает COL_ID
+								);		
+	end if;
+	-- Заполним таблицу счетов
+	SaveAccTab(	this
+				,P_ACC_RASHOD
+				,P_ACC_MAIN
+				,P_ACC_DEPR
+				,P_ACC_RASH_DEPR
+				,P_ACC_ESTIM
+				,P_ACC_REAL_SPIS
+				,P_ACC_NDS
+				,P_ACC_RASH_NDS);
+	
+	this := vThisObj;
+	
+	if this.[ACC_MAT_SUP].[GRUPPA].[UNIT_SAVE] and V_USE_EXPERT and P_EXPERT is not null then
+		begin
+			locate obj in this.[ACC_MAT_SUP].[ADD_CHARACT] where obj.[ATTRIBUTE].[CODE] = 'EXPERT';
+				obj.[VALUE] := P_EXPERT%id;
+			EXCEPTION when NO_DATA_FOUND then
+				this.[ACC_MAT_SUP].[ADD_CHARACT].[NEW#AUTO](
+											::[TMC_ATTRIBUTES](CODE='EXPERT')	/*P_ATTRIBUTE*/		--Характеристика
+											,P_EXPERT%id						/*P_VALUE*/		--Значение
+											);
+		end;
+	end if;
+
+	-- Подсчет суммы по документу
+ 	P_MAT_DOC.[COUNT#AUTO];
+  	-- Запомним новое
+  	[WORK_DECL];
+
+	P_MAT_DOC		:= null;
+	V_ZAV_NUMB_ARR	:= null;
+	V_ZAV_NUMB_MEMO	:= null;
+	V_IS_VALIDATE	:= null;
+End;
+end;
+end;

@@ -1,0 +1,46 @@
+class PSH_EMAIL_RASSIL;
+
+@name('[ПСБ] Добавить')
+@tag('CREATED')
+constructor PSH_NEW_AUTO is
+PSH_NEW_AUTO (
+	@name('Код')               P_PSH_EMAIL_COD   in [STRING_26],
+	@name('Наименование')      P_PSH_EMAIL_NAME  in [STRING_170],
+	@name('Адреса рассылки')   P_PSH_EMAIL_ADRES in [STRING_4000],
+	@name('Филиал')            P_PSH_EMAIL_FIL   in [BRANCH_REF],
+	@name('Телефоны рассылки') P_PSH_SMS_ADRES   in [STRING_4000]
+) return ref [PSH_EMAIL_RASSIL] is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_PSH_EMAIL_COD := this.[PSH_EMAIL_COD];
+	P_PSH_EMAIL_NAME := this.[PSH_EMAIL_NAME];
+	P_PSH_EMAIL_ADRES := this.[PSH_EMAIL_ADRES];
+	P_PSH_EMAIL_FIL := this.[PSH_EMAIL_FIL];
+	P_PSH_SMS_ADRES := this.[PSH_SMS_ADRES];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+i number;
+begin
+
+select x(count(x)) in ::[PSH_EMAIL_RASSIL] where x.[PSH_EMAIL_COD]=P_PSH_EMAIL_COD and x.[PSH_EMAIL_FIL]=P_PSH_EMAIL_FIL into i;
+if i>0 then pragma error('Уже используется данный код для филиала '||P_PSH_EMAIL_FIL.[CODE]); end if;
+	-- Установка значения реквизита "Код"
+	[PSH_EMAIL_COD] := P_PSH_EMAIL_COD;
+	-- Установка значения реквизита "Наименование"
+	[PSH_EMAIL_NAME] := P_PSH_EMAIL_NAME;
+	-- Установка значения реквизита "Адреса рассылки"
+	[PSH_EMAIL_ADRES] := replace(P_PSH_EMAIL_ADRES,' ');
+	-- Установка значения реквизита "Филиал"
+	[PSH_EMAIL_FIL] := P_PSH_EMAIL_FIL;
+	-- Установка значения реквизита "Телефоны рассылки"
+	[PSH_SMS_ADRES] := replace(P_PSH_SMS_ADRES,' ');
+
+end;
+end;
+end;

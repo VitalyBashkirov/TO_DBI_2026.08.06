@@ -1,0 +1,400 @@
+class FACTURA_DOC;
+
+@import_plsql(true)
+@this(plsql_lock:=false,create_on_start:=true)
+@name('Печать счетов-фактур (списочная) с 01.01.2026')
+@tag('COPIED')
+batch method PR_FACT_SP012026 is
+
+@name('Руководитель')                             public V_LEADER     [USER_REF];
+@name('Главный бухгалтер')                        public V_BUHG       [USER_REF];
+@name('Файл шаблона Excel')                       public V_FILE       [STRING_32000];
+@name('Переменная для исполнения клиент-скрипта') public V_VB         [STRING_32000];
+@name('Руководитель (строка)')                    public V_LEADER_STR [STRING];
+@name('Главный бухгалтер (строка)')               public V_BUHG_STR   [STRING];
+@name('Доверенность руководителя')                public V_DOV_LEADER [STRING_1000];
+@name('Доверенность бухгалтера')                  public V_DOV_BUHG   [STRING_1000];
+@name('Кол-во сф для подписи по дов рук')         public V_I          [DIG_6];
+@name('Кол-во сф для подписи по дов бух')         public V_J          [DIG_6];
+
+/*
+ *     Дата  		 Автор       ATM         Описание
+ * -------------    -----------	----------- ---------------------------------------------------
+ * 13.01.2026		karasev		RP0707766	Новый формат печати.
+ * 27.02.2026		karasev		RP0709579	Добавлены vMaxDocDate, vRowEnd. При выборе шаблона анализируется максимальная дата всех выбранных СЧФ.
+ * 											Добавлено использование шаблона SCH_F_04_2026_POTOK с dt_01_04_2026.
+*/
+
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma include(::[FACTURA_DOC].[SLIB]);
+pragma macro(xl,'::[OOXML].[API_XL]');
+pragma macro(lp,'::[SHABLON_DOC].[LIB_OOXML]');
+
+pragma macro(iFont,'&xl.get_font(''Arial Cyr'',2,8)');
+pragma macro(iBorder,'&xl.get_border(&xl.xl_b_thin,&xl.xl_b_thin,&xl.xl_b_thin,&xl.xl_b_thin)');
+pragma macro(iNum_fmt,'&xl.get_numFmt(''#,##0.00'')');
+
+function IsTraceGoodsExists(p_sf ref [FACTURA_DOC], p_is_corr boolean default false) return boolean 
+is
+	n number;
+begin
+	select x(count(1)) in p_sf.[SERV_LIST]
+	where x.[TRACE_GOODS] = true
+	into n;
+	
+	if n = 0 and p_is_corr = true then
+		select x(count(1)) in p_sf.[SERV_LIST]
+		where x.[SERVICE_BASE].[TRACE_GOODS] = true
+		into n;	
+	end if;
+	
+	return n > 0;
+end;
+
+PR_FACT_SP012026 (
+	@name('Выводить инфо о доверенности Руководителя') P_DOV_LEADER     in [BOOLEAN],
+	@name('Выводить инфо о доверенности Глав.Бух.')    P_DOV_BUHG       in [BOOLEAN],
+	@name('Печать расчетной ставки НДС')               P_KIND_RATE_NDS  in [BOOLEAN],
+	@name('Подписанты')                                P_KIND_SIGNATURE in [CASE_BETWEEN_TWO]
+) is
+
+validate is
+	vLeaderStr 		varchar2(200);
+	vBuhgStr		varchar2(200);
+	vRow 			number;
+	vRowC 			number;
+	vCommonFlag 	boolean	default false;
+	vCorrecFlag 	boolean default false;
+	vSrcSheet		number;
+	vDstSheet		number;
+	vNum			number	:= 1;
+	vCount			number	:= -1;
+	vMaxDocDate		date;
+	vRowEnd			number;
+begin
+	if p_message='DEFAULT' then	
+	
+		[CSMD].Init_Form(V_VB, &METHOD$CLASS, &METHOD$SNAME); -- Инициализация формы	
+		P_DOV_LEADER := true;
+		P_DOV_BUHG := true;
+		v_dov_leader := null;
+		v_dov_buhg := null;
+		V_VB 		:= null;
+		v_i := 0;
+		v_j := 0;
+		V_LEADER	:=	::[DEFVALS].[SLIB].RestoreRef(STDLIB.USERID, &METHOD$CLASS, &METHOD$SNAME, 'V_LEADER');	
+		V_BUHG		:=	::[DEFVALS].[SLIB].RestoreRef(STDLIB.USERID, &METHOD$CLASS, &METHOD$SNAME, 'V_BUHG');
+		
+		if this.count = 1 then
+			if (nvl(this(this.first).[SIGN_ADVANCE],false) and this(this.first).[ADVANCE] is null) or nvl(this(this.first).[AGENT],false) then
+				P_KIND_RATE_NDS := true;
+			else
+				P_KIND_RATE_NDS := false;
+			end if;
+		end if;
+		if this.count = 1 and (this(this.first).[SIGN_ADVANCE] or this(this.first).[AGENT])
+		then
+			null;
+		elsif this.count > 1 then
+			[CSMD].Disable(V_VB, 'P_KIND_RATE_NDS');
+			[CSMD].Command(V_VB,'Check1.visible=false');
+		end if;
+		
+		if this(this.first).[KIND].[0] = &fSale then
+			P_KIND_SIGNATURE.[0] := 1;
+		else
+			P_KIND_SIGNATURE.[0] := 2;
+		end if;		
+
+		if this.count=0 then
+			pragma error('Не выбран ни один счет для печати.');
+		end if;
+		
+
+		::[VHO_INTERFACE].[PRX_FACTURA].CL_PR_LIB_DL_TuneFilterForView(::[SYSTEM].[VARIABLES].OurBank, 'SIGN_FACTURA', ::[SYSTEM].[VARIABLES].OurBranch);
+		if V_LEADER is not null then
+			for sf in this.first..this.last loop
+				v_dov_leader := [FACTURA_DOC].[REPORTS_LIB].GetDoverennost(V_LEADER, this(sf).[DOCUMENT_DATE]);
+				if v_dov_leader is null then
+					P_DOV_LEADER := false;
+					[CSMD].Hide(V_VB, 'P_DOV_LEADER');
+				else
+					[CSMD].Show(V_VB, 'P_DOV_LEADER');
+					P_DOV_LEADER := true;
+					exit;				
+				end if;
+			end loop;
+			v_i := 0;
+			for sf in this.first..this.last loop
+				v_dov_leader := [FACTURA_DOC].[REPORTS_LIB].GetDoverennost(V_LEADER, this(sf).[DOCUMENT_DATE]);
+				if v_dov_leader is not null then
+					v_i := v_i + 1;
+				end if;
+			end loop;
+			if P_DOV_LEADER and v_i<this.last then			
+				stdio.put_line_buf(v_i||' счетов-фактур из '|| this.last || ' будут напечатаны по доверенности руководителя');
+			end if;
+		end if;
+		
+		if V_BUHG is not null then
+			for sf in this.first..this.last loop
+				v_dov_buhg := [FACTURA_DOC].[REPORTS_LIB].GetDoverennost(V_BUHG, this(sf).[DOCUMENT_DATE]);
+				if v_dov_buhg is null then
+					P_DOV_BUHG := false;
+					[CSMD].Hide(V_VB, 'P_DOV_BUHG');
+				else
+					[CSMD].Show(V_VB, 'P_DOV_BUHG');
+					P_DOV_BUHG := true;
+					exit;
+				end if;
+			end loop;
+			v_j := 0;
+			for sf in this.first..this.last loop
+				v_dov_buhg := [FACTURA_DOC].[REPORTS_LIB].GetDoverennost(V_BUHG, this(sf).[DOCUMENT_DATE]);
+				if v_dov_buhg is not null then
+					v_j := v_j + 1;
+				end if;
+			end loop;
+			if P_DOV_BUHG and v_j<this.last then			
+				stdio.put_line_buf(v_j||' счетов-фактур из '|| this.last || ' будут напечатаны по доверенности бухгалтера');
+			end if;
+		end if;
+	elsif p_message='VALIDATE' then
+		If (p_info = '%VAR%.V_LEADER') then
+			for sf in this.first..this.last loop
+				v_dov_leader := [FACTURA_DOC].[REPORTS_LIB].GetDoverennost(V_LEADER, this(sf).[DOCUMENT_DATE]);
+				if v_dov_leader is null then
+					P_DOV_LEADER := false;
+					[CSMD].Hide(V_VB, 'P_DOV_LEADER');
+				else
+					[CSMD].Show(V_VB, 'P_DOV_LEADER');
+					P_DOV_LEADER := true;
+					exit;				
+				end if;
+			end loop;			
+		end if;
+		If (p_info = '%VAR%.V_LEADER') or (p_info = 'P_DOV_LEADER') then
+			v_i := 0;
+			for sf in this.first..this.last loop
+				v_dov_leader := [FACTURA_DOC].[REPORTS_LIB].GetDoverennost(V_LEADER, this(sf).[DOCUMENT_DATE]);
+				if v_dov_leader is not null then
+					v_i := v_i + 1;
+				end if;
+			end loop;
+			if P_DOV_LEADER and v_i<this.last then			
+				stdio.put_line_buf(v_i||' счетов-фактур из '|| this.last || ' будут напечатаны по доверенности руководителя');
+			end if;
+		end if;
+		If (p_info = '%VAR%.V_BUHG') then
+			for sf in this.first..this.last loop
+				v_dov_buhg := [FACTURA_DOC].[REPORTS_LIB].GetDoverennost(V_BUHG, this(sf).[DOCUMENT_DATE]);
+				if v_dov_buhg is null then
+					P_DOV_BUHG := false;
+					[CSMD].Hide(V_VB, 'P_DOV_BUHG');
+				else
+					[CSMD].Show(V_VB, 'P_DOV_BUHG');
+					P_DOV_BUHG := true;
+					exit;
+				end if;
+			end loop;			
+		end if;
+		If (p_info = '%VAR%.V_BUHG') or (p_info = 'P_DOV_BUHG') then
+			v_j := 0;
+			for sf in this.first..this.last loop
+				v_dov_buhg := [FACTURA_DOC].[REPORTS_LIB].GetDoverennost(V_BUHG, this(sf).[DOCUMENT_DATE]);
+				if v_dov_buhg is not null then
+					v_j := v_j + 1;
+				end if;
+			end loop;
+			if P_DOV_BUHG and v_j<this.last then			
+				stdio.put_line_buf(v_j||' счетов-фактур из '|| this.last || ' будут напечатаны по доверенности бухгалтера');
+			end if;
+		end if;
+		if p_info = 'OK' then
+			if P_KIND_SIGNATURE.[0] = 1 Then
+				vLeaderStr 	:= stdlib.FIO(V_LEADER.[NAME], 'Ф И.О.');
+				vBuhgStr 	:= stdlib.FIO(V_BUHG.[NAME], 'Ф И.О.');
+			Else		  		
+				vLeaderStr 	:= V_LEADER_STR;
+				vBuhgStr 	:= V_BUHG_STR;
+			End If;		
+		
+			vRow := 0;
+			vRowC := 0;
+			
+			for sc in this.first..this.last loop
+				if vMaxDocDate is null or vMaxDocDate < this(sc).[DOCUMENT_DATE] then
+					vMaxDocDate := this(sc).[DOCUMENT_DATE];
+				end if;
+			end loop;
+			
+			if vMaxDocDate >= ::[FACTURA_DOC].[REP_LIB_01072021].dt_01_04_2026 then
+				&lp.xl_init('SCH_F_04_2026_POTOK','TMC');
+				vRowEnd := 39;
+			else
+				&lp.xl_init('SCH_F_01_2026_POTOK','TMC');
+				vRowEnd := 35;
+			end if;
+			
+			&xl.Open_Sheet('Лист1');
+			&xl.AddCopySheet('Лист1','ЛистПоток' || vNum);
+			&xl.Open_Sheet('ЛистПоток' || vNum);
+			&xl.Delete_Row(1, vRowEnd);
+				
+			for sc in this.first..this.last where not (this(sc).[INITION] is null and this(sc).[INITION_CORR] is not null) and not (this(sc).[INITION].[INITION] is null and this(sc).[INITION].[INITION_CORR] is not null) loop					
+					
+				vCount := vCount + 1;
+				if vCount = 500 then
+					vCount := 0;
+					vNum := vNum + 1;
+					&xl.AddCopySheet('Лист1','ЛистПоток' || vNum);
+					&xl.Open_Sheet('ЛистПоток' || vNum);
+					&xl.Delete_Row(1, vRowEnd);
+					&xl.SetPrintArea(1, 1, vRow , 19, &xl.getSheetNum('ЛистПоток' || (vNum - 1)));
+					vRow := 0;
+				end if;
+
+				if IsTraceGoodsExists(this(sc)) then
+					vSrcSheet := &xl.getSheetNum('Лист1');
+				else
+					vSrcSheet := &xl.getSheetNum('Лист1_2');
+				end if;
+			  
+				vDstSheet := &xl.getSheetNum('ЛистПоток' || vNum);										
+						
+				&xl.CopyPasteRows(1, vRowEnd, vRow + 1, vSrcSheet, vDstSheet);
+				
+				if V_LEADER is not null then
+					v_dov_leader := [FACTURA_DOC].[REPORTS_LIB].GetDoverennost(V_LEADER, this(sc).[DOCUMENT_DATE]);
+				end if;
+				if V_BUHG is not null then
+					v_dov_buhg := [FACTURA_DOC].[REPORTS_LIB].GetDoverennost(V_BUHG, this(sc).[DOCUMENT_DATE]);
+				end if;		
+				if not P_DOV_LEADER then
+					v_dov_leader := null;
+				end if;			  	
+				if not P_DOV_BUHG then
+					v_dov_buhg := null;
+				end if;
+				
+				if this.count = 1 and (this(this.first).[SIGN_ADVANCE] or this(this.first).[AGENT])
+				then
+					null;		
+				elsif this.count > 1 then 				
+					P_KIND_RATE_NDS := null;	
+					if (nvl(this(sc).[SIGN_ADVANCE],false) and this(sc).[ADVANCE] is null) or nvl(this(sc).[AGENT], false) then
+						P_KIND_RATE_NDS := true;
+					else
+						P_KIND_RATE_NDS := false;
+					end if;			
+				end if;
+						
+				&xl.Open_Sheet('ЛистПоток' || vNum);
+				::[FACTURA_DOC].[REP_LIB_01072021].print_sf(vRow, this(sc)%id, V_LEADER, V_BUHG, vLeaderStr, vBuhgStr, P_KIND_RATE_NDS, v_dov_leader, v_dov_buhg);
+				
+				vCommonFlag := true;
+				&xl.PutPageBreak(vRow);
+				
+			End loop;
+			
+			if vCommonFlag = true then
+				&xl.SetPrintArea(1, 1, vRow , 19, &xl.getSheetNum('ЛистПоток' || vNum));
+			end if;
+			
+			vCount := -1;
+			vNum := 1;
+				
+			&xl.Open_Sheet('Лист2');
+			&xl.AddCopySheet('Лист2','ЛистПотокКорр' || vNum);
+			&xl.Open_Sheet('ЛистПотокКорр' || vNum);
+			&xl.Delete_Row(1, 35);
+				
+			for sc in this.first..this.last where (this(sc).[INITION] is null and this(sc).[INITION_CORR] is not null) or (this(sc).[INITION].[INITION] is null and this(sc).[INITION].[INITION_CORR] is not null) loop					
+
+				vCount := vCount + 1;
+				if vCount = 500 then
+					vCount := 0;
+					vNum := vNum + 1;
+					&xl.AddCopySheet('Лист2','ЛистПотокКорр' || vNum);
+					&xl.Open_Sheet('ЛистПотокКорр' || vNum);
+					&xl.Delete_Row(1, 35);
+					&xl.SetPrintArea(1, 1, vRowC , 21, &xl.getSheetNum('ЛистПотокКорр' || (vNum - 1)));
+					vRowC := 0;
+				end if;
+
+				if IsTraceGoodsExists(this(sc),true) then	
+					vSrcSheet := &xl.getSheetNum('Лист2');
+				else
+					vSrcSheet := &xl.getSheetNum('Лист2_2');
+				end if;
+						
+				vDstSheet := &xl.getSheetNum('ЛистПотокКорр' || vNum);						
+						
+				&xl.CopyPasteRows(1, 35, vRowC + 1, vSrcSheet, vDstSheet);
+						
+					
+				if V_LEADER is not null then
+					v_dov_leader := [FACTURA_DOC].[REPORTS_LIB].GetDoverennost(V_LEADER, this(sc).[DOCUMENT_DATE]);
+				end if;
+				if V_BUHG is not null then
+					v_dov_buhg := [FACTURA_DOC].[REPORTS_LIB].GetDoverennost(V_BUHG, this(sc).[DOCUMENT_DATE]);
+				end if;		
+			  	if not P_DOV_LEADER then
+					v_dov_leader := null;
+				end if;			  	
+				if not P_DOV_BUHG then
+					v_dov_buhg := null;
+				end if;
+					
+				if this.count = 1 and (this(this.first).[SIGN_ADVANCE] or this(this.first).[AGENT])
+				then
+					null;		
+				elsif this.count > 1 then 				
+					P_KIND_RATE_NDS := null;	
+					if (nvl(this(sc).[SIGN_ADVANCE],false) and this(sc).[ADVANCE] is null) or nvl(this(sc).[AGENT],false) then
+						P_KIND_RATE_NDS := true;
+					else
+						P_KIND_RATE_NDS := false;
+					end if;		
+				end if;
+					
+				&xl.Open_Sheet('ЛистПотокКорр' || vNum);
+				vDstSheet := &xl.getSheetNum('ЛистПотокКорр' || vNum);
+				::[FACTURA_DOC].[REP_LIB_01072021].print_sf_c(vRowC, this(sc)%id, V_LEADER, V_BUHG, vLeaderStr, vBuhgStr, P_KIND_RATE_NDS, v_dov_leader, v_dov_buhg);
+						
+						
+				vCorrecFlag := true;
+				&xl.PutPageBreak(vRowC);
+				
+			End loop;
+				
+			if vCorrecFlag = true then
+				&xl.SetPrintArea(1, 1, vRowC , 21, &xl.getSheetNum('ЛистПотокКорр' || vNum));
+			end if;
+				
+			&xl.delSheet('Лист1');
+			&xl.delSheet('Лист2');
+			&xl.delSheet('Лист1_2');
+			&xl.delSheet('Лист2_2');
+			
+			if not vCommonFlag then
+				&xl.delSheet('ЛистПоток1');
+			end if;
+			if not vCorrecFlag then
+				&xl.delSheet('ЛистПотокКорр1');
+			end if;	
+			
+			&lp.xl_finish;
+			
+			p_info :='CANCEL';
+		end if;
+	end if;
+end;
+
+execute is
+begin	
+	::[DEFVALS].[SLIB].SaveRef(STDLIB.USERID, &METHOD$CLASS, &METHOD$SNAME, 'V_LEADER', V_LEADER%Id, 'USER');
+	::[DEFVALS].[SLIB].SaveRef(STDLIB.USERID, &METHOD$CLASS, &METHOD$SNAME, 'V_BUHG', V_BUHG%Id, 'USER');
+end;
+end;
+end;

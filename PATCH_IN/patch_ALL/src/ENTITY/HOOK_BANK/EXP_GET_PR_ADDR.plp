@@ -1,0 +1,2791 @@
+class HOOK_BANK;
+
+@generate_ansi_joins(true)
+@name('[ПСБ]. Получить строковое представление адреса')
+@tag('EXP_SWIFT')
+static method EXP_GET_PR_ADDR is
+dp3 number:=0;	--управлние debug_pipe
+
+v_ExpTransAddSwift boolean;
+v_ExpSearchTransId boolean;
+v_Short boolean;
+
+procedure Set_gTeg(p_Teg string(250) default null) is
+begin
+	::[HOOK_BANK].[EXP_RC_GET_CLSWF].gTeg:=p_Teg;
+end;
+
+function Get_gTeg return string(250) is
+begin
+	return ::[HOOK_BANK].[EXP_RC_GET_CLSWF].gTeg;
+end;
+
+function iif(p_v1 boolean, p_v2 varchar2(32767), p_v3 varchar2(32767)) return varchar2(32767) is
+begin
+	if p_v1 then
+		return p_v2;
+	else
+		return p_v3;
+	end if;
+end;
+
+function IsThisCountry
+(
+	p_ImpStr [STRING_250]
+) return [STRING_250] is
+begin
+	if length(p_ImpStr)=2 then
+		for (	select cntry(cntry%id)
+				in ::[COUNTRY]
+				where cntry.[ALFA_2]=p_ImpStr
+			) loop
+				p_ImpStr:=null;
+				exit;
+		end loop;
+	end if;
+	return p_ImpStr;
+end;
+
+-- Подмена элементов
+function SubElement
+(	p_c_5 string(1024)
+	,p_TypePlace number default 2
+) return string is
+	El string(100);
+	fl_lower boolean:=true;
+	ret_OutPlace string(2000);
+
+	lower_p_c_5 string(1024);
+	rzd string(32);
+	NumChrCity integer;
+	ChrCityAfter string(1);
+	ChrCityBefore string(1);
+begin
+	rzd := ' .,"''()-';
+	lower_p_c_5 := lower(p_c_5);
+	--проезд Коммунальный
+	if lower_p_c_5 = p_c_5 then
+		fl_lower:=true;
+	end if;
+	::[PSH_EXP_TRA].[PSH_L].dbg('.SubElement -> "'||p_c_5||'" fl_lower='||fl_lower||' p_TypePlace='||p_TypePlace,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+	if p_c_5 is not null then
+		if p_TypePlace in (1,3) then
+			if lower_p_c_5 like ('%область%') then		--область
+				El:='область';
+				ret_OutPlace:= 'reg.';
+			elsif lower_p_c_5 like ('%район области%') then	--район областb
+				El:='район области';
+				ret_OutPlace:= 'dist.';
+			elsif lower_p_c_5 like ('%район%') then			--район
+				El:='район';
+				ret_OutPlace:= 'area';
+			elsif lower_p_c_5 like ('%город%') then			--город
+				El:='город';
+				NumChrCity := instr(lower_p_c_5,'город');
+				ChrCityAfter := substr(lower_p_c_5,NumChrCity+length('город'),1);
+				ChrCityBefore := substr(lower_p_c_5,NumChrCity-1,1);
+				if	(NumChrCity=1 and ChrCityAfter is not null and instr(rzd,ChrCityAfter)=0) --Городовикова
+				or  (NumChrCity>1 and ChrCityAfter is not null and instr(rzd,ChrCityAfter)=0) --Новгородская
+				or  (NumChrCity>1 and ChrCityBefore is not null and instr(rzd,ChrCityBefore)>0) --Новый городок
+				then
+					ret_OutPlace:= 'город';
+				else
+					ret_OutPlace:= '';						--(не выводим)
+				end if;
+			elsif  lower_p_c_5 like ('%тауэр%')				--tower
+				or lower_p_c_5 like ('%башня%')				--башня
+				or lower_p_c_5 like ('%вышка%')				--вышка
+				or lower_p_c_5 like ('%колокольня%') then	--колокольня
+				El:='тауэр';
+				ret_OutPlace:= 'tower';
+			elsif lower_p_c_5 like ('%деревня%') then		--деревня
+				El:='деревня';
+				ret_OutPlace:= 'vill.';
+			elsif lower_p_c_5 like ('%поселок%') then		--поселок
+				El:='поселок';
+				ret_OutPlace:= 'vill.';
+			elsif lower_p_c_5 like ('%посёлок%') then		--посёлок
+				El:='посёлок';
+				ret_OutPlace:= 'vill.';
+			elsif lower_p_c_5 like ('%поселение%') then		--поселение
+				El:='поселение';
+				ret_OutPlace:= 'vill.';
+			elsif lower_p_c_5 like ('% село %') then		--село
+				El:='село';
+				ret_OutPlace:= 'vill.';
+			elsif lower_p_c_5 like ('%улица%') then			--улица
+				El:='улица';
+				ret_OutPlace:= 'str.';
+			elsif lower_p_c_5 like ('%проспект%') then		--проспект
+				El:='проспект';
+				ret_OutPlace:= 'ave.';
+			elsif lower_p_c_5 like ('%проезд%') then		--проезд
+				El:='проезд';
+				ret_OutPlace:= 'pass.';
+			elsif lower_p_c_5 like ('%переулок%') then		--переулок
+				El:='переулок';
+				ret_OutPlace:= 'land';
+			elsif lower_p_c_5 like ('%аллея%') then			--аллея
+				El:='аллея';
+				ret_OutPlace:= 'alley';
+			elsif lower_p_c_5 like ('%набережная%') then	--набережная
+				El:='набережная';
+				ret_OutPlace:= 'qy.';
+			elsif lower_p_c_5 like ('%площадь%') then		--площадь
+				El:='площадь';
+				ret_OutPlace:= 'sq.';
+			elsif lower_p_c_5 like ('%бульвар%') then		--бульвар
+				El:='бульвар';
+				ret_OutPlace:= 'blvd.';
+			elsif lower_p_c_5 like ('%шоссе%') then			--шоссе
+				El:='шоссе';
+				ret_OutPlace:= 'hwy';
+			elsif lower_p_c_5 like ('%дом%') then			--дом (не выводим)
+				El:='дом';
+				ret_OutPlace:= '';
+			elsif lower_p_c_5 like ('%корпус%') then		--корпус
+				El:='корпус';
+				ret_OutPlace:= 'build.';
+			elsif lower_p_c_5 like ('%строение%') then		--строение
+				El:='строение';
+				ret_OutPlace:= 'build.';
+			elsif lower_p_c_5 like ('%этаж%') then			--этаж ((!) ООО "РосТ" должно быть ООО "РосТ" fl.)
+				El:='этаж';
+				ret_OutPlace:= 'fl.';
+			elsif lower_p_c_5 like ('%квартира%') then		--квартира
+				El:='квартира';
+				ret_OutPlace:= 'apt.';
+			elsif lower_p_c_5 like ('%апартамент%') then	--аппартаменты
+				El:='апартамент';
+				ret_OutPlace:= 'apt.';
+			elsif lower_p_c_5 like ('%территория%') then	--территория
+				El:='территория';
+				ret_OutPlace:= 'ter.';
+			elsif lower_p_c_5 like ('%зона%') then			--зона
+				El:='зона';
+				ret_OutPlace:= 'area';
+			elsif lower_p_c_5 like ('%земля%') then			--земля
+				El:='земля';
+				ret_OutPlace:= 'land';
+			end if;
+			p_c_5:=::[RUNTIME].[STANDARD].replace(upper(p_c_5),upper(El),upper(ret_OutPlace));
+			::[PSH_EXP_TRA].[PSH_L].dbg('.SubElement - ret_OutPlace='||ret_OutPlace,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+			El=ret_OutPlace:=null;
+			if lower_p_c_5 like ('%region%') then		--область
+				El:='region';
+				ret_OutPlace:= 'reg.';
+			elsif lower_p_c_5 like ('%district%') then		--район области
+				El:='district';
+				ret_OutPlace:= 'dist.';
+			elsif lower_p_c_5 like ('%area%') then			--район
+				El:='area';
+				ret_OutPlace:= 'area';
+			elsif lower_p_c_5 like ('%tower%') then			--tower вышка, башня, колокольня
+				El:='tower';
+				ret_OutPlace:= 'tower';
+			elsif lower_p_c_5 like ('%village%') then		--деревня
+				El:='village';
+				ret_OutPlace:= 'vill.';
+			elsif lower_p_c_5 like ('%village%') then		--поселок
+				El:='village';
+				ret_OutPlace:= 'vill.';
+			elsif lower_p_c_5 like ('%street%') then		--улица
+				El:='street';
+				ret_OutPlace:= 'str.';
+			elsif lower_p_c_5 like ('%avenue%') then		--проспект
+				El:='avenue';
+				ret_OutPlace:= 'ave.';
+			elsif lower_p_c_5 like ('%lane%') then			--переулок
+				El:='lane';
+				ret_OutPlace:= 'ln.';
+			elsif lower_p_c_5 like ('%passage%') then		--проезд
+				El:='passage';
+				ret_OutPlace:= 'pass.';
+			elsif lower_p_c_5 like ('%alley%') then			--аллея
+				El:='alley';
+				ret_OutPlace:= 'alley';
+			elsif lower_p_c_5 like ('%quay%') then			--набережная
+				El:='quay';
+				ret_OutPlace:= 'qy.';
+			elsif lower_p_c_5 like ('%square%') then		--площадь
+				El:='square';
+				ret_OutPlace:= 'sq.';
+			elsif lower_p_c_5 like ('%boulevard%')then		--бульвар
+				El:='boulevard';
+				ret_OutPlace:= 'blvd.';
+			elsif lower_p_c_5 like ('%highway%') then		--шоссе
+				El:='highway';
+				ret_OutPlace:= 'hwy';
+			elsif lower_p_c_5 like ('%building%') then		--корпус или строение
+				El:='building';
+				ret_OutPlace:= 'build.';
+			elsif lower_p_c_5 like ('%floor%') then			--этаж
+				El:='floor';
+				ret_OutPlace:= 'fl.';
+			elsif lower_p_c_5 like ('%flat%') then			--квартира
+				El:='flat';
+				ret_OutPlace:= 'apt.';
+			elsif lower_p_c_5 like ('%apartment%')then		--аппартаменты
+				El:='apartment';
+				ret_OutPlace:= 'apt.';
+			elsif lower_p_c_5 like ('%territory%')then		--территория
+				El:='territory';
+				ret_OutPlace:= 'ter.';
+			elsif lower_p_c_5 like ('%area%') then			--зона
+				El:='area';
+				ret_OutPlace:= 'area';
+			elsif lower_p_c_5 like ('%land%') then			--земля
+				El:='land';
+				ret_OutPlace:= 'land';
+			end if;
+			p_c_5:=::[RUNTIME].[STANDARD].replace(upper(p_c_5),upper(El),upper(ret_OutPlace));
+
+			if not fl_lower then
+				p_c_5:=upper(p_c_5);
+			end if;
+			::[PSH_EXP_TRA].[PSH_L].dbg('.SubElement -<< '||p_c_5,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+			DelDublSpace(p_c_5);
+			return p_c_5;
+		elsif p_TypePlace in (2,4) then
+			-- 2 Адрес. Элемент. Наименование
+			-- 4 "Адрес. Элемент. Наименование" или "Адрес. Элемент. Сокращенное наименование"
+			if lower_p_c_5 like ('%область%') then		--область
+				ret_OutPlace:= 'region';
+			elsif lower_p_c_5 like ('%район области%') then	--район области
+				ret_OutPlace:= 'district';
+			elsif lower_p_c_5 like ('%район%') then			--район
+				ret_OutPlace:= 'area';
+			elsif lower_p_c_5 like ('%город%') then			--город (не выводим)
+				ret_OutPlace:= '';
+			elsif  lower_p_c_5 like ('%тауэр%')				--tower
+				or lower_p_c_5 like ('%вышка%')				--вышка
+				or lower_p_c_5 like ('%башня%')				--башня
+				or lower_p_c_5 like ('%колокольня%') then	--колокольня
+				ret_OutPlace:= 'tower';
+			elsif lower_p_c_5 like ('%деревня%') then		--деревня
+				ret_OutPlace:= 'village';
+			elsif lower_p_c_5 like ('%поселок%') then		--поселок
+				ret_OutPlace:= 'village';
+			elsif lower_p_c_5 like ('%посёлок%') then		--посёлок
+				ret_OutPlace:= 'village';
+			elsif lower_p_c_5 like ('%улица%') then			--улица
+				ret_OutPlace:= 'street';
+			elsif lower_p_c_5 like ('%проспект%') then		--проспект
+				ret_OutPlace:= 'avenue';
+			elsif lower_p_c_5 like ('%проезд%') then		--проезд
+				ret_OutPlace:= 'passage';
+			elsif lower_p_c_5 like ('%переулок%') then		--переулок
+				ret_OutPlace:= 'lane';
+			elsif lower_p_c_5 like ('%аллея%') then			--аллея
+				ret_OutPlace:= 'alley';
+			elsif lower_p_c_5 like ('%набережная%') then	--набережная
+				ret_OutPlace:= 'quay';
+			elsif lower_p_c_5 like ('%площадь%') then		--площадь
+				ret_OutPlace:= 'square';
+			elsif lower_p_c_5 like ('%бульвар%') then		--бульвар
+				ret_OutPlace:= 'boulevard';
+			elsif lower_p_c_5 like ('%шоссе%') then			--шоссе
+				ret_OutPlace:= 'highway';
+			elsif lower_p_c_5 like ('%дом%') then			--дом (не выводим)
+				ret_OutPlace:= '';
+			elsif lower_p_c_5 like ('%корпус%') then		--корпус
+				ret_OutPlace:= 'building';
+			elsif lower_p_c_5 like ('%строение%') then		--строение
+				ret_OutPlace:= 'building';
+			elsif lower_p_c_5 like ('%этаж%') then			--этаж
+				ret_OutPlace:= 'floor';
+			elsif lower_p_c_5 like ('%квартира%') then		--квартира
+				ret_OutPlace:= 'flat';
+			elsif lower_p_c_5 like ('%апартамент%') then	--квартира, аппартаменты
+				ret_OutPlace:= 'apartment';
+			elsif lower_p_c_5 like ('%территория%') then	--территория
+				ret_OutPlace:= 'territory';
+			elsif lower_p_c_5 like ('%зона%') then			--зона
+				ret_OutPlace:= 'area';
+			elsif lower_p_c_5 like ('%земля%') then			--земля
+				ret_OutPlace:= 'land';
+			end if;
+			p_c_5:=::[RUNTIME].[STANDARD].replace(upper(p_c_5),upper(El),upper(ret_OutPlace));
+
+			if not fl_lower then
+				p_c_5:=upper(p_c_5);
+			end if;
+			::[PSH_EXP_TRA].[PSH_L].dbg('.SubElement -< '||p_c_5,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+			DelDublSpace(p_c_5);
+			return p_c_5;
+		else
+			El=ret_OutPlace:=null;
+			if  lower_p_c_5 like ('%region % ')		--область
+				or lower_p_c_5 like ('%reg.%') then
+				ret_OutPlace		:='reg.';
+			elsif  lower_p_c_5 like ('%district % ')	--район области
+				or lower_p_c_5 like ('%dist.%') then
+				ret_OutPlace		:='dist.';
+			elsif  lower_p_c_5 like ('%area %') then	--район
+				ret_OutPlace		:='area';
+			elsif  lower_p_c_5 like ('%tower %') then	--tower вышка, башня, колокольня
+				ret_OutPlace		:='tower';
+			elsif  lower_p_c_5 like ('%village % ')		--деревня, поселок, посёлок
+				or lower_p_c_5 like ('%vill.%') then
+				ret_OutPlace		:='vill.';
+			elsif  lower_p_c_5 like ('%street % ')		--улица
+				or lower_p_c_5 like ('%str.%') then
+				ret_OutPlace		:='str.';
+			elsif  lower_p_c_5 like ('%avenue % ')		--проспект
+				or lower_p_c_5 like ('%ave.%') then
+				ret_OutPlace		:='ave.';
+			elsif  lower_p_c_5 like ('%passage % ')		--проезд
+				or lower_p_c_5 like ('%pass.%') then
+				ret_OutPlace		:='pass.';
+			elsif  lower_p_c_5 like ('%lane % ')		--переулок
+				or lower_p_c_5 like ('%ln.%') then
+				ret_OutPlace		:='ln.';
+			elsif  lower_p_c_5 like ('%alley %') then	--аллея
+				ret_OutPlace		:='alley';
+			elsif  lower_p_c_5 like ('%quay % ')		--набережная
+				or lower_p_c_5 like ('%qy.%') then
+				ret_OutPlace		:='qy.';
+			elsif  lower_p_c_5 like ('%square % ')		--площадь
+				or lower_p_c_5 like ('%sq.%') then
+				ret_OutPlace		:='sq.';
+			elsif  lower_p_c_5 like ('%boulevard % ')	--бульвар
+				or lower_p_c_5 like ('%blvd.%') then
+				ret_OutPlace		:='blvd.';
+			elsif  lower_p_c_5 like ('%highway % ')		--шоссе
+				or lower_p_c_5 like ('%hwy %') then
+				ret_OutPlace		:='hwy';
+			elsif  lower_p_c_5 like ('%building % ')	--корпус, строение
+				or lower_p_c_5 like ('%build.%') then
+				ret_OutPlace		:='build.';
+			elsif  lower_p_c_5 like ('%floor % ')		--этаж
+				or lower_p_c_5 like ('%fl.%') then
+				ret_OutPlace		:='fl.';
+			elsif  lower_p_c_5 like ('%flat % ')		--квартира
+				or lower_p_c_5 like ('%fl.%') then
+				ret_OutPlace		:='fl.';
+			elsif  lower_p_c_5 like ('%apartment % ')	--аппартаменты
+				or lower_p_c_5 like ('%apt.%') then
+				ret_OutPlace		:='apt.';
+			elsif  lower_p_c_5 like ('%territory % ')	--территория
+				or lower_p_c_5 like ('%ter.%') then
+				ret_OutPlace		:='ter.';
+			elsif  lower_p_c_5 like ('%area %') then	--зона
+				ret_OutPlace		:='area';
+			elsif  lower_p_c_5 like ('%land %') then	--земля
+				ret_OutPlace		:='land';
+			end if;
+		end if;
+	end if;
+	if not fl_lower then
+		ret_OutPlace:=upper(ret_OutPlace);
+	end if;
+	::[PSH_EXP_TRA].[PSH_L].dbg('.SubElement - < '||ret_OutPlace,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	DelDublSpace(ret_OutPlace);
+	return ret_OutPlace;
+end;
+
+public function transleterate
+/* Транслитерация строки*/
+(
+	p_str in out string(2000)
+		/*строка для транслитерации*/
+	,p_SubElementBool boolean default false
+		/*строка для транслитерации является субэлементом адреса*/
+	,p_TypePlace number default 2
+		/*какой субэлемент адреса передан:
+			- 1 Адрес. Элемент. "Сокращенное наименование"
+			- 2 Адрес. Элемент. "Наименование"
+			- 3 Адрес. Элемент. "Сокращенное наименование" или "Адрес. Элемент. Наименование"
+			- 4 Адрес. Элемент. "Наименование" или "Адрес. Элемент. Сокращенное наименование" */
+) 
+/* возвращаем транслитерированую строку по алгоритму Банка*/
+return	string(2000) is
+	ret_str string(2000);
+begin
+	if p_SubElementBool then
+		ret_str := SubElement(p_str,p_TypePlace);
+	else
+		ret_str := p_str;
+	end if;
+	--Согласовано с Банком
+	--(-) АБВГДЕЁЖ ЗИЙКЛМНОПРСТУФХ Ц Ч Ш Щ  ЪЫЬЭЮ Я №
+	--(-) ABVGDEEZHZIYKLMNOPRSTUFKHTSCHSHSCH Y EYUYAN
+	
+	--CFT-1297 25/06/2025
+	-- ...метод транслитерации кириллицы на латиницу необходим по ГОСТу 7.79-2000(Б)
+	-- АБВГДЕЁ Ж ЗИЙКЛМНОПРСТУФХЦ Ч Ш Щ  ЪЫЬЭЮ Я №
+	-- ABVGDEYOZHZIJKLMNOPRSTUFXCZCHSHSHH Y EYUYAN 
+	ret_str := upper(ret_str);
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'А','A');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Б','B');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'В','V');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Г','G');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Д','D');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Е','E');
+	
+  --ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Ё','E');  --CFT-1297
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Ё','YO'); --CFT-1297
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Ж','ZH');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'З','Z');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'И','I');
+	
+  --ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Й','Y'); --CFT-1297
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Й','J'); --CFT-1297
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'К','K');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Л','L');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'М','M');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Н','N');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'О','O');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'П','P');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Р','R');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'С','S');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Т','T');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'У','U');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Ф','F');
+	
+  --ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Х','KH'); --CFT-1297
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Х','X');  --CFT-1297
+	
+	
+  --ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Ц','CZ'); --'TS'); --CFT-1297 см.ниже
+	
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Ч','CH');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Ш','SH');
+	
+  --ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Щ','SCH'); --CFT-1297
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Щ','SHH'); --CFT-1297
+	
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Ъ','');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Ы','Y');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Ь','');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Э','E');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Ю','YU');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Я','YA');
+
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'№','N');
+	--ret_str := ::[RUNTIME].[STANDARD].translate(ret_str
+	--					,'АБВГДЕЁЗИЙКЛМНОПРСТУФЫЭ'
+	--					,'ABVGDEEZIYKLMNOPRSTUFYE'
+	--					);
+
+	--CFT-1297
+	-- Просьба обратить внимание на транслитерацию <Ц> - <Ц>
+	--  передается либо латинской <C>, либо сочетанием <CZ>. 
+	--  Рекомендуется употреблять <C> перед буквами I, E, Y, J, а в остальных случаях - <CZ>.
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'ЦI','CI');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'ЦE','CE');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'ЦY','CY');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'ЦJ','CJ');
+	ret_str := ::[RUNTIME].[STANDARD].replace(ret_str,'Ц', 'CZ');
+
+	if trim(ret_str)='G MOSKVA' then
+		ret_str:=::[RUNTIME].[STANDARD].replace(ret_str,'G MOSKVA','MOSCOW');
+	elsif trim(ret_str)='MOSKVA' then
+		ret_str:=::[RUNTIME].[STANDARD].replace(ret_str,'MOSKVA','MOSCOW');
+	--Башкиров В.Г. 14.10.2024 CITY OF MOSCOW -> MOSCOW
+	elsif trim(ret_str)='CITY OF MOSCOW' then
+		ret_str:=::[RUNTIME].[STANDARD].replace(ret_str,'CITY OF MOSCOW','MOSCOW');
+	end if;
+	
+	p_str:=ret_str;
+	::[PSH_EXP_TRA].[PSH_L].dbg('.transleterate -< '||ret_str,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	return ret_str;
+end;
+
+function Translet(p_WordSwift in string(32767)) return string(32767) is
+ret_val string(32767);
+begin
+	ret_val := p_WordSwift;
+	transleterate(ret_val);
+	return ret_val;
+end;
+
+public procedure DelDublSpace(
+/*удаление пробелов,сепараторов-разделителей идущих друг за другом*/
+	p_msg in out string(32767)
+		/*строка из которой удаляются дубли сепараторов-разделителей*/
+	,p_separate string(10) default ' '
+		/*символ сепаратора-разделителя. Пробел-по умочанию*/
+) is
+OldL number;
+begin
+	OldL:=length(p_msg)+1;
+	while OldL<>length(p_msg) loop
+		OldL:=length(p_msg);
+		p_msg:=::[RUNTIME].[STANDARD].replace(p_msg,p_separate||p_separate,p_separate);
+	end loop;
+end;
+
+function GetPeoplePlace
+(	p_Ref ref [PEOPLE_PLACE]
+	, p_TypePlace number default 2
+)
+return string(100) is
+TrKindKladr integer;
+et_ref ref [PSH_EXP_TRANS]; -- updated CHANGE_QUALIFIER EXP_TRANS->PSH_EXP_TRANS 08/10/25
+c_5 string(1024);
+ret_val string(100);
+begin
+	if p_ref is not null then
+		if v_ExpSearchTransId then
+			for (select pp(  pp.[TR_SNAME] : C_TR_SNAME
+							,pp.[TR_NAME] : C_TR_NAME
+							,pp%id : C_ID
+			) in ::[PSH_EXP_TRANS] where pp.[TR_ID]=p_ref%id and pp.[TR_CLASS]='PEOPLE_PLACE') loop -- updated CHANGE_QUALIFIER EXP_TRANS->PSH_EXP_TRANS 08/10/25
+				et_ref:=pp.C_ID;
+				if p_TypePlace=1 then
+					ret_val:=pp.C_TR_SNAME;
+				elsif p_TypePlace=2 then
+					ret_val:=pp.C_TR_NAME;
+				elsif p_TypePlace=3 then
+					ret_val:=nvl(pp.C_TR_SNAME,pp.C_TR_NAME);
+				elsif p_TypePlace=4 then
+					ret_val:=nvl(pp.C_TR_NAME ,pp.C_TR_SNAME);
+				end if;
+				exit;
+			end loop;
+		end if;
+		if ret_val is null then
+			TrKindKladr:=p_ref.[KLADR];
+			if TrKindKladr is not null then
+				for (select pp(  pp.[TR_SNAME] : C_TR_SNAME
+								,pp.[TR_NAME] : C_TR_NAME
+								,pp%id : C_ID
+				) in ::[PSH_EXP_TRANS] where pp.[TR_KIND_KLADR]=TrKindKladr and pp.[TR_CLASS]='PEOPLE_PLACE') loop -- updated CHANGE_QUALIFIER EXP_TRANS->PSH_EXP_TRANS 08/10/25
+					et_ref:=pp.C_ID;
+					if p_TypePlace=1 then
+						ret_val:=pp.C_TR_SNAME;
+					elsif p_TypePlace=2 then
+						ret_val:=pp.C_TR_NAME;
+					elsif p_TypePlace=3 then
+						ret_val:=nvl(pp.C_TR_SNAME,pp.C_TR_NAME);
+					elsif p_TypePlace=4 then
+						ret_val:=nvl(pp.C_TR_NAME ,pp.C_TR_SNAME);
+					end if;
+					exit;
+				end loop;
+			end if;
+		end if;
+	end if;
+
+	if et_ref is not null then
+		c_5:=lower(::[PSH_EXP_TRANS].[PSH_L].GetNameAdrObjName(et_ref)); -- updated CHANGE_QUALIFIER EXP_TRANS->PSH_EXP_TRANS 08/10/25 -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+		ret_val:=SubElement(C_5,p_TypePlace);
+	end if;
+
+	::[PSH_EXP_TRA].[PSH_L].dbg('.GetPeoplePlace -> '||ret_val,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	return ret_val;
+end;
+
+public function RuCharInStr
+/*Строка только из символов русского алфавита?*/
+(
+	p_str string(1024)
+		/*строка для проверки на русские сиволы*/
+)
+/*Возвращает логику: Да - строка только из русских символов, Нет - в остальных случаях*/
+return boolean is
+Alf string(33):='АБВГДЕЁЖЗИйКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ';
+L number;
+begin
+	p_str:=upper(p_str);
+	L:=nvl(length(p_str),0);
+	for i in 1..L loop
+		if instr(Alf,substr(p_str,i,1))>0 then
+			return true;
+		end if;
+	end loop;
+	return false;
+end;
+
+public function GetTrans
+/*получить перевод строки*/
+(	
+	p_AOGUID [STRING_40] default null
+		/*GUID-GUID адресного объекта*/
+	, p_Id reference default null
+		/*ID строки справочника "[ПСБ].Адрес.Перевод элементов"*/
+	, p_str string(1024) default null
+		/*строка для перевода*/
+	, p_TypeTrans number default 1
+		/*тип перевода адресного объекта:
+			- 1 -Сокращенное наименование
+			- 2 -Наименование
+			- 3 -Сокр. или Наим.
+			- 4 -Наим. или Сокр.
+			- 5 -Сокр.наим.об. Сокр. или Наим.
+			--6 -Полн.наим.об.Наим.или Сокр.
+			--7 -Полн.наим.об.Сокр.или Наим
+			--8 -Сокр. или Наим. Полн.наим.об.*/
+	, p_AOID [STRING_40] default null
+		/*ID адресного объекта*/
+	) 
+	/*Возвращаем перевод строки с учетом типа первода*/
+	return string(1024) is
+et_id ref [PSH_EXP_TRANS]; -- updated CHANGE_QUALIFIER EXP_TRANS->PSH_EXP_TRANS 08/10/25
+oEt [PSH_EXP_TRANS]; -- updated CHANGE_QUALIFIER EXP_TRANS->PSH_EXP_TRANS 08/10/25
+msg string(2000);
+tmpPart1 string(1024);
+tmpPart2 string(1024);
+
+ret_val string(1024);
+
+begin
+	v_ExpSearchTransId:=coalesce(v_ExpSearchTransId,::[FP_TUNE].[LIB].get_bool_value('EXP_SEARCH_TRANS_ID', null, '0'),false);
+	if p_Id is not null and v_ExpSearchTransId then
+		for (select et(et%id : C_ID) in ::[PSH_EXP_TRANS] where et.[TR_ID]=p_Id) loop --et.%id=p_Id) loop --Башкиров В.Г. 27.05.2025 -- updated CHANGE_QUALIFIER EXP_TRANS->PSH_EXP_TRANS 08/10/25
+			et_id:=et.C_ID;
+			oEt:=et_id;
+			msg:='Найдено по ID id='||et.C_ID;
+			exit;
+		end loop;
+	end if;
+	if et_id is null then
+		if et_id is null and p_AOGUID is not null and p_AOID is not null then
+			for (select et(et%id : C_ID) in ::[PSH_EXP_TRANS] where et.[TR_AOGUID]=p_AOGUID and et.[TR_AOID]=p_AOID) loop -- updated CHANGE_QUALIFIER EXP_TRANS->PSH_EXP_TRANS 08/10/25
+				et_id:=et.C_ID;
+				oEt:=et_id;
+				msg:='Найдено по AOGUID('||p_AOGUID||') и AOID('||p_AOID||') id='||et.C_ID;
+				exit;
+			end loop;
+		end if;
+		if et_id is null and p_AOGUID is not null then
+			for (select et(et%id : C_ID, et.[TR_NAME] : C_TR_NAME) in ::[PSH_EXP_TRANS] where et.[TR_AOGUID]=p_AOGUID order by et.[TR_NAME], et%id desc) loop -- updated CHANGE_QUALIFIER EXP_TRANS->PSH_EXP_TRANS 08/10/25
+				et_id:=et.C_ID;
+				oEt:=et_id;
+				msg:='Найдено по AOGUID('||p_AOGUID||') "'||et.C_TR_NAME||'" id='||et.C_ID;
+				exit;
+			end loop;
+		end if;
+	end if;
+
+	if et_id is not null then
+		if p_TypeTrans=1 then
+			ret_val:=oEt.[TR_SNAME];
+			msg:='Сокр.наим.'||msg;	--Сокр.наим.
+		elsif p_TypeTrans=2 then
+			ret_val:=oEt.[TR_NAME];
+			msg:='Наим.'||msg;		--Наим.
+		--Сокр.или Наим.
+		elsif p_TypeTrans=3 then
+			ret_val:=nvl(oEt.[TR_SNAME],oEt.[TR_NAME]);
+			msg:='Сокр.или Наим.'||msg;
+		--Наим.или Сокр.
+		elsif p_TypeTrans=4 then
+			ret_val:=nvl(oEt.[TR_NAME] ,oEt.[TR_SNAME]);
+			msg:='Наим.или Сокр.'||msg;
+		--Сокр.наим.об.Сокр.или Наим.
+		elsif p_TypeTrans=5 then
+			tmpPart1:=upper(nvl(oEt.[TR_KIND_KLADR_SN],oEt.[TR_KIND_KLADR_NA]));	--Сокр.наим.об.
+			case tmpPart1 of
+				:upper('AO'       ): tmpPart1 := 'AR';		-- Autonomous Region
+				:upper('Aobl'     ): tmpPart1 := 'AR';		-- Autonomous region
+				:upper('Chuvashia'): tmpPart1 := 'REP.OF';	-- Chuvash Republic
+				:upper('Rep.'     ): tmpPart1 := 'REP.OF';	-- Republic
+				:upper('district' ): tmpPart1 := 'DIST.';	-- District
+				:upper('g'        ): tmpPart1 := 'CITY';	-- City
+				:upper('g.'       ): tmpPart1 := 'CITY';	-- City
+				:upper('p'        ): tmpPart1 := 'VILL.';	-- Посёлок village
+				:upper('p.'       ): tmpPart1 := 'VILL.';	-- Посёлок village
+				:upper('reg'      ): tmpPart1 := 'REG.';	-- Area --Omsk Region
+				:upper('the edge' ): tmpPart1 := 'EDGE';	-- Edge --Altai Territory --Primorskiy District --Krasnoyarsk Region
+			end;
+			tmpPart2:=upper(nvl(oEt.[TR_SNAME],oEt.[TR_NAME]));						--Сокр.или Наим.
+			if instr(tmpPart2,rtrim(tmpPart1,'.'))=1 or instr(tmpPart2,' '||rtrim(tmpPart1,'.'))>1 then
+				tmpPart1:=null;
+			end if;
+			ret_val:=trim(tmpPart1||' '||tmpPart2);
+			msg:='Сокр.наим.об.Сокр.или Наим.'||msg;
+			::[PSH_EXP_TRA].[PSH_L].dbg('.GetTrans -  Сокр.наим.об.:"'||tmpPart1||'" Сокр.или Наим.:"'||tmpPart2||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+		--Полн.наим.об.Наим.или Сокр.
+		elsif p_TypeTrans=6 then
+			tmpPart1:=upper(nvl(oEt.[TR_KIND_KLADR_NA],oEt.[TR_KIND_KLADR_SN]));	--Полн.наим.об.
+			tmpPart2:=upper(nvl(oEt.[TR_NAME],oEt.[TR_SNAME]));						--Наим.или Сокр.
+			if instr(tmpPart2,rtrim(tmpPart1,'.'))=1 or instr(tmpPart2,' '||rtrim(tmpPart1,'.'))>1 then
+				tmpPart1:=null;
+			end if;
+			ret_val:=trim(tmpPart1||' '||tmpPart2);
+			msg:='Полн.наим.об.Наим.или Сокр.'||msg;
+		--Полн.наим.об.Сокр.или Наим
+		elsif p_TypeTrans=7 then
+			tmpPart1:=upper(nvl(oEt.[TR_KIND_KLADR_NA],oEt.[TR_KIND_KLADR_SN]));	--Полн.наим.об.
+			tmpPart2:=upper(nvl(oEt.[TR_SNAME],oEt.[TR_NAME]));						--Сокр.или Наим
+			if instr(tmpPart2,rtrim(tmpPart1,'.'))=1 or instr(tmpPart2,' '||rtrim(tmpPart1,'.'))>1 then
+				tmpPart1:=null;
+			end if;
+			ret_val:=trim(tmpPart1||' '||tmpPart2);
+			msg:='Полн.наим.об.Наим.или Сокр.'||msg;
+		--Сокр. или Наим. Полн.наим.об.
+		elsif p_TypeTrans=8 then
+			tmpPart1:=upper(nvl(oEt.[TR_SNAME],oEt.[TR_NAME]));						--Сокр. или Наим.
+			tmpPart2:=upper(nvl(oEt.[TR_KIND_KLADR_NA],oEt.[TR_KIND_KLADR_SN]));	--Полн.наим.об.
+			if instr(tmpPart1,rtrim(tmpPart2,'.'))=1 or instr(tmpPart1,' '||rtrim(tmpPart2,'.'))>1 then
+				tmpPart2:=null;
+			end if;
+			ret_val:=trim(tmpPart1||' '||tmpPart2);
+			msg:='Сокр. или Наим. Полн.наим.об.'||msg;
+		end if;
+	end if;
+	::[PSH_EXP_TRA].[PSH_L].dbg('.GetTrans -  '||p_TypeTrans||'-'||msg||' "'||ret_val||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	
+	if ret_val is null and p_str is not null then
+		ret_val:=upper(Transleterate(p_str));
+		msg:=substr(msg||'Transleterate',1,msg%size);
+		::[PSH_EXP_TRA].[PSH_L].dbg('.GetTrans -  (1)ret_val="'||ret_val||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	end if;
+
+	ret_val:=upper(substr(ret_val,1,ret_val%size));
+	ret_val:=SubElement(ret_val,1);
+	::[PSH_EXP_TRA].[PSH_L].dbg('.GetTrans -  (2)ret_val="'||ret_val||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+	if RuCharinstr(ret_val) then
+		ret_val:=Transleterate(ret_val);
+		::[PSH_EXP_TRA].[PSH_L].dbg('.GetTrans -  (3)ret_val="'||ret_val||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	end if;
+
+	ret_val:=::[RUNTIME].[STANDARD].replace(ret_val,'. ','.'); --REP. TATARSTAN -> REP.TATARSTAN
+	ret_val:=::[RUNTIME].[STANDARD].replace(ret_val,', ',',');
+	::[PSH_EXP_TRA].[PSH_L].dbg('.GetTrans -< '||p_TypeTrans||'-'||msg||' "'||ret_val||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	return ret_val;
+end;
+
+public function wbn
+/*Получить слово из строки*/
+(
+	p_sss in out varchar(32000)
+		/*входящая строка*/
+	,p_rzd varchar(200)
+		/*символ-разделитель слов*/
+	,p_num integer
+		/*номер требуемого слова*/
+	,p_delFirstWord boolean default false
+		/*после поиска требуемого слова удалять предыдущие слова из входящей строки, в т.ч. и требуемое слово*/
+)
+/*возвращает слово*/
+return varchar(32000)
+is
+	j integer;
+	i integer;
+	n integer;
+	ss varchar(32000);
+	ret_val varchar(32000);
+begin
+	ss := p_sss;
+	ret_val := '';
+	j := 1;
+	n := 0;
+	i := instr(p_sss, p_rzd);
+	while ((i > 0) And (p_num > n))
+	loop
+		n := n + 1;
+		if (p_num = n) Then
+			ret_val := substr(p_sss, j, i - j);
+			
+			if p_delFirstWord and p_num=1 then
+					p_sss:=substr(p_sss, j+length(ret_val)+length(p_rzd));
+			end if;
+			return ret_val;
+		else
+			j := i + length(p_rzd);
+			ss := substr(p_sss, j, length(p_sss) - j + 1);
+			i := instr(ss, p_rzd);
+			if (i > 0) then
+				i := i + (length(p_sss) - length(ss));
+			end if;
+		end If;
+	end loop;
+	
+	If (n >= p_num - 1) Then
+		ret_val := ss;
+	end if;
+	
+	if p_delFirstWord and p_num=1 then
+		p_sss:=substr(p_sss, j+length(ret_val)+length(p_rzd));
+	end if;
+	return ret_val;
+End;
+
+function GetEstStrucStatus(p_essRef ref [EST_STRUC_STATUS]) return string(100) is
+oEssStrucStaus [EST_STRUC_STATUS]:=p_essRef;
+ret_EstType string(100);
+begin
+
+	--Владение       Ownership        Ownrsh.
+	--Дом            House            Hse.
+	--Домовладение   Home ownership   HomeOwnrsh.
+	--Гараж          Garage           Grg.
+	--Здание         Building         Bld.
+	--Шахта          Mine             Mine
+	--Строение       Building         Bld.
+	--Сооружение     Structure        Struct.
+	--Литер          Liter            Ltr.
+
+	if not v_Short then
+		if oEssStrucStaus.[NAME]='Владение' then
+			ret_EstType:='Ownership';
+		elsif oEssStrucStaus.[NAME]='Домовладение' then
+			ret_EstType:='Home ownership';
+		elsif oEssStrucStaus.[NAME]='Гараж' then
+			ret_EstType:='Garage';
+		elsif oEssStrucStaus.[NAME]='Здание' then
+			ret_EstType:='Building';
+		elsif oEssStrucStaus.[NAME]='Шахта' then
+			ret_EstType:='Mine';
+		elsif oEssStrucStaus.[NAME]='Не определено' then
+			ret_EstType:='';
+		elsif oEssStrucStaus.[NAME]='Строение' then
+			ret_EstType:='Building';
+		elsif oEssStrucStaus.[NAME]='Сооружение' then
+			ret_EstType:='Building';
+		elsif oEssStrucStaus.[NAME]='Литер' then
+			ret_EstType:='Liter';
+		elsif oEssStrucStaus.[NAME]='Литера' then
+			ret_EstType:='Liter';
+		end if;
+	else
+		if oEssStrucStaus.[NAME]='Владение' then
+			ret_EstType:='Ownrsh.';
+		elsif oEssStrucStaus.[NAME]='Домовладение' then
+			ret_EstType:='HomeOwnrsh.';
+		elsif oEssStrucStaus.[NAME]='Гараж' then
+			ret_EstType:='Grg.';
+		elsif oEssStrucStaus.[NAME]='Здание' then
+			ret_EstType:='Bld.';
+		elsif oEssStrucStaus.[NAME]='Шахта' then
+			ret_EstType:='Mine';
+		elsif oEssStrucStaus.[NAME]='Не определено' then
+			ret_EstType:='';
+		elsif oEssStrucStaus.[NAME]='Строение' then
+			ret_EstType:='Build.';
+		elsif oEssStrucStaus.[NAME]='Сооружение' then
+			ret_EstType:='Build.';
+		elsif oEssStrucStaus.[NAME]='Литер' then
+			ret_EstType:='Ltr.';
+		elsif oEssStrucStaus.[NAME]='Литера' then
+			ret_EstType:='Ltr.';
+		end if;
+	end if;
+	return ret_EstType;
+end;
+
+public function ReplEngWordShortOrFull
+/* Замена в переданной строке слов на английские(или русские) в сокращенном виде или полном*/
+(
+	p_WordSwift in string(250),
+	/*исходная строка*/
+	p_RusStr string(250),
+	/*фраза на русском*/
+	p_EngStr string(250),
+	/*фраза на английском*/
+	p_EngStrv_Short string(250),
+	/*возвращать в сокращенном или полном формате*/
+	p_Sprtr string(1) default '',
+	/*символ-разделитель*/
+	p_SeekEngStr boolean default false,
+	/*исходная строка с английским или русским*/
+	p_AddSprtr boolean default true --25.06.2025
+	/*добавлять символ-разделитель*/
+	)
+	/*возвращаемая строка с замененными фразами*/
+return string(250) is
+	ret_val string(250);
+begin
+	v_Short:=coalesce(v_Short,::[FP_TUNE].[LIB].get_bool_value('EXP_SHOR_ENG_WORD', null, '0'),false);
+	ret_val:=p_WordSwift;
+	if v_Short then
+		ret_val:=::[RUNTIME].[STANDARD].replace(p_WordSwift,
+			iif(p_SeekEngStr,p_EngStr,p_RusStr)
+			,p_EngStrv_Short||iif(p_AddSprtr,p_Sprtr,'')
+			);
+		--::[PSH_EXP_TRA].[PSH_L].dbg('.ReplEngWordShortOrFull -1- ret_val="'||ret_val||'"' -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+		--	||' в исх.строке "'||p_WordSwift||'"'
+		--	||' меняем:'       ||iif(p_SeekEngStr,p_EngStr,p_RusStr)
+		--	||' на:'           ||p_EngStrv_Short||iif(p_AddSprtr,p_Sprtr,'')
+		--	,dp3);
+	else
+		ret_val:=' '||::[RUNTIME].[STANDARD].replace(p_WordSwift,iif(p_SeekEngStr,p_EngStr,p_RusStr),p_EngStr);
+		DelDublSpace(ret_val);
+		--::[PSH_EXP_TRA].[PSH_L].dbg('.ReplEngWordShortOrFull -2- ret_val="'||ret_val||'"',dp3); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	end if;
+	if p_Sprtr is not null and substr(ret_val,length(ret_val))=p_Sprtr then
+		ret_val:=rtrim(ret_val,p_Sprtr);
+	end if;
+	ret_val:=ret_val||iif(p_AddSprtr,p_Sprtr,'');
+	--::[PSH_EXP_TRA].[PSH_L].dbg('.ReplEngWordShortOrFull -<- ret_val="'||ret_val||'"',dp3); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	return ret_val;
+end;
+
+procedure ReplEngWordStreet(
+	p_WordSwift in out string(250)
+	, p_flGerion boolean default true
+	, p_Sprtr string(1) default ''
+	, p_SeekEngStr boolean default false
+) is
+AbrCity string(512);
+flCity boolean:=false;
+begin
+	::[PSH_EXP_TRA].[PSH_L].dbg('.ReplEngWordStreet ->- p_WordSwift='||p_WordSwift,dp3); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	p_WordSwift:=upper(p_WordSwift);
+
+	AbrCity:=wbn(p_WordSwift,' ',1);
+	if substr(AbrCity,1,1) in ('Г','G') then
+		::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||TB$||'AbrCity->'||AbrCity,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	end if;
+	if AbrCity='ГОРОД.' then
+		p_WordSwift:=substr(p_WordSwift,7);
+		flCity:=true;
+	elsif AbrCity='ГОРОД' then
+		p_WordSwift:=substr(p_WordSwift,6);
+		flCity:=true;
+	elsif AbrCity='ГОР.' then
+		p_WordSwift:=substr(p_WordSwift,5);
+		flCity:=true;
+	elsif AbrCity='ГОР' then
+		p_WordSwift:=substr(p_WordSwift,4);
+		flCity:=true;
+	elsif AbrCity='Г.' then
+		p_WordSwift:=substr(p_WordSwift,3);
+		flCity:=true;
+	elsif AbrCity='Г' then
+		p_WordSwift:=substr(p_WordSwift,2);
+		flCity:=true;
+	elsif AbrCity='G.' then
+		p_WordSwift:=substr(p_WordSwift,3);
+		flCity:=true;
+	elsif AbrCity='G' then
+		p_WordSwift:=substr(p_WordSwift,2);
+		flCity:=true;
+	end if;
+	if not  flCity then
+		AbrCity:=wbn(p_WordSwift,'.',1);
+		if AbrCity='ГОРОД.' then
+			p_WordSwift:=substr(p_WordSwift,7);
+			flCity:=true;
+		elsif AbrCity='ГОР.' then
+			p_WordSwift:=substr(p_WordSwift,5);
+			flCity:=true;
+		elsif AbrCity='Г.' then
+			p_WordSwift:=substr(p_WordSwift,3);
+			flCity:=true;
+		elsif AbrCity='G.' then
+			p_WordSwift:=substr(p_WordSwift,3);
+			flCity:=true;
+		end if;
+	end if;
+	::[PSH_EXP_TRA].[PSH_L].dbg('.ReplEngWordStreet -1- p_WordSwift='||p_WordSwift,dp3); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	
+	if flCity and p_flGerion and  not (instr(p_WordSwift,' REG')>0 or instr(p_WordSwift,'REG ')>0 or instr(p_WordSwift,'REGION')>0) then
+		p_WordSwift:=p_WordSwift||' REG';
+		::[PSH_EXP_TRA].[PSH_L].dbg('.ReplEngWordStreet -2- p_WordSwift='||p_WordSwift,dp3); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	end if;
+
+	if substr(trim(p_WordSwift),1,3)='УЛ ' then
+		p_WordSwift:=ReplEngWordShortOrFull(p_WordSwift,'УЛ '    ,'STREET.',' STR.',p_Sprtr,p_SeekEngStr);
+		::[PSH_EXP_TRA].[PSH_L].dbg('.ReplEngWordStreet -3- p_WordSwift='||p_WordSwift,dp3); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	end if;
+
+	if length(trim(p_WordSwift))>=3 then
+		if substr(trim(p_WordSwift),-3,3)=' УЛ' then
+		  --Ошибка ДМИТРИЯ УЛЬЯНОВА УЛ -> ДМИТРИЯ STR.ЬЯНОВА STR.
+		  --p_WordSwift:=ReplEngWordShortOrFull(p_WordSwift,' УЛ','STREET.',' STR.',p_Sprtr,p_SeekEngStr);
+			
+			p_WordSwift:=trim(p_WordSwift);
+			v_Short:=coalesce(v_Short,::[FP_TUNE].[LIB].get_bool_value('EXP_SHOR_ENG_WORD', null, '0'),false);
+			p_WordSwift:=substr(p_WordSwift,1,length(p_WordSwift)-3)||iif(v_Short,' STR.','STREET');
+			::[PSH_EXP_TRA].[PSH_L].dbg('.ReplEngWordStreet -4- p_WordSwift='||p_WordSwift,dp3); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+		end if;
+	end if;
+
+	p_WordSwift:=::[PSH_EXP_TRA].[PSH_L].ReplEngWordDic(3,p_WordSwift,p_Sprtr,p_SeekEngStr); -- регион/район/город(3) -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	p_WordSwift:=::[PSH_EXP_TRA].[PSH_L].ReplEngWordDic(0,p_WordSwift,p_Sprtr,p_SeekEngStr); -- улица/ЭПС/Нас.Пункт(0) -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	::[PSH_EXP_TRA].[PSH_L].dbg('.ReplEngWordStreet -5- p_WordSwift='||p_WordSwift,dp3); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+	p_WordSwift:=SubElement(p_WordSwift,3);
+	
+	if not v_Short then
+		p_WordSwift:=::[RUNTIME].[STANDARD].replace(p_WordSwift,' ');
+	end if;
+	p_WordSwift := trim(p_WordSwift);
+	::[PSH_EXP_TRA].[PSH_L].dbg('.ReplEngWordStreet -<- p_WordSwift='||p_WordSwift,dp3); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+end;
+
+function ReplEngWord(
+	p_WordSwift in string(250)
+	, p_Sprtr string(1) default ''
+	, p_SeekEngStr boolean default false
+	) return string(250) is
+ret_WordSwift in string(250);
+begin
+	ret_WordSwift:=upper(p_WordSwift);
+	p_WordSwift:=::[PSH_EXP_TRA].[PSH_L].ReplEngWordDic(4,p_WordSwift,p_Sprtr,p_SeekEngStr); -- прочее(4) -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	p_WordSwift:=::[PSH_EXP_TRA].[PSH_L].ReplEngWordDic(2,p_WordSwift,p_Sprtr,p_SeekEngStr); -- квартира/офис(2) -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	p_WordSwift:=::[PSH_EXP_TRA].[PSH_L].ReplEngWordDic(1,p_WordSwift,p_Sprtr,p_SeekEngStr); -- корпус(1) -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	p_WordSwift:=::[PSH_EXP_TRA].[PSH_L].ReplEngWordDic(0,p_WordSwift,p_Sprtr,p_SeekEngStr); -- улица/ЭПС/Нас.Пункт(0) -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	p_WordSwift:=::[PSH_EXP_TRA].[PSH_L].ReplEngWordDic(3,p_WordSwift,p_Sprtr,p_SeekEngStr); -- регион/район/город(3) -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+	if not v_Short then
+		p_WordSwift:=::[RUNTIME].[STANDARD].replace(p_WordSwift,' ');
+	end if;
+	if p_Sprtr is not null and substr(p_WordSwift,length(p_WordSwift))=p_Sprtr then
+		p_WordSwift:=::[RUNTIME].[STANDARD].replace(p_WordSwift,'./','/');
+		p_WordSwift:=rtrim(p_WordSwift,p_Sprtr);
+	end if;
+	ret_WordSwift:=p_WordSwift||p_Sprtr;
+	return ret_WordSwift;
+end;
+
+function IsThisCountry
+(
+	p_ImpStr [STRING_250]
+	, p_rzd string(1)
+	, p_Tag number
+	, p_cnt_tag number default null
+	, p_country in out string(2)
+) return string(2000) is
+ret_val string(2000);
+begin
+	ret_val:=trim(wbn(p_ImpStr, p_rzd, p_Tag));
+	if p_cnt_tag is null then
+		p_cnt_tag:=length(p_ImpStr)-length(::[RUNTIME].[STANDARD].replace(p_ImpStr,','))+1;
+	end if;
+	if length(ret_val)=2 and ret_val=trim(wbn(p_ImpStr, p_rzd, p_cnt_tag)) then
+		for cntry in ::[COUNTRY] where cntry.[ALFA_2]=ret_val loop
+			p_Country:=ret_val;
+			ret_val:=null;
+			exit;
+		end loop;
+	end if;
+	return ret_val;
+end;
+
+function GetNameWithKind(p_AO ref [ADDRESS_OBJ]) return [STRING_250] is
+ret_NameWithKind [STRING_250];	
+oAO [ADDRESS_OBJ];
+begin
+	if p_AO is not null then
+		oAO:=p_AO;
+		ret_NameWithKind:=iif(oAO.[KIND].[TO_END],'',oAO.[KIND].[NAME]||' ')
+		||oAO.[NAME]
+		||iif(oAO.[KIND].[TO_END],' '||oAO.[KIND].[NAME],'');
+	end if;
+	return ret_NameWithKind;
+end;
+
+procedure CityFederal(p_StrSwift in out string(250), p_StrCity string(250)) is
+begin
+	p_StrSwift:=::[RUNTIME].[STANDARD].replace(p_StrSwift,p_StrCity||' CITY',p_StrCity);
+	p_StrSwift:=::[RUNTIME].[STANDARD].replace(p_StrSwift,'CITY OF '||p_StrCity,p_StrCity);			--Башкиров В.Г. 14.10.2024 CITY OF MOSCOW -> MOSCOW
+	p_StrSwift:=::[RUNTIME].[STANDARD].replace(p_StrSwift,'CITY '||p_StrCity,p_StrCity);
+	p_StrSwift:=::[RUNTIME].[STANDARD].replace(p_StrSwift,'REG '||p_StrCity,p_StrCity||' REG');
+	p_StrSwift:=::[RUNTIME].[STANDARD].replace(p_StrSwift,'REG.'||p_StrCity,p_StrCity||' REG');
+	p_StrSwift:=::[RUNTIME].[STANDARD].replace(p_StrSwift,p_StrCity||','||p_StrCity||' REG',p_StrCity);
+	if instr(p_StrSwift,p_StrCity||'.')>0 then
+		if instr(p_StrSwift,',G '||p_StrCity)>0 then
+			p_StrSwift:=::[RUNTIME].[STANDARD].replace(p_StrSwift,',G '||p_StrCity);
+		end if;
+	else
+		if instr(p_StrSwift,',G '||p_StrCity)>0 then
+			p_StrSwift:=::[RUNTIME].[STANDARD].replace(p_StrSwift,',G '||p_StrCity,p_StrCity);
+		end if;
+	end if;
+	DelDublSpace(p_StrSwift,' ');
+	::[PSH_EXP_TRA].[PSH_L].dbg('.СityFederal -- p_StrSwift='||p_StrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+end;
+EXP_GET_PR_ADDR (
+	@name('Адрес')   P_ADDR in [PERSONAL_ADDRESS],
+	@name('Элемент') P_TEG  in [STRING_50]        default null
+) return [STRING_250] is
+
+execute is
+ClRef ref [CLIENT];
+StrParentClass string(32);
+StrExpSwift string(1024);
+
+nObj number;
+nWord string(250);
+nWordSwift string(250);
+nEpsWordSwift string(250);
+tmpWordSwift string(250);
+tmp2WordSwift string(250);
+tmpWordSwiftArea string(250);
+ret_StrSwift string(250);
+tmpStrSwift string(250);
+
+pref250 string(250);
+value250 string(250);
+tmpDom string(250);
+tmpKorp string(250);
+
+rzd string(1):=',';
+
+CodeRegionName [STRING_128];
+CodeRegionRef ref [CODE_REGION];
+RegionAreaRef ref [REGION_AREA];
+oCodeRegion [CODE_REGION];
+oRegionArea [REGION_AREA];
+RegionAreaFias [STRING_40];
+RegionAreaName [STRING_128];
+DistrictCode [STRING_40];
+DistrictRef ref [REGION];
+oDistrict [REGION];
+MainCityCode [STRING_40];
+MainCityRef ref [NAMES_CITY];
+oMainCity [NAMES_CITY];
+CityCode [STRING_40];
+CityRef ref [NAMES_CITY];
+oCity [NAMES_CITY];
+oAddr [PERSONAL_ADDRESS];
+oAddrEps [PERSONAL_ADDRESS]; -- Для эелемента планировочной структуры (ЭПС)
+oTmpAddr [PERSONAL_ADDRESS];
+
+a string(20);
+EstType string(100);
+vParentRef [REFERENCE];
+flCityRef boolean:=false;
+flStreetRef boolean:=false;
+vImpStr [STRING_250];
+
+TmpSubElement string(1024);
+FlWord3Used boolean:=false;
+
+vRegion string(1024);
+flDublRegionAreaName boolean:=false;
+
+TmpStreetTe string(250);
+Tmp2StreetTe string(250);
+TmpFlatNt string(250);
+
+nWordCity number;
+nWordTer number;
+
+rAddressObj ref [ADDRESS_OBJ]; --Адрес.Адресные объекты
+rNamesCity ref [NAMES_CITY]; --Адрес.Населенные пункты
+rRegion ref [REGION]; --Адрес.Районы населенных пунктов
+rRegionArea ref [REGION_AREA]; --Адрес.Районы регионов
+rCodeRegion ref [CODE_REGION]; --Адрес.Регионы
+rStreet ref [STREET]; --Адрес.Улично-дорожная сеть
+oStreet [STREET];
+
+rStreet2 ref [STREET]; --Адрес.Улично-дорожная сеть (ЭПС)
+oStreet2 [STREET];
+
+rCountry ref [COUNTRY];
+oNamesCity [NAMES_CITY];
+oRegion [REGION];
+oCountry [COUNTRY];
+
+RegionRef ref [REGION];
+RegionName [STRING_128];
+tmpRegionName [STRING_128];
+
+rNamesCity2 ref [NAMES_CITY]; --423601, Респ Татарстан, р-н Елабужский, г Елабуга, тер Алабуга ОЭЗ, ул Ш-2, к. 4/1,
+oNamesCity2 [NAMES_CITY];
+CityRef2 ref [NAMES_CITY];
+oCity2 [NAMES_CITY];
+nWordCity2 number;
+nWordTer2 number;
+vCityName string(160);
+vCityName2 string(160);
+CityName string(160);
+
+-- Переченные для устанения точечных запросов
+oAddressObj [ADDRESS_OBJ]; --Адрес.Адресные объекты
+idPAddr [REFERENCE];
+rPAddrParent [REFERENCE];
+
+rAddressObjClass string(32);
+oNamesCityId ref [NAMES_CITY]; --Адрес.Населенные пункты
+oNamesCityParent ::[NAMES_CITY].[PARENT]%type;
+oNamesCityParentM ::[NAMES_CITY].[PARENT_M]%type;
+oNamesCityParentClass string(32);
+oNamesCityParentMClass string(32);
+
+oNamesCity2Id ref [NAMES_CITY];  --Адрес.Населенные пункты
+oNamesCity2Parent ::[NAMES_CITY].[PARENT]%type;
+oNamesCity2ParentM ::[NAMES_CITY].[PARENT_M]%type;
+oNamesCity2ParentClass string(32);
+oNamesCity2ParentMClass string(32);
+
+oRegionId ref [REGION]; --Адрес.Районы населенных пунктов
+oRegionParent ::[REGION].[PARENT]%type;
+oRegionParentM ::[REGION].[PARENT_M]%type;
+oRegionParentClass string(32);
+oRegionParentMClass string(32);
+
+oRegionAreaId ref [REGION_AREA]; --Адрес.Районы регионов
+oRegionAreaParent ::[REGION_AREA].[PARENT]%type;
+oRegionAreaParentM ::[REGION_AREA].[PARENT_M]%type;
+oRegionAreaParentClass string(32);
+oRegionAreaParentMClass string(32);
+
+oCodeRegionId ref [CODE_REGION]; --Адрес. Регионы
+oCodeRegionParent ::[CODE_REGION].[PARENT]%type;
+oCodeRegionParentM ::[CODE_REGION].[PARENT_M]%type;
+oCodeRegionParentClass string(32);
+oCodeRegionParentMClass string(32);
+
+oStreetId ref [STREET]; --Адрес.Улично-дорожная сеть
+oStreetParent ::[STREET].[PARENT]%type;
+oStreetParentM ::[STREET].[PARENT_M]%type;
+oStreetParentClass string(32);
+oStreetParentMClass string(32);
+
+oStreet2Id ref [STREET]; --Адрес.Улично-дорожная сеть
+oStreet2Parent ::[STREET].[PARENT]%type;
+oStreet2ParentM ::[STREET].[PARENT_M]%type;
+oStreet2ParentClass string(32);
+oStreet2ParentMClass string(32);
+
+oAddrCityParent ::[NAMES_CITY].[PARENT]%type;
+oAddrCityParentM ::[NAMES_CITY].[PARENT_M]%type;
+oAddrCityParentClass string(32);
+oAddrCityParentMClass string(32);
+
+oCityId ref [NAMES_CITY];
+oCityClass string(32);
+ClRefClass string(32);
+
+rCity ref [NAMES_CITY];
+rHouse ref [HOUSES];
+oHouse [HOUSES];
+begin
+	v_ExpTransAddSwift := nvl(::[FP_TUNE].[LIB].get_bool_value('EXP_TRANSFORN_ADDRESS_SWIFT', null, '0'),false);
+	if P_TEG is null then
+		::[PSH_EXP_TRA].[PSH_L].dbg('[ПСБ]. Включить подмену адресов на английском в Адресе SWIFT клиента "'||iif(v_ExpTransAddSwift,'Да','Нет')||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+		if not v_ExpTransAddSwift then
+			v_ExpTransAddSwift = v_ExpSearchTransId = v_Short := null;
+			return null;
+		end if;
+	end if;
+
+	oAddr := P_ADDR;
+	rAddressObj := oAddr.[ADDR_OBJ];
+	if P_TEG is not null then
+		::[PSH_EXP_TRA].[PSH_L].dbg('---= '||P_TEG||' =---',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+		Set_gTeg(null);
+	end if;
+
+	rAddressObjClass:=rAddressObj%class;
+	idPAddr:=P_ADDR%id;
+	StrParentClass:=P_ADDR%parentclass;
+	rPAddrParent:=P_ADDR%parent;
+	::[PSH_EXP_TRA].[PSH_L].dbg('rAddressObjClass='||rAddressObjClass||' P_ADDR%id/%parent='||idPAddr||'/'||StrParentClass||'.'||rPAddrParent,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+	for i5 in 1..5 where rAddressObj is not null loop
+		rAddressObjClass:=rAddressObj%class;
+		oAddressObj:=rAddressObj;
+		::[PSH_EXP_TRA].[PSH_L].dbg('('||i5||') rAddressObjClass='||rAddressObjClass,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+		case rAddressObjClass of
+		:'NAMES_CITY':
+			if rNamesCity is null then
+				rNamesCity:=rAddressObj;
+				oNamesCity:=rNamesCity;
+
+				oNamesCityId:=rNamesCity;
+				oNamesCityParent:=oNamesCity.[PARENT];
+				oNamesCityParentM:=oNamesCity.[PARENT_M];
+				oNamesCityParentClass:=oNamesCityParent%class;
+				oNamesCityParentMClass:=oNamesCityParentM%class;
+
+				rCity:=nvl(oAddr.[CITY],rNamesCity);
+				oCity:=rCity;
+
+				rCountry:=oCity.[COUNTRY];
+				oCountry:=rCountry;
+
+				::[PSH_EXP_TRA].[PSH_L].dbg('Адрес.Населенные пункты         =NAMES_CITY.'||oNamesCityId||' '||oNamesCity.[NAME]||' Вышестояший:'||nvl(oNamesCityParentClass,oNamesCityParentMClass)||'.'||nvl(oNamesCityParent,oNamesCityParentM),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+				::[PSH_EXP_TRA].[PSH_L].dbg('Адрес.Населенные пункты.Страна  ='||oCountry.[ALFA_2],1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+			else
+				rNamesCity2:=rAddressObj;
+				oNamesCity2:=rNamesCity2;
+
+				oNamesCity2Id:=rNamesCity2;
+				oNamesCity2Parent:=oNamesCity2.[PARENT];
+				oNamesCity2ParentM:=oNamesCity2.[PARENT_M];
+				oNamesCity2ParentClass:=oNamesCity2Parent%class;
+				oNamesCity2ParentMClass:=oNamesCity2ParentM%class;
+
+				rCountry:=nvl(rCountry,oNamesCity2.[COUNTRY]);
+				oCountry:=rCountry;
+
+				::[PSH_EXP_TRA].[PSH_L].dbg('Адрес.Населенные пункты 2       =NAMES_CITY.'||oNamesCity2Id||' '||oNamesCity2.[NAME]||' Вышестояший:'||nvl(oNamesCity2ParentClass,oNamesCity2ParentMClass)||'.'||nvl(oNamesCity2Parent,oNamesCity2ParentM),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+				::[PSH_EXP_TRA].[PSH_L].dbg('Адрес.Населенные пункты 2.Страна='||oCountry.[ALFA_2],1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+			end if;
+
+		:'REGION':
+			rRegion:=rAddressObj;
+			oRegion:=nvl(oAddr.[DISTRICT],rRegion);
+			
+			oRegionId:=rRegion;
+			oRegionParent:=oRegion.[PARENT];
+			oRegionParentM:=oRegion.[PARENT_M];
+			oRegionParentClass:=oRegionParent%class;
+			oRegionParentMClass:=oRegionParentM%class;
+
+			::[PSH_EXP_TRA].[PSH_L].dbg('Адрес.Районы населенных пунктов =REGION.'||rRegion%id||' '||oRegion.[NAME]||' Вышестояший:'||nvl(oRegionParentClass,oRegionParentMClass)||'.'||nvl(oRegionParent,oRegionParentM),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+		:'REGION_AREA':
+			rRegionArea:=rAddressObj;
+			oRegionArea:=rRegionArea;
+
+			oRegionAreaId:=rRegionArea;
+			oRegionAreaParent:=oRegionArea.[PARENT];
+			oRegionAreaParentM:=oRegionArea.[PARENT_M];
+			oRegionAreaParentClass:=oRegionAreaParent%class;
+			oRegionAreaParentMClass:=oRegionAreaParentM%class;
+
+			::[PSH_EXP_TRA].[PSH_L].dbg('Адрес.Районы регионов           =REGION_AREA.'||oRegionAreaId||' '||oRegionArea.[NAME]||' Вышестояший:'||nvl(oRegionAreaParentClass,oRegionAreaParentMClass)||'.'||nvl(oRegionAreaParent,oRegionAreaParentM),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+		:'CODE_REGION':
+			rCodeRegion:=rAddressObj;
+			oCodeRegion:=rCodeRegion;
+
+			oCodeRegionId:=rCodeRegion;
+			oCodeRegionParent:=oCodeRegion.[PARENT];
+			oCodeRegionParentM:=oCodeRegion.[PARENT_M];
+			oCodeRegionParentClass:=oCodeRegionParent%class;
+			oCodeRegionParentMClass:=oCodeRegionParentM%class;
+
+			rCountry:=nvl(rCountry,oCodeRegion.[COUNTRY]);
+			oCountry:=rCountry;
+
+			::[PSH_EXP_TRA].[PSH_L].dbg('Адрес.Регионы                   =CODE_REGION.'||oCodeRegionId||' '||oCodeRegion.[NAME] -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+			||' Вышестояший:'||nvl(oCodeRegionParentClass,oCodeRegionParentMClass)||'.'||nvl(oCodeRegionParent,oCodeRegionParentM),1);
+			::[PSH_EXP_TRA].[PSH_L].dbg('Адрес.Регионы.Страна            ='||oCountry.[ALFA_2],1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+		:'STREET':
+			if i5=2 then --ЭПС
+				rStreet2:=rAddressObj;
+				oStreet2:=rStreet2;
+
+				oStreet2Id:=rStreet2;
+				oStreet2Parent:=oStreet2.[PARENT];
+				oStreet2ParentM:=oStreet2.[PARENT_M];
+				oStreet2ParentClass:=oStreet2Parent%class;
+				oStreet2ParentMClass:=oStreet2ParentM%class;
+
+				::[PSH_EXP_TRA].[PSH_L].dbg('Адрес.Улично-дорожная сеть(ЭПС) =STREET.'||oStreet2Id||' '||oStreet2.[NAME]||' Вышестояший:'||nvl(oStreet2ParentClass,oStreet2ParentMClass)||'.'||nvl(oStreet2Parent,oStreet2ParentM),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+			else
+				rStreet:=rAddressObj;
+				oStreet:=rStreet;
+
+				oStreetId:=rStreet;
+				oStreetParent:=oStreet.[PARENT];
+				oStreetParentM:=oStreet.[PARENT_M];
+				oStreetParentClass:=oStreetParent%class;
+				oStreetParentMClass:=oStreetParentM%class;
+
+				::[PSH_EXP_TRA].[PSH_L].dbg('Адрес.Улично-дорожная сеть      =STREET.'||oStreetId||' '||oStreet.[NAME]||' Вышестояший:'||nvl(oStreetParentClass,oStreetParentMClass)||'.'||nvl(oStreetParent,oStreetParentM),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+			end if;
+		else
+			exit;
+		end;
+
+		rAddressObj:=nvl(oAddressObj.[PARENT],oAddressObj.[PARENT_M]);
+	end loop;
+
+	Set_gTeg(null);
+	v_ExpSearchTransId := nvl(::[FP_TUNE].[LIB].get_bool_value('EXP_SEARCH_TRANS_ID', null, '0'),false);
+	v_Short:=nvl(::[FP_TUNE].[LIB].get_bool_value('EXP_SHOR_ENG_WORD', null, '0'),false);
+
+	StrParentClass:=P_ADDR%parentclass;
+	rPAddrParent:=P_ADDR%parent;
+	if StrParentClass='CL_PRIV' then
+		ClRef :=rPAddrParent;
+	elsif StrParentClass='CL_ORG'  then
+		ClRef :=rPAddrParent;
+	end if;
+	ClRef :=nvl(ClRef,rPAddrParent);
+	ClRefClass:=ClRef%class;
+	::[PSH_EXP_TRA].[PSH_L].dbg('v_Short='||v_Short||' v_ExpSearchTransId='||v_ExpSearchTransId||' StrParentClass='||StrParentClass||' "'||ClRef.[NAME]||'" P_ADDR%id/%parent='||idPAddr||'/'||StrParentClass||'.'||rPAddrParent,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+	rCity:=oAddr.[CITY];
+	oCity:=rCity;
+	rStreet:=oAddr.[STREET_REF];
+	oStreet:=rStreet;
+	rHouse:=oAddr.[HOUSE_REF];
+	oHouse:=rHouse;
+	oRegion:=oAddr.[DISTRICT];
+	oAddr.[POST_CODE]:=coalesce( oAddr.[POST_CODE]
+								,oHouse.[ZIP]
+								,oStreet.[ZIP]
+								,oNamesCity2.[ZIP]
+								,oNamesCity.[ZIP]
+								,oRegion.[ZIP]
+								,oRegionArea.[ZIP]
+								,oCodeRegion.[ZIP]
+								,oAddr.[POST_CODE]
+								);
+
+	oAddrCityParent:=oCity.[PARENT];
+	oAddrCityParentM:=oCity.[PARENT_M];
+	oAddrCityParentClass:=oCity.[PARENT]%class;
+	oAddrCityParentMClass:=oCity.[PARENT_M]%class;
+	
+	if oAddr.[TYPE].[KOD]        is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[TYPE].[KOD]          ='||oAddr.[TYPE].[KOD],dp3); end if;	--Тип адреса -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oAddr.[POST_CODE]         is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[POST_CODE]           ='||oAddr.[POST_CODE],dp3); end if;	--Почтовый индекс -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oCity.[COUNTRY]           is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[CITY].[COUNTRY]      ='||oCity.[COUNTRY].[VALUE],dp3); end if;--НП.Страна -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oCity.[NAME]              is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[CITY].[NAME]         ='||oCity.[NAME],dp3); end if;		--НП -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oCity.[OBJECTID]          is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[CITY].[OBJECTID]     ='||oCity.[OBJECTID],dp3); end if;	--НП.Идентификатор объекта -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oCity.[AOGUID]            is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[CITY].[AOGUID]       ='||oCity.[AOGUID],dp3); end if;	--НП.GUID объекта -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oCity.[AOID]              is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[CITY].[AOID]         ='||oCity.[AOID],dp3); end if;		--НП.GUID записи (изменения) -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oAddrCityParentClass      is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[CITY].[PARENT]       ='||oAddrCityParentClass||'.'||oAddrCityParent,dp3); end if;	--НП.Вышестоящий об-т в административном делении -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oAddrCityParentMClass     is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[CITY].[PARENT_M]     ='||oAddrCityParentMClass||'.'||oAddrCityParentM,dp3); end if;	--НП.Вышестоящий объект в муниципальном делении -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oRegion.[NAME]            is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[DISTRICT].[NAME]     ='||oRegion.[NAME],dp3); end if;		--Р-н НП -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oRegion.[AOGUID]          is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[DISTRICT].[AOGUID]   ='||oRegion.[AOGUID],dp3); end if;		--Р-н НП.GUID объекта -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oRegion.[AOID]            is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[DISTRICT].[AOID]     ='||oRegion.[AOID],dp3); end if;		--Р-н НП.GUID записи (изменения) -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oStreet.[NAME]            is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[STREET_REF].[NAME]   ='||oStreet.[NAME],dp3); end if;		--Улица НП -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oAddr.[STREET_STR]        is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[STREET_STR]          ='||oAddr.[STREET_STR],dp3); end if;	--Улица -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oHouse.[ZIP]              is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[HOUSE_REF].[ZIP]     ='||oHouse.[ZIP],dp3); end if;			--Дом НП. Почтовый индекс -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oHouse.[NAME]             is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[HOUSE_REF].[NAME]    ='||oHouse.[NAME],dp3); end if;		--Дом НП. Номер дома -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oHouse.[STRUCNUM]         is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[HOUSE_REF].[STRUCNUM]='||oHouse.[STRUCNUM],dp3); end if;	--Дом НП. Строение -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oHouse.[KORP]             is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[HOUSE_REF].[KORP]    ='||oHouse.[KORP],dp3); end if;		--Дом НП. Корпус -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oHouse.[ESTSTATUS].[NAME] is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[HOUSE_REF].[ESTSTATUS].[NAME](Тип дома)    ='||oHouse.[ESTSTATUS].[NAME],dp3); end if;	--Дом НП. Тип дома -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oHouse.[KORP_TYPE].[NAME] is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[HOUSE_REF].[KORP_TYPE].[NAME](Тип корпуса) ='||oHouse.[KORP_TYPE].[NAME],dp3); end if;	--Дом НП. Тип корпуса -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oHouse.[KIND].[NAME]      is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[HOUSE_REF].[KIND].[NAME]     (Тип объекта) ='||oHouse.[KIND].[NAME],dp3); end if;		--Дом НП. Тип объекта -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oHouse.[STRSTATUS].[NAME] is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[HOUSE_REF].[STRSTATUS].[NAME](Тип строения)='||oHouse.[STRSTATUS].[NAME],dp3); end if;	--Дом НП. Тип строения -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oAddr.[HOUSE]             is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[HOUSE]               ='||oAddr.[HOUSE],dp3); end if;		--Дом -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oAddr.[KORPUS]            is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[KORPUS]              ='||oAddr.[KORPUS],dp3); end if;		--Корпус -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oAddr.[FLAT]              is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[FLAT]                ='||oAddr.[FLAT],dp3); end if;			--Квартира / комната -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oAddr.[FIX_PRINT]         is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[FIX_PRINT]           ='||oAddr.[FIX_PRINT],dp3); end if;	--Фиксировать -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	if oAddr.[IMP_STR]           is not null then ::[PSH_EXP_TRA].[PSH_L].dbg('oAddr.[IMP_STR]             ='||oAddr.[IMP_STR],dp3); end if;		--Импортировано/Адрес строкой -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+	if rCity is not null or rStreet is not null then
+		::[PSH_EXP_TRA].[PSH_L].dbg('Улица строкой использовать не будем, т.к. есть '||iif(rCity is not null,'Город/НП ','')||iif(rStreet is not null,'Ссылка на улицу',''),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+		oAddr.[IMP_STR]:=null;
+	end if;
+	vImpStr:=oAddr.[IMP_STR];
+
+	if rHouse is not null
+	and (oAddr.[HOUSE] is not null or oAddr.[KORPUS] is not null)
+	then
+		::[PSH_EXP_TRA].[PSH_L].dbg('Ссылку на Дом использовать не будем, т.к. есть '||iif(oAddr.[HOUSE] is not null,'Дом ','')||iif(oAddr.[KORPUS] is not null,'Корпус',''),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+		oHouse:=null;
+	end if;
+
+	if v_ExpTransAddSwift or P_TEG is not null then
+		if oAddr.[TYPE]=::[ADDRESS_TYPE]([KOD]='SWIFT_ADDRESS') -- then --Тип адреса Адрес SWIFT			
+			or P_TEG is not null then --CFT-1297
+
+			-- Шаблон адреса SWIFT
+			StrExpSwift:=coalesce(::[PERSONAL_ADDRESS].[PSH_EDIT#AUTO_EX].gMaskAddress --CFT-1297 'COUNTRY,ZIP,REGION,DISTRICT,CITY,STREET,HOUSE_NT,KORPUS_NT,FLAT'; -- updated CHANGE_SHORT_NAME PSB_EDIT#AUTO_EX->PSH_EDIT#AUTO_EX 14/10/25
+					,::[FP_TUNE].[LIB].get_str_value('EXP_SWIFT_DOCUM_RC', null, '0')
+					,'ZIP,STREET_TE,HOUSE_TE,KORPUS_TE,FLAT_NT,CITY,REGION,COUNTRY_ALFA2');
+
+			nObj:=length(StrExpSwift)-length(::[RUNTIME].[STANDARD].replace(StrExpSwift,','))+1;
+			ret_StrSwift:='';
+			
+			::[PSH_EXP_TRA].[PSH_L].dbg('nObj='||nObj||' Шаблон адреса:'||StrExpSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+			a:=oAddr.[TYPE].[KOD];
+
+			oAddrCityParent:=oCity.[PARENT]%Id;
+			oAddrCityParentM:=oCity.[PARENT_M]%Id;
+
+			vParentRef:=nvl(oAddrCityParent,oAddrCityParentM);
+
+			for i in 1..nObj loop
+				nWordSwift:=null;
+				tmpWordSwift:=null;
+				tmpStrSwift:=null;
+				nEpsWordSwift:=null;
+				nWord:=wbn(StrExpSwift, rzd, i);
+				::[PSH_EXP_TRA].[PSH_L].dbg('<'||i||'> nWord='||nWord||' Шаблон:'||StrExpSwift,1);			 -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+				if  nWord in ('ZIP','POST_CODE') then
+					nWordSwift:=coalesce(oAddr.[POST_CODE],oHouse.[ZIP],wbn(vImpStr,',',1));
+					if length(::[RUNTIME].[STR].Get_DigitAll(nWordSwift))=length(nWordSwift) then
+						null;
+					else
+						nWordSwift:=null;
+					end if;
+				elsif nWord='COUNTRY'			then -- Наименование страны населенного пункта;
+					nWordSwift:=GetTrans(	oCountry.[ALFA_3],
+											oCountry%id,
+											oCountry.[VALUE],
+											3); --3 -Сокр. или Наим.
+				elsif nWord='COUNTRY_NO'		then -- Наименование страны населенного пункта, если страна не соответствует стране нахождения банка;
+					nWordSwift:=GetTrans(	oCountry.[ALFA_3],
+											oCountry%id,
+											oCountry.[VALUE],
+											3); --3 -Сокр. или Наим.
+				elsif nWord='COUNTRY_CODE'		then
+					nWordSwift:=oCountry.[CODE];	-- цифровой код страны;
+				elsif nWord='COUNTRY_ALFA2'		then
+					nWordSwift:=oCountry.[ALFA_2];	-- Буквенный код страны (альфа - 2);
+				elsif nWord='COUNTRY_ALFA3'		then
+					nWordSwift:=oCountry.[ALFA_3];	-- Буквенный код страны (альфа - 3);
+				elsif nWord='COUNTRY_FULL'		then -- Полное наименование страны;
+					nWordSwift:=GetTrans(	oCountry.[ALFA_3],
+											oCountry%id,
+											oCountry.[NAME],
+											4); -- 4 -Наим. или Сокр.
+				elsif nWord='COUNTRY_NO_FULL'	then -- Полное наименование страны, если страна не соответствует стране нахождения банка;
+					nWordSwift:=GetTrans(	oCountry.[ALFA_3],
+											oCountry%id,
+											oCountry.[NAME],
+											4); -- 4 -Наим. или Сокр.
+
+				elsif nWord like 'REGION%' then --Код региона;
+					--423601, Респ Татарстан, р-н Елабужский, г Елабуга, тер Алабуга ОЭЗ, ул Ш-2, к. 4/1,
+					RegionAreaRef:=rRegionArea;
+					oRegionArea:=RegionAreaRef;
+					RegionAreaName:=GetNameWithKind(rRegionArea);
+					for re in ::[REGION_AREA] where re%id=nvl(oRegionAreaId,vParentRef) loop --Адрес.Районы регионов
+						RegionAreaRef:=re%id;
+						oRegionArea:=RegionAreaRef;
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'>RegionAreaName='||RegionAreaName||' RegionAreaRef='||RegionAreaRef||' oRegionArea.[AOGUID]='||oRegionArea.[AOGUID]||' oRegionArea.[AOID]='||oRegionArea.[AOID]||' nWord='||nWord,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						RegionAreaName:=GetTrans(oRegionArea.[AOGUID],
+										oRegionAreaId,
+										RegionAreaName,
+										5 -- Сокр.наим.об. Сокр. или Наим.
+										,oRegionArea.[AOID]);
+						exit;
+					end loop;
+					::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'<RegionAreaName='||RegionAreaName||' RegionAreaRef='||RegionAreaRef||' oRegionArea.[AOGUID]='||oRegionArea.[AOGUID]||' oRegionArea.[AOID]='||oRegionArea.[AOID]||' nWord='||nWord,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+					CodeRegionRef:=rCodeRegion;
+					oCodeRegion:=CodeRegionRef;
+					CodeRegionName:=GetNameWithKind(rCodeRegion);
+					for re in ::[CODE_REGION] where re%id=nvl(oCodeRegionId,vParentRef) loop --Адрес.Регионы
+						CodeRegionRef:=re%id;
+						oCodeRegion:=CodeRegionRef;
+						CodeRegionName:=oCodeRegion.[NAME];
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'>CodeRegionName='||CodeRegionName||' CodeRegionRef='||CodeRegionRef||' oCodeRegion.[AOGUID]='||oCodeRegion.[AOGUID]||' oCodeRegion.[AOID]='||oCodeRegion.[AOID],1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						CodeRegionName:=GetTrans(oCodeRegion.[AOGUID],
+									oCodeRegionId,
+									CodeRegionName,
+									5 -- Сокр.наим.об. Сокр. или Наим. -- 2 -Наименование
+									,oCodeRegion.[AOID]);
+						exit;
+					end loop;
+					if CodeRegionName=RegionAreaName then
+						CodeRegionName:=null;
+					end if;
+					::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'<CodeRegionName='||CodeRegionName||' CodeRegionRef='||CodeRegionRef||' oCodeRegion.[AOGUID]='||oCodeRegion.[AOGUID]||' oCodeRegion.[AOID]='||oCodeRegion.[AOID]||' nWord='||nWord,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+					RegionRef:=rRegion;
+					oRegion:=RegionRef;
+					RegionName:=GetNameWithKind(rRegion);
+					for re in ::[REGION] where re%id=nvl(rRegion%id,vParentRef) loop --Адрес.Районы населенных пунктов
+						RegionRef:=re%id;
+						oRegion:=RegionRef;
+						RegionName:=oRegion.[NAME];
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'>RegionName='||RegionName||' RegionRef='||RegionRef||' oRegion.[AOGUID]='||oRegion.[AOGUID]||' oRegion.[AOID]='||oRegion.[AOID]||' nWord='||nWord,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						RegionName:=GetTrans(oRegion.[AOGUID],
+									rRegion%id,
+									RegionName,
+									5 -- Сокр.наим.об. Сокр. или Наим. -- 2 -Наименование
+									,oRegion.[AOID]);
+						exit;
+					end loop;
+					if RegionName=RegionAreaName then
+						RegionName:=null;
+					end if;
+					
+					::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'<RegionName='||RegionName||' RegionRef='||RegionRef||' oRegion.[AOGUID]='||oRegion.[AOGUID]||' oRegion.[AOID]='||oRegion.[AOID]||' nWord='||nWord,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+					--12 KV-L STR,24,1,APT.34,MOSCOW,VILL.VOSKRESENSKOE,MOSCOW,RU
+					--12 KV-L STR,24,1,APT.34,VILL.VOSKRESENSKOE,MOSCOW REG,RU
+					if CityName=CodeRegionName and RegionAreaName is not null then
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(1)ret_StrSwift='||ret_StrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(1)tmpStrSwift='||tmpStrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						ret_StrSwift:=::[RUNTIME].[STANDARD].replace(ret_StrSwift,rzd||CodeRegionName);
+						tmpStrSwift:=::[RUNTIME].[STANDARD].replace(tmpStrSwift,rzd||CodeRegionName);
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(2)ret_StrSwift='||ret_StrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(2)tmpStrSwift='||tmpStrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						CityName:=null;
+						if instr(CodeRegionName,'REG')=0 then
+							CodeRegionName:=CodeRegionName||' REG';
+						end if;
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'<<CodeRegionName='||CodeRegionName||' CityName='||CityName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+					end if;
+					
+					if nWord='REGION_CODE'  then
+						nWordSwift:=CodeRegionName;	--Код региона;
+					elsif nWord='REGION_LCODE' then
+						nWordSwift:=oCodeRegion.[KLADR]; --Код региона по КЛАДР;
+
+					elsif nWord='REGION' then --Наименование региона населенного пункта вместе с наименованием типа региона, порядок следования опеределяется в типе региона;
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'nWordSwift(1.0)->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+						if RegionAreaName is not null or CodeRegionName is not null then
+							nWordSwift:=trim(RegionAreaName||rzd||CodeRegionName,rzd);
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'nWordSwift(1.1)->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+
+						if nWordSwift is null then
+							--423601, Респ Татарстан, р-н Елабужский, г Елабуга, тер Алабуга ОЭЗ, ул Ш-2, к. 4/1,
+							vRegion:=::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a);
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'VIEWFUN.GetAddress('||ClRef||','||nWord||','||a||')->'||vRegion||' flCityRef='||flCityRef||' vImpStr->'||vImpStr,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+							if vRegion is null and (not flCityRef and vImpStr is not null) then
+								vRegion:=wbn(vImpStr,',',2);
+								::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'vRegion(1)->'||vRegion||' TmpStreetTe='||TmpStreetTe||' Tmp2StreetTe='||Tmp2StreetTe,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+								if vRegion in (TmpStreetTe,Tmp2StreetTe) then
+									vRegion:=wbn(vImpStr,',',7);
+									::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'vRegion(2)->'||vRegion,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+									
+									if vRegion=nvl(oCountry.[ALFA_2],'RU') then
+										vRegion:=wbn(vImpStr,',',6);
+										::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'vRegion(3)->'||vRegion,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+									end if;
+								end if;
+							end if;
+							ReplEngWordStreet(vRegion);	--'г '
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'vRegion(4)->'||vRegion,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+							nWordSwift:=GetTrans(	oCodeRegion.[AOGUID],
+													CodeRegionRef%id,
+													vRegion, 
+													5 -- 5 -Сокр.наим.об. Сокр. или Наим. --2 -- 2 -Наименование
+													,oCodeRegion.[AOID]);
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'GetTrans->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							nWordSwift:=upper(nWordSwift);
+						end if;
+
+						ReplEngWordStreet(nWordSwift);	--'г '
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'nWordSwift(2)->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+						if instr(nWordSwift,'REGION')>0 or instr(nWordSwift,'REG ')=1  or instr(nWordSwift,'REG.')=1 then
+							nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,'REGION');
+							nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,'REG ');
+							nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,'REG.');
+							nWordSwift:=nWordSwift||' REG';
+							DelDublSpace(nWordSwift);
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'nWordSwift(3) "REGION/REG" в XXX REG->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+						vRegion:=nWordSwift; 
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'vRegion(5)|nWordSwift->'||vRegion,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+					elsif nWord='REGION_NT' then --Наименование региона населенного пункта;
+						nWordSwift:=GetTrans(	oCodeRegion.[AOGUID],
+												CodeRegionRef%id,
+												::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a),
+												6 -- 6 -Полн.наим.об. Наим. или Сокр.
+												,oCodeRegion.[AOID]);
+					elsif nWord='REGION_TE' then --Наименование региона населенного пункта вместе с наименованием типа региона, порядок <регион> <тип>;
+						nWordSwift:=GetTrans(	oCodeRegion.[AOGUID],
+												CodeRegionRef%id,
+												::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a),
+												5 -- 5 -Сокр.наим.об. Сокр. или Наим.
+												,oCodeRegion.[AOID]);
+					end if;
+				end if;
+
+				--1--
+				::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'--1-- "'||nWord||'" oRegionArea='||oRegionArea.[NAME]||' oCodeRegion='||oCodeRegion.[NAME]||' oRegion='||oRegion.[NAME]||' oAddr.[CITY].[PARENT/PARENT_M]Class='||nvl(oAddrCityParentClass,oAddrCityParentMClass)||' flCityRef='||flCityRef||' vImpStr='||vImpStr||' nWordSwift='||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+				if nWord ='REGION' and ((rRegionArea is not null or rCodeRegion is not null)
+				or nvl(oAddrCityParentClass,oAddrCityParentMClass) in ('REGION_AREA','CODE_REGION')
+				or (not flCityRef and vImpStr is not null))
+				then
+					if RegionAreaName is not null or CodeRegionName is not null then
+						if instr(CodeRegionName,'REGION')>0 or instr(CodeRegionName,'REG ')=1  or instr(CodeRegionName,'REG.')=1 then
+							CodeRegionName:=::[RUNTIME].[STANDARD].replace(CodeRegionName,'REGION');
+							CodeRegionName:=::[RUNTIME].[STANDARD].replace(CodeRegionName,'REG ');
+							CodeRegionName:=::[RUNTIME].[STANDARD].replace(CodeRegionName,'REG.');
+							CodeRegionName:=CodeRegionName||' REG';
+							DelDublSpace(CodeRegionName);
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'CodeRegionName(4.1) "REGION/REG" в XXX REG->'||CodeRegionName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'CodeRegionName(4.2)->'||CodeRegionName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+						vRegion=nWordSwift:=trim(RegionAreaName||rzd||CodeRegionName,rzd);
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'nWordSwift(4.3)->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+					else
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'vRegion(6)->'||vRegion,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						--423601, Респ Татарстан, р-н Елабужский, г Елабуга, тер Алабуга ОЭЗ, ул Ш-2, к. 4/1,
+						--654321, Респ Башкортостан, р-н Иглинский, с Акбердино, ул Юбилейная, д. 19,
+						if rRegionArea is not null then --Адрес.Районы регионов (REGION_AREA.53202893 Иглинский)
+							oRegionArea:=rRegionArea;
+							RegionAreaName:=GetTrans(oRegionArea.[AOGUID],
+											oRegionAreaId,
+											oRegionArea.[NAME],
+											5 -- Сокр.наим.об. Сокр. или Наим.
+											,oRegionArea.[AOID]);
+							FlWord3Used:=true;
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'RegionAreaName(7.0)->'||RegionAreaName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						elsif vRegion is not null then
+							RegionAreaName:=vRegion;
+							FlWord3Used:=true;
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'RegionAreaName(7.1)->'||RegionAreaName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						else
+							RegionAreaName:=::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a);
+							FlWord3Used:=true;
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'RegionAreaName(7.2)->'||RegionAreaName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+
+						if RegionAreaName is null and not FlWord3Used then
+							RegionAreaName:=wbn(vImpStr,',',3);
+							FlWord3Used:=true;
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'wbn(vImpStr,",",3)='||RegionAreaName||' FlWord3Used='||FlWord3Used,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'RegionAreaName(7.3)->'||RegionAreaName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+						if RuCharinstr(RegionAreaName) then
+							RegionAreaName:=Transleterate(RegionAreaName);
+						end if;
+						RegionAreaName:=::[RUNTIME].[STANDARD].replace(RegionAreaName,'. ','.');
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'RegionAreaName(7.4)->'||RegionAreaName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+						RegionAreaRef:=null;
+						oRegionArea:=RegionAreaRef;
+						tmpWordSwift:=null;
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'vParentRef%id='||vParentRef,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+						for	(select re(re : c_id, re.[FIAS] : c_fias)
+								in ::[REGION_AREA] --Адрес.Районы регионов (Район:	Район Иглинский;)
+								where re%id=vParentRef
+						)loop
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(1.0)-=Адрес.Районы регионов=- RegionAreaName='||RegionAreaName||' vParentRef='||vParentRef,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							RegionAreaRef:=re.c_id;
+							oRegionArea:=RegionAreaRef;
+
+							oRegionAreaId:=rRegionArea%id;
+							oRegionAreaParent:=oRegionArea.[PARENT]%id;
+							oRegionAreaParentM:=oRegionArea.[PARENT_M]%id;
+							oRegionAreaParentClass:=oRegionArea.[PARENT]%class;
+							oRegionAreaParentMClass:=oRegionArea.[PARENT_M]%class;
+
+							RegionAreaFias:=re.c_fias;
+							RegionAreaName:=GetTrans(oRegionArea.[AOGUID],
+											oRegionAreaId,
+											RegionAreaName,
+											5 -- Сокр.наим.об. Сокр. или Наим.
+											,oRegionArea.[AOID]);
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'RegionAreaName(7.5)->'||RegionAreaName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(1)oRegionArea.[PARENT]  ='||oRegionAreaParentClass||'.'||oRegionAreaParent,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(1)oRegionArea.[PARENT_M]='||oRegionAreaParentMClass||'.'||oRegionAreaParentM,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							if nvl(oRegionAreaParentClass,oRegionAreaParentMClass)='CODE_REGION' then
+								if RegionAreaName is not null then
+									tmpWordSwift:=::[RUNTIME].[STANDARD].replace(RegionAreaName,'. ','.');
+								else
+									tmpWordSwift=RegionAreaName:=::[RUNTIME].[STANDARD].replace(::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a),'. ','.');
+									::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'RegionAreaName(7.6)->'||RegionAreaName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								end if;
+								::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'tmpWordSwift(1)->'||tmpWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+								CodeRegionRef:=null;
+								oCodeRegion:=CodeRegionRef;
+								vParentRef:=coalesce(rCodeRegion,oRegionArea.[PARENT],oRegionArea.[PARENT_M]);
+								::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(1.1)-=Адрес.Регионы=- CodeRegionName='||CodeRegionName||' vParentRef='||vParentRef,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								if vParentRef is not null then
+									for CodeRegionRef in ::[CODE_REGION] --Адрес.Регионы (Регион:	Республика Башкортостан;)
+									where re.c_id=vParentRef
+									loop
+										oCodeRegion:=CodeRegionRef;
+										CodeRegionName:=::[RUNTIME].[STANDARD].replace(GetTrans(oCodeRegion.[AOGUID],
+													CodeRegionRef%id,
+													::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a),
+													5 -- Сокр.наим.об. Сокр. или Наим. -- 2 -Наименование
+													,oCodeRegion.[AOID]),'. ','.');
+										::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(1.2)CodeRegionName='||CodeRegionName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+										if instr(nWordSwift,RegionAreaName)=1 or instr(nWordSwift,' '||RegionAreaName)>1 then
+											flDublRegionAreaName:=true;
+											::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(1.3)nWordSwift="'||nWordSwift||'" RegionAreaName="'||RegionAreaName||'" исключаем дубль наименования региона',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+											RegionAreaName:=null;
+										end if;
+										if CodeRegionName is null then
+											tmpWordSwift=CodeRegionName:=::[RUNTIME].[STANDARD].replace(GetTrans(oCodeRegion.[AOGUID],
+														CodeRegionRef%id,
+														::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a),
+														5 -- 5 -Сокр.наим.об. Сокр. или Наим.
+														,oCodeRegion.[AOID]),'. ','.');
+											::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(1.4)tmpWordSwift='||tmpWordSwift||' CodeRegionName='||CodeRegionName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+										end if;
+										::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(2)  -=Адрес.Регионы=- CodeRegionName='||CodeRegionName||' CodeRegionRef='||CodeRegionRef||' oCodeRegion.[AOGUID]='||oCodeRegion.[AOGUID],1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+										exit;
+									end loop;
+								end if;
+							end if;
+							exit;
+						end loop;
+	
+						if RegionAreaName is null and not flDublRegionAreaName then
+							RegionAreaName:=::[RUNTIME].[STANDARD].replace(::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a),'. ','.');
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(3.0)RegionAreaName='||RegionAreaName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+						
+						tmpWordSwiftArea:=tmpWordSwift;
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(3.1) tmpWordSwiftArea='||tmpWordSwiftArea||' RegionAreaName='||RegionAreaName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						if rRegionArea is not null and oRegionArea.[AOGUID] is null and oRegionArea.[AOID] is null then --Адрес.Районы регионов
+							oRegionArea:=rRegionArea;
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(3.2) tmpWordSwiftArea='||tmpWordSwiftArea||' RegionAreaName='||RegionAreaName||' oRegionArea.[AOGUID]='||oRegionArea.[AOGUID]||' oRegionArea.[AOGUID]='||oRegionArea.[AOID]||' RegionAreaFias='||RegionAreaFias,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+
+						tmpWordSwift:=GetTrans(	oRegionArea.[AOGUID],
+												RegionAreaRef%id,
+												RegionAreaName,
+												8 --8 -Сокр. или Наим. Полн.наим.об.
+												,oRegionArea.[AOID]);
+						tmpWordSwift :=trim(trim(trim(tmpWordSwift),rzd));
+
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(4)  instr('||tmpWordSwift||',"R-N ")='||instr(tmpWordSwift,'R-N '),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+						if instr(tmpWordSwift,'R-N ')=1 then --423601, Респ Татарстан, р-н Елабужский, г Елабуга, тер Алабуга ОЭЗ, ул Ш-2, к. 4/1,
+							tmpWordSwift:=trim(substr(tmpWordSwift,5))||' DIST.'; -- R-N -> DIST.
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(4.0) tmpWordSwift='||tmpWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+
+						tmpWordSwiftArea := ::[RUNTIME].[STANDARD].replace(trim(tmpWordSwiftArea,rzd),'. ','.');
+						tmpWordSwift := ::[RUNTIME].[STANDARD].replace(trim(tmpWordSwift,rzd),'. ','.');
+
+						if tmpWordSwiftArea is not null and tmpWordSwift is not null
+						and instr(tmpWordSwiftArea,tmpWordSwift)=0 and instr(tmpWordSwift,tmpWordSwiftArea)=0
+						then
+							tmpWordSwift:=tmpWordSwift||rzd||tmpWordSwiftArea;
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(4.1) tmpWordSwift(Добавили к району регион)->'||tmpWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+					end if;
+
+					if tmpWordSwift is null and not FlWord3Used then
+						tmpWordSwift:=wbn(vImpStr,',',3);
+						FlWord3Used:=true;
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(5)wbn('||vImpStr||',",",3)->'||tmpWordSwift||' FlWord3Used='||FlWord3Used,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+						ReplEngWordStreet(tmpWordSwift,false,null,true);	--'г '
+						tmpWordSwift:=transleterate(tmpWordSwift);
+					end if;
+
+					nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,'. ','.');
+					tmpWordSwift:=::[RUNTIME].[STANDARD].replace(tmpWordSwift,'. ','.');
+					if nWordSwift is not  null and tmpWordSwift is not null
+					and instr(nWordSwift,tmpWordSwift)=0 and instr(tmpWordSwift,nWordSwift)=0 then
+						nWordSwift:=tmpWordSwift||','||nWordSwift;
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(8)     nWordSwift->'||nWordSwift||' tmpWordSwift='||tmpWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+					end if;
+				end if;
+
+				if instr(nWordSwift,tmpWordSwift)>0 then
+					nWordSwift:=upper(nWordSwift);
+				else
+					nWordSwift:=upper(nvl(tmpWordSwift,nWordSwift));
+				end if;
+
+				tmpStrSwift:=trim(ret_StrSwift,rzd);
+				tmpStrSwift:=rzd||tmpStrSwift||rzd;
+				if instr(tmpStrSwift,rzd||nWordSwift||rzd)>0 then
+					::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(9)"'||rzd||nWordSwift||rzd||'" уже есть в "'||tmpStrSwift||'" Не будем добавлять',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+					nWordSwift:=null;
+				end if;
+				::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(10)        nWordSwift->'||nWordSwift||' tmpWordSwift='||tmpWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+				
+				nWordSwift:=Transleterate(nWordSwift);
+				::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(11) Transleterate  ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+				if nWord like '%STREET%' then
+					ReplEngWordStreet(nWordSwift,false,null,true);
+					::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(12) ReplEngWordStreet->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+				end if;
+				
+				if nWord like 'REGION%' then
+					tmpRegionName:=upper(nWordSwift);
+					::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(10)    tmpRegionName->'||tmpRegionName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+					
+					nWordSwift:=Transleterate(tmpRegionName);
+					::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(10)Transleterate    ->'||tmpRegionName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	
+					ReplEngWordStreet(nWordSwift,false,null,true);
+					::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(10)ReplEngWordStreet->'||tmpRegionName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+				end if;
+
+				--2-- Для населенных пунктов уровня > 1 и статуса не равного 5 (Города федерального значения):
+				if nWord in ('REGION_NCT', 'REGION_NCT_NT', 'REGION_NCT_TE', 'REGION_NCT_CODE', 'REGION_NCT_LCODE') then
+					nWordSwift:=GetTrans(	oCodeRegion.[AOGUID],
+											CodeRegionRef%id,
+											::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a),
+											5 -- 5 -Сокр.наим.об. Сокр. или Наим.
+											,oCodeRegion.[AOID]);
+				--Для населенных пунктов уровня > 1 и статуса не равного 2 (Центр региона), 3 (Центр района и региона), 5 (Города федерального значения):
+				elsif nWord in ('REGION_NCC', 'REGION_NCC_TE', 'REGION_NCC_NT', 'REGION_NCC_CODE', 'REGION_NCC_LCODE') then
+					nWordSwift:=GetTrans(	oCodeRegion.[AOGUID],
+											CodeRegionRef%id,
+											::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a),
+											5 -- 5 -Сокр.наим.об. Сокр. или Наим.
+											,oCodeRegion.[AOID]);
+
+				elsif nWord like ('DISTRICT%') or nWord in ('AREA','CITY_DISTRICT') then
+					DistrictCode:=oRegion.[AOGUID];
+					DistrictRef:=null;
+					for re in ::[REGION] where re.[AOGUID]=DistrictCode loop
+						DistrictRef:=re%id;
+						oDistrict := DistrictRef;
+						exit;
+					end loop;
+					DistrictRef:=coalesce(DistrictRef,oAddr.[DISTRICT]);
+					::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'DistrictCode='||DistrictCode||' DistrictRef='||DistrictRef,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+					if nWord='DISTRICT_TE' then --Район региона вместе с типом района, порядок следования:  <район> <тип>;
+						nWordSwift:=GetTrans(	DistrictCode,
+												oDistrict%id,
+												::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a),
+												5 -- 5 -Сокр.наим.об. Сокр. или Наим.
+												,oDistrict.[AOID]);
+					elsif nWord in ('DISTRICT', 'AREA','CITY_DISTRICT') then --Район региона вместе с типом района, порядок следования опеределяется типом района;
+						nWordSwift:=GetTrans(	DistrictCode,
+												oDistrict%id,
+												::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a),
+												5 -- 5 -Сокр.наим.об. Сокр. или Наим.
+												,oDistrict.[AOID]);
+					elsif nWord='DISTRICT_NT' then --Район региона;
+						nWordSwift:=GetTrans(	DistrictCode,
+												oDistrict%id,
+												::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a),
+												3 -- 3 -Сокр. или Наим.
+												,oDistrict.[AOID]);
+					elsif nWord='DISTRICT_CODE' then
+						nWordSwift:=DistrictCode; --Код района региона; 
+						nWordSwift:=::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a);
+
+					--Для районов не в статусе: 1(Центр района) 3(Центр района и региона)
+					elsif nWord in ('DISTRICT_NCC', 'DISTRICT_NCC_TE', 'DISTRICT_NCC_NT', 'DISTRICT_NCC_CODE') then
+						nWordSwift:=GetTrans(	DistrictCode,
+												oDistrict%id,
+												::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a),
+												5 -- 5 -Сокр.наим.об. Сокр. или Наим.
+												,oDistrict.[AOID]);
+					end if;
+					tmpStrSwift:=trim(ret_StrSwift,rzd);
+					tmpStrSwift:=rzd||tmpStrSwift||rzd;
+					::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'nWordSwift='||nWordSwift||' есть в "'||tmpStrSwift||'" "'||rzd||nWordSwift||rzd||'" ?',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+					if instr(tmpStrSwift,rzd||nWordSwift||rzd)>0 then
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'"'||rzd||nWordSwift||rzd||'" уже есть в "'||tmpStrSwift||'" Не будем добавлять',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						nWordSwift:=null;
+					end if;
+
+				--3--Поселение - по муниципальному делению ---------------
+				elsif nWord in ('MAIN_CITY', 'MAIN_CITY_TE', 'MAIN_CITY_NT', 'MAIN_CITY_CODE') then
+					MainCityCode:=oCity.[AOGUID];
+					MainCityRef:=null;
+					for nc in ::[NAMES_CITY] where nc.[AOGUID]=MainCityCode loop
+						MainCityRef:=nc%id;
+						oMainCity := MainCityRef;
+						exit;
+					end loop;
+					MainCityRef:=coalesce(MainCityRef,oAddr.[CITY]);
+					::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'MainCityCode='||MainCityCode||' MainCityRef='||MainCityRef,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+					if nWord='MAIN_CITY' then
+						nWordSwift:=GetTrans(	MainCityCode,
+												MainCityRef,
+												::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a),
+												2 -- 2 -Наименование
+												,oMainCity.[AOID]);
+
+					elsif nWord in ('MAIN_CITY_TE','MAIN_CITY_NT') then
+						nWordSwift:=GetTrans(	MainCityCode,
+												oMainCity%id,
+												::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a),
+												6 -- 6 -Полн.наим.об. Наим. или Сокр.
+												,oMainCity.[AOID]);
+					elsif nWord='MAIN_CITY_CODE' then
+						nWordSwift:=MainCityCode;
+					end if;
+				--Населенный пункт ---------------
+				elsif nWord in ('CITY' , 'CITY_TE','CITY_NT', 'CITY_CODE', 'CITY_DISTRICT') then
+					CityRef:=null; -- GUID объекта (AOGUID)
+					CityCode:=oCity.[AOGUID];
+					for nc in ::[NAMES_CITY] where nc.[AOGUID]=CityCode and (nc.[ARCHAIC] is null or not nc.[ARCHAIC]) loop
+						CityRef:=nc%id;
+						oCity :=  CityRef;
+
+						oCityId:=CityRef;
+						oCityClass:=oCity%class;
+
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'НП найден по AOGUID='||CityCode||' и актуальности '||oCityClass||'.'||oCityId,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						exit;
+					end loop;
+					CityRef:=coalesce(CityRef,oAddr.[CITY]);
+					oCity :=  CityRef;
+					if CityRef is null then --GUID записи (изменения) (AOID)
+						CityCode:=oCity.[AOID];
+						for nc in ::[NAMES_CITY] where nc.[AOID]=CityCode loop
+							CityRef:=nc%id;
+							oCity :=  CityRef;
+
+							oCityId:=CityRef;
+							oCityClass:=oCity%class;
+
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'НП найден по AOID='||CityCode||' '||oCityClass||'.'||oCityId,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							exit;
+						end loop;
+						CityRef:=coalesce(CityRef,oAddr.[CITY]);
+						oCity :=  CityRef;
+					end if;
+
+					oCityId:=CityRef;
+					oCityClass:=oCity%class;
+
+					if CityRef is not null then
+						flCityRef:=true;
+					end if;
+					::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'CityCode='||CityCode||' CityRef='||CityRef||' flCityRef='||flCityRef,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+					if nWord='CITY' then
+						if CityRef is null then
+							CityRef:=oCity;
+							oCity :=  CityRef;
+	
+							oCityId:=CityRef;
+							oCityClass:=oCity%class;
+						end if;
+
+						vCityName:=coalesce(GetNameWithKind(CityRef),::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a));
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'GetAddress       ->'||vCityName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						nWordSwift:=GetTrans(	CityCode,
+												oCityId,
+												vCityName,
+												8	--8 ---Сокр. или Наим. Полн.наим.об.
+												,oCity.[AOID]);
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'GetTrans         ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+						nWordSwift:=Transleterate(nWordSwift);
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'Transleterate    ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						
+						if nWord like '%STREET%' then
+							ReplEngWordStreet(nWordSwift,false,null,true);
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'ReplEngWordStreet->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+
+						nWordSwift := ::[RUNTIME].[STANDARD].replace(::[RUNTIME].[STANDARD].replace(nWordSwift,' CITY'),'CITY ');
+						nWordSwift := ::[RUNTIME].[STANDARD].replace(::[RUNTIME].[STANDARD].replace(nWordSwift,' GOROD'),'GOROD ');
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'Город            ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+						if rNamesCity2 is not null or (nWordSwift is null and (not flCityRef and vImpStr is not null)) then
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'rNamesCity2      ->'||rNamesCity2,dp3); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							if rNamesCity2 is not null then
+								::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'rNamesCity2      =>'||rNamesCity2,dp3); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								CityRef2:=rNamesCity2;
+								oCity2 := CityRef2;
+								nWordCity2:=4;
+								nWordTer2:=5;
+								vCityName2:=coalesce(GetNameWithKind(CityRef2),::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWordCity2,a));
+								::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'GetAddress2      ->'||vCityName2||' oNamesCity2.[AOGUID]/[AOID]='||oNamesCity2.[AOGUID]||' '||oNamesCity2.[AOID],1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								tmp2WordSwift:=nWordSwift;
+								nWordSwift:=GetTrans(	oNamesCity2.[AOGUID],
+														null,
+														vCityName2,
+														8	--8 ---Сокр. или Наим. Полн.наим.об.
+														,oNamesCity2.[AOID]);
+								::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'GetTrans2        ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+								nWordSwift:=Transleterate(nWordSwift);
+								::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'Transleterate2   ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+								if nWord like '%STREET%' then
+									ReplEngWordStreet(nWordSwift,false,null,true);
+									::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'ReplEngWordStreet->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								end if;
+
+								nWordSwift := ::[RUNTIME].[STANDARD].replace(::[RUNTIME].[STANDARD].replace(nWordSwift,' CITY'),'CITY ');
+								nWordSwift := ::[RUNTIME].[STANDARD].replace(::[RUNTIME].[STANDARD].replace(nWordSwift,' GOROD'),'GOROD ');
+								::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'Город2           ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+								if tmp2WordSwift is not null then
+									nWordSwift:=nWordSwift||rzd||tmp2WordSwift;
+									::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'Город2+НП        ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								end if;
+							else
+								--423601, Респ Татарстан, р-н Елабужский, г Елабуга, тер Алабуга ОЭЗ, ул Ш-2, к. 4/1,
+								nWordCity:=4;
+								nWordTer:=5;
+								::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'nWordCity        ->'||nWordCity,dp3); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'nWordTer         ->'||nWordTer,dp3); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								for i in 1..2 loop
+									nWordSwift:=trim(wbn(vImpStr,',',nWordCity));
+									::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'wbn(vImpStr,",",'||nWordCity||')>'||nWordSwift||' vImpStr='||vImpStr,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+									nWordSwift:=upper(nWordSwift);
+									ReplEngWordStreet(nWordSwift,false,null,true); --'г '
+									::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'ReplEngWordStreet->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+									
+									if (TmpFlatNt is not null and instr(nWordSwift,TmpFlatNt)>0)
+									or wbn(nWordSwift,'.',1)=wbn(TmpFlatNt,'.',1)
+									then
+										nWordSwift:=null;
+										::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'Есть TmpFlatNt "'||wbn(TmpFlatNt,'.',1)||'%" Сбросим nWordSwift='||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+									end if;
+
+									nWordSwift:=Transleterate(nWordSwift);
+									::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'Transleterate    ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+									var vTer string(1024);
+									vTer:=trim(wbn(vImpStr,',',nWordTer));
+									vTer:=upper(vTer);
+									ReplEngWordStreet(vTer);	--'тер '
+									::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'vTer('||nWordTer||')          ->'||vTer,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+									vTer:=trim(trim(trim(vTer),'.'));
+									if vTer is not null then
+										vTer:=Transleterate(vTer);
+										::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'vTer('||nWordTer||')          ->'||vTer||' TmpStreetTe='||TmpStreetTe||' TmpFlatNt='||TmpFlatNt,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+										if (instr(vTer,TmpFlatNt)>0 and length(TmpFlatNt)>0)
+										or wbn(vTer,'.',1)=wbn(TmpFlatNt,'.',1)
+										then
+											nWordCity:=5;
+											nWordTer:=6;
+											nWordSwift=vTer:=null;
+											::[PSH_EXP_TRA].[PSH_L].dbg('На месте Ter оказалась FL Пробуем еще раз для nWordCity='||nWordCity||' nWordTer='||nWordTer,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+											continue;
+										end if;
+										if instr(vTer,TmpStreetTe)>0 and length(TmpStreetTe)>0 then
+											vTer:=trim(trim(trim(substr(vTer,1,instr(vTer,TmpStreetTe)-1)),'.'));
+											::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'vTer             ->'||vTer||' Вырезали "'||TmpStreetTe||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+										end if;
+										if vTer is not null then
+											::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'nWordSwift('||nWordCity||')    ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+											::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'vTer('||nWordTer||')           ->'||vTer,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+											nWordSwift:=trim(nWordSwift||','||vTer,',');
+										end if;
+										::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'nWordSwift||vTer ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+									end if;
+									exit;
+								end loop;
+							end if;
+						else
+							nWordSwift:=upper(nWordSwift);
+							if nWord like '%STREET%' then
+								ReplEngWordStreet(nWordSwift);	--'г '
+								::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'(12.) ReplEngWordStreet->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							end if;
+
+							nWordSwift:=Translet(nWordSwift);
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'Translet         ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+						if instr(nWordSwift,'THE VILLAGE')>0 then
+							nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,'THE VILLAGE','VILL.');
+							DelDublSpace(nWordSwift,'VILL.');
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'nWordSwift.......->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+						if instr(nWordSwift,' VILLAGE')>0 then
+							nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,' VILLAGE',' VILL.');
+							DelDublSpace(nWordSwift,'VILL.');
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'nWordSwift.......->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+						if instr(nWordSwift,'VILLAGE ')>0 then
+							nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,'VILLAGE ','VILL.');
+							DelDublSpace(nWordSwift,'VILL.');
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'nWordSwift.......->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+
+						CityName:=nWordSwift;
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'CityName         =>'||CityName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+					elsif nWord in ('CITY_TE','CITY_NT') then
+						nWordSwift:=GetTrans(	CityCode,
+												oCity%id,
+												::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a),
+												6 -- 6 -Полн.наим.об. Наим. или Сокр.
+												,oCity.[AOID]);
+						nWordSwift:=upper(nWordSwift);
+						ReplEngWordStreet(nWordSwift);	--'г '
+
+					elsif nWord='CITY_CODE' then
+						nWordSwift:=CityCode;
+					end if;
+
+				--4-- Элемент планировочной структуры ---------------
+				elsif nWord='SUBAREA' then -- планировочная структура с наименованием типа;
+					nWordSwift:=::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a);
+					nWordSwift:=Translet(nWordSwift);
+				elsif nWord='SUBAREA_NT' then -- планировочная структура с наименованием типа;
+					nWordSwift:=::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a);
+					nWordSwift:=Translet(nWordSwift);
+				elsif nWord like 'STREET%' then
+					for eps in 1..2 loop
+						tmp2WordSwift=Tmp2StreetTe:=null;
+						if eps=1 then
+							oTmpAddr:=oAddr;
+						elsif eps=2 and rStreet2 is not null then
+							nEpsWordSwift:=nWordSwift;
+							nWordSwift:='';
+							oTmpAddr.[STREET_REF]:=rStreet2; --Адрес.Улично-дорожная сеть (ЭПС)
+							::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'Есть ЭПС:"'||oStreet2.[NAME]||'" nEpsWordSwift="'||nEpsWordSwift||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						else
+							exit;
+						end if;
+						if oTmpAddr.[STREET_REF] is not null then
+							flStreetRef:=false;
+						end if;
+
+						::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'flCityRef='||flCityRef||' flStreetRef='||flStreetRef,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						if nWord='STREET' then -- наименование улицы с наименованием типа улицы, порядок следования опеределяется в типе улицы;
+							nWordSwift:=iif(eps=2,GetNameWithKind(rStreet2),::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a));
+							::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'GetAddress       ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							if nWordSwift is null and oTmpAddr.[STREET_STR] is not null then
+								nWordSwift:=oTmpAddr.[STREET_STR];
+								::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'oTmpAddr.STREET_STR->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	
+								ReplEngWordStreet(nWordSwift);	--'г '
+								::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'ReplEngWordStreet ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+								nWordSwift:=transleterate(nWordSwift);
+								::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'transleterate     ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'instr(nWordSwift, STR)='||instr(nWordSwift,' STR'),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'instr(nWordSwift,STR.)='||instr(nWordSwift,'STR.'),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								if instr(nWordSwift,'STR ')=1 or instr(nWordSwift,'STR.')=1 then
+									nWordSwift:=trim(substr(nWordSwift,5));
+									if nWordSwift is not null then
+										nWordSwift:=nWordSwift||' STR.';
+										::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'      STR. в конец->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+									end if;
+								end if;
+
+								--Переулок
+								::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'instr(nWordSwift, PER)='||instr(nWordSwift,' PER'),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'instr(nWordSwift,PER.)='||instr(nWordSwift,'PER.'),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								if instr(nWordSwift,'PER ')=1 or instr(nWordSwift,'PER.')=1 then
+									nWordSwift:=trim(substr(nWordSwift,5))||' ALLEY';
+									::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'      ALLEY в конец->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								end if;
+
+								if  ::[PSH_EXP_TRA].[PSH_L].GetIdxCashExpTransTao(nWordSwift,0,true)=0	-- улица/ЭПС/Нас.Пункт(0) -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								and ::[PSH_EXP_TRA].[PSH_L].GetIdxCashExpTransTao(nWordSwift,0,false)=0 -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								then
+									TmpSubElement:=upper(SubElement(nWordSwift,5));
+									if TmpSubElement is null then
+										nWordSwift:=trim(nWordSwift)||' STR.';
+										--PERVOMAYSKIY AREA, UL.RAZZAKOVA
+										nWordSwift:=trim(replace(nWordSwift,', UL.' ,','));
+										nWordSwift:=trim(replace(nWordSwift,'. UL.' ,'.'));
+										nWordSwift:=trim(replace(nWordSwift,', UL ' ,','));
+										nWordSwift:=trim(replace(nWordSwift,'. UL ' ,'.'));
+										nWordSwift:=trim(replace(nWordSwift,',UL.' ,','));
+										nWordSwift:=trim(replace(nWordSwift,'.UL.' ,'.'));
+										nWordSwift:=trim(replace(nWordSwift,',UL ' ,','));
+										nWordSwift:=trim(replace(nWordSwift,'.UL ' ,'.'));
+										::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'             +STR.->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+									else
+										nWordSwift:=trim(::[RUNTIME].[STANDARD].replace(nWordSwift,TmpSubElement))||' '||TmpSubElement;
+										::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||TmpSubElement||' в конец ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+									end if;
+								end if;
+							end if;
+							nWordSwift:=Translet(nWordSwift);
+						elsif nWord='STREET_TE' then -- наименование улицы с наименованием типа улицы, порядок следования:  <улица> <тип> (улица строкой игнорируется);
+							nWordSwift:=iif(eps=2,GetNameWithKind(rStreet2),::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a));
+							::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'GetAddress       ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							if nWordSwift is null and oTmpAddr.[STREET_STR] is not null then
+								nWordSwift:=oTmpAddr.[STREET_STR];
+								::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'oTmpAddr.STREET_STR->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							end if;
+							if nWordSwift is null and (not flStreetRef and vImpStr is not null) then
+								if RuCharinstr(vImpStr) then
+									nWordSwift:=trim(wbn(vImpStr,',',6));
+									::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'wbn(vImpStr,",",6)>'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								else
+									nWordSwift:=trim(wbn(vImpStr,',',2));
+									::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'wbn(vImpStr,",",2)>'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+								end if;
+							end if;
+
+							::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'GetAddress       ->>'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							ReplEngWordStreet(nWordSwift);
+							::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'ReplEngWordStreet->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+							nWordSwift:=transleterate(nWordSwift);
+							::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'transleterate    ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+							::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'instr(nWordSwift, STR)='||instr(nWordSwift,' STR'),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'instr(nWordSwift,STR.)='||instr(nWordSwift,'STR.'),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							
+							TmpStreetTe:=nWordSwift;
+							::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'      Запомним TmpStreetTe='||TmpStreetTe,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	
+							if instr(nWordSwift,'STR ')=1 or instr(nWordSwift,'STR.')=1 then
+								nWordSwift:=trim(substr(nWordSwift,5))||' STR.';
+								::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'      STR. в конец->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							end if;
+
+							--Переулок
+							::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'instr(nWordSwift, PER)='||instr(nWordSwift,' PER'),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'instr(nWordSwift,PER.)='||instr(nWordSwift,'PER.'),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							if instr(nWordSwift,'PER ')=1 or instr(nWordSwift,'PER.')=1 then
+								nWordSwift:=trim(substr(nWordSwift,5))||' ALLEY';
+								::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'      ALLEY в конец->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							end if;
+
+							if  ::[PSH_EXP_TRA].[PSH_L].GetIdxCashExpTransTao(nWordSwift,0,true)=0	-- улица/ЭПС/Нас.Пункт(0) -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							and ::[PSH_EXP_TRA].[PSH_L].GetIdxCashExpTransTao(nWordSwift,0,false)=0 -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							and eps<>2
+							then
+									TmpSubElement:=upper(SubElement(nWordSwift,5));
+									if TmpSubElement is null then
+										nWordSwift:=trim(nWordSwift);
+										if nWordSwift is not null then
+											nWordSwift:=nWordSwift||' STR.';
+											--PERVOMAYSKIY AREA, UL.RAZZAKOVA
+											nWordSwift:=trim(replace(nWordSwift,', UL.' ,','));
+											nWordSwift:=trim(replace(nWordSwift,'. UL.' ,'.'));
+											nWordSwift:=trim(replace(nWordSwift,', UL ' ,','));
+											nWordSwift:=trim(replace(nWordSwift,'. UL ' ,'.'));
+											nWordSwift:=trim(replace(nWordSwift,',UL.' ,','));
+											nWordSwift:=trim(replace(nWordSwift,'.UL.' ,'.'));
+											nWordSwift:=trim(replace(nWordSwift,',UL ' ,','));
+											nWordSwift:=trim(replace(nWordSwift,'.UL ' ,'.'));
+											::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'             +STR.->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+										end if;
+									else
+										nWordSwift:=trim(::[RUNTIME].[STANDARD].replace(nWordSwift,TmpSubElement))||' '||TmpSubElement;
+										::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||TmpSubElement||' в конец ->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+									end if;
+							end if;
+
+							tmp2WordSwift:=nWordSwift;
+							Tmp2StreetTe=nWordSwift:=transleterate(nWordSwift,true,1);
+							::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||'transleterate("'||tmp2WordSwift||'",true,1);->'||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						elsif nWord='STREET_NT' then -- наименование улицы;
+							nWordSwift:=iif(eps=2,GetNameWithKind(rStreet2),::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a));
+							nWordSwift:=Translet(nWordSwift);
+						elsif nWord='STREET_CODE' then -- Код улицы;
+							nWordSwift:=iif(eps=2,GetNameWithKind(rStreet2),::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a));
+						end if;
+						if nWordSwift is null then
+							if nWordSwift is null and oTmpAddr.[STREET_REF] is not null then
+								nWordSwift:=oTmpAddr.[STREET_REF].[NAME];
+								nWordSwift:=Translet(nWordSwift);
+								if nWord='STREET_TE' then
+									nWordSwift:=trim(nWordSwift||' '||GetPeoplePlace(oTmpAddr.[STREET_REF].[KIND],3)); -- 3 "Адрес. Элемент. Сокращенное наименование" или "Адрес. Элемент. Наименование"
+								elsif nWord='STREET_NT' then
+									nWordSwift:=trim(nWordSwift||' '||GetPeoplePlace(oTmpAddr.[STREET_REF].[KIND],2)); -- 2 Адрес. Элемент. Наименование
+								end if;
+							end if;
+							if nWordSwift is null and oTmpAddr.[STREET_STR] is not null then
+								nWordSwift:=oTmpAddr.[STREET_STR];
+								ReplEngWordStreet(nWordSwift);
+								nWordSwift:=Translet(nWordSwift);
+							end if;
+						end if;
+						nWordSwift:=upper(nWordSwift);
+						if eps=2 and nEpsWordSwift is not null then
+							nWordSwift:=substr(trim(nEpsWordSwift,'.')||'.'||nWordSwift,1,nWordSwift%size);
+							::[PSH_EXP_TRA].[PSH_L].dbg(iif(eps=2,'ЭПС:','')||TB$||TB$||nWord||' Объединение Улицы и ЭПС "'||nWordSwift||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+					end loop;
+
+				-- Дом ---------------
+				elsif nWord like 'HOUSE%' --в т.ч
+				and (oHouse.[ESTSTATUS].[NAME] is null or oHouse.[ESTSTATUS].[NAME]<>'Не определено')
+				then
+					if nWord='HOUSE' then -- Номер дома с наименованием вида;
+						nWordSwift:=::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a);
+						nWordSwift:=Translet(nWordSwift);
+					elsif nWord in ('HOUSE_TE','HOUSE_NT') then -- номер дома;
+						tmpDom=tmpWordSwift:= --(Тип дома)    =Дом
+							trim( GetEstStrucStatus(oHouse.[ESTSTATUS])||' '||
+								oHouse.[NAME]
+								);
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||nWord||' (Тип дома) '||tmpWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+						tmpKorp=tmpWordSwift:= --(Тип корпуса) =Корпус
+							trim( GetEstStrucStatus(oHouse.[KORP_TYPE])||' '||
+								oHouse.[KORP]
+								);
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||nWord||' (Тип корпуса) '||tmpWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+						tmpWordSwift:= --(Тип строения)=Строение
+						trim( GetEstStrucStatus(oHouse.[STRSTATUS])||' '||
+								oHouse.[STRUCNUM]
+								);
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||nWord||' (Тип строения) '||tmpWordSwift||' tmpDom='||tmpDom||' tmpKorp='||tmpKorp,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+						if tmpDom is null and tmpKorp is null then
+							nWordSwift:=coalesce(
+							trim(
+							--(Тип дома)    =Дом
+								trim( GetEstStrucStatus(oHouse.[ESTSTATUS])||' '||
+									nvl(oAddr.[HOUSE],oHouse.[NAME])
+									)||' '||
+							--(Тип корпуса) =Корпус
+								trim( GetEstStrucStatus(oHouse.[KORP_TYPE])||' '||
+									oHouse.[KORP]
+									)||' '||
+							--(Тип строения)=Строение
+								trim( GetEstStrucStatus(oHouse.[STRSTATUS])||' '||
+									oHouse.[STRUCNUM]
+									)
+								)
+								,ReplEngWord(oAddr.[HOUSE])
+								,::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a));
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||nWord||' (0)nWordSwift='||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						else
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||nWord||' Дом Корпус->Дом/Корпус',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							nWordSwift:=coalesce(
+							trim(
+									trim(
+								trim(tmpDom)  --(Тип дома)    =Дом
+									||'/'||
+								trim(tmpKorp) --(Тип корпуса) =Корпус
+									,'/')
+									||' '||
+							--(Тип строения)=Строение
+								trim( GetEstStrucStatus(oHouse.[STRSTATUS])||' '||
+									oHouse.[STRUCNUM]
+									)
+								)
+								,ReplEngWord(oAddr.[HOUSE])
+								,::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a));
+						end if;
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||nWord||' (2)nWordSwift='||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+						if nWordSwift is null and (not flStreetRef and vImpStr is not null) and not FlWord3Used then
+							var vCountry string(2);
+							nWordSwift:=IsThisCountry(vImpStr, ',', 7,null,vCountry);
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||nWord||'(3)nWordSwift='||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+
+						nWordSwift:=ReplEngWord(nWordSwift);
+						nWordSwift:=Translet(nWordSwift);
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||nWord||' (Тип xxx) '||tmpWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+					end if;
+					nWordSwift:=ReplEngWord(nWordSwift);
+
+					nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,'HOME OWNERSHIP.');
+					nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,'HOMEOWNRSH.');
+					nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,'OWNERSHIP.');
+					nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,'OWNRSH.');
+					DelDublSpace(nWordSwift);
+
+					::[PSH_EXP_TRA].[PSH_L].dbg('"'||nWord||'" -> '||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+					nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,'. ','.');
+					nWordSwift:=Transleterate(nWordSwift);
+				--5-- Корпус ---------------
+				elsif nWord like 'KORPUS%'
+				and (oHouse.[KORP_TYPE].[NAME] is null or oHouse.[KORP_TYPE].[NAME]<>'Не определено')
+				and oHouse.[STRUCNUM] is null
+				then
+					if nWord='KORPUS' then -- корпус дома с наименованием вида;
+						nWordSwift:=::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a);
+						nWordSwift:=Translet(nWordSwift);
+					elsif nWord='KORPUS_ONLY' then -- только корпус искючая строение с типом;
+						nWordSwift:=::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a);
+						nWordSwift:=Translet(nWordSwift);
+					elsif nWord='KORPUS_NT' then -- корпус дома;
+						nWordSwift:=::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a);
+						nWordSwift:=Translet(nWordSwift);
+					elsif nWord='KORPUS_ONLY_NT' then -- только корпус искючая строение без типа;
+						nWordSwift:=::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a);
+						nWordSwift:=Translet(nWordSwift);
+					end if;
+					EstType:=GetEstStrucStatus(oHouse.[STRSTATUS]);
+					::[PSH_EXP_TRA].[PSH_L].dbg('"'||nWord||'" -1-> '||nWordSwift||'   Тип строения:'||EstType,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+					if EstType is null and nWordSwift is not null then
+						nWordSwift:=ReplEngWord(Upper(nWordSwift));
+					end if;
+					if nWordSwift is null then
+						if nWordSwift is null and oAddr.[KORPUS] is not null then
+							nWordSwift:=oAddr.[KORPUS];
+							::[PSH_EXP_TRA].[PSH_L].dbg('"'||nWord||'" -2-> '||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							nWordSwift:=ReplEngWord(nWordSwift);
+							::[PSH_EXP_TRA].[PSH_L].dbg('"'||nWord||'" -3-> '||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							nWordSwift:=Translet(nWordSwift);
+							::[PSH_EXP_TRA].[PSH_L].dbg('"'||nWord||'" -4-> '||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						end if;
+						if nWordSwift is null and oHouse.[KORP] is not null then
+							nWordSwift:=oHouse.[KORP];
+							if nWord in ('KORPUS_TE','KORPUS_NT','KORPUS_ONLY_NT') then
+								if nWord='KORPUS_ONLY_NT' then
+									nWordSwift:=EstType;
+								else
+									nWordSwift:=trim(EstType||' '||nWordSwift);
+								end if;
+								::[PSH_EXP_TRA].[PSH_L].dbg('"'||nWord||'" -5-> '||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+								nWordSwift:=Translet(nWordSwift);
+								::[PSH_EXP_TRA].[PSH_L].dbg('"'||nWord||'" -6-> '||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							end if;
+						end if;
+					end if;
+					nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,'. ','.');
+					nWordSwift:=Transleterate(nWordSwift);
+					::[PSH_EXP_TRA].[PSH_L].dbg('"'||nWord||'" -7-> '||nWordSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+				-- Строение ---------------
+				elsif nWord like 'BUILD%' or nWord like 'STRUCTURE%' 
+				and (oHouse.[STRSTATUS].[NAME] is null or oHouse.[STRSTATUS].[NAME]<>'Не определено')
+				then
+					if nWord in ('BUILD', 'STRUCTURE') then -- номер строения дома с наименованием вида;
+						nWordSwift:=::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a);
+						nWordSwift:=Translet(nWordSwift);
+					elsif nWord in ('BUILD_NT','STRUCTURE_NT') then -- номер строения дома;
+						nWordSwift:=::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a);
+						nWordSwift:=Translet(nWordSwift);
+					end if;
+					if nWordSwift is null then
+						if nWordSwift is null and oHouse.[STRUCNUM] is not null then
+							nWordSwift:=oHouse.[STRUCNUM];
+							EstType:=GetEstStrucStatus(oHouse.[STRSTATUS]);
+							nWordSwift:=trim(EstType||' '||nWordSwift);
+							nWordSwift:=Translet(nWordSwift);
+						end if;
+					end if;
+					nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,'. ','.');
+					nWordSwift:=Transleterate(nWordSwift);
+				--Квартира/офис ---------------
+				elsif nWord in ('FLAT','FLAT_NT','FLAT_TE')	and oAddr.[FLAT] is not null then -- квартира(офис);
+					nWordSwift:=oAddr.[FLAT];
+					nWordSwift:=upper(nWordSwift);
+					::[PSH_EXP_TRA].[PSH_L].dbg('"'||nWord||'" -1-> "'||nWordSwift||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+					if nWordSwift is null and not RuCharinstr(vImpStr) and not FlWord3Used then
+						nWordSwift:=trim(wbn(vImpStr,',',3)); FlWord3Used:=true;
+						::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'wbn(vImpStr,",",3)>'||nWordSwift||' FlWord3Used='||FlWord3Used,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+					end if;
+
+					if instr(nWordSwift,' ')>0 then
+						pref250:=trim(substr(nWordSwift,1,instr(nWordSwift,' ')));
+						value250:=trim(substr(nWordSwift, instr(nWordSwift,' ')));
+					end if;
+					::[PSH_EXP_TRA].[PSH_L].dbg('"'||nWord||'" -2-> ' -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						||' pref250('||length(pref250)||') = "'||pref250||'"'
+						||' value250('||length(value250)||') = "'||value250||'"'
+						,1);
+
+					if nWord in ('FLAT_NT', 'FLAT_TE') then --эт.1ком Б оф.7
+						if instr(pref250,'/')>0 and instr(value250,'/')>0 then
+							value250:=transleterate(value250);
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'value250="'||value250||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							
+							pref250:=ReplEngWord(pref250,'/');
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'pref250="'||pref250||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							
+							pref250:=trim(trim(trim(::[RUNTIME].[STANDARD].replace(transleterate(pref250),' '),'/'),'.'),'/');
+							::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||'pref250="'||pref250||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							
+							--ЭТАЖ.'           ,'FLOOR.'         ,'FL.'
+							--ХОЛЛ.'           ,'HALL.'          ,'HALL.'
+							--ЧАСТЬ ПОМЕЩЕНИЯ.','PREMLSE.'       ,'PART.RM.' --РЕГ.№ 64551 --196628, г Санкт-Петербург, п Шушары, тер. Славянка, ул Полоцкая, д. 19, стр 1, ЭТАЖ 1 ЧАСТЬ ПОМЕЩ. 25
+							--ПОМЕЩЕНИЕ.'      ,'PREMLSE.'       ,'PREM.'    --(!) ООО "РосТ"
+							--Апартамент.'     ,'Apartment.'     ,'Apt.'
+							--КВАРТИРА.'       ,'APARTMENT.'     ,'APT.'
+							--КОМНАТА.'        ,'ROOM.'          ,'RM.'
+							--ОФИС.'           ,'OFFICE.'        ,'OF.'
+							var pR string(512); --ЭТ/ПОМ/КОМ
+							while pref250 is not null loop
+								pR:=pR||trim(trim(trim( wbn(pref250,'/',1,true) ),'.'))||'/';
+								::[PSH_EXP_TRA].[PSH_L].dbg(TB$||TB$||' pR='||pR,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							end loop;
+							pR:=trim(pR,'/');
+							TmpFlatNt=nWordSwift:=pR||' '||value250;
+
+							::[PSH_EXP_TRA].[PSH_L].dbg('"'||nWord||'" -3-> "'||nWordSwift||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+						else
+							TmpFlatNt:=nWordSwift;
+							nWordSwift:=ReplEngWord(nWordSwift);
+							::[PSH_EXP_TRA].[PSH_L].dbg('"'||nWord||'" -4-> "'||nWordSwift||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+							if nWordSwift is not null and TmpFlatNt=nWordSwift and instr(nWordSwift,iif(ClRefClass='CL_PRIV','APT','OF'))=0 then
+								nWordSwift:=iif(ClRefClass='CL_PRIV','APT.','OF.')||nWordSwift;
+								::[PSH_EXP_TRA].[PSH_L].dbg('"'||nWord||'" -5-> "'||nWordSwift||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+							end if;
+						end if;
+					end if;
+					nWordSwift:=Translet(trim(nWordSwift));
+					nWordSwift:=trim( ::[RUNTIME].[STANDARD].replace(nWordSwift,'. ','.'));
+					nWordSwift:=trim( ::[RUNTIME].[STANDARD].replace(nWordSwift,'/ ','/'));
+					nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,'FL.PREM.','FL/PREM.'); --эт/пом 5/163
+					::[PSH_EXP_TRA].[PSH_L].dbg('"'||nWord||'" -6-> "'||nWordSwift||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+					DelDublSpace(nWordSwift);
+					nWordSwift:=trim(trim(trim(nWordSwift,'.'),'/'),'.');
+					TmpFlatNT=nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,'. ','.'); --FL/RM. 5/164
+					nWordSwift:=Transleterate(nWordSwift);
+
+					TmpFlatNt:=nWordSwift;
+					::[PSH_EXP_TRA].[PSH_L].dbg('"'||nWord||'" -7-> "'||nWordSwift||'" TmpFlatNT="'||TmpFlatNT||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+				end if; --5--
+
+				--Другое ---------------
+				if nWord='IMP_STR' then -- адрес строкой
+					nWordSwift:=::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a);
+				elsif nWord='ADDR_TYPE' then -- код типа адреса;
+					nWordSwift:=::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a);
+				elsif nWord='KLADR_CODE' then -- код по КЛАДР. В порядке приоритета: улица, город, регион;
+					nWordSwift:=::[RUNTIME].[VIEWFUN].GetAddress(ClRef,nWord,a);
+				end if;
+				if nWord not like 'REGION%' then
+					nWordSwift:=::[RUNTIME].[STANDARD].replace(nWordSwift,rzd,'.');
+				end if;
+
+				ret_StrSwift:=substr(ret_StrSwift||rzd||nWordSwift, 1, ret_StrSwift%size);
+
+				if P_TEG=nWord then
+					::[PSH_EXP_TRA].[PSH_L].dbg('Выходим из цикла P_TEG=nWord '||P_TEG||'='||nWord||' > "'||nWordSwift||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+					ret_StrSwift:=nWordSwift;
+					Set_gTeg(nWordSwift);
+					exit; --CFT-1297
+				end if;
+			end loop;
+
+			if nWord not like 'COUNTRY%' then -- Наименование страны населенного пункта;
+				nWordSwift:=IsThisCountry(nWordSwift);
+			end if;
+		end if;
+	end if;
+	::[PSH_EXP_TRA].[PSH_L].dbg('(1)ret_StrSwift='||ret_StrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+	ret_StrSwift:=upper(trim(ret_StrSwift,rzd));
+	DelDublSpace(ret_StrSwift,' ');
+	DelDublSpace(ret_StrSwift,'.');
+	::[PSH_EXP_TRA].[PSH_L].dbg('(2)ret_StrSwift='||ret_StrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+	::[PSH_EXP_TRA].[PSH_L].dbg(TB$||'(1)CityName  ='||CityName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	CityName:=trim(::[RUNTIME].[STANDARD].replace(CityName,' CITY'),' ');
+	CityName:=trim(::[RUNTIME].[STANDARD].replace(CityName,'CITY '),' ');
+	CityName:=trim(::[RUNTIME].[STANDARD].replace(CityName,'CITY'),' ');
+	if rNamesCity2 is not null then -- Город+НП
+		CityName:=::[RUNTIME].[STANDARD].replace(CityName,',','.');
+		DelDublSpace(CityName,'.');
+	end if;
+	CityName:=trim(CityName,'.');
+	CityName:=trim(CityName,',');
+	::[PSH_EXP_TRA].[PSH_L].dbg(TB$||'(2)CityName  ='||CityName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+	RegionName:=tmpRegionName;
+	::[PSH_EXP_TRA].[PSH_L].dbg(TB$||'(1)RegionName='||RegionName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	RegionName:=trim(::[RUNTIME].[STANDARD].replace(RegionName,'CITY'),' ');
+	RegionName:=trim(RegionName,'.');
+	RegionName:=trim(RegionName,',');
+	::[PSH_EXP_TRA].[PSH_L].dbg(TB$||'(2)RegionName='||RegionName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+	if instr(RegionName,',G MOSKVA')>0 then
+		RegionName:=trim(::[RUNTIME].[STANDARD].replace(RegionName,',G MOSKVA',',MOSCOW'));
+	end if;
+
+	var bReg boolean;
+	bReg:=false;
+	if RegionName like '%MOSCOW%'
+	or RegionName like '%SANKT-PETERBURG%'
+	or RegionName like '%SEVASTOPOL%'
+	then
+		bReg:=true;
+	else
+		if instr(RegionName,' REG.',-1)=length(RegionName)-4 then
+			bReg:=true;
+			RegionName:=trim(::[RUNTIME].[STANDARD].replace(RegionName,' REG.'));
+		end if;
+		if instr(RegionName,' REG,',-1)=length(RegionName)-4 then
+			bReg:=true;
+			RegionName:=trim(::[RUNTIME].[STANDARD].replace(RegionName,' REG,'));
+		end if;
+		if instr(RegionName,' REG',-1)=length(RegionName)-3 then
+			bReg:=true;
+			RegionName:=trim(::[RUNTIME].[STANDARD].replace(RegionName,' REG'));
+		end if;
+		if instr(RegionName,'REG.')=1 then
+			bReg:=true;
+			RegionName:=trim(::[RUNTIME].[STANDARD].replace(RegionName,'REG.'));
+		end if;
+		if instr(RegionName,'REG ')=1 then
+			bReg:=true;
+			RegionName:=trim(::[RUNTIME].[STANDARD].replace(RegionName,'REG '));
+		end if;
+	end if;
+	::[PSH_EXP_TRA].[PSH_L].dbg(TB$||'(3)RegionName='||RegionName||' bReg='||bReg,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	::[PSH_EXP_TRA].[PSH_L].dbg(TB$||'tmpRegionName='||tmpRegionName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+	vCityName :=substr(CityName,1,instr(CityName,'.')-1);
+	vCityName2:=trim(::[RUNTIME].[STANDARD].replace(RegionName,'CITY'));
+	::[PSH_EXP_TRA].[PSH_L].dbg(TB$||'vCityName ='||vCityName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	::[PSH_EXP_TRA].[PSH_L].dbg(TB$||'vCityName2='||vCityName2,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+	--2) По поводу нзваний регионов
+	--(а)использовать Rep.of(Название) в названиях республик, например Rep.of Dagestan;
+	--(б)города федерального значения - использовать только сами названия:
+	--(в)все остальные субъекты Федерации - использовать Reg. после названия, например Sverdlovskaya Reg., Permskiy Reg.
+
+	--NOVOSIBIRSK,NOVOSIBIRSK REG. -> NOVOSIBIRSK
+	if CityName=RegionName 
+	and CityName in ('MOSCOW','SANKT-PETERBURG','SEVASTOPOL')
+	then
+		ret_StrSwift:=::[RUNTIME].[STANDARD].replace(ret_StrSwift,rzd||tmpRegionName);
+		ret_StrSwift:=::[RUNTIME].[STANDARD].replace(ret_StrSwift,'CITY');
+		DelDublSpace(ret_StrSwift,rzd);
+		::[PSH_EXP_TRA].[PSH_L].dbg('(4.0)ret_StrSwift='||ret_StrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	--SANKT-PETERBURG.SHUSHARY VILL.,CITY SANKT-PETERBURG -> SHUSHARY VILL,SANKT-PETERBURG
+	elsif vCityName=vCityName2 and instr(ret_StrSwift,vCityName||'.')>1 then
+		ret_StrSwift:=::[RUNTIME].[STANDARD].replace(ret_StrSwift, vCityName||'.');
+		DelDublSpace(ret_StrSwift,rzd);
+		ret_StrSwift:=::[RUNTIME].[STANDARD].replace(ret_StrSwift,'CITY ');
+		DelDublSpace(ret_StrSwift);
+		::[PSH_EXP_TRA].[PSH_L].dbg('(4.1)ret_StrSwift='||ret_StrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+		if bReg and RegionName is not null 
+		and instr(ret_StrSwift,','||vCityName2)>1
+		and instr(vCityName2,' REG')=0
+		then
+			ret_StrSwift:=::[RUNTIME].[STANDARD].replace(ret_StrSwift, vCityName2, vCityName2||' REG');
+			::[PSH_EXP_TRA].[PSH_L].dbg('(4.2)ret_StrSwift='||ret_StrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+		end if;
+	--SANKT-PETERBURG,CITY SANKT-PETERBURG -> SANKT-PETERBURG
+	elsif CityName=vCityName2 and not bReg then
+		ret_StrSwift:=::[RUNTIME].[STANDARD].replace(ret_StrSwift,rzd||tmpRegionName);
+		ret_StrSwift:=::[RUNTIME].[STANDARD].replace(ret_StrSwift,'CITY');
+		DelDublSpace(ret_StrSwift,rzd);
+		::[PSH_EXP_TRA].[PSH_L].dbg('(4.3)ret_StrSwift='||ret_StrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	else
+		ret_StrSwift:=::[RUNTIME].[STANDARD].replace(ret_StrSwift,'CITY');
+		if bReg and RegionName is not null and instr(RegionName,' REG')=0 then
+			RegionName:=RegionName||' REG';
+			::[PSH_EXP_TRA].[PSH_L].dbg(TB$||'(5)RegionName='||RegionName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+		end if;
+	end if;
+
+	if instr(RegionName,'REG.')=1 then
+		RegionName:=trim(::[RUNTIME].[STANDARD].replace(RegionName,'REG.')||' REG');
+		ret_StrSwift:=::[RUNTIME].[STANDARD].replace(ret_StrSwift,tmpRegionName,RegionName);
+		::[PSH_EXP_TRA].[PSH_L].dbg('(6)ret_StrSwift='||ret_StrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	end if;
+
+	if P_TEG='CITY' then
+		Set_gTeg(CityName);
+		::[PSH_EXP_TRA].[PSH_L].dbg(TB$||'(7).gTeg=CityName='||CityName,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	elsif P_TEG='REGION' then
+		Set_gTeg(nvl(RegionName,tmpRegionName));
+		::[PSH_EXP_TRA].[PSH_L].dbg(TB$||'(8).gTeg=RegionName='||nvl(RegionName,tmpRegionName),1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	end if;
+	
+	if instr(ret_StrSwift,'THE VILLAGE')>0 then
+		ret_StrSwift:=::[RUNTIME].[STANDARD].replace(ret_StrSwift,'THE VILLAGE','VILL.');
+		DelDublSpace(ret_StrSwift,'VILL.');
+		::[PSH_EXP_TRA].[PSH_L].dbg('(9)ret_StrSwift='||ret_StrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	end if;
+
+	--Города федерального значения (Вырезаем REG)
+	ret_StrSwift:=::[RUNTIME].[STANDARD].replace(ret_StrSwift,'MOSKVA','MOSCOW');
+	CityFederal(ret_StrSwift,'MOSCOW');
+	CityFederal(ret_StrSwift,'SANKT-PETERBURG');
+	CityFederal(ret_StrSwift,'SEVASTOPOL');
+
+	ret_StrSwift:=trim(::[RUNTIME].[STANDARD].replace(ret_StrSwift,' ,',','),',');
+	ret_StrSwift:=trim(::[RUNTIME].[STANDARD].replace(ret_StrSwift,', ',','),',');
+	ret_StrSwift:=trim(::[RUNTIME].[STANDARD].replace(ret_StrSwift,' .','.'),'.');
+	ret_StrSwift:=trim(::[RUNTIME].[STANDARD].replace(ret_StrSwift,'. ','.'),'.');
+	ret_StrSwift:=trim(::[RUNTIME].[STANDARD].replace(ret_StrSwift,'.,',','),',');
+	DelDublSpace(ret_StrSwift,rzd);
+	::[PSH_EXP_TRA].[PSH_L].dbg('(11.1)ret_StrSwift='||ret_StrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+	--Башкиров В.Г. 20.06.2025 CFT-1297
+	if ret_StrSwift is null and P_TEG is null then
+		ret_StrSwift:=oAddr.[IMP_STR];
+	end if;
+	
+	if RuCharinstr(ret_StrSwift) then
+		::[PSH_EXP_TRA].[PSH_L].dbg('Есть русские буквы! Транслитерируем',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+		ret_StrSwift:=Transleterate(ret_StrSwift);
+		::[PSH_EXP_TRA].[PSH_L].dbg('(12.1)ret_StrSwift='||ret_StrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	end if;
+
+	::[PSH_EXP_TRA].[PSH_L].dbg('Шаблон:'||StrExpSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	::[PSH_EXP_TRA].[PSH_L].dbg('< ret_StrSwift='||ret_StrSwift,1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+
+	if P_TEG is not null then
+		::[PSH_EXP_TRA].[PSH_L].dbg('Тэг:"'||P_TEG||'" < "'||Get_gTeg()||'"',1); -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+	end if;
+
+	v_ExpTransAddSwift = v_ExpSearchTransId = v_Short := null;
+	return ret_StrSwift;
+end;
+end;
+end;

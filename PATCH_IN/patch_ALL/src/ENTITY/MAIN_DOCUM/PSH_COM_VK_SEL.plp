@@ -1,0 +1,58 @@
+class MAIN_DOCUM;
+
+@import_plsql(true)
+@name('[ПСБ] Установить признак взимания комиссии за ВК с УНК/без УНК')
+batch method PSH_COM_VK_SEL is
+PSH_COM_VK_SEL (
+	@name('Вариант комиссия УНК') P_UNK_COM in [ONE_FROM_THREE] default null
+) is
+
+validate is
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		P_UNK_COM.[0] := 0;
+	end if;
+	if P_MESSAGE = 'VALIDATE' and P_INFO = 'OK' and P_UNK_COM.[0] = 0 then
+		pragma error('Не выбран вариант комиссии УНК!');
+	end if;
+end;
+
+execute is
+	idx		integer;
+begin
+	idx := this.first;
+	while idx is not null
+	loop
+		if --(this(idx).[ACC_DT].[MAIN_V_ID] like '30102810%' or this(idx).[ACC_DT].[MAIN_V_ID] like '47416810%') 
+			this(idx).[ACC_KT].[MAIN_V_ID] like '40%' 
+			and this(idx).[ACC_KT].[CLIENT_V].[IS_RESIDENT]
+			and this(idx).[ACC_KT].[CLIENT_V]%class = 'CL_ORG'
+		then 
+			for hs in this(idx).[HISTORY_STATE]
+				where hs.[STATE] = 'PSB_UNK_SEL'
+			loop
+				hs.[DELETE#AUTO];
+			end loop;
+			
+			if P_UNK_COM.[0] = 1 then
+				this(idx).[HISTORY_STATE].[NEW#AUTO](
+					'PSB_UNK_SEL',
+					'1',
+					null,
+					null);
+			elsif P_UNK_COM.[0] = 2 then
+				this(idx).[HISTORY_STATE].[NEW#AUTO](
+					'PSB_UNK_SEL',
+					'2',
+					null,
+					null);
+			end if;
+		else debug_pipe('Документ № '||this(idx).[DOCUMENT_NUM] || ' от '||to_char(this(idx).[DATE_DOC]) || ' пропущен, т.к. не удовлетворяет условиям', 0);
+		end if;
+
+		idx := this.next(idx);
+	end loop;
+	
+end;
+end;
+end;

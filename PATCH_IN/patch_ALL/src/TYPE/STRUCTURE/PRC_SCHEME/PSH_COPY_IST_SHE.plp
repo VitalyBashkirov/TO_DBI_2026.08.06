@@ -1,0 +1,129 @@
+class PRC_SCHEME;
+
+@name('[ПСБ] Скопировать схему или историю схемы')
+method PSH_COPY_IST_SHE is
+
+@name('От куда копируем')      public P_START  [REF_PRC_SCH];
+@name('Куда копируем')         public P_END    [REF_PRC_SCH];
+@name('Создать схему')         public P_CREATE [BOOLEAN];
+@name('Увеличть %% ставки на') public P_DOBAV  [PSH_PERCENT_FEE];
+PSH_COPY_IST_SHE is
+
+validate is
+
+begin
+	if p_message = 'DEFAULT' then
+	P_START:=this;
+	P_CREATE:= true;
+	P_DOBAV:=0.1;
+	elsif p_message = 'VALIDATE' then
+		if p_info = 'OK' then
+
+		null;						
+		end if;	
+	end if;
+end;
+
+execute is
+/*********************************************************************
+Назначение:
+
+kurganov, последнее изменение 24 Март 2014 г.
+*********************************************************************/
+history ref [ARC_SCH_PRC];
+history_end ref [ARC_SCH_PRC];
+zavis ref [DEPEND_PRC];
+est number;
+
+begin
+			if (P_END is null and (P_CREATE = false or P_CREATE is null)) or P_START is null then	
+				pragma error('Не указано откуда и куда копировать');
+			end if;
+			
+			select x (count(x)) in ::[PRC_SCHEME] where x.[NAME]='Копия.'||P_START.[NAME] into est;			
+			
+			if  est>0 and P_CREATE then
+				pragma error('Уже есть такая копия схемы');
+			end if;			
+	
+	if P_CREATE then
+		P_END:=	 ::[PRC_SCHEME].[NEW_SCHEMA](
+											'Копия.'||P_START.[NAME]/*P#NAME*/		--Наименование
+											,NULL/*P#COD*/		--Код
+											,P_START.[VALUTA] --val/*P#VALUTA*/		--Валюта схемы
+											,null/*P#P_PRIVATE*/		--Признак индивидуального использования
+											,false/*P#P_CREDIT*/		--Признак схемы по активному счету
+											,null/*P_IGNORE_NEGATIVE*/		--Игнорировать отрицательные остатки в выписке
+											,next_valUE('SEQ_ID')/*P#LIST_SCH_PRC*/		--История схемы начисления процентов
+											,P_START.[DATE_USE_BEG]/*P#DATE_USE_BEG*/		--Дата начала использования
+											,null/*P#DATE_USE_END*/		--Дата окончания использования
+											,P_START.[PROC_RECORDS]/*P#PROC_RECORDS*/		--Способ обработки выписки
+											,P_START.[PROC_PRC_DATE]/*P#PROC_PRC_DATE*/		--Способ выбора процентной ставки за дату
+											,null/*P_ROUND_DEGREE*/		--Степень округления процентной ставки
+											,'DEPOSIT_PRIV'/*P_GROUP_CODE*/		--Группа
+											,null/*P_CLASSIFIC*/		--Классификация схемы
+											,null/*P_IND_RATE_NAME*/		--Наименование индикативной ставки
+											,null/*P_IND_RATE_TIME*/		--Срок индикативной ставки
+											);
+	end if;
+	
+	for (select x (x : C_ID) in P_START.[LIST_SCH_PRC])
+	loop
+	history:=x.C_ID;
+	
+	
+	
+	if history.[L_SIMPLE_PRC] then P_END.[LIST_SCH_PRC].[NEW_SIMPLE](
+														history.[DATE_BEG]/*P_DATE_BEG*/		--Дата начала действия
+														,history.[VAL_SIMPLE_PRC]+P_DOBAV/*P_VAL_SIMPLE_PRC*/		--Процентая ставка
+														,history.[BANK_YEAR]/*P_BANK_YEAR*/		--Признак банковского года
+														);
+	else
+		history_end:=P_END.[LIST_SCH_PRC].[NEW#AUTO](
+						history.DATE_BEG		--Дата начала действия
+						,history.DATE_END		--Дата окончания действия
+						,history.EI_TVALID		--Единица измерения в процентных схемах
+						,history.BANK_YEAR		--Признак банковского года в 360 дней
+						,history.FOST		--Разбиение остатка по суммам в процентной схеме
+						,history.L_SIMPLE_PRC		--Признак упрощенной схемы
+						,history.VAL_SIMPLE_PRC		--Процент при упрощенной схеме
+						,next_valUE('SEQ_ID')		--Список процентов в зависимости от сроков и сумм
+						,history.FPERIOD		--Разбиение по срокам в процентной схеме
+						,history.DAYS_IN_PERIOD		--Количество дней в периоде процентной ставки
+						,history.CALC_EVERY_DAY		--Ежедневный расчет процентов
+						,history.NOT2ADD0		--Не добавлять в журнал запись с нулевой ставкой и суммой
+						,history.F_PRC_RATE		--Разбиение по процентным ставкам
+						,history.MIN_SALDO		--Неснижаемый остаток
+						,history.PRC_MAX		--Не больше
+						,history.PRC_MIN		--Не меньше
+						,null		--Подразделение
+						,null		--MetaClass
+						,history.RECALC_PRC		--Пересчитывать проценты
+						,history.QUEUE_TYPE		--Тип очереди в плавающей ставке
+						,history.FPERSUMM		--Зависимость от срока и суммы транша
+						,history.METH_PERC_PER		--Способ определения ставки от срока
+						);
+	end if;
+	
+	--debug_pipe('history:'||history,0);
+	--debug_pipe('history.[LIST_DEPEND_PRC]:'||history.[LIST_DEPEND_PRC],0);
+	
+	for (select y(y :C_ID) in history.[LIST_DEPEND_PRC])
+	loop
+	zavis:=y.C_ID;
+	history_end.[LIST_DEPEND_PRC].[NEW#AUTO](
+	zavis.PRC+P_DOBAV		--Процентная ставка
+	,zavis.PERIOD		--Срок (начиная с которого действует процентная ставка)
+	,zavis.SUMMA		--Сумма / Процент  от базовой суммы (начиная с которой действует процентная ставка)
+	,zavis.FIX_SUMMA		--Признак фиксированной суммы процентов
+	,zavis.SUB_SUMMA		--Вычитаемая сумма
+	,zavis.TERM		--Срок во временных интервалах
+	);
+	end loop;
+	
+	end loop;
+	
+	
+end;
+end;
+end;

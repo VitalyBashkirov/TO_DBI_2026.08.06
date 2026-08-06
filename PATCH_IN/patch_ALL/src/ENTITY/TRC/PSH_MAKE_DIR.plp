@@ -1,0 +1,46 @@
+class TRC;
+
+@this(create_on_start:=true)
+@name('[ПСБ] Создать каталог')
+@tag('KUP_P')
+static method PSH_MAKE_DIR is
+PSH_MAKE_DIR (
+	@name('Имя каталога') P_PATH in [STRING_255]
+) is
+
+execute is
+/*********************************************************************
+Назначение:
+
+Avs1204, последнее изменение понедельник 21 Июнь 2004 г.
+*********************************************************************/
+begin
+	P_PATH:=Replace(P_PATH,'\','/');
+	If SubStr(P_PATH,Length(P_PATH))='/' then
+	   P_PATH:=SubStr(P_PATH,1,Length(P_PATH)-1);
+	end if;
+	stdio.mkdir(P_PATH,255);
+	/** /
+	stdio.mkdir('trc/'||P_FIL||'/errors',255);
+	stdio.mkdir('trc/'||P_FIL||'/archive',255);
+	stdio.mkdir('trc/'||P_FIL||'/arch_in',255);
+	stdio.mkdir('trc/'||P_FIL||'/arch_out',255);
+	stdio.mkdir('trc/'||P_FIL||'/_mbr_',255);
+	stdio.mkdir('trc/'||P_FIL||'/_mbr_/in',255);
+	stdio.mkdir('trc/'||P_FIL||'/_mbr_/out',255);
+
+	stdio.mkdir('trc/'||P_FIL||'/_rur_',255);
+	stdio.mkdir('trc/'||P_FIL||'/_rur_/in',255);
+	stdio.mkdir('trc/'||P_FIL||'/_rur_/out',255);
+	stdio.mkdir('trc/'||P_FIL||'/_rur_/vyp',255);
+	stdio.mkdir('trc/'||P_FIL||'/_rur_/print',255);
+
+	stdio.mkdir('trc/'||P_FIL||'/_val_',255);
+	stdio.mkdir('trc/'||P_FIL||'/_val_/in',255);
+	stdio.mkdir('trc/'||P_FIL||'/_val_/out',255);
+	stdio.mkdir('trc/'||P_FIL||'/_val_/vyp',255);
+	stdio.mkdir('trc/'||P_FIL||'/_val_/print',255);
+	/**/
+end;
+end;
+end;

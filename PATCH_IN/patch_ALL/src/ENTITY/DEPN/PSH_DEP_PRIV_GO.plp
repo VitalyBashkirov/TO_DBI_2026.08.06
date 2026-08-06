@@ -1,0 +1,2161 @@
+class DEPN;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Групповая обработка договоров')
+@tag('COPIED')
+static method PSH_DEP_PRIV_GO is
+
+@name('Строка валидатора')                     public V_DEST_STR                  [STRING_32000];
+@name('Признак выполнения групповой операции') public V_PRIV_OPER                 [BOOLEAN];
+@name('File path')                             public P#PATH                      [STRING];
+@name('File name')                             public P#NAME                      [STRING];
+@name('Виды длительных распоряжений')          public V_LONG_ORDER_TYPES table of [LONG_ORDER_T_REF];
+@name('Виды депозитных договоров')             public V_VID_DEPS         table of [VID_DEPOSIT_REF];
+@name('Виды комиссий')                         public V_COMISS_TYPE      table of [CODE_TAR_RBS_REF];
+--- Переменные для запуска операций
+public SYS_USER 		ref [USER];
+public DEPART_GROUP	[DEPART_GROUP];
+public FILIAL			[BRANCH];
+public STOP_FLAG_CODE	varchar2(32);
+--public METHOD2CALL		[METHOD2CALL];
+public MESSAGE_ROOT	[APP_ERROR_REF];
+public V#STEAM#COUNT 	integer;
+public V#STEAM#NUM 	integer;
+-----------------------------------------------------
+public ret		number; -- Количество повторений обработки
+
+PRAGMA INCLUDE ([LAST_WILL]::[MACRO_LIB]);
+PRAGMA INCLUDE([DEPN]::[LIB_MACRO]);
+PRAGMA INCLUDE([RUNTIME]::[MACRO_LIB]);
+
+IS_EOD_NEW			boolean;			--признак нового ЗОДа
+stream_num			string;				--сконвертированный в текст номер потока
+debug_on			boolean;			--признак вывода отладки в консоль
+
+IdFile		integer;
+
+type recEarlyProl is record (sId	number,
+							 NumDog ::[DEPN].[NUM_DOG]%type,
+							 DtBeg	date);
+type tEarlyProl is table of recEarlyProl index by varchar2(50);
+tblEarlyProl	tEarlyProl;
+tblDepnProl		tEarlyProl;
+
+ThisClass	varchar2(16);
+
+pragma macro(mod$stream,'mod([1],P_STREAM_COUNT)=P_STREAM_NUM',substitute);
+
+ComStatus_Work	   ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'WORK');
+ComStatus_Prol	   ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'PROLONG');
+ComStatus_AREST    ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'AREST');
+ComStatus_TO_CLOSE ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'TO_CLOSE');
+
+NatCur const ref [FT_MONEY] := [SYSTEM].[VARIABLES].NatCur;
+
+type typeRec	is record 	(rec_num number --порядковый №
+							,rec_type integer --тип записи (1 - депозит, 2 - длит.поручение)
+							,rec_id number --№ депозитного договора
+							,err_date date --дата возникновения ошибки
+							,err_location varchar(500) --место возникновения ошибки
+							,err_message varchar(2000) --ошибка
+							);
+type data_list  is table of typeRec;
+tbl_data_view	data_list;
+
+errRec typeRec;
+idx number := 0;
+
+cn_format_dd_mm_hh	const varchar2(16) := 'DD_MM_YYYY';
+cn_format_hh_mi_ss	const varchar2(16) := 'HH24_MI_SS';
+
+SysOpDate	date;
+function GetOperDate
+/* Получить дату операционного дня */
+(
+	p_FILIAL		ref [BRANCH]
+	/* Ссылка на филиал */
+)
+return date
+/* Дата операционного дня */
+is
+	v_op_date	date;
+begin
+	if p_FILIAL is null then
+		v_op_date := ::[SYSTEM].[OP_DATE];
+	else
+		v_op_date := ::[SYSTEM].[VARIABLES].Br2OpDate(p_FILIAL);
+	end if;
+	return v_op_date;
+end;
+
+Function CheckHollidays(P_DATE_BEG in out date, P_DATE_END in out date, OnFilial ref [BRANCH]) return boolean is
+Begin
+	OnFilial := nvl(OnFilial, stdlib.user_id.[DEPART].[FILIAL]);
+	-- такое может нам указали только завершение опердня
+	-- следовательно дата начала и дата окончания у нас текущий опердень
+	-- ищем последний рабочий день до этого
+	for OpDay in ::[JOURNAL_OP_DAYS] all
+	where OpDay%collection = OnFilial.[JOUR_OP_DAYS]
+	and trunc(OpDay.[OP_DAY]) < P_DATE_BEG
+	order by OpDay.[OP_DAY] desc
+	loop
+		if trunc(OpDay.[OP_DAY]) + 1 = P_DATE_BEG then
+			return false;
+		end if;
+		-- Делаем выходные дни
+		P_DATE_BEG := trunc(OpDay.[OP_DAY]) + 1; -- Начало выходных
+		P_DATE_END := P_DATE_END - 1; -- Окончание выходных
+		return true;
+	end loop;
+	return null; -- Такого не может быть...
+End;
+
+public procedure WrMess (mess varchar2(2000)) is
+begin
+	if IS_EOD_NEW then
+	  --Башкиров В.Г. 17.12.2023
+	  --[DEPN_INTERFACE].[PRX_DEPN_TO_END].EOD2_WrMess(stream_num||TB$||to_char(sysdate, 'dd/mm/yy hh24:mi:ss')||TB$||Mess);
+		[DEPN_INTERFACE].[PRX_DEPN_TO_END].EOD_WrMess(stream_num||TB$||to_char(sysdate, 'dd/mm/yy hh24:mi:ss')||TB$||Mess);
+	else
+		[DEPN_INTERFACE].[PRX_DEPN_TO_END].EOD_WrMess(stream_num||TB$||to_char(sysdate, 'dd/mm/yy hh24:mi:ss')||TB$||Mess);
+
+		if debug_on and APP_SECURITY.check_job() then		--для вывода в консоль
+			debug_pipe('Поток ' || stream_num || ': ' || mess, 0);
+		end if;
+	end if;
+end;
+
+--Добавление записи в таблицу ошибок
+procedure AddRecordInErrorLog (rec_id 		number
+							,err_location 	varchar(500)
+							,err_message 	varchar(2000)
+							,rec_type 		number default 1 ) is
+begin
+	idx := idx + 1;
+	errRec.rec_num := idx;
+	errRec.rec_type:= rec_type;
+	errRec.rec_id := rec_id;
+	errRec.err_date := SYSDATE;
+	errRec.err_location := err_location;
+	errRec.err_message := err_message;
+	tbl_data_view(idx) := errRec;
+end;
+
+--Сохранение таблицы ошибок в файл
+procedure SaveErrorLog (FileName varchar(1000), FilePath varchar(1000)) is
+	outStr varchar(2700);
+begin
+	begin
+		IdFile := stdio.open(FilePath, FileName, 'а');
+	exception
+		--	если не удалось открыть файл на дозапись, значит такой файл не существует
+		--	в таком случае открываем файл на запись, файл будет создан автоматически
+		when others then
+			IdFile := stdio.OPEN( FilePath, FileName , 'w' );
+	end;
+	
+	stdio.put_line(IdFile,	'#|  type |rec_id|err_date|err_location|err_message'	, null, null, stdio.DOSTEXT);
+	
+	for idx in tbl_data_view.first..tbl_data_view.last loop
+		errRec:=tbl_data_view(idx);
+		outStr := tbl_data_view(idx).rec_num;
+		case errRec.rec_type of
+		: 1 :
+			outStr := outStr || '|депозит|';
+		: 2 :
+			outStr := outStr || '|длпоруч|';
+		else
+			outStr := outStr || '|       |';
+		end;
+		outStr := outStr || errRec.rec_id;	
+		outStr := outStr || '|' || to_char (errRec.err_date, 'dd.mm.yyyy hh24:mi:ss');	
+		outStr := outStr || '|' || errRec.err_location;	
+		outStr := outStr || '|' || errRec.err_message;	
+		
+		stdio.put_line(IdFile, outStr, null, null, stdio.DOSTEXT);
+		
+	end loop;	
+
+	stdio.close(IdFile);
+exception
+	when others then
+		stdio.close(IdFile);
+		::[DEPN_INTERFACE].[PRX_DEPN_TO_END].EOD_WRMESS('Ошибка при сохранеии файла ошибок - ' || FileName || ' в каталог ' || FilePath ||'.');
+		::[DEPN_INTERFACE].[PRX_DEPN_TO_END].EOD_WRMESS('Текст ошибки : '||sqlerrm);
+end;
+procedure WaitStopJobs(p_filial ref [BRANCH], p_timeout integer)
+is
+
+t1	integer;
+t2	integer;
+
+default_timeout	const integer	:= 60;
+
+begin
+
+	-- Время начала ожидания
+	t1	:= utils.get_time;
+	t2	:= utils.get_time;
+	
+	&nvl(p_timeout, default_timeout)
+	
+	loop
+
+		begin
+			[EOD_JOB_INFO]::[L].set_all_lock_eod(p_filial);
+		exception
+			when MESSAGE.APP_EXCEPTION then
+			
+				-- Текущее время
+				t2	:= utils.get_time;
+				
+				if (t2 - t1)/100 > p_timeout then
+					raise;
+				else			
+					-- Повторяем попытку блокировки
+					continue;
+				end if;
+				
+			when OTHERS then
+				raise;
+		end;
+		
+		exit;
+
+	end loop;
+
+end;
+
+-- Возвращает единицу, если в таблице с видами депозитных договоров указан хотя бы один.
+function CheckVidDeposits
+return boolean is
+	i	number;
+begin
+	if V_VID_DEPS is null then return false; end if;
+	i := V_VID_DEPS.first;
+	while i is not null loop
+		if V_VID_DEPS(i) is not null then
+			return true;
+		end if;
+		i := V_VID_DEPS.next(i);
+	end loop;
+	return false;
+end;
+
+function GetMilliSecsBetween( p_start	TIMESTAMP_TZ
+							, p_end		TIMESTAMP_TZ
+							)
+return number
+is
+	vHours 			number;
+	vMinutes		number;
+	vSeconds		number;
+	vMilliseconds	number;
+	vFraction		number := 1000;
+	function CharToNum ( p_time		TIMESTAMP_TZ
+						,p_format	varchar(4)
+						)
+	return number
+	is
+	begin
+		return to_number(to_char(p_time, p_format));
+	end;
+begin
+	vHours 		  := (to_date( p_end, 'yyyy-mm-dd' ) - to_date( p_start, 'yyyy-mm-dd' )) * 24; -- разница в днях
+	vHours 		  := vHours + CharToNum( p_end, 'HH24' ) - CharToNum( p_start, 'HH24' ) ;
+	vMinutes 	  := CharToNum( p_end, 'MI' ) - CharToNum( p_start, 'MI' );
+	vSeconds 	  := CharToNum( p_end, 'SS' ) - CharToNum( p_start, 'SS' );
+	vMilliseconds := CharToNum( p_end, 'FF3' ) - CharToNum( p_start, 'FF3' );
+	return vMilliseconds + vSeconds*vFraction + vMinutes*60*vFraction + vHours*3600*vFraction;
+end;
+
+--Башкиров В.Г. 17.12.2023 Скопировано с 23.1.10 ::[SYSTEM].[DAY_LIB].check_stop_commit
+/** /
+public function check_stop_commit(	P_METHOD_PROC		varchar2(200)
+							,P_OBJECT_COUNT		integer default null
+							,P_OBJECT_HANDLED	integer	default null
+							,P_OBJ_HANDLE_ERROR	integer	default null
+							) return boolean  is 
+m ref [METHOD2CALL];
+begin
+	m%id:=METHOD2CALL%id;
+	update a(	a.[METHOD_PROC]			= P_METHOD_PROC
+				,a.[OBJECT_COUNT]		= P_OBJECT_COUNT
+				,a.[OBJECT_HANDLED]		= P_OBJECT_HANDLED
+				,a.[OBJ_HANDLE_ERROR]	= P_OBJ_HANDLE_ERROR
+			) in ::[METHOD2CALL] all where a = m;
+	commit;
+	if ::[SYSTEM_FLAGS].[GET](STOP_FLAG_CODE) then
+		return true;
+	end if;
+	return false;
+end;
+/**/
+--Башкиров В.Г. 17.12.2023 Скопировано с 23.1.10 END_OD_INTERFACE.INT_EOD_001-END_OD_INTERFACE
+public function EOD2_CHECK_STOP_COMMIT
+/*	Функция для оперативного уведомления об исполняемом действии и проверки флага завершения процессов для "Нового ЗОД".
+	Информация, передаваемая функции через параметры, может быть просмотрена в экранной форме операции "Смена операционного дня".
+	Возвращает результат проверки флага завершения процессов (true - флаг включен, false - выключен).
+*/
+	(P_METHOD_PROC		varchar2(200)
+		/* описание действия, которое выполняет операция */
+	,P_OBJECT_COUNT		integer default null
+		/* количество объектов к обработке */
+	,P_OBJECT_HANDLED	integer default null
+		/* количество обработанных объектов */
+	,P_OBJ_HANDLE_ERROR	integer default null
+		/*  количество объектов обработанных с ошибкой */
+	)
+return boolean
+is
+begin
+	--return ::[SYSTEM].[PSB_DAY_LIB].check_stop_commit(P_METHOD_PROC,P_OBJECT_COUNT,P_OBJECT_HANDLED,P_OBJ_HANDLE_ERROR);
+	return null;
+end;
+PSH_DEP_PRIV_GO (
+	@name('Дата начала периода')                                  P_DATE_BEG           in [DATE]             default null,
+	@name('Дата окончания периода')                               P_DATE_END           in [DATE]             default null,
+	@name('Филиал')                                               P_FILIAL             in [BRANCH_REF]       default null,
+	@name('Подразделение')                                        P_DEPART             in [DEPART_REF]       default null,
+	@name('Ответственный')                                        P_USER               in [USER_REF]         default null,
+	@name('Валюта')                                               P_CURRENCY           in [FT_MONEY_REF]     default null,
+	@name('Исключить')                                            P_NOT_CURRENCY       in [BOOLEAN]          default null,
+	@name('Вид договора')                                         P_VID_DEP            in [VID_DEPOSIT_REF]  default null,
+	@name('Расчет процентов')                                     P_CALC_PRC_END       in [BOOLEAN]          default null,
+	@name('Учет процентов')                                       P_REG_PRC            in [BOOLEAN]          default null,
+	@name('Капитализация процентов')                              P_CAP_PRC            in [BOOLEAN]          default null,
+	@name('Даты капитализации')                                   P_CAP_DATES          in [BOOLEAN]          default null,
+	@name('Переоформление договоров')                             P_RESTART_DEP        in [BOOLEAN]          default null,
+	@name('Пролонгация договоров')                                P_PROL_DEP           in [BOOLEAN]          default null,
+	@name('Перенос остатка при пролонгации')                      P_MOVE_SALDO         in [BOOLEAN]          default null,
+	@name('Планировать')                                          P_PLAN               in [BOOLEAN]          default null,
+	@name('По признаку в фактических операциях')                  P_NEED_PLAN          in [BOOLEAN]          default null,
+	@name('Исполнение длительных поручений')                      P_EXEC_L_ORDER       in [BOOLEAN]          default null,
+	@name('Автоконвертация мультивалютных вкладов')               P_AUTO_CONV          in [BOOLEAN]          default null,
+	@name('Сводная проводка Дт 702 Кт 47502')                     P_CLOSE_47502        in [BOOLEAN]          default null,
+	@name('За выходные дни')                                      P_HOLLIDAYS          in [BOOLEAN]          default null,
+	@name('Депозиты физ. лицам')                                  P_DEPOSIT_PRIV       in [BOOLEAN]          default null,
+	@name('Мультивалютные вклады')                                P_DEPOSIT_MULT       in [BOOLEAN]          default null,
+	@name('Депозиты юр. лицам')                                   P_DEPOSIT_ORG        in [BOOLEAN]          default null,
+	@name('Путь до файла ошибок')                                 P_FILE_PATH          in [STRING]           default null,
+	@name('Имя файла ошибок')                                     P_FILE_NAME          in [STRING]           default null,
+	@name('Исполнить фин.распоряжения на закрытие вал. счетов')   P_EXEC_FIN_ORD       in [BOOLEAN]          default null,
+	@name('Время ожидания остановки заданий')                     P_TIMEOUT            in [SHORT3]           default null,
+	@name('Количество потоков')                                   P_STREAM_COUNT       in [SHORT3]           default null,
+	@name('Номер потока')                                         P_STREAM_NUM         in [SHORT3]           default null,
+	@name('Необходима отладка (для запуска в джобах)')            P_NEED_DEBUG         in [BOOLEAN]          default null,
+	@name('Расчет процентов по всем договорам')                   P_CALC_PRC_ALL       in [BOOLEAN]          default null,
+	@name('Закрытие договоров')                                   P_CLOSE_DEP          in [BOOLEAN]          default null,
+	@name('Группа подразделений')                                 P_DEPART_GROUP       in [DEPART_GROUP_REF] default null,
+	@name('Режим ЗОД (пусто или 1-старый, 2-новый, 3-не из ЗОД)') P_MODE               in [SHORT1]           default null,
+	@name('Количество записей в порции между commit')             P_COMMIT             in [SHORT3]           default null,
+	@name('Дата валютирования')                                   P_DATE_VAL           in [DATE]             default null,
+	@name('Виды длительных поручений')                            P_LONG_ORDER_TYPES   in [STRING_32000]     default null,
+	@name('Обработка доп.соглашений')                             P_EXEC_DOP           in [BOOLEAN]          default null,
+	@name('Виды депозитных договоров')                            P_VID_DEPS           in [STRING_32000]     default null,
+	@name('Удержать периодическую комиссию')                      P_EXEC_COMISS        in [BOOLEAN]          default null,
+	@name('Виды комиссий')                                        P_COMISS_TYPES       in [STRING_32000]     default null,
+	@name('Признание затрат')                                     P_RECOGNISE_EXPENSES in [BOOLEAN]          default null,
+	@name('Корректировка стоимости депозита до АС')               P_IFRS_ADJ_AC        in [BOOLEAN]          default null,
+	@name('Перенос просроченной дебиторской задолженности')       P_DEBIT_OVERDUE      in [BOOLEAN]          default null,
+	@name('Закрытие договоров с поручениями ФНС')                 P_CLOSE_FNS          in [BOOLEAN]          default null
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATE_BEG := [SYSTEM]::[OP_DATE];
+	P_DATE_END := [SYSTEM]::[OP_DATE];
+
+end if;
+-- End initialization of parameters and variables
+declare
+vEnableCheckBoxes	boolean;
+v1B400085			boolean;
+bApp1B400302			boolean;
+Begin
+	if P_MESSAGE = 'DEFAULT' then
+		
+		P_USER := stdlib.userid;
+		P_DEPART := P_USER.[DEPART];
+		P_FILIAL := P_DEPART.[FILIAL];
+
+		P_DEPOSIT_PRIV := true;
+		P_DEPOSIT_MULT := true;
+		P_DEPOSIT_ORG := true;
+		
+		P_NOT_CURRENCY	:= false;
+		P_EXEC_DOP		:= false;
+		P_EXEC_COMISS	:= false;
+		
+		SysOpDate := GetOperDate(P_FILIAL);
+		
+		P_FILE_PATH := nvl (P_FILE_PATH, nvl(::[SYSTEM_PARAMS].[GET]('PATH_PROTOCOL', null),'.'));
+		P_FILE_NAME := nvl(P_FILE_NAME, to_char(SysOpDate, cn_format_dd_mm_hh) || '_' ||lpad(nvl(P_FILIAL.[CODE], 0), ::[BRANCH].[CODE]%size, '0') || '_' || coalesce(P_STREAM_NUM, 1) || '_DEPN_ERROR_LOG.log');
+
+
+		-- Проверка доступтности операций пользователю
+		ThisClass := ::[DEPN]%class;
+		
+		[CSMD].Init_Form(V_DEST_STR, ThisClass, 'DEP_PRIV_OPER');
+		[CSMD].Command(V_DEST_STR, 'Form2.visible = ' || ::[DEPN].[LIB_APPLICATION].check_application_extra('1B420030'));		
+		[CSMD].Command(V_DEST_STR, 'Form4.visible = ' || ::[DEPN].[LIB_APPLICATION].check_application('1B400205'));
+		v1B400085 := ::[DEPN].[LIB_APPLICATION].check_application_extra('1B400085');
+		[CSMD].Command(V_DEST_STR, 'RECOGNISE_EXPENSES.enabled = ' || v1B400085);
+		[CSMD].Command(V_DEST_STR, 'ADJ_TO_AC.enabled = ' || v1B400085);
+		bApp1B400302 := ::[DEPN].[LIB_APPLICATION].check_application_extra('1B400302');
+		[CSMD].Command(V_DEST_STR, 'P_CLOSE_FNS.ENABLED = ' || bApp1B400302);
+	elsif P_MESSAGE = 'VALIDATE' then
+		[CSMD].Init_Form(V_DEST_STR, null, null);
+		if p_info like '%V_VID_DEPS%' then
+			-- если таблица с видами непустая, то нужно блокировать чекбоксы
+			vEnableCheckBoxes := not CheckVidDeposits;
+			if not vEnableCheckBoxes then
+				P_DEPOSIT_PRIV = P_DEPOSIT_MULT = P_DEPOSIT_ORG := true;
+			end if;
+			[CSMD].Command(V_DEST_STR, 'P_DEPOSIT_PRIV.ENABLED = ' || vEnableCheckBoxes);
+			[CSMD].Command(V_DEST_STR, 'P_DEPOSIT_MULT.ENABLED = ' || vEnableCheckBoxes);
+			[CSMD].Command(V_DEST_STR, 'P_DEPOSIT_ORG.ENABLED = ' || vEnableCheckBoxes);
+		elsif bApp1B400302 and p_info in ('P_DEPOSIT_PRIV', 'P_DEPOSIT_MULT') then
+			vEnableCheckBoxes := (P_DEPOSIT_PRIV or P_DEPOSIT_MULT);
+			[CSMD].Command(V_DEST_STR, 'P_CLOSE_FNS.ENABLED = ' || vEnableCheckBoxes);
+		end if;
+	end if;
+End;
+end;
+
+execute is
+	OpDateBranch	date;
+
+	
+	TimeStartAll	TIMESTAMP_TZ;
+	TimeEndAll		TIMESTAMP_TZ;	
+	
+	N_CALC_PRC_END	number := 0;
+	N_REG_PRC		number := 0;
+	N_CAP_PRC		number := 0;
+	N_RESTART_DEP	number := 0;
+	N_PROL_DEP		number := 0;
+	N_MOVE_SALDO	number := 0;
+	N_PLAN			number := 0;
+	N_EXEC_L_ORDER	number := 0;
+	N_AUTO_CONV		number := 0;
+	N_EXEC_FIN_ORD  number := 0;
+	N_CLOSE_DEP		number := 0;
+	N_DOP_INDRESTR	number := 0;
+	N_EXEC_EARLY	number := 0;
+	N_EXEC_COMISS	number := 0;
+	N_RECOG_EXPNS	number := 0;
+	N_ADJ_TO_AC		number := 0;
+	N_DEBIT_OVERDUE	number := 0;
+	
+	CurDate			date;
+	-------------------------------------
+	-- Таблички для обработки депозитов
+	type TbCur is table of ::[DEPN];
+	VCurTb			TbCur;
+	VCurTb_error	TbCur;
+	
+	-- Таблица, в которой содержится информация о том, нужно ли производить закрытие договора
+	type t_BOOL_TABLE is table of boolean index by varchar2(50);
+	v_close_depn_tbl	t_BOOL_TABLE;
+	v_close_depn		boolean;	-- нужно ли закрывать конкретный договор
+	
+	-- Таблички для обработки длит.поручений
+	type TbLOCur is table of ::[LONG_ORDER];
+	VCurTbLO		TbLOCur;
+	VCurTbLO_error	TbLOCur;
+	------------------------------------
+	
+	TimeStart		number;
+	TimeEnd			number;
+	Counter			integer;			--счётчик, обработанных записей, сбрасывается между запусками
+	Counter_Process	number := 0;		--(для статистики)общий счётчик обработанных экземпляров, не сбрасываемый
+	Counter_Total	number := 0;		--(для статистики)общее количество записей к обработке
+	Counter_Err		number := 0;		--(для статистики)количество ошибочно обработанных записей
+	Counter_ErrFlag	boolean;			--(для корректного инкремента статистики) признак какой-либо ошибки при обработке депозита
+
+	Idx				number;
+	P_RETRY_COUNT	number;
+	
+	RETRY_COUNT		number;
+	
+	bApp1B400302		boolean;
+	bApp1B410023		boolean;
+	
+	prov_str			varchar2(2000);
+	add_par				varchar2(32000);
+	prov_dep_reg		boolean;
+	prov_dep_cap 		boolean;
+	prov_prol			boolean;
+	prov_dep_prolac 	boolean;
+	prov_close_dog		boolean;
+	prov_comiss			boolean;
+	prov_recong_expns	boolean;
+	prov_adj_to_AC		boolean;
+	need_commitnow		boolean;
+	WrMess_NRecs    	integer := 1000; -- Вывод отладочных сообщений через 1000 записей.
+	
+	bMakeProl			boolean;
+	
+	--оплата комиссии
+	vComissTab ::[DEPN].[GET_TAR_LIB].typeComissTab;
+	
+	--Анализ полученных параметров
+	procedure analyse_input is
+	begin
+	
+		SysOpDate := GetOperDate(P_FILIAL);
+		
+		if P_MODE=2 then
+			IS_EOD_NEW:=true;
+		else
+			IS_EOD_NEW:=false;
+			debug_on:=P_NEED_DEBUG;
+		end if;
+		P_DATE_BEG := trunc(nvl(P_DATE_BEG, SysOpDate));
+		P_DATE_END := trunc(nvl(P_DATE_END, SysOpDate));
+		P_DATE_BEG := least(P_DATE_BEG, P_DATE_END);
+
+		P_STREAM_COUNT	:= nvl(P_STREAM_COUNT, 1);
+		if P_STREAM_COUNT = 0 then
+			pragma error('Количество потоков не может быть равно 0');
+		end if;
+	
+		P_STREAM_NUM	:= nvl(P_STREAM_NUM, 0);
+		if P_STREAM_NUM>=P_STREAM_COUNT then
+			pragma error('Номер потока должен быть меньше запускаемого количества');
+		end if;
+		if P_STREAM_COUNT>0 then
+			stream_num:=to_char(P_STREAM_NUM);
+		else
+			stream_num:='';
+		end if;
+
+		if P_COMMIT is null then		--проверяем количество записей на порцию			
+			P_COMMIT := ::[FP_TUNE].[LIB].get_num_value('GROUP_OPER_COMMIT_NUM', null,'0'); --ставим умолчательное количество записей из настройки
+			if nvl( P_COMMIT, 0 ) < 1 then
+				P_COMMIT := 1;
+			end if;
+		end if;
+	end;
+
+Begin
+	analyse_input;
+	if 	IS_EOD_NEW=false then
+		-- Ожидание остановки заданий филиала
+		WaitStopJobs(P_FILIAL, P_TIMEOUT);
+	end if;
+	-- устанавливаем признак массового изменения лимита авторизации
+	executor.set_context('MASS_CALL_FOR_CHANGE_LA', 1);
+	::[DEPN_INTERFACE].[PRX_DEPN_TO_CARD].MassCall_SetOper('DEPN_DOG');
+	--Установим признак массового открытия счетов(для учета)
+	executor.set_context('MASS_CALL_OPEN_ACC', 1);
+--	::[RUNTIME].[TRACE].START_TRACE(iTLevel == 8);
+	ThisClass := 'DEPN';
+
+	WrMess(UTILS.get_time||'Депозиты. Начало групповой обработки.');
+
+	if P_DEPOSIT_PRIV is null
+	and P_DEPOSIT_ORG is null
+	and P_DEPOSIT_MULT is null
+	then
+		P_DEPOSIT_PRIV := true;
+		P_DEPOSIT_MULT := true;
+		P_DEPOSIT_ORG  := true;
+	end if;
+	&nvl(P_DEPOSIT_PRIV, false)
+	&nvl(P_DEPOSIT_MULT, false)
+	&nvl(P_DEPOSIT_ORG, false)
+	&nvl(P_NOT_CURRENCY, false)
+
+	&nvl(P_CALC_PRC_END, false)
+	&nvl(P_REG_PRC, false)
+	&nvl(P_CAP_PRC, false)
+	&nvl(P_CAP_DATES, false)
+	&nvl(P_RESTART_DEP, false)
+	&nvl(P_PROL_DEP, false)
+	&nvl(P_MOVE_SALDO, false)
+	&nvl(P_CLOSE_47502, false)
+	&nvl(P_EXEC_L_ORDER, false)
+	&nvl(P_AUTO_CONV, false)
+	&nvl(P_PLAN, false)
+	&nvl(P_NEED_PLAN, false)
+	&nvl(P_EXEC_FIN_ORD, false)
+	&nvl(P_CALC_PRC_ALL, false)
+	&nvl(P_CLOSE_DEP, false)
+	&nvl(P_EXEC_COMISS, false)
+	&nvl(P_RECOGNISE_EXPENSES, false)
+	&nvl(P_IFRS_ADJ_AC, false)
+	&nvl(P_DEBIT_OVERDUE, false)
+	&nvl(P_CLOSE_FNS, false)
+	
+	if not ::[DEPN].[LIB_APPLICATION].check_application('1B400085') then
+		P_RECOGNISE_EXPENSES 	:= false;
+		P_IFRS_ADJ_AC 			:= false;
+	end if;
+
+	if nvl(P_HOLLIDAYS, false) then -- Если нам указали проверить выходные дни, то проверим их до запросов к базе
+		if not CheckHollidays(P_DATE_BEG, P_DATE_END, nvl(P_FILIAL, P_DEPART.[FILIAL])) then -- Не было выходных
+			--::[RUNTIME].[TRACE].STOP_TRACE;
+			
+			if 	IS_EOD_NEW=false then
+				-- Снимаем блокировку ЗОД с филиала
+				[EOD_JOB_INFO]::[L].release_all_lock_eod(P_FILIAL);
+			end if;
+			
+			return;
+		end if;
+	end if;
+
+	if IS_EOD_NEW then	--для "нового ЗОДа" непосредственно перед выборкой проверим - есть ли блокировки
+		if EOD2_CHECK_STOP_COMMIT
+			(	P_METHOD_PROC  		== &Method$NAME	-- наименование действия которое сейчас исполняет операция
+				,P_OBJECT_COUNT  	== 0			-- количество объектов к обработке
+				,P_OBJECT_HANDLED 	== 0			-- количество обработанных объектов
+				,P_OBJ_HANDLE_ERROR == 0 			-- количество объектов обработанных с ошибкой
+			)
+		then
+			return;
+		end if;
+	end if;
+	
+	VCurTb.delete;
+	tbl_data_view.delete;
+	if P_CALC_PRC_END
+	or P_REG_PRC
+	or P_CAP_PRC
+	or P_RESTART_DEP
+	or P_PROL_DEP
+	or P_MOVE_SALDO
+	or P_AUTO_CONV
+	or P_PLAN
+	or P_NEED_PLAN
+	or P_CLOSE_DEP
+	or P_EXEC_DOP
+	or P_EXEC_COMISS
+	or P_IFRS_ADJ_AC
+	or P_RECOGNISE_EXPENSES
+	or P_DEBIT_OVERDUE
+	or P_CLOSE_FNS
+	then
+		
+		begin
+			-- если в P_VID_DEPS передали пустую строку, то очистим ее
+			if replace(P_VID_DEPS, ' ', '') = '' then
+				P_VID_DEPS := null;
+			end if;
+
+			-- на экранной форме указаны виды, по которым нужно работать
+			-- (в таком случае была вызвана ЭФО и возможности указать значение параметра P_VID_DEP у пользователя нет)
+			if CheckVidDeposits then
+				-- в таком случае работаем по всем классам
+				P_DEPOSIT_PRIV = P_DEPOSIT_ORG = P_DEPOSIT_MULT := true;
+				-- сформируем строку из кодов видов депозитных договоров
+				P_VID_DEPS := ';';
+				idx := V_VID_DEPS.first;
+				while idx is not null loop
+					if V_VID_DEPS(idx) is not null then
+						P_VID_DEPS := P_VID_DEPS || V_VID_DEPS(idx).[CODE] || ';';
+						WrMess('V_VID_DEPS(' || idx || ').[CODE]: ' || V_VID_DEPS(idx).[CODE]);
+					end if;
+					idx := V_VID_DEPS.next(idx);
+				end loop;
+				
+			-- если передали коды, по которым будем работать
+			-- (работаем без поднятия ЭФО)
+			elsif P_VID_DEPS is not null then
+				-- в таком случае работаем по всем классам
+				P_DEPOSIT_PRIV = P_DEPOSIT_ORG = P_DEPOSIT_MULT := true;
+				-- если еще и передали вид через параметр P_VID_DEP, то допишем его к остальным
+				if P_VID_DEP is not null then
+					P_VID_DEPS := P_VID_DEPS || P_VID_DEP.[CODE] || ';';
+				end if;
+				
+			-- через P_VID_DEPS ничего не передано, проверить нужно только P_VID_DEP
+			else
+				if P_VID_DEP is not null then
+					P_VID_DEPS := ';' || P_VID_DEP.[CODE] || ';';
+				end if;
+			end if;
+			WrMess('P_VID_DEPS: ' || P_VID_DEPS);
+			
+			--проверим необходимость удержания комиссий
+			if ::[DEPN].[LIB_APPLICATION].check_application('1B400205') then
+				--приложение установлено
+				-- если в P_COMISS_TYPES передали пустую строку, то очистим ее
+				if replace(P_COMISS_TYPES, ' ', '') = '' then
+					P_COMISS_TYPES := null;
+				end if;
+				--дополним строку P_COMISS_TYPE видами комиссий, выбранными на ЭФО
+				P_COMISS_TYPES := P_COMISS_TYPES||';';
+				idx := V_COMISS_TYPE.first;
+				while idx is not null loop
+					if V_COMISS_TYPE(idx) is not null then
+						P_COMISS_TYPES := P_COMISS_TYPES ||	V_COMISS_TYPE(idx).[CODE] || ';';
+						WrMess('V_COMISS_TYPE(' || idx || ').[CODE]: ' || V_COMISS_TYPE(idx).[CODE]);
+					end if;
+					idx := V_COMISS_TYPE.next(idx);
+				end loop;				
+			else
+				P_EXEC_COMISS := false;
+				P_COMISS_TYPES := null;
+			end if;
+			WrMess('P_COMISS_TYPES: ' || P_COMISS_TYPES);
+			
+			if P_PROL_DEP then
+				bApp1B400302 := ::[DEPN].[LIB_APPLICATION].check_application_extra('1B400302');
+			end if;
+			
+			if P_PROL_DEP or P_CLOSE_DEP then
+				bApp1B410023 := ::[DEPN].[LIB_APPLICATION].check_application('1B410023');
+			end if;
+			
+			-- Выберем все нужные депозиты для обработки
+			select /*+index(Z#PRODUCT ISX_Z#PRODUCT_GROUP_OPERS)*/
+				IdPrd(IdPrd%id)
+			in ::[PRODUCT], (::[DEPN] all : IdDep) all
+			where IdDep = IdPrd
+				and (	   (P_DEPOSIT_PRIV and IdPrd%class = 'DEPOSIT_PRIV' and IdDep.[VID_DOG].[CLASS_DEP] != 'DEPOSIT_MULT')
+						or (P_DEPOSIT_MULT and IdPrd%class = 'DEPOSIT_MULT')
+						or (P_DEPOSIT_ORG  and IdPrd%class = 'DEPOSIT_ORG'  and IdDep.[VID_DOG].[CLASS_DEP] != 'DEPOSIT_MULT')
+						)
+				and nvl(IdPrd.[COM_STATUS], -1) in (ComStatus_Work, ComStatus_Prol, ComStatus_TO_CLOSE)
+				and nvl(IdPrd.[FILIAL], -1) = nvl(P_FILIAL, nvl(IdPrd.[FILIAL], 1))
+				and nvl(IdPrd.[DEPART], -1) = nvl(P_DEPART, nvl(IdPrd.[DEPART], 1))
+				and (IdPrd.[DEPART].[DEPART_GROUP] = P_DEPART_GROUP or P_DEPART_GROUP is null)
+				and nvl(IdPrd.[CREATE_USER], 1) = nvl(P_USER, nvl(IdPrd.[CREATE_USER], 1))
+				and nvl(IdPrd.[DATE_BEGIN], P_DATE_END) < P_DATE_END + 1
+				and ((P_VID_DEPS is null) or (instr(P_VID_DEPS, ';' || IdDep.[VID_DOG].[CODE] || ';', 1) > 0))
+				and (	(P_NOT_CURRENCY and nvl(IdDep.[FINTOOL], -1) != nvl(P_CURRENCY, 1))
+						or (not P_NOT_CURRENCY and nvl(IdDep.[FINTOOL], -1) = nvl(P_CURRENCY, nvl(IdDep.[FINTOOL], -1)))
+					)
+				and &mod$stream(coalesce(IdDep.[ACC_ENROL_PRC].[1].[1],IdDep.[CLIENT]%id))	
+				and IdPrd.[NUM_DOG] in ('NAD-R181-00012738')--,'NAD-R91-00012761','NAD-R181-00012739','NAD-R181-00012741','NAD-R181-00012742','NAD-R181-00012750','NAD-R181-00012760')
+			into VCurTb;
+			Counter_Total:=VCurTb.Count;
+		exception when NO_DATA_FOUND then
+			null;
+		end;
+		WrMess(UTILS.get_time||'Депозитных договоров к обработке: '||Counter_Total);
+	end if;
+	
+	if P_EXEC_DOP or P_CLOSE_DEP then
+		tblEarlyProl.delete;
+		tblDepnProl.delete;
+		v_close_depn_tbl.delete;
+		Idx := VCurTb.first;
+		while Idx is not null loop
+			for (select Prol(Prol%id			:rId,
+							 Dep.[NUM_DOG]		:NumDog,
+							 Dep.[DATE_BEGIN]	:DtBeg,
+							 Prol.[TYPE_REC]	:TYPE_REC,
+							 Prol.[PROL_BEGIN]	:PROL_BEG)
+					in ::[PROL_CONTR_DEPN], (::[DEPN] all Dep) all
+						where Dep%id = VCurTb(Idx)
+						and Prol%collection = Dep.[LIST_PROL]
+						and Prol.[PROL_BEGIN] <= SysOpDate
+						and Prol.[COM_STATUS] = ComStatus_Work
+						and Prol.[TYPE_REC] in (::[UD_CODE_NAME](CODE = 'EARLY_PROL'), ::[UD_CODE_NAME](CODE = 'EARLY_CRASH')))
+			loop
+				if P_EXEC_DOP then
+					tblDepnProl(VCurTb(Idx)).NumDog	:= Prol.NumDog;
+					tblDepnProl(VCurTb(Idx)).DtBeg	:= Prol.DtBeg;
+					tblEarlyProl(Prol.rId).sId		:= VCurTb(Idx);
+					tblEarlyProl(Prol.rId).NumDog	:= Prol.NumDog;
+					tblEarlyProl(Prol.rId).DtBeg	:= Prol.DtBeg;
+				end if;
+				-- если есть доп. соглашение на досрочную пролонгацию с датой вступления в силу равной опердню
+				-- и в состоянии "Работает", то тогда закрытие договора не производится
+				if P_CLOSE_DEP and Prol.PROL_BEG = SysOpDate and Prol.TYPE_REC = ::[UD_CODE_NAME](CODE = 'EARLY_PROL') then
+					v_close_depn_tbl(VCurTb(Idx)) := false;
+				else
+					v_close_depn_tbl(VCurTb(Idx)) := true;
+				end if;
+			end loop;
+			
+			Idx := VCurTb.next(Idx);
+		end loop;
+	end if;
+
+	
+	[STR].set_par(add_par,'P_DATE_BEG',P_DATE_BEG);
+	[STR].set_par(add_par,'P_DATE_END',P_DATE_END);
+	
+	[STR].set_par(add_par,'P_REG_PRC',P_REG_PRC);
+	[STR].set_par(add_par,'P_CAP_PRC',P_CAP_PRC);
+	[STR].set_par(add_par,'P_RESTART_DEP',P_RESTART_DEP);
+	[STR].set_par(add_par,'P_PROL_DEP',P_PROL_DEP);
+	[STR].set_par(add_par,'P_DEPART',P_DEPART);
+	
+	prov_str :=	::[HOOK].[DEPN_GET_GROUP_P](P_FILIAL
+											,add_par
+											);
+	if trim(prov_str) is not null then
+		prov_dep_reg		:= [STR].get_bool_par(prov_str,'DEP_REG');
+		prov_dep_cap 		:= [STR].get_bool_par(prov_str,'DEP_CAP');
+		prov_prol			:= [STR].get_bool_par(prov_str,'DEP_PROL');
+		prov_dep_prolac 	:= [STR].get_bool_par(prov_str,'DEP_PROLAC');
+		prov_close_dog		:= [STR].get_bool_par(prov_str,'DEP_CLOSE');
+		prov_comiss			:= [STR].get_bool_par(prov_str,'DEP_PERCOM');
+		prov_recong_expns	:= [STR].get_bool_par(prov_str,'DEP_RECOGN_EXPNS');
+		prov_adj_to_AC		:= [STR].get_bool_par(prov_str,'DEP_ADJTOAC');
+	end if;
+	
+	prov_dep_reg		:= nvl(prov_dep_reg,true);
+	prov_dep_cap 		:= nvl(prov_dep_cap,true);
+	prov_prol			:= nvl(prov_prol,true);
+	prov_dep_prolac 	:= nvl(prov_dep_prolac,true);
+	prov_close_dog		:= nvl(prov_close_dog, true);
+	prov_comiss			:= nvl(prov_comiss, true);
+	prov_recong_expns	:= nvl(prov_recong_expns, true);
+	prov_adj_to_AC		:= nvl(prov_adj_to_AC, true);
+		
+	V_PRIV_OPER := true;
+	
+	Idx := 0;
+
+	-- Кэшируем все что только можно
+	&Cash_Vid_Debt
+	&Cash_Vid_Oper_Dog
+	&Cash_Tip_Acc
+	&Cash_Pattern_Doc
+	&Cash_Sum_Guide
+	&Cash_Vid_Deposit
+
+	TimeStartAll := systimestamp;
+	--непосредственно обработка депозитных договоров
+	if VCurTb.count > 0 then
+		
+		P_RETRY_COUNT 	:= nvl(ret,3);
+		RETRY_COUNT		:= 1;
+		Counter := 0;
+		
+		while RETRY_COUNT <= P_RETRY_COUNT loop
+			
+			VCurTb_error.delete;
+			Idx := VCurTb.first;
+			
+			
+			Counter_ErrFlag:=false;		--сбрасываем флаг ошибки
+
+			while Idx is not null loop
+				TimeStart := utils.get_time;
+				
+				-- Попробуем заблокировать экземпляр
+				begin
+					VCurTb(Idx)%lock('DEPN');
+				exception when CANNOT_LOCK then
+					-- Блокировка не удалась. Перенесем депозит в таблицу ошибок для обработки в следующем заходе
+					
+					WrMess('Неудача при блокировке договора '||VCurTb(Idx).NUM_DOG_EXT||' от '||to_char(VCurTb(Idx).DATE_BEGIN, 'dd.mm.yy'));
+					WrMess('Текст ошибки : '||sqlerrm);
+					
+					VCurTb_error(VCurTb_error.count+1) := VCurTb(Idx);
+					Idx := VCurTb.next(Idx);
+					continue;
+				end;
+				
+				&Cash_Depn(VCurTb(Idx))
+				&Cash_Fact_Oper(&Depn.LIST_PAY)
+				&Cash_Hoz_Op_Acc(&Depn.ARRAY_DOG_ACC)
+		
+				-- Дата опер. дня филиала депозита
+				OpDateBranch	:= ::[SYSTEM].[VARIABLES].Br2OpDate(&Depn.[FILIAL]);
+				
+				
+				-- 1. Расчет процентов
+				if P_CALC_PRC_END and (&Depn.[STRONG_PRC_DATE] < (P_DATE_END + 1) or &Depn.Id%class='DEPOSIT_MULT' or P_CALC_PRC_ALL) then
+					begin
+					
+						N_CALC_PRC_END := N_CALC_PRC_END + 1;
+						
+						&sp(IdDep_CALC_SP)
+						
+						&Depn.Id->(DEPN)[CALC_PRC](P_DATE_BEG, P_DATE_END, null, false);						
+						
+					exception
+						when others then
+							&rb(IdDep_CALC_SP)
+							
+							WrMess('Ошибка при расчете процентов по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+							WrMess('Текст ошибки : '||sqlerrm);
+							
+							AddRecordInErrorLog (&Depn.id,
+												   'Ошибка при расчете процентов по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+												   sqlerrm);
+							Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+					end;
+				end if;
+		
+				&Cash_String_Calc_Prc(&Depn.JOUR_CALC_PRC, &Depn.JOUR_CB_PRC, &Depn.JOUR_PRC_TAX)
+		
+				-- 2. Учет процентов
+				if P_REG_PRC then
+				
+					CurDate := P_DATE_BEG;
+					
+					while CurDate <= P_DATE_END loop
+						if &GET_BOOL(MAY_FROM_GROUP_REG_PRC, &Depn.Id, CurDate, null) then
+							begin
+							
+								N_REG_PRC := N_REG_PRC + 1;
+								
+								&sp(IdDep_REG_SP)
+							 	
+							 	if(&Depn.CLASS_ID = 'DEPOSIT_MULT')then
+							 		&Depn.Id->(DEPOSIT_MULT)[REG_PRC](P_DATE_REG == CurDate, P_DATE_VAL == P_DATE_VAL, P_PROV == prov_dep_reg);
+							 	else
+							 		&Depn.Id->(DEPN)[REG_PRC](P_DATE_REG == CurDate, P_DATE_VAL == P_DATE_VAL, P_PROV == prov_dep_reg);
+							 	end if;
+							 	
+							exception
+								when others then
+									&rb(IdDep_REG_SP)
+									
+									WrMess('Ошибка при учете процентов по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+									WrMess('Текст ошибки : '||sqlerrm);
+									
+									AddRecordInErrorLog (&Depn.id,
+														   'Ошибка при учете процентов по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+														   sqlerrm);					
+									Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+							end;
+						end if;
+						
+						CurDate := CurDate + 1;
+						
+					end loop; -- while CurDate <= P_DATE_END loop
+					
+				end if;
+		
+				-- 3. Капитализация процентов
+				if P_CAP_PRC then
+				
+					CurDate := P_DATE_BEG;
+					
+					
+					while CurDate <= P_DATE_END loop
+						if &GET_BOOL(MAY_FROM_GROUP_CAP_PRC, &Depn.Id, CurDate, null) then
+							begin
+							
+								N_CAP_PRC := N_CAP_PRC + 1;
+								
+								&sp(IdDep_CAP_SP)
+								
+							 	&Depn.Id->(DEPN)[CAP_PRC]
+							 				(P_DATE_CAP 		== CurDate			-- Дата капитализации
+							 				,P_DATE_VAL 		== P_DATE_VAL		-- Дата валютирования
+							 				,P_PROV				== prov_dep_cap		-- Проводить документы
+							 				,P_CALC_NEXT_DATE	== P_CAP_DATES);	-- Рассчитать дату след. капитализации
+							 	
+							exception
+								when others then
+									&rb(IdDep_CAP_SP)
+									
+									WrMess('Ошибка при капитализации процентов по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+									WrMess('Текст ошибки : '||sqlerrm);
+									
+									AddRecordInErrorLog (&Depn.id,
+														   'Ошибка при капитализации процентов по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+														   sqlerrm);					
+									Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+							end;
+						end if;
+						
+						CurDate := CurDate + 1;
+						
+					end loop; -- while CurDate <= P_DATE_END loop
+				end if;
+		
+				-- 4. Пролонгации
+				&Get_Vid_Deposit(&Depn.VID_DOG)
+				
+				if nvl(P_PROL_DEP, false)
+					and not tblDepnProl.exists(&Depn.Id)
+					and &Depn.COM_STATUS in (ComStatus_Work, ComStatus_AREST)
+					and nvl(&Depn.VID_DOG_PROL, &Vid_Deposit.VID_DOG_PROL) is not null
+					and &Depn.DATE_ENDING is not null
+					and &Depn.DATE_ENDING <= P_DATE_END
+					and ::[DEPN].[GET_BOOL].IS_PROL(&Depn.Id, 'IS_PROL_'||nvl(&Depn.VID_DOG_PROL, &Vid_Deposit.VID_DOG_PROL).[CODE], null, null)
+				then
+				
+					CurDate := greatest(P_DATE_BEG, &Depn.DATE_ENDING);
+					if &GET_BOOL(MAY_FROM_GROUP_PROLONGATION, &Depn.Id, CurDate, null) then
+						begin
+							N_PROL_DEP := N_PROL_DEP + 1;
+							
+							&sp(IdDep_PROL_SP)
+							
+							bMakeProl := true;
+							
+							if &Depn.[CLIENT]%class = ::[CL_PRIV]%class and bApp1B400302 then
+								--Для депозитов физического лица необходимо проверить наличие поручений UPD с ненулевой суммой
+								if ::[DEPN].[LIB_TAX].checkUpd(p_rDepn == &Depn.ID) then
+									bMakeProl := false;
+									if P_CLOSE_FNS then
+										--Пролонгация невозможна, закрываем договор
+									 	if &Depn.[VID_DOG].[RNKO_DEP] and bApp1B410023 then
+											[DEPN]::[L].CloseDepositSimple(P_DEPN == &Depn.Id, P_DATE == CurDate, P_PROV == prov_prol, P_NOT_PAY == true);
+										else
+											[DEPN]::[L].CloseDepositSimple(P_DEPN == &Depn.Id, P_DATE == CurDate, P_PROV == prov_prol, P_NOT_PAY == false);
+										end if;
+									else
+										WrMess('По договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy') || ' есть неисполненные поручения от гос. органа на перечисление денежных средств с депозита клиента. Пролонгация не выполнена!');
+										AddRecordInErrorLog (&Depn.id,
+															   'Ошибка при пролонгации по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+															   'На данном договоре есть неисполненные поручения от гос. органа на перечисление денежных средств с депозита клиента. Пролонгация не выполнена!');
+										Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+									end if;
+								end if;
+							end if;
+							
+							if bMakeProl then
+								if(&Depn.CLASS_ID = 'DEPOSIT_MULT')then
+									&Depn.Id->(DEPOSIT_MULT)[PROLONGATION](P_DATE == CurDate, P_PROV_DOCS == prov_prol, P_RESTART == false);
+								else
+									&Depn.Id->(DEPN)[PROLONGATION](P_DATE == CurDate, P_PROV_DOCS == prov_prol, P_RESTART == false);
+								end if;
+							end if;
+							
+						exception
+							when others then
+								&rb(IdDep_PROL_SP)
+								
+								WrMess('Ошибка при пролонгации по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+								WrMess('Текст ошибки : '||sqlerrm);
+								
+								AddRecordInErrorLog (&Depn.id,
+												   'Ошибка при пролонгации по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+												   sqlerrm);				
+								Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+						end;
+					end if;
+				end if;
+		
+				-- 5. Перенос остатков
+				if P_MOVE_SALDO
+					and &Depn.COM_STATUS = ComStatus_Prol
+				then
+					for (	select IdProl(IdProl : Id, (IdProl.[PROL_BEGIN] - 1) : DateProl) in ::[PROL_CONTRACT] all
+							where IdProl%collection = &Depn.LIST_PROL
+								and IdProl.[ADD_AGREEMENT] -- признак пролонгации
+								and (IdProl.[PROL_BEGIN] - 1) + 1 > P_DATE_BEG
+								and (IdProl.[PROL_BEGIN] - 1) < P_DATE_END + 1
+						)
+					loop
+						if &GET_BOOL(MAY_FROM_GROUP_PROLONGATION, &Depn.Id, IdProl.DateProl, null) then				
+							begin
+								N_MOVE_SALDO := N_MOVE_SALDO + 1;
+								
+								&sp(IdDep_MOVE_SP)
+
+								bMakeProl := true;
+								
+								if &Depn.[CLIENT]%class = ::[CL_PRIV]%class and bApp1B400302 then
+									--Для депозитов физического лица необходимо проверить наличие поручений UPD с ненулевой суммой
+									if ::[DEPN].[LIB_TAX].checkUpd(p_rDepn == &Depn.ID) then
+										bMakeProl := false;
+										WrMess('По договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy') || ' есть неисполненные поручения от гос. органа на перечисление денежных средств с депозита клиента. Перенос остатков не выполнен!');
+										AddRecordInErrorLog( &Depn.id,
+															   'Ошибка при переносе остатков по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+															   'На данном договоре есть неисполненные поручения от гос. органа на перечисление денежных средств с депозита клиента. Перенос остатков не выполнен!');
+										Counter_ErrFlag := true;		--устанавливаем признак ошибки при обработке (депозита)
+									end if;
+								end if;
+								
+								if bMakeProl then
+									&Depn.Id->(DEPN)[PROLONGATION](P_DATE == IdProl.DateProl, P_PROV_DOCS == prov_prol);
+								end if;
+								
+							exception
+								when others then
+									&rb(IdDep_MOVE_SP)
+	
+									WrMess('Ошибка при переносе остатков по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+									WrMess('Текст ошибки : '||sqlerrm);
+									
+									AddRecordInErrorLog ( &Depn.id,
+														   'Ошибка при переносе остатков по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+														   sqlerrm);							
+									Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+							end;
+						end if;
+						exit;
+					end loop;
+				end if;
+				
+				-- 6. Перенос просроченной дебиторской задолженности
+				if P_DEBIT_OVERDUE then
+					CurDate := P_DATE_BEG;
+					
+					while CurDate <= P_DATE_END loop
+						if &GET_BOOL(MAY_FROM_GROUP_DEBIT_OVERDUE, &Depn.Id, CurDate, null) then
+							declare
+								VDepTb			TbCur;
+								Jdx				number;
+							begin	
+								if &Depn.ID%class != 'DEPOSIT_MULT' then
+									VDepTb(1) := &Depn.Id; 	
+								else
+									select Mult(Mult.[DEPOSIT] : Id)
+									in &Depn.MULTYCURR
+									into VDepTb;
+								end if;
+								
+								N_DEBIT_OVERDUE := N_DEBIT_OVERDUE + 1;
+								
+								Jdx := VDepTb.first;
+								while Jdx is not null loop
+									begin
+										&sp(IdDep_OVERDUE)
+										
+										VDepTb(Jdx)->(::[DEPN])[DEBIT_OVERDUE](P_DATE	== CurDate
+																			 , P_PROV	== true
+																			 );
+									exception
+										when others then -- Выполнение операции не должно прерываться при возникновении любой ошибки, сообщение об ошибке необходимо записать в лог-файл
+											&rb(IdDep_OVERDUE)
+											WrMess('Ошибка при переносе просроченной дебиторской задолженности по договору '||VDepTb(Jdx).NUM_DOG||' от '||to_char(VDepTb(Jdx).DATE_BEGIN, 'dd.mm.yy'));
+											WrMess('Текст ошибки : '||sqlerrm);
+											
+											AddRecordInErrorLog (&Depn.id,
+																   'Ошибка при переносе просроченной дебиторской задолженности по договору '||VDepTb(Jdx).NUM_DOG||' от '||to_char(VDepTb(Jdx).DATE_BEGIN, 'dd.mm.yy'),
+																   sqlerrm);					
+											Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+									end;
+									Jdx := VDepTb.next(Jdx);
+								end loop;
+							end;
+						end if;
+						
+						CurDate := CurDate + 1;
+						
+					end loop;
+				end if;
+				
+				
+				-- 7. Переоформление
+				&Get_Vid_Deposit(&Depn.VID_DOG)
+				
+				if P_RESTART_DEP
+					and nvl(&Depn.VID_DOG_PROL, &Vid_Deposit.VID_DOG_PROL) is not null
+					and &Depn.COM_STATUS = ComStatus_Work -- Вдруг пролонгация не завершилась...  :-/
+					and &Depn.DATE_ENDING is not null
+					and &Depn.DATE_ENDING <= P_DATE_END
+					and not ::[DEPN].[GET_BOOL].IS_PROL(&Depn.Id, 'IS_PROL_'||nvl(&Depn.VID_DOG_PROL, &Vid_Deposit.[VID_DOG_PROL]).[CODE], null, null)
+				then
+					
+					CurDate := greatest(P_DATE_BEG, &Depn.DATE_ENDING);
+					if &GET_BOOL(MAY_FROM_GROUP_PROLONGATION, &Depn.Id, CurDate, null) then
+						begin
+						
+							N_RESTART_DEP := N_RESTART_DEP + 1;
+							
+							&sp(IdDep_RESTART_SP)
+							
+							if &Depn.VID_DOG <> nvl(&Depn.VID_DOG_PROL, &Vid_Deposit.VID_DOG_PROL)
+								and not &Vid_Deposit.PROL_TO_OTHER
+								and [LIB_01].GetSummDebt(&Depn.Id, ::[VID_DEBT]([CODE] = 'АРЕСТОВАНО'), CurDate) > 0
+								then
+								WrMess('Ошибка при переоформлении по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+								WrMess('Текст ошибки : На данном договоре есть арестованные суммы. Переоформление на новый договор запрещено! ');
+								
+								AddRecordInErrorLog (&Depn.id,
+													   'Ошибка при переоформлении по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+													   'На данном договоре есть арестованные суммы. Переоформление на новый договор запрещено!');
+								Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+							else
+								bMakeProl := true;
+								
+								if &Depn.[CLIENT]%class = ::[CL_PRIV]%class and bApp1B400302 then
+									--Для депозитов физического лица необходимо проверить наличие поручений UPD с ненулевой суммой
+									if ::[DEPN].[LIB_TAX].checkUpd(p_rDepn == &Depn.ID) then
+										bMakeProl := false;
+										if P_CLOSE_FNS then
+											--Переоформление невозможно, закрываем договор
+										 	if &Depn.[VID_DOG].[RNKO_DEP] and bApp1B410023 then
+												[DEPN]::[L].CloseDepositSimple(P_DEPN == &Depn.Id, P_DATE == CurDate, P_PROV == prov_prol, P_NOT_PAY == true);
+											else
+												[DEPN]::[L].CloseDepositSimple(P_DEPN == &Depn.Id, P_DATE == CurDate, P_PROV == prov_prol, P_NOT_PAY == false);
+											end if;
+										else
+											WrMess('По договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy') || ' есть неисполненные поручения от гос. органа на перечисление денежных средств с депозита клиента. Переоформление не выполнено!');
+											AddRecordInErrorLog (&Depn.id,
+																   'Ошибка при переоформлении по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+																   'На данном договоре есть неисполненные поручения от гос. органа на перечисление денежных средств с депозита клиента. Переоформление не выполнено!');
+											Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+										end if;
+									end if;
+								end if;
+								
+								if bMakeProl then
+									&Depn.Id->(DEPN)[PROLONGATION](P_DATE == CurDate,P_PROV_DOCS == prov_dep_prolac, P_RESTART == true);
+								end if;
+
+							end if;
+							
+						exception
+							when others then
+								&rb(IdDep_RESTART_SP)
+								
+								WrMess('Ошибка при переоформлении по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+								WrMess('Текст ошибки : '||sqlerrm);
+								
+								AddRecordInErrorLog (&Depn.id,
+													   'Ошибка при переоформлении по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+													   sqlerrm);				
+								Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+						end;
+					end if;
+				end if;
+		
+				-- 8. Автоматическая конвертация вкладов
+				if P_AUTO_CONV
+					and &Depn.CLASS_ID = 'DEPOSIT_MULT'
+					and &Depn.COM_STATUS = ComStatus_Work
+					and &Depn.AUTO_CONV = '1'
+				then
+					
+					CurDate := P_DATE_END;
+
+					if &GET_BOOL(MAY_FROM_GROUP_AUTO_CONV, &Depn.Id, CurDate, null) then				
+						begin
+						
+							N_AUTO_CONV := N_AUTO_CONV + 1;
+							
+							&sp(IdDep_AUTO_CONV)
+							
+							&Depn.Id->(DEPOSIT_MULT)[CONV_MULT](P_DATE_END);
+							
+						exception
+							when others then
+								&rb(IdDep_AUTO_CONV)
+	
+								WrMess('Ошибка при автоматической конвертации по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+								WrMess('Текст ошибки : '||sqlerrm);
+	
+								AddRecordInErrorLog (&Depn.id,
+													   'Ошибка при автоматической конвертации по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+													   sqlerrm);					
+								Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+						end;
+					end if;
+				end if;
+		
+				-- 9. Планирование
+				if P_PLAN
+					or P_NEED_PLAN
+						and &GET_BOOL(MAY_FROM_GROUP_PLAN, &Depn.Id, OpDateBranch, null)
+						and  &Depn.[COM_STATUS] <> ComStatus_TO_CLOSE
+				then
+					
+					if P_NEED_PLAN and &Fact_Oper_Tb.first is not null then
+					
+						for FOpIdx in reverse &Fact_Oper_Tb.first..&Fact_Oper_Tb.last
+							where &Fact_Oper(FOpIdx).COLLECTION_ID = &Depn.LIST_PAY
+							and &Fact_Oper(FOpIdx).C_NEED_REFORM_PLAN = '1'
+						loop
+							
+							begin
+							
+								N_PLAN := N_PLAN + 1;
+								
+								&sp(IdDep_PLAN_SP)
+								
+								&Depn.Id->(DEPN)[PLAN](null);
+								
+								exit;
+								
+							exception
+								when others then
+
+									&rb(IdDep_PLAN_SP)
+									
+									WrMess('Ошибка при планировании по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+									WrMess('Текст ошибки : '||sqlerrm);
+									
+									AddRecordInErrorLog (&Depn.id,
+														   'Ошибка при планировании по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+														   sqlerrm);						
+									Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+								exit;
+								
+							end;
+							
+							exit;
+							
+						end loop;
+						
+					elsif not P_NEED_PLAN then
+					
+						begin
+							
+							N_PLAN := N_PLAN + 1;
+							&sp(IdDep_PLAN_SP)
+							&Depn.Id->(DEPN)[PLAN](null);
+							
+						exception
+							when others then
+								&rb(IdDep_PLAN_SP)
+								
+								WrMess('Ошибка при планировании по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+								WrMess('Текст ошибки : '||sqlerrm);
+								
+								AddRecordInErrorLog (&Depn.id,
+												   'Ошибка при планировании по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+												   sqlerrm);					
+								Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+						end;
+					end if;
+				end if;
+
+				-- 10. Закрытие договоров (срочных) при наступлении окончания срока действия с переносом остатка на счет для возврата
+				&Get_Vid_Deposit(&Depn.VID_DOG)
+				
+				-- если существует доп. соглашение на досрочную пролонгацию с датой вступления в силу равной
+				-- текущему опердню, то закрывать договор не нужно
+				if P_CLOSE_DEP and v_close_depn_tbl.exists(&Depn.ID) and (not v_close_depn_tbl(&Depn.ID)) then
+					v_close_depn := false;
+				else
+					v_close_depn := true;
+				end if;
+				
+				if P_CLOSE_DEP
+					and v_close_depn
+					and &Depn.COM_STATUS in (ComStatus_Work, ComStatus_AREST)
+					-- Закрытие осуществляем в опер. день
+					and (P_DATE_BEG <= OpDateBranch and OpDateBranch <= P_DATE_END)
+					and &Depn.DATE_ENDING <= OpDateBranch
+					and &GET_BOOL(MAY_FROM_GROUP_CLOSE_DEP, &Depn.Id, OpDateBranch, null)
+					
+					-- В случае обработки мультиков - закрытие делаем с мультика
+					and (not P_DEPOSIT_MULT or &Vid_Deposit.[CLASS_DEP] <> ::[DEPOSIT_MULT]%class or &Depn.[CLASS_ID] = ::[DEPOSIT_MULT]%class)
+					
+					and	(
+							-- Не указан вид договора для пролонгации
+							(&Vid_Deposit.[VID_DOG_PROL] is null and &Depn.[VID_DOG_PROL] is null)
+							or
+							-- Количество пролонгаций завершено
+							(&Vid_Deposit.[PROL_NUM] >= 0 and &Vid_Deposit.PROL_NUM <= &GET_NUM(PROL_COUNT, &Depn.Id, OpDateBranch, null))
+						)
+				then
+				
+					CurDate := OpDateBranch;
+					
+					begin
+					
+						N_CLOSE_DEP := N_CLOSE_DEP + 1;
+						
+						&sp(Close_Dep)
+						if 	&Depn.[VID_DOG].[RNKO_DEP] and bApp1B410023 then
+							[DEPN]::[L].CloseDepositSimple(P_DEPN == &Depn.Id, P_DATE == CurDate, P_PROV == prov_close_dog, P_NOT_PAY == true);
+						else
+							[DEPN]::[L].CloseDepositSimple(P_DEPN == &Depn.Id, P_DATE == CurDate, P_PROV == prov_close_dog, P_NOT_PAY == false);
+						end if;
+						
+					exception
+						when others then
+							&rb(Close_Dep)
+							WrMess('Ошибка при закрытии договора '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+							WrMess('Текст ошибки : '||sqlerrm);
+							
+							AddRecordInErrorLog (&Depn.id,
+											   'Ошибка при закрытии договора '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+											   sqlerrm);
+							Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+					end;
+				-- Закрытие карточных
+				elsif P_CLOSE_DEP
+					and v_close_depn
+					and &Vid_Deposit.[CARD_DEP]
+					and &Depn.COM_STATUS = ComStatus_Work
+					and &GET_BOOL(MAY_FROM_GROUP_CLOSE_DEP, &Depn.Id, OpDateBranch, null)
+				then
+					declare
+						closeFromDboProperty ref [PROPERTY];
+					begin
+						begin
+							closeFromDboProperty  := &Depn.[PROPERTY_ARR] ([PROPERTY_TYPE] = ::[PROPERTY_TYPE] ([CODE] = 'CLOSE_FROM_DBO'));
+						exception
+							when NO_DATA_FOUND then
+								null;
+						end;
+						if ( ::[DEPN].[LIB_APPLICATION].check_application_extra('1B350270', null) or (closeFromDboProperty is not null)) then
+							declare
+								lastClosedCardRef ref [VZ_CARDS];
+								lastClosedAccountRef ref [VZ_ACCOUNTS];
+								closeCardVzaccDepn number;
+								canons varchar2;
+							begin
+								&sp(Close_Dep)
+								begin
+									select card (card) in ::[VZ_CARDS], ([VZ_ACCOUNTS] all : acc) all
+									where (acc.[PROD_REF] = &Depn.id) and (card.[IP_ACCOUNTS_REF] = acc%id) and card.[DATE_CLOSE] is not null
+									order by card.[DATE_CLOSE] desc
+									fetch 1
+									into lastClosedCardRef;
+								exception
+									when NO_DATA_FOUND then
+										pragma error ('Не удалось определить последнюю закрытую карту для договора ' || &Depn.NUM_DOG);
+										
+								end;
+								canons	:= ::[FP_TUNE].[LIB].set_canons( 'METACLASS', &Depn.CLASS_ID,'IP_PROCESSINGS', lastClosedCardRef.[IP_BRANCH].[IP_PROCESSING], 'IP_VID_PRODUCT', ::[DEPN_INTERFACE].[PRX_DEPN_TO_CARD].GetCardVidByVidDep(&Vid_Deposit.id));
+								closeCardVzaccDepn := nvl (::[FP_TUNE].[LIB].get_num_value('CLOSE_CARD_VZACC_PROD', canons,'0'), 2);
+								if (closeCardVzaccDepn = 0) then
+									::[DEPN].[L].checkCardDepnCloseConditions (&Depn.id, true);
+								
+									begin
+										select acc (acc) in ::[VZ_ACCOUNTS] all
+										where (acc.[PROD_REF] = &Depn.id) and acc.[DATE_CLOSE] is not null
+										order by acc.[DATE_CLOSE] desc
+										fetch 1
+										into lastClosedAccountRef;
+									exception
+										when NO_DATA_FOUND then
+											pragma error ('Не удалось определить последний закрытый счетовой контракт для договора ' || &Depn.NUM_DOG);
+									end;
+								
+									WrMess('DepnId = ' || &Depn.id);
+									WrMess('lastClosedAccountRef = ' || lastClosedAccountRef%id);
+								
+									declare
+										accReturn	[REQ_CLIENT];
+										payWay		[PAY_WAY];
+										comissReq	[PAY_WAY];
+										
+										summa		[SUPER_SUMMA];
+										summaMax	[SUPER_SUMMA];
+										summBack	[SUPER_SUMMA];
+										summBackCur	[SUPER_SUMMA];
+										addPar		varchar2;
+										summAll		number default 0;
+										
+										isCrash boolean default false;
+									begin
+										accReturn := &Depn.id->(DEPN)[ACC_RETURN];
+										payWay.[0] := 1;
+										payWay.[MEMO] := accReturn;
+										
+										::[DEPN].[CANC_TERM].SetDefArr(IdDepn == &Depn.id,
+																		OnDate == OpDateBranch);
+										
+										comissReq.[MEMO] := &Depn.id.[GET_REQ_CLIENT](::[TIP_ACC]([COD] = 'D_ACCOUNT'));
+										
+										if ((&Depn.DATE_ENDING is not null) and &Depn.DATE_CLOSE > OpDateBranch) then
+											isCrash := true;
+										end if;
+										
+										::[DEPN].[CANC_TERM].CalcSumms( IdDepn 			== &Depn.id,
+																		OnDate			== OpDateBranch,
+																		SummSp			== summa,
+																		SummSpMax		== summaMax,
+																		SummBack		== summBack,
+																		SummBackCur		== summBackCur,
+																		Course			== 1,
+																		ClientReq		== payWay,
+																		ComissReq		== comissReq,
+																		IsCrash			== isCrash,
+																		PInfo			== 'P_DATE',
+																		ReCalcPrc		== true,
+																		FullSumms		== true
+										  );
+										
+										for i in ::[DEPN].[CANC_TERM].V_SUMMS.first..::[DEPN].[CANC_TERM].V_SUMMS.last loop
+											summAll := summAll + nvl(::[DEPN].[CANC_TERM].V_SUMMS (i).[CALC_SUMMA], 0);
+										end loop;
+										
+										WrMess ('Итоговая сумма депозита: ' || summAll);
+										
+										if (summAll < 0) then
+											WrMess('Невозможно закрыть договор ' || &Depn.[NUM_DOG] || ' - недостаточно средств для погашения задолжности!');
+											Idx := VCurTb.next(Idx);
+											continue;
+										end if;									
+										
+										if (((accReturn.[0] = 1) and (accReturn.[1].[2] is not null)) or ((accReturn.[0] = 2) and (accReturn.[2].[1] is not null))) then
+											WrMess ('Договор ' || &Depn.[NUM_DOG] || ' - безналичное перечисление');
+											if (summa > 0) then
+												WrMess ('Договор ' || &Depn.[NUM_DOG] || ' - Сумма больше нуля');
+
+												::[DEPN].[CANC_TERM].V_CRASH		:= false;
+												
+												::[DEPN].[CANC_TERM].V_COMMIS_REQ	:= comissReq;
+												::[DEPN].[CANC_TERM].V_PROV_DOCS 	:= true;
+												
+												WrMess (summa);
+												WrMess (summBack);
+												WrMess (summBackCur);
+												
+												&Depn.id->(DEPN)[CANC_TERM](OpDateBranch, summa ,payWay , 1, summBack, summBackCur, null);
+												
+												::[DEPN].[CANC_TERM].V_COMMIS_REQ := null;
+												::[DEPN].[CANC_TERM].V_PROV_DOCS  := null;
+											else
+												WrMess ('Договор ' || &Depn.[NUM_DOG] || ' - Сумма равна нулю');
+												&Depn.id->(DEPN)[CLOSE_FINAL]();
+											end if;
+										else
+											WrMess ('Договор ' || &Depn.[NUM_DOG] || ' - Наличное списание');
+											if (summa = 0) then
+												WrMess ('Договор ' || &Depn.[NUM_DOG] || ' - Сумма равна нулю');
+												&Depn.id->(DEPN)[CLOSE_FINAL]();
+											else
+												WrMess('Сумма договора ' || &Depn.[NUM_DOG] || ' больше нуля, и реквизиты для безналичного перечисления не указаны.');        				
+											end if;
+										end if;
+									end;
+								end if;
+							exception
+								when OTHERS then
+									&rb(Close_Dep)
+									
+									if (lastClosedCardRef is not null) and (lastClosedAccountRef is not null) then
+										WrMess('Ошибка при закрытии договора '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+										WrMess('Текст ошибки : '||sqlerrm);
+									
+										AddRecordInErrorLog (&Depn.id, 'Ошибка при закрытии договора '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'), sqlerrm);					
+									end if;
+									Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+							end;
+						end if;
+					end;
+				--Удержание периодических комиссий
+				elsif P_EXEC_COMISS then
+					var vComissFolder ref [FOLDER_PAY];				
+					CurDate := P_DATE_BEG;					
+						while CurDate <= P_DATE_END loop
+							--список комиссий был сформирован ранее, получим список услуг из ТП для удержания комиссии
+							vComissTab := ::[DEPN].[GET_TAR_LIB].getComissOnDate(
+												P_DEPN			== &depn.id			/*Депозит*/
+												,P_COMISS_TYPE 	== P_COMISS_TYPES 	/*Список id видов комиссий разделенных через ;*/
+												,P_DATE 		== CurDate); 		/*дата*/							
+							if vComissTab.last is not null then
+								-- попробуем удержать комиссию по каждому виду услуги						
+								for idx in vComissTab.first .. vComissTab.last
+								loop
+								begin															
+									&sp(IdDep_RET_COM_SP)
+									--попробуем удержать комиссию по каждому виду услуги
+									vComissFolder := ::[DEPN].[GET_TAR_LIB].ret_service_out_debit(
+																	P_DEPN 			== &depn.id		/*Депозит*/		
+																	,P_ON_DATE 		== CurDate 		/* дата операции */
+																	,P_SERVICE		== vComissTab(idx)/*комиссия*/
+																	,P_PROV			== prov_comiss	/* проводить документы */	
+														);
+									if vComissFolder is not null then
+										N_EXEC_COMISS := N_EXEC_COMISS +1;
+										vComissFolder := null; 	
+									end if;
+								exception
+										when MESSAGE.APP_EXCEPTION then
+											&rb(IdDep_RET_COM_SP)
+											vComissFolder := null; 		
+											WrMess('Ошибка при удержании комиссии по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+											WrMess('Текст ошибки : '||&sqlerrm2str);										
+											AddRecordInErrorLog (&Depn.id,
+																   'Ошибка при удержании комиссии по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+																   &sqlerrm2str);					
+											Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+									end;
+								end loop;
+							end if;							
+							CurDate := CurDate + 1;
+							
+						end loop; -- while CurDate <= P_DATE_END loop					
+				end if;
+				
+				-- 11. МСФО. Признание затрат по ДД
+				if P_RECOGNISE_EXPENSES then
+					CurDate := P_DATE_END;
+					if &GET_BOOL(MAY_FROM_GROUP_RECOGN_EXPNS, &Depn.Id, CurDate, null) then
+						begin
+						
+							N_RECOG_EXPNS := N_RECOG_EXPNS + 1;
+							
+							&sp(IdDep_RECOGN_EXPNS)
+						 	
+						 	&Depn.Id->(DEPN)[RECOGNISE_EXPENS]( P_DATE			==	CurDate
+																, P_DATE_VAL	==	P_DATE_VAL
+																, P_PROV		==	prov_recong_expns
+																, P_IMPORTANCE	==	true);
+						exception
+							when others then
+								&rb(IdDep_RECOGN_EXPNS)
+								
+								WrMess('Ошибка при признании затрат по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+								WrMess('Текст ошибки : '||sqlerrm);
+								
+								AddRecordInErrorLog (&Depn.id,
+													   'Ошибка при признании затрат по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+													   sqlerrm);					
+								Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+						end;
+					end if;				
+				end if;
+				
+				-- 12. МСФО. Корректировка стоимости до АС для срочных договоров
+				if P_IFRS_ADJ_AC and &Depn.DATE_ENDING is not null
+					and &Depn.[COM_STATUS] <> ComStatus_TO_CLOSE
+				 then
+					CurDate := P_DATE_BEG;
+					
+					while CurDate <= P_DATE_END loop
+						if &GET_BOOL(MAY_FROM_GROUP_ADJ_TO_AC, &Depn.Id, CurDate, null) then
+							declare
+								rFolder		ref [FOLDER_PAY];
+							begin
+								
+							 	--&sp(IdDep_ADJ_TO_AC)
+								if(&Depn.CLASS_ID = 'DEPOSIT_MULT')then
+									rFolder := &Depn.Id->(DEPOSIT_MULT)[ADJUSTMENT_TO_AC]( P_DATE		== CurDate
+																				 , P_DATE_VAL	== P_DATE_VAL
+																				 , P_PROV_DOCS	== prov_adj_to_AC
+																				 );
+								else
+									--rFolder := &Depn.Id->(DEPN)[ADJUSTMENT_TO_AC]( P_DATE		== CurDate
+									rFolder := &Depn.Id->(DEPN)[PSH_ADJUST_TO_AC]( P_DATE		== CurDate -- updated CHANGE_SHORT_NAME PSB_ADJUST_TO_AC->PSH_ADJUST_TO_AC 14/10/25
+																				 , P_DATE_VAL	== P_DATE_VAL
+																				 , P_PROV_DOCS	== prov_adj_to_AC
+																				 );
+								end if;
+								if rFolder is not null then
+									N_ADJ_TO_AC := N_ADJ_TO_AC + 1;
+								end if;
+							--- exception
+							--- 	when others then
+							--- 		--&rb(IdDep_ADJ_TO_AC)
+							--- 		
+							--- 		WrMess('Ошибка при корректировке стоимости до АС по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+							--- 		WrMess('Текст ошибки : '||sqlerrm);
+							--- 		
+							--- 		AddRecordInErrorLog (&Depn.id,
+							--- 							   'Ошибка при корректировке стоимости до АС по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+							--- 							   sqlerrm);					
+							--- 		Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+							end;
+						end if;
+						
+						CurDate := CurDate + 1;
+						
+					end loop;
+				end if;
+				
+				-- 13. Закрытие дополнительных соглашений на изменение индивидуальных ограничений депозитного договора
+				if nvl(P_EXEC_DOP, false) and ( P_DATE_BEG <= OpDateBranch ) then
+					declare
+						Agr			ref [PROL_IND_RESTR];
+						v_DateEnd	[DATE];
+					begin
+						v_DateEnd := least( OpDateBranch, P_DATE_END );
+						for (	select Agreement( Agreement%id			:	ID
+												, Agreement.[NUM_AGR]	:	NUM_AGR
+												)
+								in ::[PROL_IND_RESTR] all
+								where	Agreement%collection = &Depn.[LIST_PROL]
+										and Agreement.[PROL_END] <= v_DateEnd and Agreement.[PROL_END] >= P_DATE_BEG
+										and Agreement.[COM_STATUS] = ComStatus_Work
+						) loop
+							begin
+								&sp(IdDep_IND_RESTR)
+								Agr := Agreement.ID;
+								Agr.[CLOSE_AGR](  P_WHY_CLOSE_CODE	== 'SROK'
+												, P_DATE 			== OpDateBranch
+												);
+								N_DOP_INDRESTR := N_DOP_INDRESTR + 1;
+							exception
+								when others then
+									&rb(IdDep_IND_RESTR)
+									
+									WrMess('Ошибка при закрытии дополнительного соглашения ' || Agreement.[NUM_AGR] || ' на изменение индивидуальных ограничений по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'));
+									WrMess('Текст ошибки : '||sqlerrm);
+									
+									AddRecordInErrorLog (&Depn.id,
+														   'Ошибка при закрытии дополнительного соглашения ' || Agreement.[NUM_AGR] || ' на изменение индивидуальных ограничений по договору '||&Depn.NUM_DOG||' от '||to_char(&Depn.DATE_BEGIN, 'dd.mm.yy'),
+														   sqlerrm);					
+									Counter_ErrFlag:=true;		--устанавливаем признак ошибки при обработке (депозита)
+							end;
+						end loop;
+			 		end;
+				end if;
+				
+				&Del_Depn
+				&Del_Fact_Oper
+				&Del_Hoz_Op_Acc
+				&Del_String_Calc_Prc
+		
+				TimeEnd := utils.get_time;
+				
+				Counter := Counter + 1;
+				if Counter_ErrFlag=true then		--установлен признак ошибки при обработке депозита
+					Counter_Err     := Counter_Err+1;
+					Counter_ErrFlag := false;
+				else
+					Counter_Process := Counter_Process+1;
+				end if;
+				
+				if mod(Counter, WrMess_NRecs) = 0 then   -- каждую 1000
+				   WrMess('Обработано '||Counter||' записей!');
+				end if;
+				
+				if mod(Counter, P_COMMIT) = 0 then		
+					
+					if IS_EOD_NEW then
+						if EOD2_CHECK_STOP_COMMIT	
+							(	P_METHOD_PROC  		== &Method$NAME||'(депозитные договора)' -- наименование действия которое сейчас исполняет операция
+								,P_OBJECT_COUNT  	== Counter_Total		-- количество объектов к обработке
+								,P_OBJECT_HANDLED 	== Counter_Process		-- количество обработанных объектов
+								,P_OBJ_HANDLE_ERROR == Counter_Err 			-- количество объектов обработанных с ошибкой
+							)
+						then
+							return;
+						end if;
+					else
+						commit;
+					end if;
+					
+				end if;
+		
+				Idx := VCurTb.next(Idx);
+			end loop; -- VCurTb.first is not null
+			
+			RETRY_COUNT := RETRY_COUNT + 1;
+			
+			-- Если есть договоры, которые не заблокировались
+			if VCurTb_error.count > 0 then
+				--Пробежим еще раз обработку для всех депозитов, у которых не произошла блокировка
+			
+				VCurTb.delete;
+				for IdxErr in VCurTb_error.first..VCurTb_error.last loop
+					VCurTb(IdxErr) := VCurTb_error(IdxErr);
+				end loop;
+				
+			else
+				-- выходим
+				exit;
+			end if;
+		end loop;
+
+		-- Закомитим оставшиеся договора
+		Counter_Err:=Counter_Err+VCurTb_error.count;		--необработанные записи автоматически увеличивают счетчик ошибок
+		if mod(Counter, P_COMMIT) <> 0 then
+			if IS_EOD_NEW then
+				if EOD2_CHECK_STOP_COMMIT	
+							(	P_METHOD_PROC  		== &Method$NAME||'(депозитные договора)' -- наименование действия которое сейчас исполняет операция
+								,P_OBJECT_COUNT  	== Counter_Total		-- количество объектов к обработке
+								,P_OBJECT_HANDLED 	== Counter_Process		-- количество обработанных объектов
+								,P_OBJ_HANDLE_ERROR == Counter_Err 			-- количество объектов обработанных с ошибкой
+							)
+				then
+					return;
+				end if;
+			else
+				commit;
+			end if;
+		end if;
+
+		-- Выведем в лог сообщения о необработанных депозитах (которые на момент обработки были заблокированы другими пользователями)
+		if VCurTb_error.count > 0 then
+			for IdxErr in VCurTb_error.first..VCurTb_error.last loop
+				
+				WrMess('Во время групповой обработки договор '||VCurTb_error(IdxErr).NUM_DOG_EXT||' от '||to_char(VCurTb_error(IdxErr).DATE_BEGIN, 'dd.mm.yy')||' не обработан. Причина:  блокировка другой операцией');
+				
+				AddRecordInErrorLog (VCurTb_error(IdxErr),
+									  'Во время групповой обработки договор '||VCurTb_error(IdxErr).NUM_DOG_EXT||' от '||to_char(VCurTb_error(IdxErr).DATE_BEGIN, 'dd.mm.yy')||' не обработан. Причина:  блокировка другой операцией',
+									   null);
+			end loop;
+		end if;
+	end if;
+
+
+	-- 14. Исполнение длительных поручений
+	if nvl(P_EXEC_L_ORDER, false) then
+		if P_LONG_ORDER_TYPES is null then
+			idx := V_LONG_ORDER_TYPES.first;
+			if idx is not null then
+				P_LONG_ORDER_TYPES := ';';
+			end if;
+			while idx is not null loop
+				P_LONG_ORDER_TYPES := P_LONG_ORDER_TYPES || V_LONG_ORDER_TYPES(idx).[CODE] || ';';
+				WrMess('V_LONG_ORDER_TYPES(idx).[CODE]: ' || V_LONG_ORDER_TYPES(idx).[CODE]);
+				idx := V_LONG_ORDER_TYPES.next(idx);
+			end loop;
+		end if;
+		WrMess('P_LONG_ORDER_TYPES: ' || P_LONG_ORDER_TYPES);
+		need_commitnow:=false;
+		CurDate := P_DATE_BEG;
+		while CurDate <= P_DATE_END loop
+			TimeStart := utils.get_time;
+			WrMess('Депозиты. Исполнение длительных поручений на дату '||to_char(CurDate, 'dd.mm.yyyy'));
+			VCurTbLO.delete;
+			idx := 1;
+			for (select IdOrder(IdOrder : Id)
+				in ::[LONG_ORDER] all
+				where IdOrder%state = 'WORK'
+				and nvl(IdOrder.[FILIAL], -1) = nvl(P_FILIAL, nvl(IdOrder.[FILIAL], 1))
+				and nvl(IdOrder.[DEPART], -1) = nvl(P_DEPART, nvl(IdOrder.[DEPART], 1))
+				and (IdOrder.[DEPART].[DEPART_GROUP] = P_DEPART_GROUP or P_DEPART_GROUP is null)
+				and ((P_LONG_ORDER_TYPES is null) or (instr(P_LONG_ORDER_TYPES, ';' || IdOrder.[LONG_ORDER_TYPE].[CODE] || ';', 1) > 0))
+				and (
+						(IdOrder.[contra_req].[0] = 1 and &mod$stream(IdOrder.[contra_req].[1].[2]))
+						or (IdOrder.[contra_req].[0] = 2 and IdOrder.ini_client%id is not null and &mod$stream(IdOrder.ini_client%id))
+						or (IdOrder.ini_client%id is null and P_STREAM_NUM=0)
+						)	--многопоточное условие
+				order by IdOrder.[DATE_EXEC])
+			loop
+				VCurTbLO(idx) := IdOrder.Id;
+				idx := idx + 1;
+			end loop;
+
+			if VCurTbLO.count > 0 then
+				WrMess('Депозиты. на дату '||to_char(CurDate, 'dd.mm.yyyy')||' всего '||VCurTbLO.count||' длит.поручений');
+				Counter := 0;
+				P_RETRY_COUNT 	:= nvl(ret,3);
+				RETRY_COUNT		:= 1;
+				Counter_Total	:= Counter_Total + VCurTbLO.count;
+
+				while RETRY_COUNT <= P_RETRY_COUNT loop
+					VCurTbLO_error.delete;
+					idx:=VCurTbLO.first;
+					while idx is not null loop
+						declare
+							acfin_cache		[ac_fin];
+						begin
+							&sp(IdOrder_EXEC_SP)
+
+							::[DEPN_INTERFACE].[PRX_LONG_ORDER].ExecLongOrder(P_LONG_ORDER==VCurTbLO(idx)
+																			,P_DATE==CurDate
+																			,P_PROCESSERRLCK==false);
+							Counter_Process:=Counter_Process+1;
+
+							--Особая логика многопоточного режима							
+							if P_STREAM_COUNT>1 then
+								if VCurTbLO(idx).[CONTRA_REQ].[0]=1 then		--внутренний документ. проверяем какой продукт
+									acfin_cache:=VCurTbLO(idx).[CONTRA_REQ].[1].[2];
+									if acfin_cache.[TO_PRODUCT]=::[ACC_PRODUCT]([CODE]='RKO') or --скорее всего это счет блокируемый
+									  (acfin_cache.[TO_PRODUCT]=::[ACC_PRODUCT]([CODE]='DEPN') and acfin_cache.[CLIENT_V]!=VCurTbLO(idx).[INI_CLIENT]) then	--перечисляем на депозит другого клиента
+										WrMess('Перечисление на договор РКО или депозит другого клиента. фиксируем транзакцию прямо сейчас');
+										need_commitnow:=true;
+									end if;
+								end if;
+							end if;
+						exception
+							when CANNOT_LOCK then
+								&rb(IdOrder_EXEC_SP)
+								WrMess('Неудача при блокировке под длит поручения '||VCurTbLO(Idx).[DOCUMENT_NUM]||' от '||to_char(VCurTbLO(Idx).[DOCUMENT_DATE], 'dd.mm.yyyy'));
+								WrMess('Текст ошибки : '||sqlerrm);
+								VCurTbLO_error(VCurTbLO_error.count+1) := VCurTbLO(Idx);
+								Idx := VCurTbLo.next(Idx);
+								continue;
+							when others then
+								&rb(IdOrder_EXEC_SP)
+								WrMess('Ошибка при исполнении длительного поручения '||VCurTbLO(Idx).[DOCUMENT_NUM]);
+								WrMess('Текст ошибки : '||sqlerrm);
+								AddRecordInErrorLog (VCurTbLO(Idx)%id,
+													'Во время групповой обработки длит поручение '||VCurTbLO(Idx).[DOCUMENT_NUM]||' от '||to_char(VCurTbLO(Idx).[DOCUMENT_DATE], 'dd.mm.yyyy')||' не обработано. Причина: '||sqlerrm,
+													null,
+													2);
+													
+								Counter_Err:=Counter_Err+1;
+						end;
+
+						counter := counter+1;
+						
+   				        if mod(Counter, WrMess_NRecs) = 0 then   -- каждую 1000
+				           WrMess('Обработано '||Counter||' записей!');
+				        end if;
+
+						
+						if mod(counter, P_COMMIT) = 0 or need_commitnow then
+							need_commitnow:=false;
+
+							if IS_EOD_NEW then
+								if EOD2_CHECK_STOP_COMMIT	
+										(	P_METHOD_PROC  		== &Method$NAME||'(длит.поруч-я)' -- наименование действия которое сейчас исполняет операция
+											,P_OBJECT_COUNT  	== Counter_Total		-- количество объектов к обработке
+											,P_OBJECT_HANDLED 	== Counter_Process		-- количество обработанных объектов
+											,P_OBJ_HANDLE_ERROR == Counter_Err 			-- количество объектов обработанных с ошибкой
+										)
+								then
+									return;
+								end if;
+							else
+								commit;
+							end if;
+						end if;
+						Idx := VCurTbLo.next(Idx);
+					end loop;
+					N_EXEC_L_ORDER := N_EXEC_L_ORDER + counter;
+					RETRY_COUNT := RETRY_COUNT + 1;
+					-- Если есть длит поручения, которые не заблокировались
+					if VCurTbLO_error.count > 0 then
+						WrMess('Готовимся к повторной обработке '||VCurTbLO_error.count||' записей на попытке '||RETRY_COUNT);
+						-- Есть - Пробежим еще раз обработку для всех длитпоручений, у которых не произошла блокировка
+						VCurTbLO.delete;
+						for IdxErr in VCurTbLO_error.first..VCurTbLO_error.last loop
+							VCurTbLO(IdxErr) := VCurTbLO_error(IdxErr);
+						end loop;
+					else
+						-- Нет - выходим
+						exit;
+					end if;
+				end loop;
+			end if;
+
+			Counter_Err:=Counter_Err+VCurTbLO_error.count;			--незаблокированные записи за дату безусловно увеличивают счётчик ошибок
+			if mod(Counter, WrMess_NRecs) = 0 then   -- каждую 1000
+				 WrMess('Обработано '||Counter||' записей!');
+			end if;
+
+			
+			if mod(counter, P_COMMIT) <> 0 then
+
+				if IS_EOD_NEW then
+					if EOD2_CHECK_STOP_COMMIT	
+							(	P_METHOD_PROC  		== &Method$NAME||'(длит.поруч-я)' -- наименование действия которое сейчас исполняет операция
+								,P_OBJECT_COUNT  	== Counter_Total		-- количество объектов к обработке
+								,P_OBJECT_HANDLED 	== Counter_Process		-- количество обработанных объектов
+								,P_OBJ_HANDLE_ERROR == Counter_Err 			-- количество объектов обработанных с ошибкой
+							) then
+						return;
+					end if;
+				else
+					commit;
+				end if;
+			end if;
+			
+			if VCurTbLO_error.count > 0 then
+				for IdxErr in VCurTbLO_error.first..VCurTbLO_error.last loop
+					WrMess('Во время групповой обработки длит поручение '||VCurTbLO_error(IdxErr).[DOCUMENT_NUM]||' от '||to_char(VCurTbLO_error(IdxErr).[DOCUMENT_DATE], 'dd.mm.yyyy')||' не обработано. Причина:  блокировка другой операцией');
+					AddRecordInErrorLog (VCurTbLO_error(IdxErr)%id,
+										  'Во время групповой обработки длит поручение '||VCurTbLO_error(IdxErr).[DOCUMENT_NUM]||' от '||to_char(VCurTbLO_error(IdxErr).[DOCUMENT_DATE], 'dd.mm.yyyy')||' не обработано. Причина:  блокировка другой операцией',
+										   null,
+										   2);
+				end loop;
+			end if;
+
+			TimeEnd := utils.get_time;
+			WrMess('Обработка длительных поручений закончена. Всего обработано '||Counter||' записей за '||(TimeEnd - TimeStart)/100||'с !');
+
+			WrMess('Депозиты. Исполнение длительных поручений на дату '||to_char(CurDate, 'dd.mm.yyyy')||' ЗАКОНЧЕН !');
+			CurDate := CurDate + 1;
+		end loop; -- while CurDate <= P_DATE_END loop
+	end if;
+-----------------------------------------------------------------------------------------------------------------
+	-- 15. Обработка дополнительных соглашений
+	if P_EXEC_DOP then
+		declare
+			rProl ref [PROL_CONTR_DEPN];
+			sIdx varchar2(50);
+		begin
+			Counter_Err := 0;
+			TimeStart := utils.get_time;
+			
+			sIdx := tblEarlyProl.first;
+			while sIdx is not null loop
+				begin
+					rProl%id := sIdx;
+					N_EXEC_EARLY := N_EXEC_EARLY + 1;
+					&sp(Exec_Early)
+					rProl.[EXEC_EARLY];
+					rProl.[SRV_LOG] := null;
+				exception
+					when others then
+						&rb(Exec_Early)
+						WrMess('Ошибка при обработке дополнительного соглашения по договору '||tblEarlyProl(sIdx).NumDog||' от '||to_char(tblEarlyProl(sIdx).DtBeg, 'dd.mm.yy'));
+						WrMess('Текст ошибки : '||sqlerrm);
+						rProl.[SRV_LOG] := 'ОШИБКА ОБРАБОТКИ: '||sqlerrm;					
+						AddRecordInErrorLog (tblEarlyProl(sIdx).sId,
+										   'Ошибка при обработке дополнительного соглашения по договору '||tblEarlyProl(sIdx).NumDog||' от '||to_char(tblEarlyProl(sIdx).DtBeg, 'dd.mm.yy'),
+										   sqlerrm);					
+						Counter_Err := Counter_Err + 1;
+				end;
+				sIdx := tblEarlyProl.next(sIdx);
+			end loop;
+			
+			TimeEnd := utils.get_time;
+			WrMess('Депозиты. Обработка дополнительных соглашений ЗАКОНЧЕНА за '||(TimeEnd - TimeStart)/100||'с !');
+			WrMess('Обработано '||N_EXEC_EARLY||' записей!');
+			Counter_Total := Counter_Total + N_EXEC_EARLY;
+
+			if IS_EOD_NEW then
+				--для нового зода обновим статус
+				if EOD2_CHECK_STOP_COMMIT	
+						(	P_METHOD_PROC  		== &Method$NAME||'(Обработка дополнительных соглашений)' -- наименование действия которое сейчас исполняет операция
+							,P_OBJECT_COUNT  	== N_EXEC_EARLY										-- количество объектов к обработке
+							,P_OBJECT_HANDLED 	== N_EXEC_EARLY - Counter_Err						-- количество обработанных объектов (без ошибок)
+							,P_OBJ_HANDLE_ERROR == Counter_Err 										-- количество объектов обработанных с ошибкой
+						)
+				then
+					return;
+				end if;
+			else
+				commit;
+			end if;
+
+		end;
+	end if;
+	
+	-- 16. Исполнить фин.распоряжения на закрытие вал. счетов (после дооценки)
+	if nvl(P_EXEC_FIN_ORD, false) then
+		CurDate := P_DATE_BEG;
+		while CurDate <= P_DATE_END loop
+			TimeStart := utils.get_time;
+			WrMess('Депозиты. Исполнение фин. распоряжений на закрытие вал. счетов на дату '||to_char(CurDate, 'dd.mm.yyyy'));
+			for(	select fo(fo : FinOrder, fo.[DOCUMENT_NUM] : doc_num, dep%id : IdDep)
+					in ::[FIN_ORDER],
+					  (::[DEPN] all: dep) all
+					where fo.[PRODUCT] = dep
+					  and dep.[COM_STATUS] = ComStatus_TO_CLOSE
+					  and dep.[ACCOUNT].[SALDO] = 0
+					  and dep.[ACCOUNT].[SALDO_NT] = 0
+					  and dep.[FINTOOL] != NatCur
+					  and fo.[PATTERN_DOC_REF] = ::[PATTERN_DOC]([PATTERN_CODE] = 'DEP_ACC_CLOSE')
+					  and fo%state = 'FORM'
+					  and fo.[DATE_OPER] = CurDate
+					  and &mod$stream(dep.[CLIENT]%id)
+			   )
+			loop
+				begin
+					N_EXEC_FIN_ORD := N_EXEC_FIN_ORD + 1;
+
+					::[DEPN_INTERFACE].[PRX_FIN_ORDER].DocToProv(p_FinOrder == fo.FinOrder, p_call_from_fold == false, p_date == CurDate );
+					
+				exception when others then
+					WrMess('Ошибка при исполнении фин распоряжения: ' || fo.doc_num);
+					WrMess('Текст ошибки : '||sqlerrm);
+					AddRecordInErrorLog (fo.IdDep,
+										   'Ошибка при исполнении фин распоряжения: ' || fo.doc_num,
+										   sqlerrm);									
+					Counter_Err:=Counter_Err+1;
+				end;
+			end loop;
+			TimeEnd := utils.get_time;
+			WrMess('Депозиты. Исполнение фин. распоряжений на закрытие вал. счетов на дату '||to_char(CurDate, 'dd.mm.yyyy') || ' ЗАКОНЧЕНО за '||(TimeEnd - TimeStart)/100||'с !');
+			CurDate := CurDate + 1;
+		end loop;	
+
+		WrMess('Обработано '||N_EXEC_FIN_ORD||' записей!');
+		Counter_Total:=Counter_Total+N_EXEC_FIN_ORD;			--увеличиваем общий счётчик
+		if IS_EOD_NEW then
+			--для нового зода обновим статус
+			if EOD2_CHECK_STOP_COMMIT	
+					(	P_METHOD_PROC  		== &Method$NAME||'(ФР на закр.валсч)' -- наименование действия которое сейчас исполняет операция
+						,P_OBJECT_COUNT  	== Counter_Total		-- количество объектов к обработке
+						,P_OBJECT_HANDLED 	== N_EXEC_FIN_ORD-Counter_Err		-- количество обработанных объектов (без ошибок)
+						,P_OBJ_HANDLE_ERROR == Counter_Err 			-- количество объектов обработанных с ошибкой
+					)
+			then
+				return;
+			end if;
+		else
+			commit;
+		end if;
+	end if;
+
+	TimeEndAll	:= systimestamp;
+	if N_CALC_PRC_END > 0 then
+		WrMess('Всего по: Расчет процентов - '||N_CALC_PRC_END);
+	end if;
+	if N_REG_PRC > 0 then
+		WrMess('Всего по: Учет процентов - '||N_REG_PRC);
+	end if;
+	if N_CAP_PRC > 0 then
+		WrMess('Всего по: Капитализация процентов - '||N_CAP_PRC);
+	end if;
+	if N_RESTART_DEP > 0 then
+		WrMess('Всего по: Переоформление договоров - '||N_RESTART_DEP);
+	end if;
+	if N_PROL_DEP > 0 then
+		WrMess('Всего по: Пролонгация договоров - '||N_PROL_DEP);
+	end if;
+	if N_MOVE_SALDO > 0 then
+		WrMess('Всего по: Перенос остатка при пролонгации - '||N_MOVE_SALDO);
+	end if;
+	if N_AUTO_CONV > 0 then
+		WrMess('Всего по: Автоматическая конвертация мультивалютных вкладов - '||N_AUTO_CONV);
+	end if;
+	if N_PLAN > 0 then
+		WrMess('Всего по: Планировать - '||N_PLAN);
+	end if;
+	if N_EXEC_L_ORDER > 0 then
+		WrMess('Всего по: Исполнение длительных поручений - '||N_EXEC_L_ORDER);
+	end if;
+	if N_EXEC_FIN_ORD > 0 then
+		WrMess('Всего по: Исполнение финансовых распоряжений - '||N_EXEC_FIN_ORD);
+	end if;
+	if N_DOP_INDRESTR > 0 then
+		WrMess('Всего по: Закрытие доп. соглашений на изменение индивидуальных ограничений - ' || N_DOP_INDRESTR);
+	end if;
+	if N_CLOSE_DEP > 0 then
+		WrMess('Всего по: Закрытие договоров - '||N_CLOSE_DEP);
+	end if;
+	if N_EXEC_EARLY > 0 then
+		WrMess('Всего по: Обработке дополнительных соглашений - '||N_EXEC_EARLY);
+	end if;		
+	if N_EXEC_COMISS > 0 then
+		WrMess('Всего по: Удержание периодических комиссий - '||N_EXEC_COMISS);
+	end if;
+	if N_RECOG_EXPNS > 0 then
+		WrMess('Всего по: Признание затрат - '||N_EXEC_COMISS);
+	end if;
+	if N_ADJ_TO_AC > 0 then
+		WrMess('Всего по: Корректировка стоимости до АС - '||N_ADJ_TO_AC);
+	end if;
+	if N_DEBIT_OVERDUE > 0 then
+		WrMess('Всего по: Перенос просроченной дебиторской задолженности - '||N_DEBIT_OVERDUE);
+	end if;
+	
+	WrMess('Обработка закончена за '|| GetMilliSecsBetween(TimeStartAll, TimeEndAll)/1000 ||'с!');
+
+	-- Сбрасываем кэш
+	&Del_Vid_Debt
+	&Del_Vid_Oper_Dog
+	&Del_Tip_Acc
+	&Del_Pattern_Doc
+	&Del_Sum_Guide
+	&Del_Vid_Deposit
+
+	V_PRIV_OPER := null;
+	
+	if tbl_data_view.count > 0 then
+		P_FILE_PATH := nvl (P_FILE_PATH, nvl(::[SYSTEM_PARAMS].[GET]('PATH_PROTOCOL', null),'.'));
+		P_FILE_NAME := nvl(P_FILE_NAME, to_char(SysOpDate, cn_format_dd_mm_hh) || '_' || to_char(SYSDATE, cn_format_hh_mi_ss)  || '_' ||lpad(nvl(P_FILIAL.[CODE], 0), ::[BRANCH].[CODE]%size, '0') || '_' || coalesce(P_STREAM_NUM, 1) || '_DEPN_ERROR_LOG.log');
+		WrMess(UTILS.get_time||'Депозиты. Сохранение файла ошибок. Файл - ' || P_FILE_NAME || ' в каталог ' || P_FILE_PATH ||'.');
+		SaveErrorLog(P_FILE_NAME, P_FILE_PATH);
+	end if;
+	WrMess(UTILS.get_time||'Депозиты. Окончание групповой обработки.');
+
+	-- удаляем признак массового отзыва из лимита авторизации
+	executor.set_context('MASS_CALL_FOR_CHANGE_LA', null);
+	::[DEPN_INTERFACE].[PRX_DEPN_TO_CARD].MassCall_SetOper;
+
+	--Удалим признак массового открытия счетов (для учета)
+	executor.set_context('MASS_CALL_OPEN_ACC', null);
+
+	if IS_EOD_NEW=false then
+		-- Снимаем блокировку ЗОД с филиала
+		[EOD_JOB_INFO]::[L].release_all_lock_eod(P_FILIAL);
+	end if;
+/** /
+exception
+	when others then 	
+		-- удаляем признак массового отзыва из лимита авторизации
+		executor.set_context('MASS_CALL_FOR_CHANGE_LA', null);	
+		::[DEPN_INTERFACE].[PRX_DEPN_TO_CARD].MassCall_SetOper;
+
+		--Удалим признак массового открытия счетов(для учета)
+		executor.set_context('MASS_CALL_OPEN_ACC', null);
+	
+		if IS_EOD_NEW=false then
+			-- Снимаем блокировку ЗОД с филиала
+			[EOD_JOB_INFO]::[L].release_all_lock_eod(P_FILIAL);
+		end if;
+		
+		raise;
+/**/
+End;
+end;
+end;

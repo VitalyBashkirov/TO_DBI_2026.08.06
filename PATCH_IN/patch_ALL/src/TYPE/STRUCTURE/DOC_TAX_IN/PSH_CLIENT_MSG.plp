@@ -1,0 +1,267 @@
+class DOC_TAX_IN;
+
+@import_plsql(true)
+@name('[ПСБ] Сообщение клиенту')
+method PSH_CLIENT_MSG is
+pragma include(::[INTERFACE].[COMPILE_LIB]);
+PSH_CLIENT_MSG (
+	@name('Текст') P_TEXT in [MEMO]
+) is
+
+validate is
+v_date		varchar2(20); 
+v_num		varchar2(20);
+v_kod_osn_1 varchar2(100);
+v_kod_osn_2 varchar2(100);
+v_kod_osn_3 varchar2(100);
+v_kod_osn_4 varchar2(100);
+v_kod_osn_5 varchar2(100);
+v_kod_osn_6 varchar2(100);
+v_kod_osn_7 varchar2(100);
+v_kod_osn_8 varchar2(100);
+v_kod_osn   varchar2(100);
+v_vid_resh_1  varchar2(100);
+v_vid_resh_2  varchar2(100);
+v_vid_resh  varchar2(200);
+v_obs		varchar2(2000);
+v_bic		varchar2(20);
+v_nameb		varchar2(200);
+v_bic_1		varchar2(20);
+v_nameb_1	varchar2(200);
+v_sum		summa;
+v_numr		varchar2(20);
+v_dater		varchar2(20);
+v_no		varchar2(200);
+v_acc		varchar2(1000);
+v_acc_1		varchar2(1000);
+v_bank_pl_ac 	varchar2(100);
+v_bank_pol_ac	varchar2(100);
+v_client	varchar2(200);
+v_inn		varchar2(20);
+v_kpp		varchar2(20);
+v_client_1	varchar2(200);
+v_inn_1		varchar2(20);
+v_kpp_1		varchar2(20);
+n			integer;
+l			integer;
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		::[TEMP_TABLE_S].[L].group_delete(::[DOC_TAX].[LIB_TC].printTabGroup);
+
+----------------------- RPO ----------------------------------------------------------
+		if this.[FILE_NAME] like 'RPO%' then
+			v_date := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_ДАТАРЕШПР');
+			v_num := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_НОМРЕШПР');
+			v_kod_osn_1 := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_КОДОСНОВ_01');
+			v_kod_osn_2 := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_КОДОСНОВ_02');
+			v_kod_osn_3 := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_КОДОСНОВ_03');
+			v_kod_osn_4 := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_КОДОСНОВ_04');
+			v_kod_osn_5 := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_КОДОСНОВ_05');
+			v_kod_osn_6 := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_КодОснов_06');
+			v_obs := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_ОБСТОЯТ');
+			v_bic := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_БИК');
+			v_nameb := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_НАИМБ');
+			v_sum := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_СУМВЗЫСК');
+			v_numr := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_НОМРЕШВЗЫСК');
+			v_dater := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_ДАТАРЕШВЗЫСК');
+			v_no := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_НАИМНО');
+			v_inn := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_ИНН');
+			v_kpp := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_КПП');
+			v_client := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_НАИМ');
+			v_acc := ::[DOC_TAX].[DOC_RPO].getValue(this, 'RPO_СЧЕТА_1');
+			
+			if    v_kod_osn_1 = 'V' then v_kod_osn := '01';
+			elsif v_kod_osn_2 = 'V' then v_kod_osn := '02';
+			elsif v_kod_osn_3 = 'V' then v_kod_osn := '03';
+			elsif v_kod_osn_4 = 'V' then v_kod_osn := '04';
+			elsif v_kod_osn_5 = 'V' then v_kod_osn := '05';
+			elsif v_kod_osn_6 = 'V' then v_kod_osn := '06';
+			end if;
+			
+		P_TEXT := 'НомРешПр='|| v_num || NL$ ||
+				  'ДатаРешПр=' || v_date || NL$ ||
+				  'КодОснов='|| v_kod_osn || NL$ ||				 
+				  'Обстоят='|| v_obs || NL$ ||
+				  'БИК='|| v_bic || NL$ ||
+				  'НаимБ='|| v_nameb || NL$ ||
+				  'СумВзыск='|| v_sum || NL$ ||
+				  'НомРешВзыск='|| v_numr || NL$ ||
+				  'ДатаРешВзыск='|| v_dater || NL$ ||
+				  'НаимНО='|| v_no || NL$ ||
+				  'ИННЮЛ='|| v_inn || NL$ ||
+				  'КППЮЛ='|| v_kpp || NL$ ||
+				  'НаимЮЛ='|| v_client || NL$ ||
+				  'НомСч='|| v_acc || NL$;
+			
+----------------------- ROO ----------------------------------------------------------	
+		elsif this.[FILE_NAME] like 'ROO%' then
+			v_date := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_ДАТАРЕШОТ');
+			v_num := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_НОМРЕШОТ');
+			v_kod_osn_1 := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_КОДОСНОВ_01');
+			v_kod_osn_2 := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_КОДОСНОВ_02');
+			v_kod_osn_3 := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_КОДОСНОВ_03');
+			v_kod_osn_4 := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_КОДОСНОВ_04');
+			v_kod_osn_5 := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_КОДОСНОВ_05');
+			v_kod_osn_6 := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_КодОснов_06');
+			v_kod_osn_7 := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_КодОснов_07');
+			v_kod_osn_8 := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_КодОснов_08');
+			v_vid_resh_1 := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_ВИДРЕШ_1');
+			v_vid_resh_2 := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_ВИДРЕШ_2');
+			v_bic := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_БИК');
+			v_nameb := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_НАИМБ');
+			v_numr := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_НОМРЕШПР');
+			v_dater := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_ДАТАРЕШПР');
+			v_no := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_НАИМНО');
+			v_inn := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_ИНН');
+			v_kpp := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_КПП');
+			v_client := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_НАИМ');
+			v_acc := ::[DOC_TAX].[DOC_ROO].getValue(this, 'ROO_Счета_1_00');
+			
+			if    v_kod_osn_1 = 'V' then v_kod_osn := '01';
+			elsif v_kod_osn_2 = 'V' then v_kod_osn := '02';
+			elsif v_kod_osn_3 = 'V' then v_kod_osn := '03';
+			elsif v_kod_osn_4 = 'V' then v_kod_osn := '04';
+			elsif v_kod_osn_5 = 'V' then v_kod_osn := '05';
+			elsif v_kod_osn_6 = 'V' then v_kod_osn := '06';
+			elsif v_kod_osn_7 = 'V' then v_kod_osn := '07';
+			elsif v_kod_osn_8 = 'V' then v_kod_osn := '08';						
+			end if;
+			
+			if    v_vid_resh_1 = 'X' then v_vid_resh := '1';
+			elsif v_vid_resh_2 = 'X' then v_vid_resh := '2';
+			end if;
+
+		P_TEXT := 'НомРешОт='|| v_num || NL$ ||
+				  'ДатаРешОт=' || v_date || NL$ ||
+				  'КодОснов='|| v_kod_osn || NL$ ||				 
+				  'ВидРеш='|| v_vid_resh || NL$ ||
+				  'НомРешПр='|| v_numr || NL$ ||
+				  'ДатаРешПр='|| v_dater || NL$ ||
+				  'БИК='|| v_bic || NL$ ||
+				  'НаимБ='|| v_nameb || NL$ ||
+				  'НаимНО='|| v_no || NL$ ||
+				  'ИННЮЛ='|| v_inn || NL$ ||
+				  'КППЮЛ='|| v_kpp || NL$ ||
+				  'НаимЮЛ='|| v_client || NL$ ||
+				  'НомСч='|| v_acc || NL$;
+
+----------------------- UNO ----------------------------------------------------------
+		elsif this.[FILE_NAME] like 'UNO%' then
+			v_date := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_ДАТАПОРУЧ');
+			v_num := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_НОМПОРУЧ');
+			v_sum := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_СУМПЛАТ');
+			v_kod_osn := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_СТАТУС');
+			v_client_1 := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_ПЛАТЕЛЬЩ');
+			v_inn_1 := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_ИНННП');
+			v_kpp_1 := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_КППНП');
+			v_acc_1 := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_НОМСЧПЛ');
+			v_nameb_1 := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_БАНКПЛ');
+			v_bic_1 := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_БИКБПЛ');
+			v_bank_pl_ac := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_НОМСЧБПЛ');
+			v_nameb := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_БАНКПОЛ');
+			v_bic := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_БИКБПОЛ');
+			v_bank_pol_ac := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_НОМСЧБПОЛ');
+			v_inn := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_ИННПОЛ');
+			v_kpp := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_КПППОЛ');
+			v_client := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_ПОЛУЧ');
+			v_acc := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_НОМСЧПОЛ');
+			v_obs := ::[DOC_TAX].[DOC_PNO].getValue(this, 'UNO_НАЗНПЛ');
+
+		P_TEXT := 'НомПоруч='|| v_num || NL$ ||
+				  'ДатаПоруч=' || v_date || NL$ ||
+				  'СумПлат='|| v_sum || NL$ ||
+				  'Статус='|| v_kod_osn || NL$ ||				 
+				  'Плательщ='|| v_client_1 || NL$ ||
+				  'ИННПл='|| v_inn_1 || NL$ ||
+				  'КПППл='|| v_kpp_1 || NL$ ||
+				  'НомСчПл='|| v_acc_1 || NL$ ||
+				  'БанкПл='|| v_nameb_1 || NL$ ||
+				  'БИКБПл='|| v_bic_1 || NL$ ||
+				  'НомСчБПл='|| v_bank_pl_ac || NL$ ||
+				  'БанкПол='|| v_nameb || NL$ ||
+				  'БИКБПол='|| v_bic || NL$ ||
+				  'НомСчБПол='|| v_bank_pol_ac || NL$ ||
+				  'ИННПол='|| v_inn || NL$ ||
+				  'КПППол='|| v_kpp || NL$ ||
+				  'Получ='|| v_client || NL$ ||
+				  'НомСчПол='|| v_acc || NL$ ||
+				  'НазнПл='|| v_obs || NL$ ;
+
+----------------------- UPO ----------------------------------------------------------
+		elsif this.[FILE_NAME] like 'UPO%' then
+			v_date := ::[DOC_TAX].[DOC_UPO].getValue(this, 'UPO_ДАТАУВЕД');
+			v_num := ::[DOC_TAX].[DOC_UPO].getValue(this, 'UPO_НОМУВЕД');
+			v_kod_osn := ::[DOC_TAX].[DOC_UPO].getValue(this, 'UPO_КОДОСНОВ');
+			v_obs := ::[DOC_TAX].[DOC_UPO].getValue(this, 'UPO_ОБСТОЯТ');
+			v_bic := ::[DOC_TAX].[DOC_UPO].getValue(this, 'UPO_БИК');
+			v_nameb := ::[DOC_TAX].[DOC_UPO].getValue(this, 'UPO_НАИМБ');
+			v_sum := ::[DOC_TAX].[DOC_UPO].getValue(this, 'UPO_СУМВЗЫСК');
+			v_numr := ::[DOC_TAX].[DOC_UPO].getValue(this, 'UPO_НОМРЕШВЗЫСК');
+			v_dater := ::[DOC_TAX].[DOC_UPO].getValue(this, 'UPO_ДАТАРЕШВЗЫСК');
+			v_no := ::[DOC_TAX].[DOC_UPO].getValue(this, 'UPO_НАИМНО');
+			v_inn := ::[DOC_TAX].[DOC_UPO].getValue(this, 'UPO_ИНН');
+			v_kpp := ::[DOC_TAX].[DOC_UPO].getValue(this, 'UPO_КПП');
+			v_client := ::[DOC_TAX].[DOC_UPO].getValue(this, 'UPO_НАИМ');
+			v_acc := ::[DOC_TAX].[DOC_UPO].getValue(this, 'UPO_СЧЕТА_1');
+			
+		P_TEXT := 'НомУвед='|| v_num || NL$ ||
+				  'ДатаУвед=' || v_date || NL$ ||
+				  'КодОснов='|| v_kod_osn || NL$ ||				 
+				  'Обстоят='|| v_obs || NL$ ||
+				  'БИК='|| v_bic || NL$ ||
+				  'НаимБ='|| v_nameb || NL$ ||
+				  'СумВзыск='|| v_sum || NL$ ||
+				  'НомРешВзыск='|| v_numr || NL$ ||
+				  'ДатаРешВзыск='|| v_dater || NL$ ||
+				  'НаимНО='|| v_no || NL$ ||
+				  'ИННЮЛ='|| v_inn || NL$ ||
+				  'КППЮЛ='|| v_kpp || NL$ ||
+				  'НаимЮЛ='|| v_client || NL$ ||
+				  'НомСч='|| v_acc || NL$;
+
+----------------------- UPN ----------------------------------------------------------
+		elsif this.[FILE_NAME] like 'UPN%' then
+			v_date := ::[DOC_TAX].[DOC_UPN].getValue(this, 'UPN_ДАТАРЕШ');
+			v_num := ::[DOC_TAX].[DOC_UPN].getValue(this, 'UPN_НОМРЕШ');
+			v_bic := ::[DOC_TAX].[DOC_UPN].getValue(this, 'UPN_БИКБПЛ');
+			v_nameb := ::[DOC_TAX].[DOC_UPN].getValue(this, 'UPN_БАНКПЛ');
+			v_sum := ::[DOC_TAX].[DOC_UPN].getValue(this, 'UPN_СУММА');
+			v_obs := ::[DOC_TAX].[DOC_UPN].getValue(this, 'UPN_ПОРУЧ');
+			n := instr(v_obs, ', ', -1);
+			v_numr := substr(v_obs, n + 2);
+			v_obs := substr(v_obs, 1, n - 1);
+			n := instr(v_obs, ', ', -1);
+			v_dater := substr(v_obs, n + 2);
+			v_vid_resh := ::[DOC_TAX].[DOC_UPN].getValue(this, 'UPN_ВИДРЕШ');
+			if v_vid_resh = 'приостановить' then v_vid_resh := '1';
+			elsif v_vid_resh = 'отменить приостановление' then v_vid_resh := '2';
+			end if;
+			if v_obs like 'на списание%' then v_kod_osn := '1';
+			elsif v_obs like 'на перевод%' then v_kod_osn := '2';
+			end if;
+			v_no := ::[DOC_TAX].[DOC_UPN].getValue(this, 'UPN_НАИМНО');
+			v_inn := ::[DOC_TAX].[DOC_UPN].getValue(this, 'UPN_ИНННП');
+			v_acc := ::[DOC_TAX].[DOC_UPN].getValue(this, 'UPN_СЧЕТА');
+			
+		P_TEXT := 'НомРеш='|| v_num || NL$ ||
+				  'ДатаРеш=' || v_date || NL$ ||
+				  'ВидРеш='|| v_vid_resh || NL$ ||				 
+				  'БанкПл='|| v_nameb || NL$ ||
+				  'БИКБПл='|| v_bic || NL$ ||
+				  'ИНННП='|| v_inn || NL$ ||
+				  'НомПоруч='|| v_numr || NL$ ||
+				  'ДатаПоруч='|| v_dater || NL$ ||
+				  'ВидПоруч='|| v_kod_osn || NL$ ||
+				  'СуммаПриост='|| v_sum || NL$ ||
+				  'НомСчПл='|| v_acc || NL$ ||
+				  'НаимНО='|| v_no || NL$;
+
+		else
+			pragma error('Для файла ' || this.[FILE_NAME] || '  не предусмотрено создания сообщения клиенту');
+		end if;
+	
+	::[TEMP_TABLE_S].[L].group_delete(::[DOC_TAX].[LIB_TC].printTabGroup);
+	end if;
+end;
+end;
+end;

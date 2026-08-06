@@ -1,0 +1,443 @@
+{
+  "version": "v04",
+  "created": "2026-04-13",
+  "last_updated": "2026-04-20T10:30:00",
+  "description": "Рубрикатор для маркировки исправлений PLPlus кода при миграции на DBI (синхронизирован с DATA/Рубрикатор/)",
+  "markers": [
+    {
+      "id": "M001",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 32 по 48",
+      "marker": "v50.SQL.OUTERJOIN.п.1.1",
+      "format": "-- v50.SQL.OUTERJOIN.п.1.1 строки с XXXX по YYYY. Замена (+) на LEFT/RIGHT JOIN",
+      "description": "Замена (\\+) на LEFT/RIGHT JOIN",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "В Oracle используется оператор (\\+) для внешнего соединения. В PostgreSQL и ANSI SQL его нет. Заменить на явные LEFT JOIN или RIGHT JOIN с условием ON"
+    },
+    {
+      "id": "M002",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 16 по 35",
+      "marker": "v50.SQL.ROWNUM.п.1.2",
+      "format": "-- v50.SQL.ROWNUM.п.1.2 строки с XXXX по YYYY. ROWNUM -> FETCH FIRST",
+      "description": "Замена ROWNUM на FETCH FIRST n ROWS ONLY",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Псевдоколонка ROWNUM не поддерживается в PostgreSQL. Использовать FETCH FIRST N ROWS ONLY. Для сдвига выборки использовать OFFSET"
+    },
+    {
+      "id": "M003",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 25 по 25",
+      "marker": "v50.SQL.UDF.п.1.3",
+      "format": "-- v50.SQL.UDF.п.1.3 строки с XXXX по YYYY. Запрет UDF в WHERE/GROUP BY/ORDER BY",
+      "description": "Запрет UDF в WHERE/GROUP BY/ORDER BY",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Пользовательские функции нельзя в условиях фильтрации, группировки и сортировки. Только в SELECT-листе верхнего уровня"
+    },
+    {
+      "id": "M004",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 40 по 55",
+      "marker": "v50.SQL.DECODE.п.1.6.1",
+      "format": "-- v50.SQL.DECODE.п.1.6.1 строки с XXXX по YYYY. Замена DECODE на CASE",
+      "description": "Замена DECODE на CASE WHEN ... THEN ... ELSE ... END",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Функция DECODE специфична для Oracle. Заменять на ANSI-конструкцию CASE WHEN ... THEN ... ELSE ... END"
+    },
+    {
+      "id": "M005",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 50 по 70",
+      "marker": "v50.SQL.CONNECTBY.п.1.8",
+      "format": "-- v50.SQL.CONNECTBY.п.1.8 строки с XXXX по YYYY. Замена CONNECT BY на WITH RECURSIVE",
+      "description": "Замена CONNECT BY на WITH RECURSIVE",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Иерархические запросы с CONNECT BY не поддерживаются. Использовать рекурсивные CTE: WITH RECURSIVE"
+    },
+    {
+      "id": "M006",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 60 по 60",
+      "marker": "v50.SQL.SYSVIEW.п.1.9",
+      "format": "-- v50.SQL.SYSVIEW.п.1.9 строки с XXXX по YYYY. Замена v$session на VW_DB_SESSION",
+      "description": "Замена v$session на VW_DB_SESSION",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Системные представления Oracle недоступны. Использовать VW_DB_SESSION с полями SESSION_SID, STATUS, MODULE, ACTION"
+    },
+    {
+      "id": "M007",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 65 по 65",
+      "marker": "v50.SQL.CONTEXT.п.1.23",
+      "format": "-- v50.SQL.CONTEXT.п.1.23 строки с XXXX по YYYY. Замена sys_context",
+      "description": "Замена sys_context('USERENV','DB_NAME')",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Контекст USERENV не поддерживается. Использовать ::[RUNTIME].[ENVIRONMENT].ClassStorage('ТБП').dbName"
+    },
+    {
+      "id": "M008",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 70 по 70",
+      "marker": "v50.SQL.FUNC_REQ.п.1.14",
+      "format": "-- v50.SQL.FUNC_REQ.п.1.14 строки с XXXX по YYYY. Ограничения функциональных реквизитов",
+      "description": "Ограничения функциональных реквизитов",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Функциональные реквизиты можно использовать только в SELECT-листе запроса верхнего уровня"
+    },
+    {
+      "id": "M009",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 75 по 75",
+      "marker": "v50.SQL.SIMPLE_VIEW.п.1.21",
+      "format": "-- v50.SQL.SIMPLE_VIEW.п.1.21 строки с XXXX по YYYY. Запрет простых представлений",
+      "description": "Запрет простых представлений",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Простые представления отсутствуют в dbi проекте. Конвертировать в PlPlus представления с учетом ANSI синтаксиса"
+    },
+    {
+      "id": "M010",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 32 по 48",
+      "marker": "v50.STOR.DATE.п.2.2",
+      "format": "-- v50.STOR.DATE.п.2.2 строки с XXXX по YYYY. Замена DATE на DATE_TIME",
+      "description": "Замена DATE на DATE_TIME",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "В PostgreSQL тип DATE не хранит время. Использовать тип DATE_TIME (timestamp(0))"
+    },
+    {
+      "id": "M011",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 80 по 95",
+      "marker": "v50.STOR.TEMP.п.2.8",
+      "format": "-- v50.STOR.TEMP.п.2.8 строки с XXXX по YYYY. Замена временных таблиц на VARRAY",
+      "description": "Замена временных таблиц на VARRAY",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Временные таблицы приводят к проблемам производительности. Заменять на VARRAY (до 10 000 записей)"
+    },
+    {
+      "id": "M012",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 85 по 85",
+      "marker": "v50.STOR.INDEX.п.2.6.3",
+      "format": "-- v50.STOR.INDEX.п.2.6.3 строки с XXXX по YYYY. Учёт ограничения 2704 байт для BTREE",
+      "description": "Учёт ограничения 2704 байт для BTREE",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Размер строки BTREE индекса не более 2704 байт. При превышении переходить на GIST/GIN индексы"
+    },
+    {
+      "id": "M013",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 90 по 90",
+      "marker": "v50.PROC.CRYPTO.п.3.1.2",
+      "format": "-- v50.PROC.CRYPTO.п.3.1.2 строки с XXXX по YYYY. Замена dbms_crypto на INT_EXT_CALL_001",
+      "description": "Замена dbms_crypto на INT_EXT_CALL_001",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Пакет dbms_crypto недоступен. Использовать ::[PCORE_INTERFACE].[INT_EXT_CALL_001]"
+    },
+    {
+      "id": "M014",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 92 по 92",
+      "marker": "v50.PROC.SMTP.п.3.1.3",
+      "format": "-- v50.PROC.SMTP.п.3.1.3 строки с XXXX по YYYY. Замена utl_smtp на INT_EMAIL_001",
+      "description": "Замена utl_smtp на INT_EMAIL_001",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Пакет utl_smtp недоступен. Использовать ::[PCORE_INTERFACE].[INT_EMAIL_001]"
+    },
+    {
+      "id": "M015",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 34 по 34",
+      "marker": "v50.PROC.HTTP.п.3.1.6",
+      "format": "-- v50.PROC.HTTP.п.3.1.6 строки с XXXX по YYYY. Замена utl_http на HTTP_MGR",
+      "description": "Замена utl_http на HTTP_MGR",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Пакет utl_http недоступен. Использовать ::[RUNTIME].[HTTP_MGR]"
+    },
+    {
+      "id": "M016",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 95 по 95",
+      "marker": "v50.PROC.EXECUTE.п.3.3",
+      "format": "-- v50.PROC.EXECUTE.п.3.3 строки с XXXX по YYYY. Экранирование имён таблиц в execute immediate",
+      "description": "Экранирование имён таблиц в execute immediate",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "В execute immediate имена таблиц экранировать двойными кавычками. После DML выполнять cache_mgr.cache_flush()"
+    },
+    {
+      "id": "M017",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 36 по 37",
+      "marker": "v50.PROC.WHENOTHERS.п.3.5",
+      "format": "-- v50.PROC.WHENOTHERS.п.3.5 строки с XXXX по YYYY. Добавление ROLLBACK или RAISE в WHEN OTHERS",
+      "description": "Добавление ROLLBACK или RAISE в WHEN OTHERS",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "В PostgreSQL после ошибки транзакция прерывается. В WHEN OTHERS обязательно делать ROLLBACK или RAISE"
+    },
+    {
+      "id": "M018",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 100 по 100",
+      "marker": "v50.PROC.BULK.п.1.28",
+      "format": "-- v50.PROC.BULK.п.1.28 строки с XXXX по YYYY. Включение batch для bulk операций",
+      "description": "Включение batch для bulk операций",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Для массовых операций включить batch через APPLICATION.DBI=1 или pragma hint('jdbc_batch(true)')"
+    },
+    {
+      "id": "M019",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 102 по 102",
+      "marker": "v50.PROC.TRIGGER.п.3.8",
+      "format": "-- v50.PROC.TRIGGER.п.3.8 строки с XXXX по YYYY. Замена триггеров БД на операции-триггеры",
+      "description": "Замена триггеров БД на операции-триггеры",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Триггеры БД заменить на операции типа Триггер в PL+"
+    },
+    {
+      "id": "M020",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 105 по 105",
+      "marker": "v50.PROC.EXCEPTIONLOOP.п.1.25",
+      "format": "-- v50.PROC.EXCEPTIONLOOP.п.1.25 строки с XXXX по YYYY. Запрет конструкции exceptionloop",
+      "description": "Запрет конструкции exceptionloop",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Конструкция exceptionloop запрещена, так как в PostgreSQL при возникновении исключения в SQL портится вся транзакция"
+    },
+    {
+      "id": "M021",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 110 по 110",
+      "marker": "v50.INT.DBLINK.п.4.2",
+      "format": "-- v50.INT.DBLINK.п.4.2 строки с XXXX по YYYY. Замена Database Link на REST/SOAP",
+      "description": "Замена Database Link на REST/SOAP",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Database Link не поддерживается. Использовать веб-сервисы: REST или SOAP"
+    },
+    {
+      "id": "M022",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 112 по 112",
+      "marker": "v50.INT.QUEUE.п.4.4",
+      "format": "-- v50.INT.QUEUE.п.4.4 строки с XXXX по YYYY. Использование RUNTIME.AQ_LIB для очередей",
+      "description": "Использование RUNTIME.AQ_LIB для очередей",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Для работы с очередями использовать библиотеку ::[RUNTIME].[AQ_LIB]. Для PostgreSQL обязательно Apache ActiveMQ"
+    },
+    {
+      "id": "M023",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 115 по 115",
+      "marker": "v50.CACHE.REF.п.6.10",
+      "format": "-- v50.CACHE.REF.п.6.10 строки с XXXX по YYYY. Получение полей сразу в курсоре",
+      "description": "Получение полей сразу в курсоре",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Разыменование ссылок в цикле вызывает точечные запросы. Получать нужные поля сразу в SELECT-листе курсора"
+    },
+    {
+      "id": "M024",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 118 по 118",
+      "marker": "v50.CACHE.CONFIG.п.6.13",
+      "format": "-- v50.CACHE.CONFIG.п.6.13 строки с XXXX по YYYY. Настройка кэша 2 уровня в config_orm.xml",
+      "description": "Настройка кэша 2 уровня в config_orm.xml",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Для часто используемых ТБП настроить кэш 2 уровня в config_orm.xml"
+    },
+    {
+      "id": "M025",
+      "document_id": "DOC_V50_TXT",
+      "line_range": "строки с 36 по 36",
+      "marker": "v50.PROC.JSON.п.3.1.4",
+      "format": "-- v50.PROC.JSON.п.3.1.4 строки с XXXX по YYYY. Использование RUNTIME.LIB_JSON для JSON",
+      "description": "Использование RUNTIME.LIB_JSON для JSON",
+      "status": "active",
+      "version": "v50.1",
+      "updated": "2026-04-20",
+      "notes": "Для работы с JSON использовать только ::[RUNTIME].[LIB_JSON]. После работы вызывать freeMemory"
+    },
+    {
+      "id": "M026",
+      "document_id": "DOC_TDS_PDF",
+      "line_range": "строки с XX по YY",
+      "marker": "тдс20240828.п.1",
+      "format": "-- тдс20240828.п.1 строки с XXXX по YYYY. SYSDATE -> SYSTEM.OP_DATE",
+      "description": "Замена SYSDATE на SYSTEM.OP_DATE (ТДС 2024-08-28)",
+      "status": "active",
+      "version": "v1.0",
+      "updated": "2026-04-20",
+      "notes": "Обязательная обработка: тдс20240828.Требования для совместимости кода с DBI.pdf"
+    },
+    {
+      "id": "M027",
+      "document_id": "DOC_TDS_PDF",
+      "line_range": "строки с XX по YY",
+      "marker": "тдс20240828.п.2",
+      "format": "-- тдс20240828.п.2 строки с XXXX по YYYY. USER -> STDLIB.USERID",
+      "description": "Замена USER на STDLIB.USERID (ТДС 2024-08-28)",
+      "status": "active",
+      "version": "v1.0",
+      "updated": "2026-04-20",
+      "notes": "Исключение: USER FROM в запросах"
+    },
+    {
+      "id": "M028",
+      "document_id": "DOC_KLOIK_PDF",
+      "line_range": "строки с XX по YY",
+      "marker": "тклоик20240828.КОДИРОВАНИЕ.п.3",
+      "format": "-- тклоик20240828.КОДИРОВАНИЕ.п.3 строки с XXXX по YYYY. VARCHAR -> VARCHAR2",
+      "description": "Замена VARCHAR на VARCHAR2 (КЛОИК 2024-08-28)",
+      "status": "active",
+      "version": "v1.0",
+      "updated": "2026-04-20",
+      "notes": "Обязательная обработка: тклоик20240828.Требования к локальным объектам и к коду.pdf"
+    },
+    {
+      "id": "M029",
+      "document_id": "DOC_KLOIK_PDF",
+      "line_range": "строки с XX по YY",
+      "marker": "тклоик20240828.ЛОКАЛЬНЫЕ_ОБЪЕКТЫ.п.1",
+      "format": "-- тклоик20240828.ЛОКАЛЬНЫЕ_ОБЪЕКТЫ.п.1 строки с XXXX по YYYY. Описание",
+      "description": "Требования к локальным объектам (КЛОИК 2024-08-28)",
+      "status": "active",
+      "version": "v1.0",
+      "updated": "2026-04-20",
+      "notes": "Обязательная обработка: тклоик20240828.Требования к локальным объектам и к коду.pdf"
+    }
+  ],
+  "documents": [
+    {
+      "id": "DOC_V50_TXT",
+      "marker": "v50",
+      "filename": "Рекомендации по адаптации кода на PLPlus для работы с DBI приложением v50.txt",
+      "path": "DATA/CFT Platform IDE Documentation/",
+      "format": "txt",
+      "version": "v50.1",
+      "status": "active",
+      "updated": "2026-04-20",
+      "author": "CFT Platform Team",
+      "notes": "Переведённая версия из .docx в .txt",
+      "original_format": "docx"
+    },
+    {
+      "id": "DOC_TDS_PDF",
+      "marker": "тдс20240828",
+      "filename": "тдс20240828.Требования для совместимости кода с DBI.pdf",
+      "path": "DATA/CFT Platform IDE Documentation/",
+      "format": "pdf",
+      "version": "v1.0",
+      "status": "active",
+      "updated": "2026-04-20",
+      "author": "NLP-Core-Team",
+      "notes": "ОБЯЗАТЕЛЬНАЯ ОБРАБОТКА: Требования для совместимости кода с DBI",
+      "priority": "high"
+    },
+    {
+      "id": "DOC_KLOIK_PDF",
+      "marker": "тклоик20240828",
+      "filename": "тклоик20240828.Требования к локальным объектам и к коду.pdf",
+      "path": "DATA/CFT Platform IDE Documentation/",
+      "format": "pdf",
+      "version": "v1.0",
+      "status": "active",
+      "updated": "2026-04-20",
+      "author": "NLP-Core-Team",
+      "notes": "ОБЯЗАТЕЛЬНАЯ ОБРАБОТКА: Требования к локальным объектам и к коду",
+      "priority": "high"
+    }
+  ],
+  "format_rules": {
+    "marker_template": "-- {marker} строки с XXXX по YYYY. {description}",
+    "old_template": "--OLD {YYYY-MM-DD HH:MM}:",
+    "max_description_length": 120,
+    "timestamp_format": "%Y-%m-%d %H:%M",
+    "line_range_format": "строки с {start} по {end}"
+  },
+  "pdf_processing": {
+    "enabled": true,
+    "documents": [
+      {
+        "id": "DOC_TDS_PDF",
+        "filename": "тдс20240828.Требования для совместимости кода с DBI.pdf",
+        "status": "pending_extraction",
+        "extraction_method": "pdf_to_txt",
+        "priority": "high"
+      },
+      {
+        "id": "DOC_KLOIK_PDF",
+        "filename": "тклоик20240828.Требования к локальным объектам и к коду.pdf",
+        "status": "pending_extraction",
+        "extraction_method": "pdf_to_txt",
+        "priority": "high"
+      }
+    ]
+  },
+  "audit_log": [
+    {
+      "date": "2026-04-13T15:30:00",
+      "action": "created",
+      "author": "NLP-Core-Team",
+      "changes": "Создание начальной версии рубрикатора"
+    },
+    {
+      "date": "2026-04-15T10:00:00",
+      "action": "updated",
+      "author": "NLP-Core-Team",
+      "changes": "Добавлена поддержка PDF документов и TXT переводов (v03)"
+    },
+    {
+      "date": "2026-04-20T10:30:00",
+      "action": "updated",
+      "author": "NLP-Core-Team",
+      "changes": "Синхронизация с DATA/Рубрикатор/3.RUBRICATOR_FIXES.md (v50: 25 правил). Обновление до v04"
+    }
+  ]
+}

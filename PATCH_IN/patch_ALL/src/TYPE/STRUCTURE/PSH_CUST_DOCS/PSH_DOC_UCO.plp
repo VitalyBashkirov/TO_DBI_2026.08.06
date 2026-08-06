@@ -1,0 +1,845 @@
+class PSH_CUST_DOCS;
+
+@import_plsql(true)
+@name('[ПСБ] UCO')
+@tag('COPIED')
+library PSH_DOC_UCO is
+/*Поручение на бесспорное взыскание*/
+
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB_TC]); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+
+
+
+public type RDoc	is record (
+	  DocumentModeID	varchar2(30)		-- ID вида документа
+	, DocumentID		varchar2(36)		-- ID документа
+	, RefDocumentID		varchar2(36)		-- ID исходного документа
+	, InfoDate			[DATE]				-- Дата формирования сведений
+	, InfoTime			string(32)			-- Время формирования сведений
+	, Custom			&libtc.r_custOffice	-- Таможенный орган
+	, DocumentType		varchar2(1)			-- Тип сведений:
+											--     0 - документ
+											--     2 - отзыв документа
+	, OrderType			varchar2(1)			-- Вид документа:
+											--     0 - поручение на бесспорное взыскание
+											--     1 - поручение на продажу иностранной валюты
+											--     2 - поручение на перевод электронных денежных средств
+											--     3 - поручение на перечисление денежных средств с депозитного счета на расчетный (текущий) счет плательщика
+											--     4 - поручение на продажу драгоценных металлов и перечисление денежных средств от продажи драгоценных металлов на расчетный (текущий) счет плательщика
+	, Document			&libtc.r_custDoc	-- Реквизиты представляемого документа (поручения / решения)
+	
+	, Payer				&libtc.r_payer		-- Сведения о плательщике
+	, PayerBank			&libtc.r_bank		-- Сведения о банке плательщика
+	, PayerAcc			&libtc.r_acc		-- Сведения о счете плательщика
+	
+	-- Реквизиты для перевода денежных средств (заполняется только для UCO, CMO):
+	, TrRecipAccNum		string(20)			-- Номер счета получателя
+	, TrRecipAccCurCode	string(3)			-- Символьный код валюты счета получателя
+	, TrPayerBankKS		string(20)			-- Коррсчет банка плательщика
+	, TrRecipBankKS		string(20)			-- Коррсчет банка получателя
+	, TrRecipBankName	string(250)			-- Наименование банка получателя
+	, TrRecipBankBIC	string(9)			-- БИК банка получателя
+	, TrRecipName		string(250)			-- Наименование получателя
+	, TrRecipINN		string(12)			-- ИНН получателя
+	, TrRecipKPP		string(9)			-- КПП получателя
+	, TrOperType		string(2)			-- Вид операции: всегда "06" 
+	, TrUIN				string(25)			-- УИН
+	, TrPrior			string(1)			-- Очередность платежа
+	, TrNazn			string(210)			-- Назначение платежа
+	, TrReserve			string(35)			-- Резервное поле
+	, TrTypePayment		string(1)			-- Вид платежа: всегда "0"
+	, TrOrder101		string(10)			-- Реквизит 101 (Статус): всегда "07" - таможенный орган
+	, TrOrder105		string(11)			-- Реквизит 105 (Код ОКТМО)
+	, TrOrder106		string(2)			-- Реквизит 106 (Основание платежа)
+	, TrOrder108		string(15)			-- Реквизит 108 (Номер документа, на основании которого делается платеж)
+	, TrOrder109		string(10)			-- Реквизит 109 (Дата документа, на основании которого делается платеж)
+	, TrOrder110		string(1)			-- Реквизит 110 (Код выплат)
+	, TrSum				string(20)			-- Сумма платежа
+	, TrSumText			string(250)			-- Сумма платежа прописью
+	, TrKBK				string(20)			-- КБК
+	, TrCurCode			string(3)			-- Символьный код валюты платежа
+	
+	-- Документ основание:
+	-- для CSO, UCC, STO, TFO заполняется реквизиты Поручения на бесспорное взыскание или неисполненного Поручения на бесспорное взыскание
+	, BaseUCO			&libtc.r_person	-- Реквизиты поручения
+	, BaseUCOAcc		varchar2(20)		-- Номер счета плательщика, указанный в поручении
+	
+	-- Документ основание:
+	-- для UCO, CMO заполняются реквизиты Решения таможенного органа о взыскании денежных средств со счетов в бесспорном порядке
+	-- для CMC, CSO заполняются реквизиты Поручения на перевод электронных денежных средств
+	, BaseDocIn			&libtc.r_custDoc	-- Реквизиты Решения или Поручения
+	
+	, ChiefSign			&libtc.r_person	-- Подпись начальника таможенного органа
+	, ExecSign			&libtc.r_person	-- Подпись исполнителя
+);
+
+
+
+public function processAnswer(p_doc ref [PSH_CUST_DOCS_IN], p_requests &libtc.T_reqs) return integer is -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+
+    procedure getErr
+    (
+    	  p_errCode		string(2)
+    	, p_errText		string(512)
+    	, p_minPrior	in out integer
+    	, p_minCode		in out string(2)
+    	, p_minText		in out string(512)
+    )
+    is
+    pr integer;
+    begin
+    	pr := &libfun.get_err_prior(p_errCode);
+		
+		if p_minPrior >= pr or p_minPrior is null then
+			if p_errText <> nvl(p_minText, ' ') and p_minPrior is not null and p_errCode = p_minCode then
+				p_minText := null;
+			else
+				p_minText := p_errText;
+			end if;
+
+			p_minPrior := pr;
+			p_minCode := p_errCode;
+		end if;
+    end;
+
+-- для обработки CLOB ответа от ИК
+type TClob is table of clob;
+type TReqs is table of ref [PSH_CUST_REQS]; -- updated CHANGE_QUALIFIER PSB_CUST_REQS->PSH_CUST_REQS 08/10/25
+
+-- филиал запроса НО
+branch			ref [BRANCH];
+contentsList		TClob;
+n					integer;
+xDoc				XMLType;
+xRes				XMLType;
+
+-- для накопления ошибок полученных от ИК
+errObj				[TAX_ERROR];
+errorsList			&libtc.t_errors;
+resCode				string(50);
+resText				string(512);
+posRes				boolean;
+
+-- для возврата структруного ответа
+outDocObj			&libtc.R_docOut;
+minPrior			integer;
+minErrCode			string(2);
+minErrText			string(512);
+docId				string(1000);
+
+srcReqsList			TReqs;
+appCode				string(50) := '1B028050';
+outDocRef		ref [PSH_CUST_DOCS_OU]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+version				string(16);
+begin
+	&debug('>> processAnswer', 0)
+	
+	&debug(&libfun.checkApp(appCode), 0)
+	if &libfun.checkApp(appCode) is not null then
+		&debug('Приложение '|| appCode ||' не включено', 0)
+		return null;
+	end if;
+
+	-- собираем в табличку содержимое всех ответов
+	select	x(x.[CONTENT], x.[INITIAL_REQ])
+	in		::[PSH_CUST_REQS] all -- updated CHANGE_QUALIFIER PSB_CUST_REQS->PSH_CUST_REQS 08/10/25
+	where	x in (select y(y.column_value) in p_requests)
+	into	contentsList, srcReqsList;
+		
+	&debug('contentsList.count = ' || contentsList.count, 0)
+
+	-- если есть - работаем
+	if contentsList.count > 0 then
+		begin
+			-- выдернем из запроса нужные реквизиты
+			select	d(d.[BRANCH])
+			in		::[PSH_CUST_DOCS] all -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+			where	d = p_doc
+			into	branch;
+			
+			&debug('branch = ' || branch%id, 0)
+		exception
+			when NO_DATA_FOUND then
+				null;
+				&debug('Не нашли файл НО', 0)
+		end;	
+
+		-- обрабатываем ответы
+		n := contentsList.first;	
+		while n is not null loop		
+			xDoc := XMLType(contentsList(n)); -- делаем xml
+			resCode := null;
+			if xDoc is not null then 	
+				if xDoc.existsNode('/Ответ/РезПроверки') = 1 then -- ошибка
+					xRes := xDoc.extract('/Ответ/РезПроверки');
+
+					resCode := xRes.extract('/РезПроверки/@КодРезПроверки').getStringVal();
+					resText := &libfun.getErrorNote(xRes, '/РезПроверки');
+					&debug('01 resCode = ' || resCode, 0)
+
+				elsif xDoc.existsNode('/Ответ/Документ') = 1 then -- положительный результат
+					docId := xDoc.extract('/Ответ/Документ/@ИдДок').getStringVal();
+					&debug('docId = '||docId || ', srcReqsList(n) = ' || srcReqsList(n)%id, 0)
+
+					if docId is not null and srcReqsList(n) is not null then -- если id и исходный запрос указаны - делаем связь
+						::[PSH_CUST_ATTR].[PSH_LIB].set_req_attr(srcReqsList(n), 'docId', docId);
+						&debug('Создана связь экземпляра компоненты и исходного запроса в компоненту', 0)
+					end if;
+
+					posRes := true;
+					&debug('02 положительный результат', 0)
+					exit; -- если есть положительный результат, можно дальше не искать.
+
+				end if;
+			end if;
+
+			-- обрабатываем ошибку, выбираем из уже обработанных ранее самую приоритетную
+			if resCode is not null then
+				getErr(resCode, resText, minPrior, minErrCode, minErrText);
+			end if;
+
+			n := contentsList.next(n);
+		end loop;
+
+		-- если положительного ответа нет, возвращаем ошибки
+		if not nvl(posRes, false) then
+			-- формируем PB2
+			-- проставляем итоговую ошибку от всех компонент
+			if minErrCode is not null then
+				errObj := null;
+				errObj.[ERR_TYPE] := minErrCode;
+				errObj.[ERR_TEXT] := minErrText;
+				errorsList(1) := errObj;
+				outDocObj := &libfun.formPT2(p_doc, branch, errorsList);
+
+				if outDocObj.r_fileName is not null then
+					outDocRef := ::[PSH_CUST_DOCS_OU].[PSH_NEW_AUTO]( -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+																  P_FILE_NAME 		== outDocObj.r_fileName	-- Имя файла
+																, P_FILE_CONTENT	== outDocObj.r_clob		-- Содержимое файла
+																, P_FILE_CR_DATE 	== null					-- Дата создания файла
+																, P_DOC_CR_DATE		== sysdate				-- Дата создания документа
+																, P_VERSION			== version				-- Версия формата
+																, P_DOC_TYPE		== outDocObj.r_docType	-- Тип документа
+																, P_BRANCH			== outDocObj.r_branch	-- Филиал
+															);
+					-- добавляем связи
+					&lib.linkDoc(p_doc, outDocRef, outDocObj.r_link);
+				end if;
+
+				&debug('	Подтверждение: ' || outDocObj.r_clob, 0)
+			end if;
+		else
+			null; -- сохранить идентификатор docId
+
+		end if;
+
+		errorsList.delete;
+	end if;
+
+	return bool_num(outDocRef is not null, 1, 0);
+end;
+
+
+function checkPayerInfo
+(
+	  p_node &xml.DOMNode
+	, p_errors in out &libtc.T_Errors
+	, p_xpath varchar2(32767) default null
+)
+return &libtc.r_payer
+is
+nodeList	&xml.DOMNodeList;
+childNode	&xml.DOMNode;
+payer		&libtc.r_payer;
+begin
+	if not &xml.isNull(p_node) then
+		nodeList := &xml.getChildNodes(p_node);
+		if not &xml.isNull(nodeList) then
+			for i in 0..&xml.getLength(nodeList) loop
+				childNode := &xml.item(nodeList, i);
+				case &xml.getNodename(childNode) of
+					:'OrganizationName':
+						payer.FullName := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'OrganizationName', p_errors, true, 1, 250);
+					:'ShortName':
+						payer.ShortName := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'ShortName', p_errors, false, 1, 120);
+					:'OrganizationLanguage':
+						payer.Language := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'OrganizationLanguage', p_errors, false, 2, 2);
+					:'FIO':
+						payer.FIO := &libfun.checkFIO(childNode, p_errors, p_xpath||'/FIO');
+					:'INN':
+						payer.INN := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'INN', p_errors, true, 10, 12);
+					:'KPP':
+						payer.KPP := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'KPP', p_errors, false, 9, 9);
+					:'OGRN':
+						payer.OGRN := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'OGRN', p_errors, false, 13, 15);
+					:'OKPOID':
+						payer.OKPOID := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'OKPOID', p_errors, false, 8, 10, '^([0-9]{8}|[0-9]{10})$');
+					:'OKATOCode':
+						payer.OKATOCode := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'OKATOCode', p_errors, false, 5, 11);
+					:'ITN':
+						payer.ITN := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'ITN', p_errors, false, 1, 13);
+				end;
+			end loop;
+		end if;
+	end if;
+	
+	if payer.FullName is null then
+		if p_xpath is null then
+			&libfun.setError(p_errors, 'Отсутствует обязательное поле', '13', 'OrganizationName');
+		else
+			&libfun.setError(p_errors, p_xpath||'/OrganizationName: Отсутствует обязательный элемент', '13');
+		end if;
+	end if;	
+	
+	if payer.INN is null then
+		if p_xpath is null then
+			&libfun.setError(p_errors, 'Отсутствует обязательное поле', '13', 'INN');
+		else
+			&libfun.setError(p_errors, p_xpath||'/INN: Отсутствует обязательный элемент', '13');
+		end if;
+	end if;		
+	
+	 if length(payer.INN) = 10 and payer.KPP is null then
+		if p_xpath is null then
+			&libfun.setError(p_errors, 'Отсутствует обязательное поле', '13', 'KPP');
+		else
+			&libfun.setError(p_errors, p_xpath||'/KPP: Отсутствует обязательный элемент', '13');
+		end if;	 
+	 end if;
+	
+	return payer;
+end;
+
+function checkBankInfo
+(
+	  p_node &xml.DOMNode
+	, p_errors in out &libtc.T_Errors
+	, p_xpath varchar2(32767) default null
+)
+return &libtc.r_bank
+is
+nodeList	&xml.DOMNodeList;
+childNode	&xml.DOMNode;
+bank		&libtc.r_bank;
+begin
+	if not &xml.isNull(p_node) then
+		nodeList := &xml.getChildNodes(p_node);
+		if not &xml.isNull(nodeList) then
+			for i in 0..&xml.getLength(nodeList) loop
+				childNode := &xml.item(nodeList, i);
+				case &xml.getNodename(childNode) of
+					:'OrganizationName':
+						bank.FullName := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'OrganizationName', p_errors, true, 1, 250);
+					:'ShortName':
+						bank.ShortName := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'ShortName', p_errors, false, 1, 120);
+					:'INN':
+						bank.INN := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'INN', p_errors, false, 10, 12);
+					:'KPP':
+						bank.KPP := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'KPP', p_errors, false, 9, 9);
+					:'OGRN':
+						bank.OGRN := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'OGRN', p_errors, false, 13, 15);
+					:'OKPOID':
+						bank.OKPOID := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'OKPOID', p_errors, false, 8, 10, '^([0-9]{8}|[0-9]{10})$');
+					:'OKATOCode':
+						bank.OKATOCode := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'OKATOCode', p_errors, false, 5, 11);
+					:'BICBankPayer':
+						bank.BIC := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'BICBankPayer', p_errors, true, 9, 9);
+				end;
+			end loop;
+		end if;
+	end if;
+	
+	if bank.FullName is null then
+		if p_xpath is null then
+			&libfun.setError(p_errors, 'Отсутствует обязательное поле', '13', 'OrganizationName');
+		else
+			&libfun.setError(p_errors, p_xpath||'/OrganizationName: Отсутствует обязательный элемент', '13');
+		end if;
+	end if;	
+	
+	if bank.BIC is null then
+		if p_xpath is null then
+			&libfun.setError(p_errors, 'Отсутствует обязательное поле', '13', 'BICBankPayer');
+		else
+			&libfun.setError(p_errors, p_xpath||'/BICBankPayer: Отсутствует обязательный элемент', '13');
+		end if;
+	end if;		
+	
+	return bank;
+end;
+
+function checkAccInfo
+(
+	  p_node &xml.DOMNode
+	, p_reqAcc boolean
+	, p_errors in out &libtc.T_Errors
+)
+return &libtc.r_acc
+is
+nodeList	&xml.DOMNodeList;
+childNode	&xml.DOMNode;
+acc			&libtc.r_acc;
+begin
+	if not &xml.isNull(p_node) then
+		nodeList := &xml.getChildNodes(p_node);
+		if not &xml.isNull(nodeList) then
+			for i in 0..&xml.getLength(nodeList) loop
+				childNode := &xml.item(nodeList, i);
+				case &xml.getNodename(childNode) of
+					:'AccountPayer':
+						acc.AccNum := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'AccountPayer', p_errors, p_reqAcc, 20, 20, '\d{20}');
+					:'AccountTypePayer':
+						acc.AccType := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'AccountTypePayer', p_errors, false, 1, 250);
+					:'CodeAccountCurrencyPayer':
+						acc.AccCurCode := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'CodeAccountCurrencyPayer', p_errors, false, 3, 3);
+					:'CorporatePayer':
+						acc.CorporatePayer := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'CorporatePayer', p_errors, not p_reqAcc, 1, 250);
+				end;
+			end loop;
+		end if;
+	end if;
+	
+	return acc;
+end;
+
+function checkAccCur(p_acc varchar2(20), p_curCode varchar2(3)) return boolean is
+begin
+	
+	if
+		p_acc is not null and p_curCode is not null and
+		::[FT_MONEY].[LIB].AccNum2Money(p_acc) != ::[FT_MONEY].[LIB].get_money(p_curCode)
+	then
+		return false;
+	end if;
+	
+	return true;
+
+end;
+
+function getDoc(
+	p_doc &xml.DOMNode
+	, p_typeDoc in ::[PSH_CUST_DOCS].[DOC_TYPE]%type -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	, p_error in out &libtc.T_Errors
+)
+return RDoc is
+node		&xml.DOMNode;
+node1		&xml.DOMNode;
+node2		&xml.DOMNode;
+node3		&xml.DOMNode;
+elem 		&xml.DOMElement;
+nodeList	&xml.DOMNodeList;
+nodeList1	&xml.DOMNodeList;
+nodeList2	&xml.DOMNodeList;
+nodeList3	&xml.DOMNodeList;
+
+nodeName	string(100);
+nodeName1	string(100);
+nodeName2	string(100);
+nodeName3	string(100);
+
+docRec		RDoc;
+
+checksList	&libtc.T_CheckXML;
+
+rootName	string(128) := 'DebtIncashANDCommission';
+xPath		string(128);
+xPath1		string(128);
+xPath2		string(128);
+xPath3		string(128);
+xPath4		string(128);
+
+docTypePatt		string(1);
+orderTypePatt	string(1);
+begin
+	docTypePatt := case when p_typeDoc in (&libtc.typeUCC, &libtc.typeCMC) then '2' else '0' end;
+	orderTypePatt := case
+						when p_typeDoc in (&libtc.typeUCO, &libtc.typeUCC) then
+							'0'
+						when p_typeDoc = &libtc.typeCSO then
+							'1'
+						when p_typeDoc in (&libtc.typeCMO, &libtc.typeCMC) then
+							'2'
+						when p_typeDoc = &libtc.typeTFO then
+							'3'
+						when p_typeDoc = &libtc.typeSTO then
+							'4'
+					end	;
+	
+	if &xml.getNodeName(p_doc) = rootName then
+		elem := &xml.makeElement(p_doc);
+		
+		docRec.DocumentModeID := &libfun.checkStrValue(&xml.getAttribute(elem, 'DocumentModeID'), 'DocumentModeID', p_error, true, 1, 30, p_legalValue == '1002047E');
+		
+		xPath := '//'||rootName;
+		
+		&libfun.setExist(checksList, xPath||'/DocumentID', false);
+		&libfun.setExist(checksList, xPath||'/DocumentInfo', false);
+		
+		nodeList := &xml.getChildNodes(p_doc);
+		
+		&debug('&xml.isNull(nodeList) ' || bool_char(&xml.isNull(nodeList)), 0)
+
+		if not &xml.isNull(nodeList) then
+			for i in 0..&xml.getLength(nodeList)-1 loop
+
+				&debug('i = ' || i, 0)
+							
+				node := &xml.item(nodeList, i);	
+				nodeName := &xml.getNodename(node);
+				&debug('&xml.getNodename(node) = ' || nodeName, 0)
+				xPath1 := xPath || '/' || nodeName;
+				
+				case nodeName of		
+					:'DocumentID':
+						docRec.DocumentID := &libfun.checkStrValue(&xml_getNodeValue(node), 'DocumentID', p_error, true, 36, 36, '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}');
+						&libfun.setExist(checksList, xPath1); -- ставим признак что элемент есть
+
+					:'RefDocumentID':
+						docRec.RefDocumentID := &libfun.checkStrValue(&xml_getNodeValue(node), 'RefDocumentID', p_error, false, 36, 36, '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}');
+		
+					:'InfoDate':
+						docRec.InfoDate := &libfun.checkDateValue(&xml_getNodeValue(node), 'InfoDate', p_error, false);
+						
+					:'InfoTime':
+						docRec.InfoTime := &libfun.checkStrValue(&xml_getNodeValue(node), 'InfoTime', p_error, false, 8, 14, '^\d{2}:\d{2}:\d{2}([+-]\d{2}:\d{2})?$');
+
+					:'DocumentInfo':
+						&libfun.setExist(checksList, xPath1); -- ставим признак что элемент есть
+						
+						&libfun.setExist(checksList, xPath1||'/CustomsOffice', false);
+						&libfun.setExist(checksList, xPath1||'/DocumentType', false);
+						&libfun.setExist(checksList, xPath1||'/OrderType', false);
+						&libfun.setExist(checksList, xPath1||'/RequisitesDocument', false);												
+						&libfun.setExist(checksList, xPath1||'/PayerInfo', false);
+						&libfun.setExist(checksList, xPath1||'/PayerBankInfo', false);
+						if p_typeDoc in (&libtc.typeUCO, &libtc.typeCMO) then
+							&libfun.setExist(checksList, xPath1||'/TransFerfunds', false);
+						end if;
+						if p_typeDoc in (&libtc.typeCSO, &libtc.typeSTO, &libtc.typeUCC, &libtc.typeCMC, &libtc.typeTFO) then
+							&libfun.setExist(checksList, xPath1||'/BaseDocument', false);
+						end if;
+
+						nodeList1 := &xml.getChildNodes(node);
+						if not &xml.isNull(nodeList1) then
+							for j in 0..&xml.getLength(nodeList1)-1 loop
+				
+								&debug('j = ' || j, 0)
+											
+								node1 := &xml.item(nodeList1, j);	
+								nodeName1 := &xml.getNodename(node1);
+								&debug('&xml.getNodename(node1) = ' || nodeName1, 0)
+								xPath2 := xPath1 || '/' || nodeName1;
+								
+								case nodeName1 of
+									:'CustomsOffice':
+										docRec.Custom := &libfun.checkCust(node1, p_error, xPath2);
+										&libfun.setExist(checksList, xPath2); -- ставим признак что элемент есть
+										
+									:'DocumentType':
+										docRec.DocumentType := &libfun.checkStrValue(&xml_getNodeValue(node1), 'DocumentType', p_error, true, 1, 1, '0|2', docTypePatt);
+										&libfun.setExist(checksList, xPath2); -- ставим признак что элемент есть
+										
+									:'OrderType':
+										docRec.OrderType := &libfun.checkStrValue(&xml_getNodeValue(node1), 'OrderType', p_error, true, 1, 1, '[0-4]{1}', orderTypePatt);
+										&libfun.setExist(checksList, xPath2); -- ставим признак что элемент есть
+										
+									:'RequisitesDocument':
+										docRec.Document := &libfun.checkCustDoc(node1, p_error);
+										&libfun.setExist(checksList, xPath2); -- ставим признак что элемент есть
+										
+									:'PayerInfo':
+										docRec.Payer := checkPayerInfo(node1, p_error, xPath2);
+										
+										&libfun.setExist(checksList, xPath2); -- ставим признак что элемент есть
+										
+									:'PayerBankInfo':
+										docRec.PayerBank := checkBankInfo(node1, p_error, xPath2);
+										docRec.PayerAcc := checkAccInfo(node1, not p_typeDoc in (&libtc.typeCMO, &libtc.typeCMC), p_error);
+										
+										if
+											p_typeDoc = &libtc.typeUCO and
+											coalesce(&ft.get_num_value('CUST_UCO_CUR_PT', throw_error == '0'), 0) = 1 and
+											::[FT_MONEY].[LIB].AccNum2Money(docRec.PayerAcc.AccNum) != ::[SYSTEM].[VARIABLES].NatCur
+										then
+											&libfun.setError(p_error, 'В поручении на бесспорное взыскание не может быть указан счет плательщика в иностранной валюте '||docRec.PayerAcc.AccNum||'.', '13', 'AccountPayer');
+										end if;
+										
+										if not checkAccCur(docRec.PayerAcc.AccNum, docRec.PayerAcc.AccCurCode) then
+											&libfun.setError(p_error, 'Код валюты '||docRec.PayerAcc.AccCurCode||', указанный для счета плательщика, не совпадает с валютой в номере счета плательщика '||docRec.PayerAcc.AccNum||'.', '13', 'CodeAccountCurrencyPayer');
+										end if;
+										
+										&libfun.setExist(checksList, xPath2); -- ставим признак что элемент есть
+										
+									:'TransFerfunds':
+										&libfun.setExist(checksList, xPath2||'/Amount', false);
+										
+										nodeList2 := &xml.getChildNodes(node1);
+										if not &xml.isNull(nodeList2) then
+											for k in 0..&xml.getLength(nodeList2)-1 loop
+								
+												&debug('k = ' || k, 0)
+															
+												node2 := &xml.item(nodeList2, k);	
+												nodeName2 := &xml.getNodename(node2);
+												&debug('&xml.getNodename(node2) = ' || nodeName2, 0)
+												xPath3 := xPath2 || '/' || nodeName2;
+												
+												case nodeName2 of										
+													:'TransFerReqs':
+														&libfun.setExist(checksList, xPath3||'/AccountRecipient', false);
+														&libfun.setExist(checksList, xPath3||'/CodeAccountCurrency', false);
+														&libfun.setExist(checksList, xPath3||'/sKorAccountBankPayer', false);
+														&libfun.setExist(checksList, xPath3||'/BankInfoRecipient', false);
+														&libfun.setExist(checksList, xPath3||'/BICBankRecipient', false);
+														&libfun.setExist(checksList, xPath3||'/RecipientName', false);
+														&libfun.setExist(checksList, xPath3||'/RecipientINN', false);
+														&libfun.setExist(checksList, xPath3||'/PriorityPayment', false);
+														&libfun.setExist(checksList, xPath3||'/Order105', false);
+														&libfun.setExist(checksList, xPath3||'/Order106', false);
+														&libfun.setExist(checksList, xPath3||'/Order108', false);
+														&libfun.setExist(checksList, xPath3||'/Order109', false);
+													
+														nodeList3 := &xml.getChildNodes(node2);
+														if not &xml.isNull(nodeList3) then
+															for l in 0..&xml.getLength(nodeList3)-1 loop
+												
+																&debug('l = ' || l, 0)
+																			
+																node3 := &xml.item(nodeList3, l);	
+																nodeName3 := &xml.getNodename(node3);
+																&debug('&xml.getNodename(node3) = ' || nodeName3, 0)
+																xPath4 := xPath3 || '/' || nodeName3;
+																
+																case nodeName3 of
+																	:'AccountRecipient':
+																		docRec.TrRecipAccNum := &libfun.checkStrValue(&xml_getNodeValue(node3), 'AccountRecipient', p_error, true, 20, 20, '\d{20}');
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть												
+
+																	:'CodeAccountCurrency':
+																		docRec.TrRecipAccCurCode := &libfun.checkStrValue(&xml_getNodeValue(node3), 'CodeAccountCurrency', p_error, true, 3, 3);
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть
+																		
+																	:'sKorAccountBankPayer':
+																		docRec.TrPayerBankKS := &libfun.checkStrValue(&xml_getNodeValue(node3), 'sKorAccountBankPayer', p_error, true, 20, 20, '\d{20}');
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть
+																		
+																	:'sKorAccountBankRecipient':
+																		docRec.TrRecipBankKS := &libfun.checkStrValue(&xml_getNodeValue(node3), 'sKorAccountBankRecipient', p_error, false, 20, 20, '\d{20}');
+																		
+																	:'BankInfoRecipient':
+																		docRec.TrRecipBankName := &libfun.checkStrValue(&xml_getNodeValue(node3), 'BankInfoRecipient', p_error, true, 1, 250);
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть																	
+
+																	:'BICBankRecipient':
+																		docRec.TrRecipBankBIC := &libfun.checkStrValue(&xml_getNodeValue(node3), 'BICBankRecipient', p_error, true, 9, 9);
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть
+
+																	:'RecipientName':
+																		docRec.TrRecipName := &libfun.checkStrValue(&xml_getNodeValue(node3), 'RecipientName', p_error, true, 1, 250);
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть
+
+																	:'RecipientINN':
+																		docRec.TrRecipINN := &libfun.checkStrValue(&xml_getNodeValue(node3), 'RecipientINN', p_error, true, 10, 12);
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть
+
+																	:'RecipientKPP':
+																		docRec.TrRecipKPP := &libfun.checkStrValue(&xml_getNodeValue(node3), 'RecipientKPP', p_error, false, 9, 9);
+
+																	:'TypeOfOperation':
+																		docRec.TrOperType:= &libfun.checkStrValue(&xml_getNodeValue(node3), 'TypeOfOperation', p_error, p_typeDoc in (&libtc.typeUCO, &libtc.typeCMO), 2, 2, p_legalValue == '06');
+
+																	:'PaymentCode':
+																		docRec.TrUIN := &libfun.checkStrValue(&xml_getNodeValue(node3), 'PaymentCode', p_error, false, 1, 25, '^\d{1,25}$');
+
+																	:'PriorityPayment':
+																		docRec.TrPrior := &libfun.checkStrValue(&xml_getNodeValue(node3), 'PriorityPayment', p_error, true, 1, 1, '[1-5]{1}');
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть
+
+																	:'PurposePayment':
+																		docRec.TrNazn := &libfun.checkStrValue(&xml_getNodeValue(node3), 'PurposePayment', p_error, false, 1, 210);
+
+																	:'ReserveField':
+																		docRec.TrReserve := &libfun.checkStrValue(&xml_getNodeValue(node3), 'ReserveField', p_error, false, 1, 35);
+
+																	:'TypePayment':
+																		docRec.TrTypePayment := &libfun.checkStrValue(&xml_getNodeValue(node3), 'TypePayment', p_error, false, 1, 1, '[0-9]{1}', '0');
+
+																	:'Order101':
+																		docRec.TrOrder101 := &libfun.checkStrValue(&xml_getNodeValue(node3), 'Order101', p_error, false, 1, 10);
+
+																	:'Order105':
+																		docRec.TrOrder105 := &libfun.checkStrValue(&xml_getNodeValue(node3), 'Order105', p_error, true, 1, 11);
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть
+
+																	:'Order106':
+																		docRec.TrOrder106 := &libfun.checkStrValue(&xml_getNodeValue(node3), 'Order106', p_error, true, 1, 2);
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть
+
+																	:'Order108':
+																		docRec.TrOrder108 := &libfun.checkStrValue(&xml_getNodeValue(node3), 'Order108', p_error, true, 1, 15);
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть
+
+																	:'Order109':
+																		docRec.TrOrder109 := &libfun.checkStrValue(&xml_getNodeValue(node3), 'Order109', p_error, true, 1, 10);
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть
+
+																	:'Order110':
+																		docRec.TrOrder110 := &libfun.checkStrValue(&xml_getNodeValue(node3), 'Order110', p_error, true, 1, 1);
+
+																end;
+															end loop;
+														end if;
+														
+														if not checkAccCur(docRec.TrRecipAccNum, docrec.TrRecipAccCurCode) then
+															&libfun.setError(p_error, 'Код валюты '||docRec.TrRecipAccCurCode||', указанный для счета получателя, не совпадает с валютой в номере счета получателя '||docRec.TrRecipAccNum||'.', '13', 'CodeAccountCurrency');
+														end if;
+														
+													:'Amount':
+														&libfun.setExist(checksList, xPath3); -- ставим признак что элемент есть
+
+														&libfun.setExist(checksList, xPath3||'/PaymentAmountText', false);
+														&libfun.setExist(checksList, xPath3||'/PaymentKBK', false);
+														&libfun.setExist(checksList, xPath3||'/PaymentAmount', false);
+														&libfun.setExist(checksList, xPath3||'/CodeCurrency', false);
+
+														nodeList3 := &xml.getChildNodes(node2);
+														if not &xml.isNull(nodeList3) then
+															for l in 0..&xml.getLength(nodeList3)-1 loop
+												
+																&debug('l = ' || l, 0)
+																			
+																node3 := &xml.item(nodeList3, l);	
+																nodeName3 := &xml.getNodename(node3);
+																&debug('&xml.getNodename(node3) = ' || nodeName3, 0)
+																xPath4 := xPath3 || '/' || nodeName3;
+																
+																case nodeName3 of
+																	:'PaymentAmountText':
+																		docRec.TrSumText := &libfun.checkStrValue(&xml_getNodeValue(node3), 'PaymentAmountText', p_error, true, 1, 250);
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть
+
+																	:'PaymentKBK':
+																		docRec.TrKBK := &libfun.checkStrValue(&xml_getNodeValue(node3), 'PaymentKBK', p_error, true, 1, 20);
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть
+
+																	:'PaymentAmount':
+																		docRec.TrSum := &libfun.checkStrValue(&xml_getNodeValue(node3), 'PaymentAmount', p_error, true, 1, 20);
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть
+
+																	:'CodeCurrency':
+																		docRec.TrCurCode := &libfun.checkStrValue(&xml_getNodeValue(node3), 'CodeCurrency', p_error, true, 3, 3);
+																		&libfun.setExist(checksList, xPath4); -- ставим признак что элемент есть
+
+																end;
+															end loop;
+														end if;
+
+												end;
+											end loop;
+										end if;
+										
+										&libfun.setExist(checksList, xPath2); -- ставим признак что элемент есть
+									
+									:'BaseDocument':
+										if p_typeDoc in (&libtc.typeUCC, &libtc.typeSTO, &libtc.typeTFO) then
+											&libfun.setExist(checksList, xPath2||'/DecisInconGR', false);
+										end if;
+									
+										if p_typeDoc = &libtc.typeCMC then
+											&libfun.setExist(checksList, xPath2||'/Indocrn', false);
+										end if;
+										
+										if p_typeDoc = &libtc.typeCSO then
+											&libfun.setExist(checksList, xPath2||'/DecisInconGR или '||xPath2||'/Indocrn', false);
+										end if;
+									
+										nodeList2 := &xml.getChildNodes(node1);
+										if not &xml.isNull(nodeList2) then
+											for k in 0..&xml.getLength(nodeList2)-1 loop
+								
+												&debug('k = ' || k, 0)
+															
+												node2 := &xml.item(nodeList2, k);	
+												nodeName2 := &xml.getNodename(node2);
+												&debug('&xml.getNodename(node2) = ' || nodeName2, 0)
+												xPath3 := xPath2 || '/' || nodeName2;
+												
+												case nodeName2 of										
+													:'DecisInconGR':
+														docRec.BaseDocIn := &libfun.checkCustDoc(node2, p_error, 'PrDocumentName,PrDocumentNumber,PrDocumentDate,AccountPayer', xPath3);
+														&libfun.setExist(checksList, xPath3); -- ставим признак что элемент есть
+														&libfun.setExist(checksList, xPath2||'/DecisInconGR или '||xPath2||'/Indocrn'); -- ставим признак что один из двух элементов есть
+
+													:'Indocrn':
+														docRec.BaseDocIn := &libfun.checkCustDoc(node2, p_error);
+														&libfun.setExist(checksList, xPath3); -- ставим признак что элемент есть
+														&libfun.setExist(checksList, xPath2||'/DecisInconGR или '||xPath2||'/Indocrn'); -- ставим признак что один из двух элементов есть
+
+												end;
+											end loop;
+										end if;
+										
+										&libfun.setExist(checksList, xPath2); -- ставим признак что элемент есть
+										
+									:'DocumentSignature':
+										&libfun.setExist(checksList, xPath2||'/CustChiefSignature', false);
+										&libfun.setExist(checksList, xPath2||'/ExecutiveSignature', false);
+										
+										nodeList2 := &xml.getChildNodes(node1);
+										if not &xml.isNull(nodeList2) then
+											for k in 0..&xml.getLength(nodeList2)-1 loop
+								
+												&debug('k = ' || k, 0)
+															
+												node2 := &xml.item(nodeList2, k);	
+												nodeName2 := &xml.getNodename(node2);
+												&debug('&xml.getNodename(node2) = ' || nodeName2, 0)
+												xPath3 := xPath2 || '/' || nodeName2;
+												
+												case nodeName2 of										
+													:'CustChiefSignature':									
+														docRec.ChiefSign := &libfun.checkPerson(node2, p_error, 'PersonPost,IssueDate', xPath3);
+														&libfun.setExist(checksList, xPath3); -- ставим признак что элемент есть
+														
+													:'ExecutiveSignature':
+														docRec.ExecSign := &libfun.checkPerson(node2, p_error, 'PersonPost,IssueDate', xPath3);
+														&libfun.setExist(checksList, xPath3); -- ставим признак что элемент есть
+														
+												end;
+											end loop;
+										end if;
+
+								end;
+							end loop;
+						end if;
+				end;
+			end loop;
+		end if;	
+		&libfun.checkExists(checksList, p_error);
+	end if;
+	
+	return docRec;
+end;
+
+public procedure checkDoc(
+	  p_doc &xml.DOMNode
+	, p_error in out &libtc.T_Errors
+	, p_typeDoc in ::[PSH_CUST_DOCS].[DOC_TYPE]%type -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	, p_branch out ref [BRANCH]
+) is
+docRec RDoc;
+begin
+	docRec := getDoc(p_doc, p_typeDoc, p_error);
+	
+	p_branch := &libfun.getBranch(docRec.PayerBank.BIC, docRec.PayerBank.FullName, docRec.Document.DocDate);
+end;
+
+public function convertMessage(p_inDoc in clob) return clob is
+cl clob;
+begin
+	dbms_lob.createtemporary(cl, true);
+	cl := p_inDoc;
+	return cl;
+end;
+end;

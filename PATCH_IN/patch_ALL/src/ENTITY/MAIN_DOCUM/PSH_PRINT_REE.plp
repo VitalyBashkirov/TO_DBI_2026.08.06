@@ -1,0 +1,159 @@
+class MAIN_DOCUM;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('ПСХ. Печать узкого реестра')
+@tag('COPIED')
+@speciality('print')
+method PSH_PRINT_REE is
+public type tbl_doc is table of ref [MAIN_DOCUM];  -- табличный тип
+public docs tbl_doc; -- массив документов
+public dat [DATE];
+public v_worker	ref [USER];
+public v_controler	ref [USER];
+
+PSH_PRINT_REE (
+	@name('Заголовок')         P_HEAD      in [STRING],
+	@name('Дата')              P_DAT       in [STRING],
+	@name('Итого Сумма')       P_SUM_STR   in [MEMO],
+	@name('Итого кол-во')      P_KOL_STR   in [STRING],
+	@name('Мемо1')             P_M1        in [MEMO_BIG],
+	@name('Мемо2')             P_M2        in [MEMO_BIG],
+	@name('Мемо3')             P_M3        in [MEMO_BIG],
+	@name('Мемо4')             P_M4        in [MEMO_BIG],
+	@name('Мемо5')             P_M5        in [MEMO_BIG],
+	@name('Мемо6')             P_M6        in [MEMO_BIG],
+	@name('Временное Мемо')    P_M         in [MEMO_BIG],
+	@name('Руководитель')      P_MANAGER   in [STRING],
+	@name('Главный бухгалтер') P_BUH       in [STRING],
+	@name('Исполнитель')       P_WORKER    in [STRING],
+	@name('Контролер')         P_CONTROLER in [STRING_128]
+) is
+
+validate is
+/******************************************************************************************
+*	Родионов С.Ю. 16,02,02																  *
+*																						  *
+******************************************************************************************/
+
+	doc			ref [MAIN_DOCUM];
+	vSumma      string;
+	num			integer	:= 1;
+	numStr		integer	:= 0;		-- Количество строк
+	bank_pl 	ref [CL_BANK_N];
+	bank_po 	ref [CL_BANK_N];
+	our_bank 	ref [CL_BANK_N];
+	Wid_Dok_Str varchar2(3);
+	idx 		integer;
+	v_summa		[SUMMA] ;
+	v_summa_str	varchar2(1024);
+	v_val_name	::[FT_MONEY].[CUR_SHORT]%TYPE;
+	type sum_val_t is table of [SUMMA] index by string;
+	sum_val 	sum_val_t;
+	str_idx		string;
+	v_pos 	number;
+	Procedure SaveMemo is
+	Begin
+	  If    num = 1 Then P_M1 := P_M; P_M := null; num := 2;
+	  ElsIf num = 2 Then P_M2 := P_M; P_M := null; num := 3;
+	  ElsIf num = 3 Then P_M3 := P_M; P_M := null; num := 4;
+	  ElsIf num = 4 Then P_M4 := P_M; P_M := null; num := 5;
+	  ElsIf num = 5 Then P_M5 := P_M; P_M := null; num := 6;
+	  ElsIf num = 6 Then P_M6 := P_M; P_M := null; num := 7;
+	  else
+	  	pragma error ('Внимание! Операция не предназначена для печати ресстров с содержимым > 192К.'||NL$||' Уменьшите выборку или воспользуйтесь операций типа "Отчет');
+	  End If;
+	End;
+	
+	procedure add_str(p_str varchar2(32000)) is
+	begin
+		if length(P_M) + length(p_str) > P_M%size then
+			SaveMemo;
+			P_M := p_str;
+		else
+			P_M := P_M || p_str;
+		end if;
+	end;
+
+
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		P_DAT:=to_char(dat,'dd/mm/yyyy');
+		idx := docs.first;
+		while idx is not null loop
+			doc := docs(idx);
+			if doc.[FILIAL] is null then
+				pragma error ('Не указан филиал документа '|| doc.[DOCUMENT_NUM] || ' от '|| to_char (doc.[DOCUMENT_DATE], 'DD.MM.YYYY'));
+			end if;
+			our_bank := ::[SYSTEM].[VARIABLES].Br2Bank(doc.[FILIAL]);
+			bank_pl := nvl(doc.[KL_DT].[2].[3], our_bank);
+			bank_po := nvl(doc.[KL_KT].[2].[3], our_bank);
+			
+			v_summa := nvl(doc.[SUM], 0);
+			if v_summa = 0 then
+				v_summa := nvl(doc.[SUM_PO], 0);
+				v_val_name := doc.[VALUTA_PO].[CUR_SHORT];
+			else
+				v_val_name := doc.[VALUTA].[CUR_SHORT];
+			end if;
+			if  v_val_name is not null then
+				if  sum_val.exists(v_val_name) then
+					sum_val(v_val_name) := nvl(sum_val(v_val_name), 0) + v_summa;
+				else
+					sum_val(v_val_name) :=  v_summa;				
+				end if;
+			end if;
+			vSumma := ltrim(to_char(v_summa, '9,999,999,990.99'));
+            Wid_Dok_Str	:= nvl(rpad(doc.[VID_DOC].[SHORT_CODE], 3), '   ');
+
+			add_str(LF$||TB$||'|'
+				||Wid_Dok_Str||'|'
+				||rpad(substr(doc.[DOCUMENT_NUM]||'        ',1,5),5)||'|'
+				||to_char(doc.[DATE_DOC], 'dd/mm/yy')||'|'
+				||rpad(nvl(nvl(doc.[ACC_DT].[MAIN_V_ID], doc.[KL_DT].[2].[1]), ' '),25)||'|'
+				||rpad(nvl(nvl(doc.[ACC_KT].[MAIN_V_ID], doc.[KL_KT].[2].[1]), ' '),25)||'|'
+				||lpad(substr(vSumma, 1, 16), 16)||'|'
+				||rpad(nvl(substr('   '||v_val_name,-3),'  '),3)||'|'
+			);
+			
+			numStr := numStr + 1;
+			idx := docs.next(idx);
+			
+		end loop;
+		P_KOL_STR := to_char(numStr);
+	
+		str_idx := sum_val.first;
+		while str_idx is not null loop
+			-- Сумма строкой
+			v_summa_str := '| '||str_idx||'   '||ltrim(to_char(sum_val(str_idx), '99,999,999,990.99'))||' ('||STDLIB.N2STR( sum_val(str_idx), str_idx)||')';
+			--[MAIN_DOCUM]::[PRINT_SRV].formating(SUM_STR_SPELL,1,50,pos)
+			if length(v_summa_str) <= 92 then
+				P_SUM_STR := P_SUM_STR||LF$||TB$ || rpad( v_summa_str, 92) || '|';
+			else
+				P_SUM_STR := P_SUM_STR||LF$||TB$ || rpad(::[MAIN_DOCUM].[PRINT_SRV].formating(v_summa_str, 1,92 , v_pos),92) || '|';
+				while v_pos <= length(v_summa_str) loop
+					P_SUM_STR := P_SUM_STR||LF$||TB$ || '|       '||rpad(::[MAIN_DOCUM].[PRINT_SRV].formating(v_summa_str, v_pos,84 , v_pos), 84) || '|';
+				end loop;
+			end if;
+			
+			str_idx := sum_val.next(str_idx);
+		end loop;
+	
+		P_WORKER := v_worker.[NAME];
+		P_CONTROLER := v_controler.[NAME];
+		
+		DEBUG_PIPE('v_controler.[NAME]='||v_controler.[NAME], 0);
+		DEBUG_PIPE('P_CONTROLER='||P_CONTROLER, 0);
+
+		SaveMemo;
+     	-- Определение названия заголовка
+		doc := docs(docs.first);
+	end if;
+end;
+
+execute is
+begin
+	Null;
+end;
+end;
+end;

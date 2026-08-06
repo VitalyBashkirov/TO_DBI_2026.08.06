@@ -1,0 +1,989 @@
+class PERSONAL_ADDRESS;
+
+@import_plsql(true)
+@name('[ПСБ] Выбрать адресный объект')
+@tag('COPIED')
+static method PSH_GET_ADDR_OBJ is
+
+@name('Страна')                                                   public V_COUNTRY                     [COUNTRY_REF];
+@name('Регион')                                                   public V_REGION                      [ADDRESS_OBJ_REF];
+@name('Район региона')                                            public V_DISTRICT                    [ADDRESS_OBJ_REF];
+@name('Город')                                                    public V_CITY                        [ADDRESS_OBJ_REF];
+@name('Поселение')                                                public V_SETTLEMENT                  [ADDRESS_OBJ_REF];
+@name('Населённый пункт')                                         public V_TOWN                        [ADDRESS_OBJ_REF];
+@name('Элемент планировочной структуры')                          public V_SUBAREA                     [ADDRESS_OBJ_REF];
+@name('Улица')                                                    public V_STREET                      [ADDRESS_OBJ_REF];
+@name('Уровень города')                                           public V_LEVEL_CITY                  [SHORT2];
+@name('Уровень ЭПС')                                              public V_LEVEL_SUBAREA               [SHORT2];
+@name('Родитель')                                                 public V_PARENT                      [ADDRESS_OBJ_REF];
+@name('Тип адреса')                                               public V_TYPE                        [ADDRESS_TYPE_REF];
+@name('Только актуальные')                                        public V_ACTUAL                      [STRING_1];
+@name('Уровень выводимого объекта')                               public V_MODE                        [SHORT1];
+@name('V_VB')                                                     public V_VB                          [STRING_32000];
+@name('Тип адресного деления')                                    public V_STRUCT                      [ONE_FROM_THREE];
+@name('Не проверять существование объекта в двух видах деления')  public V_NOT_CHECK_STRUCT            [STRING_1];
+@name('Адресные объекты')                                         public V_ADDR_OBJECTS       table of [GRID_TEMPLATE];
+@name('Информация об адресном объекте')                           public V_ADDR_INFO                   [MEMO_4000];
+@name('Показать информацию об идентификаторах адресного объекта') public V_ADDR_INFO_SHOW_IDS          [BOOLEAN];
+@name('Выбранная строка')                                         public V_ROW                         [INTEGER];
+@name('ОКТМО выбранного объекта')                                 public V_OKTMO                       [OKTMO_REF];
+@name('Список ОКТОМО адресного объекта')                          public V_LIST_ADDR_ARR               [LIST_ADDR_HI_ARR];
+@name('Выбор ОКТМО адресного объекта')                            public V_LIST_ADDR_REF               [LIST_ADDR_HI_REF];
+@name('Нужно выбирать ОКТМО адресного объекта')                   public V_NEED_CHOOSE_OKTMO           [STRING_1];
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+dp  integer:=0; --управление debug_pipe
+dp2 integer:=0;	--управление debug_pipe
+fmt	   string(10):='dd/mm/yyyy';
+
+
+--#include [RUNTIME].[DEBUG_MACRO]
+
+v_kladr_mode [NUMBER];
+V_REGION_CITY	[ADDRESS_OBJ_REF];
+V_DISTRICT_CITY	[ADDRESS_OBJ_REF];
+v_addr_objects_max_count constant integer := 25;
+v_curOktmo ref [OKTMO];
+type addr_objects_ref_tabtype is table of ref [ADDRESS_OBJ] index by pls_integer;
+
+C_FMT_ADM constant string := 'COUNTRY_NO,REGION,DISTRICT,MAIN_CITY,CITY,SUBAREA,STREET';
+C_FMT_MUN constant string := 'COUNTRY_NO,REGION,DISTRICT,SETTLEMENT,MAIN_CITY,CITY,SUBAREA,STREET';
+
+--#define normalize_text substitute trim(regexp_replace([1],'\s+',' '))
+--#define normalize_text_upper substitute trim(regexp_replace(upper([1]),'\s+',' '))
+--#define normalize_addr_name substitute regexp_replace(upper([1]),'^ИМ(\.|(Е(НИ?)?)\s)?\s*')
+
+function get_city_double_for_parent(p_addr_obj ref [ADDRESS_OBJ]) return ref [ADDRESS_OBJ] is
+begin
+    for    (select r
+            ( p : city_ref
+            )
+            in ::[ADDRESS_OBJ], (::[ADDRESS_OBJ] : p)
+            where r = p_addr_obj
+                and p%class = ::[NAMES_CITY]%class
+                and p.[PARENT] = r
+                and p.[KIND] = r.[KIND]
+                and p.[NAME] = r.[NAME]
+                and p.[KIND].[SHORT_NAME] in ('г','г.','Г','Г.')
+            order by p.[ARCHAIC]
+        )
+    loop
+        return r.city_ref;
+    end loop;
+    return null;
+end;
+
+procedure expand_(P_ADDR_OBJ_REF [ADDRESS_OBJ_REF], P_ADDR_STRUCT number, P_OKTMO [OKTMO_REF] default null) is
+	v_addr_obj ::[PERSONAL_ADDRESS].[API_LIB].addr_obj_expanded_rectype%type;
+begin
+	v_addr_obj := ::[PERSONAL_ADDRESS].[API_LIB].get_addr_obj_expanded(P_ADDR_OBJ_REF, P_ADDR_STRUCT, P_OKTMO);
+
+	V_COUNTRY := coalesce(v_addr_obj.COUNTRY.ID, V_COUNTRY, ::[SYSTEM].[COUNTRY]);
+	V_REGION := v_addr_obj.REGION.ID;
+	V_DISTRICT := v_addr_obj.DISTRICT.ID;
+	V_SETTLEMENT := v_addr_obj.SETTLEMENT.ID;
+	V_CITY := v_addr_obj.CITY.ID;
+	V_TOWN := v_addr_obj.TOWN.ID;
+	V_SUBAREA := v_addr_obj.SUBAREA.ID;
+	V_STREET := v_addr_obj.STREET.ID;
+	V_REGION_CITY := v_addr_obj.region_city;
+	V_DISTRICT_CITY := v_addr_obj.district_city;
+
+	if	V_CITY is null and 
+		V_TOWN is null and 
+		V_REGION_CITY is null and 
+		V_DISTRICT_CITY is null and  
+		(V_REGION is not null or V_DISTRICT is not null)
+	then
+		V_REGION_CITY := get_city_double_for_parent(nvl(V_DISTRICT, V_REGION));
+
+		if V_REGION_CITY%class = ::[REGION_AREA]%class then
+			V_DISTRICT_CITY := V_REGION_CITY;
+			V_REGION_CITY := null;
+		end if;
+	end if;
+	
+	[CSMD].Set_Validate_Prop (V_VB, 'V_REGION.NAME', 'V', '.ForeColor = ' || case v_addr_obj.REGION.is_actual when false then 'vbRed' else 'vbBlack' end);
+	[CSMD].Set_Validate_Prop (V_VB, 'V_DISTRICT.NAME', 'V', '.ForeColor = ' || case v_addr_obj.DISTRICT.is_actual when false then 'vbRed' else 'vbBlack' end);
+	[CSMD].Set_Validate_Prop (V_VB, 'V_SETTLEMENT.NAME', 'V', '.ForeColor = ' || case v_addr_obj.SETTLEMENT.is_actual when false then 'vbRed' else 'vbBlack' end);
+	[CSMD].Set_Validate_Prop (V_VB, 'V_CITY.NAME', 'V', '.ForeColor = ' || case v_addr_obj.CITY.is_actual when false then 'vbRed' else 'vbBlack' end);
+	[CSMD].Set_Validate_Prop (V_VB, 'V_TOWN.NAME', 'V', '.ForeColor = ' || case v_addr_obj.TOWN.is_actual when false then 'vbRed' else 'vbBlack' end);
+	[CSMD].Set_Validate_Prop (V_VB, 'V_SUBAREA.NAME', 'V', '.ForeColor = ' || case v_addr_obj.SUBAREA.is_actual when false then 'vbRed' else 'vbBlack' end);
+	[CSMD].Set_Validate_Prop (V_VB, 'V_STREET.NAME', 'V', '.ForeColor = ' || case v_addr_obj.STREET.is_actual when false then 'vbRed' else 'vbBlack' end);
+	
+end;
+
+-- проверка, что объект существует в том делении, в котором мы хотим его проверить
+procedure is_obj_exists(P_ADDR_OBJ_REF ref [ADDRESS_OBJ], p_struct number) is
+	v_struct_type string;
+	v_cnt integer;
+begin
+	if V_NOT_CHECK_STRUCT = '0' then
+		if p_struct = 1 and P_ADDR_OBJ_REF.[PARENT] is null and P_ADDR_OBJ_REF.[KIND].[OBJ_LEVEL] <> 1 then
+			for (select x(x)
+				 in ::[ADDR_OBJ_HIERAR]
+				 where x.[ADDR_OBJ] = P_ADDR_OBJ_REF
+				 fetch 1)
+			loop
+				v_struct_type := 'муниципальном';
+			end loop;
+		elsif p_struct = 2 and P_ADDR_OBJ_REF.[PARENT] is not null then
+			select x(count(1))
+			in ::[ADDR_OBJ_HIERAR]
+			where x.[ADDR_OBJ] = P_ADDR_OBJ_REF
+			into v_cnt;
+			
+			if v_cnt = 0 then
+				v_struct_type := 'административном';
+			end if;
+		end if;
+		if v_struct_type is not null then
+			pragma error('Адресный объект существует только в '||v_struct_type||' делении! Необходимо выбрать объект, который существует в обоих видах деления.');
+		end if;
+	end if;
+end;
+
+function get_addr_obj_guid(p_str varchar2) return varchar2 is
+-- Получение guid (без разделителей), если переданная строка является guid-ом
+begin
+	p_str := regexp_substr(&normalize_text(replace(lower(p_str),'-')),'^\S{32,33}');
+	if regexp_like(p_str,'^[0-9a-f]{32}$') then
+		return p_str;
+	end if;
+	return null;
+end;
+
+function get_addr_objects_by_guid(p_guid varchar2) return addr_objects_ref_tabtype is
+-- Получение адресного объекта по guid
+	v_tab addr_objects_ref_tabtype;
+	v_g1 varchar2(2);
+	v_g2 varchar2(2);
+	v_g3 varchar2(2);
+	v_g4 varchar2(2);
+begin
+	&debug('get_addr_objects_by_guid# p_guid = '||p_guid,1)
+-- Используется алгоритм регистронезависимого поиска по нормализованной строке, использующий обычный индекс (не по функции).
+-- Из строки поиска берутся первые два символа (например, ab) и формируется условие, учитывающее все их комбинации в разных регистрах:
+-- 	(col like 'ab%' or col like 'aB%' or col like 'Ab%' or col like 'AB%')
+-- Это условие будет использовать индекс по колонке col, отбирая по первым двум буквам ~0.4% всех записей ( = 1/(16*16), т.к. в guid могут быть только 16-ричные цифры "0123456789abcdef").
+-- Среди этих, отобранных по индексу записей, будет выполнятся поиск по выражению.
+	v_g1 := lower(substr(p_guid,1,2));
+	if regexp_like(v_g1,'^\d\d') then -- Оба первых символа - цифры
+		null; -- нет комбинаций с разными регистрами
+	elsif regexp_like(v_g1,'^\d') or regexp_like(v_g1,'^.\d') then -- Один из первых двух символов - цифра
+		v_g2 := upper(v_g1); -- нет комбинаций с разными регистрами
+	else -- Оба первых символа - буквы. Есть все 4 варианта с разными регистрами
+		v_g2 := substr(v_g1,1,1)||upper(substr(v_g1,2,1));
+		v_g3 := upper(substr(v_g1,1,1))||substr(v_g1,2,1);
+		v_g4 := upper(substr(v_g1,1,1))||upper(substr(v_g1,2,1));
+	end if;
+	&debug('get_addr_objects_by_guid# v_g1='||v_g1||'; v_g2='||v_g2||'; v_g3='||v_g3||'; v_g4='||v_g4,10)
+	if v_g4 is not null then
+		select r(r)
+			in ::[ADDRESS_OBJ]
+			where (r.[AOGUID] like v_g1||'%' or r.[AOGUID] like v_g2||'%' or r.[AOGUID] like v_g3||'%' or r.[AOGUID] like v_g4||'%')
+				and &normalize_text(replace(lower(r.[AOGUID]),'-')) = p_guid
+			order by nvl(r.[ARCHAIC],false)
+		into v_tab;
+	elsif v_g2 is not null then
+		select r(r)
+			in ::[ADDRESS_OBJ]
+			where (r.[AOGUID] like v_g1||'%' or r.[AOGUID] like v_g2||'%')
+				and &normalize_text(replace(lower(r.[AOGUID]),'-')) = p_guid
+			order by nvl(r.[ARCHAIC],false)
+		into v_tab;
+	elsif v_g1 is not null then
+		select r(r)
+			in ::[ADDRESS_OBJ]
+			where r.[AOGUID] like v_g1||'%'
+				and &normalize_text(replace(lower(r.[AOGUID]),'-')) = p_guid
+			order by nvl(r.[ARCHAIC],false)
+		into v_tab;
+	end if;	
+	&debug('get_addr_objects_by_guid# v_tab.count = '||v_tab.count,1)
+	return v_tab;
+end;
+
+function str_to_arr
+	( p_str varchar2(32767)
+	, p_delimiters varchar2 := ',;' -- Каждый символ рассматривается как разделитель
+	)
+	return rtl.string_table
+is
+	v_arr rtl.string_table;
+	v_pos1 pls_integer := 1;
+	v_pos2 pls_integer;
+	v_one varchar2(32767);
+	v_str_size constant integer := length(p_str);
+	v_dlm_size constant integer := 1;
+begin
+	if p_str is null or p_delimiters is null then
+		return v_arr;
+	end if;
+	loop
+		v_pos2 := regexp_instr(p_str,'['||p_delimiters||']',v_pos1);
+		v_one := &normalize_text(substr(p_str, v_pos1, case when v_pos2 > 0 then v_pos2 else v_str_size + 1 end - v_pos1));
+		if v_one is not null then
+			v_arr(v_arr.count+1) := v_one;
+		end if;
+		exit when v_pos2 = 0 or v_pos2 is null;
+		v_pos1 := v_pos2 + v_dlm_size;
+	end loop;
+	return v_arr;
+end;
+
+v_addr_types rtl.string_table;
+
+procedure init_addr_types is
+	-- Уровни адресных объектов
+	v_lvl_1 integer;	v_lvl_2 integer;	v_lvl_3 integer;	v_lvl_4 integer;	v_lvl_5 integer;
+	v_lvl_6 integer;	v_lvl_7 integer;	v_lvl_8 integer;	v_lvl_13 integer;	v_lvl_14 integer;
+begin
+	if v_addr_types.count > 0 then
+		return;
+	end if;
+	v_lvl_1 := ::[PERSONAL_ADDRESS].[API_LIB].get_obj_level(1); -- Регион
+	v_lvl_2 := ::[PERSONAL_ADDRESS].[API_LIB].get_obj_level(2); -- Административный район
+	v_lvl_3 := ::[PERSONAL_ADDRESS].[API_LIB].get_obj_level(3); -- Муниципальный район
+	v_lvl_4 := ::[PERSONAL_ADDRESS].[API_LIB].get_obj_level(4); -- Муниципальное поселение
+	v_lvl_5 := ::[PERSONAL_ADDRESS].[API_LIB].get_obj_level(5); -- Город
+	v_lvl_6 := ::[PERSONAL_ADDRESS].[API_LIB].get_obj_level(6); -- Населённый пункт
+	v_lvl_7 := ::[PERSONAL_ADDRESS].[API_LIB].get_obj_level(7); -- ЭПС
+	v_lvl_8 := ::[PERSONAL_ADDRESS].[API_LIB].get_obj_level(8); -- Улица
+	v_lvl_13 := ::[PERSONAL_ADDRESS].[API_LIB].get_obj_level(13); -- Автономный округ (устаревшее)
+	v_lvl_14 := ::[PERSONAL_ADDRESS].[API_LIB].get_obj_level(14); -- Внутригородская территория (устаревшее)
+	select r(&normalize_text_upper(r.[NAME]) : name)
+		in ::[PEOPLE_PLACE]
+		where r.[OBJ_LEVEL] in (v_lvl_1,v_lvl_2,v_lvl_3,v_lvl_4,v_lvl_5,v_lvl_6,v_lvl_7,v_lvl_8,v_lvl_13,v_lvl_14)
+			and &normalize_text_upper(r.[NAME]) is not null
+	union
+	select r(&normalize_text_upper(r.[SHORT_NAME]) : name)
+		in ::[PEOPLE_PLACE]
+		where r.[OBJ_LEVEL] in (v_lvl_1,v_lvl_2,v_lvl_3,v_lvl_4,v_lvl_5,v_lvl_6,v_lvl_7,v_lvl_8,v_lvl_13,v_lvl_14)
+			and &normalize_text_upper(r.[SHORT_NAME]) is not null
+	order by length(r.name) desc
+	into v_addr_types;
+	&debug('init_addr_types# v_addr_types.count = '||v_addr_types.count,1)
+end;
+
+function get_addr_name_without_type(p_name varchar2) return varchar2 is
+	v_name varchar2(4000);
+	v_name_length integer;
+	v_type_length integer;
+begin -- Вырезаем тип адресного объекта. Оставляем только наименование
+	init_addr_types;
+	v_name_length := nvl(length(p_name),0);
+	&debug('get_addr_name_without_type# p_name = '||p_name,1)
+	&debug('get_addr_name_without_type# v_name_length = '||v_name_length,1)
+	for i in 1..v_addr_types.count loop
+		v_type_length := nvl(length(v_addr_types(i)),0);
+		if v_name_length > v_type_length then
+			if substr(p_name,1,v_type_length) = v_addr_types(i) -- Тип в начале имени
+				and regexp_like(substr(p_name,v_type_length,2),'[^[:alnum:]_]') -- Среди символов на стыке типа и имени есть "разделитель" (не буква, не цифра и не подчерк)
+			then
+				v_name := &normalize_text(substr(p_name,v_type_length+1));
+			end if;
+			exit when v_name is not null;
+			if substr(p_name,-v_type_length) = v_addr_types(i) -- Тип в конце имени
+				and regexp_like(substr(p_name,-(v_type_length+1),2),'[^[:alnum:]_]') -- Среди символов на стыке типа и имени есть "разделитель"
+			then
+				v_name := &normalize_text(substr(p_name,1,(v_name_length-v_type_length)));
+			end if;
+			exit when v_name is not null;
+		end if;
+	end loop;
+	v_name := &normalize_addr_name(nvl(v_name,p_name));
+	&debug('get_addr_name_without_type# result = '||v_name,1)
+	return v_name;
+end;
+
+function get_addr_objects_by_str
+	( p_str varchar2
+	, p_struct number
+	)
+	return addr_objects_ref_tabtype
+is
+	v_tab addr_objects_ref_tabtype;
+	v_objectguid varchar2(36);
+	v_items rtl.string_table;
+	v_names rtl.string_table;
+	v_name varchar2(4000);
+	v_start_name_1 varchar2(4000);
+	v_start_name_2 varchar2(4000);
+	v_path_1 varchar2(4000);
+	v_path_2 varchar2(4000);
+begin
+	&debug('get_addr_objects_by_str# p_str = '||p_str,0)
+	v_objectguid := get_addr_obj_guid(p_str);
+	if v_objectguid is not null then
+		return get_addr_objects_by_guid(v_objectguid);
+	elsif p_str is not null then
+		v_items := str_to_arr(upper(p_str));
+		&debug('get_addr_objects_by_str# v_items.count = '||v_items.count,0)
+		if v_items.count > 0 then
+			for i in 1..v_items.count loop
+				&debug('get_addr_objects_by_str# v_items('||i||') = '||v_items(i),0)
+				v_name := get_addr_name_without_type(v_items(i));
+				if v_name is not null then
+					v_names(v_names.count+1) := v_name;
+					&debug('get_addr_objects_by_str# v_names('||v_names.count||') = '||v_names(v_names.count),0)
+				end if;
+			end loop;
+			&debug('get_addr_objects_by_str# v_names.count = '||v_names.count,0)
+			if v_names.count > 0 then
+				v_start_name_1 := upper(v_names(v_names.first));
+				v_start_name_2 := upper(v_names(v_names.last));
+				&debug('get_addr_objects_by_str# v_start_name_1 = '||v_start_name_1,0)
+				&debug('get_addr_objects_by_str# v_start_name_2 = '||v_start_name_2,0)
+				for i in 1..v_names.count loop
+					v_path_1 := v_path_1 || '#' ||upper(v_names(i)) || '#%';
+					v_path_2 := '#' ||upper(v_names(i)) || '#%' || v_path_2;
+				end loop;
+				&debug('get_addr_objects_by_str# v_path_1 = '||v_path_1,0)
+				&debug('get_addr_objects_by_str# v_path_2 = '||v_path_2,0)
+				select r(r.id)
+					in	(select rr
+							( rr.root_id : id
+							, analytic(row_number(), 'over(partition by [1] order by [2] desc)', rr.root_id, rr.lvl) : rnum
+							)
+							in	(with recursive rc(id, parent, root_id, root_guid, addr_path, lvl, root_arch, root_next, nocyc) as
+									(select x(x : id
+											, x.[PARENT] : parent
+											, x : root_id
+											, x.[AOGUID] : root_guid
+											, &normalize_addr_name(x.[NAME]) : addr_path
+											, 1 : lvl
+											, x.[ARCHAIC] : root_arch
+											, x.[NEW_NAME] : root_next
+											, ','||x||',')
+									 in ::[ADDRESS_OBJ]
+									 where (upper(x.[NAME]) like v_start_name_1||'%'
+											or upper(x.[NAME]) like v_start_name_2||'%'
+											or upper(x.[NAME]) like 'ИМ%'||v_start_name_1||'%'
+											or upper(x.[NAME]) like 'ИМ%'||v_start_name_2||'%'
+										   )
+										   and (nvl(x.[ARCHAIC],false) = false or x.[NEW_NAME] is null)
+									 union all
+									 select x(x : id
+											, x.[PARENT] : parent
+											, rcr.root_id : root_id
+											, rcr.root_guid : root_guid
+											, rcr.addr_path||'##'||&normalize_addr_name(x.[NAME]) : addr_path
+											, rcr.lvl+1 : lvl
+											, rcr.root_arch : root_arch
+											, rcr.root_next : root_next
+											, rcr.nocyc||x||',')
+									 in ::[ADDRESS_OBJ]
+									 join (rc : rcr) on rcr.parent = x and instr(rcr.nocyc, ','||x||',') = 0
+									)
+								 select a(a.root_id : root_id, a.root_guid : root_guid, '#'||a.addr_path||'#' : addr_path, a.lvl : lvl, a.root_arch : root_archaic, a.root_next : root_next)
+								 in rc
+								)
+							where rr.addr_path like v_path_1 or rr.addr_path like v_path_2
+							order by rr.root_archaic -- Приоритет у актуальных
+								, case when rr.root_next is null then 0 else 1 end -- К актуальным относим и тех, у кого не указана следующая изменённая запись
+								, case when rr.root_guid is not null then 0 else 1 end -- Приоритет у адре
+						)
+					where r.rnum = 1
+					fetch v_addr_objects_max_count
+				into v_tab;
+				&debug('get_addr_objects_by_str# v_addr_objects_max_count = '||v_addr_objects_max_count,0)
+				&debug('get_addr_objects_by_str# v_tab.count = '||v_tab.count,0)
+			end if;
+		end if;
+	end if;
+	return v_tab;
+end;
+
+procedure set_addr_str_info
+	( p_str out varchar2(4000)
+	, p_addr_rec ::[PERSONAL_ADDRESS].[API_LIB].addr_obj_expanded_rectype
+	, p_struct number
+	, p_add_ids boolean := false
+	)
+is
+	procedure add_item_str
+		( p_item_title varchar2(30)
+		, p_item_str varchar2(2000)
+		)
+	is
+	begin
+		if p_item_str is not null then
+			if p_str is not null then
+				p_str := p_str || NL$;
+			end if;
+			p_str := p_str || p_item_title || case when length(p_item_title) > 7 then ' ' else TB$ end || p_item_str || ';';
+		end if;
+	end;
+	procedure add_addr_item
+		( p_title varchar2(30)
+		, p_addr_obj ::[PERSONAL_ADDRESS].[API_LIB].addr_obj_rectype
+		)
+	is
+	begin
+		add_item_str
+			( p_title
+			, p_addr_obj.full_name
+				|| case when p_add_ids and p_addr_obj.id is not null then
+						' ('
+					||	p_addr_obj.id%id
+					||	case when p_addr_obj.ids.objectguid is not null then ', ' || p_addr_obj.ids.objectguid end
+					||	' )'
+					end
+			);
+	end;
+begin
+	add_item_str('Страна:', p_addr_rec.country.full_name);
+	add_addr_item('Регион:', p_addr_rec.region);
+	if p_struct = 1 then
+		add_addr_item('Район:', p_addr_rec.district);
+	elsif p_struct = 2 then
+		add_addr_item('Муниципальный район:', p_addr_rec.district);
+		add_addr_item('Сельское/городское поселение:', p_addr_rec.settlement);
+	end if;
+	add_addr_item('Город:', p_addr_rec.city);
+	add_addr_item('Населённый пункт:', p_addr_rec.town);
+	add_addr_item('ЭПС:', p_addr_rec.subarea);
+	add_addr_item('Улица:', p_addr_rec.street);
+	p_str := rtrim(p_str, ';');
+end;
+
+procedure FindAddrObjects(P_ADDR_STR in out varchar2(4000), p_struct number) is
+	v_addr_objects_refs addr_objects_ref_tabtype;
+	v_addr_obj_expanded ::[PERSONAL_ADDRESS].[API_LIB].addr_obj_expanded_rectype;
+	v_str string(4000);
+begin
+	&debug('FindAddrObjects',0)
+	P_ADDR_STR := &normalize_text(P_ADDR_STR);
+	V_ADDR_OBJECTS.delete;
+	v_addr_objects_refs := get_addr_objects_by_str(P_ADDR_STR, p_struct);
+	for i in 1..v_addr_objects_refs.count loop
+		&debug('v_addr_objects_refs(i)='||v_addr_objects_refs(i),0)
+		v_str := ::[PERSONAL_ADDRESS].[API_LIB].addr_obj_to_str(v_addr_objects_refs(i), case V_STRUCT.[0] when 1 then C_FMT_ADM when 2 then C_FMT_MUN end, ', ','0', V_STRUCT.[0]);
+		&debug('v_str='||v_str,0)
+		if v_str is not null then
+			V_ADDR_OBJECTS(i).[FIELD_1] := v_str;
+			V_ADDR_OBJECTS(i).[FIELD_2] := v_addr_objects_refs(i)%id;
+			v_addr_obj_expanded := ::[PERSONAL_ADDRESS].[API_LIB].get_addr_obj_expanded(v_addr_objects_refs(i), p_struct);
+			set_addr_str_info(V_ADDR_OBJECTS(i).[FIELD_3], v_addr_obj_expanded, V_STRUCT.[0], false);
+			set_addr_str_info(V_ADDR_OBJECTS(i).[FIELD_4], v_addr_obj_expanded, V_STRUCT.[0], true);
+			V_ADDR_OBJECTS(i).[BOOL_1]
+				:=	nvl(v_addr_obj_expanded.region.is_actual,true)
+				and	nvl(v_addr_obj_expanded.district.is_actual,true)
+				and	nvl(v_addr_obj_expanded.settlement.is_actual,true)
+				and	nvl(v_addr_obj_expanded.city.is_actual,true)
+				and	nvl(v_addr_obj_expanded.town.is_actual,true)
+				and	nvl(v_addr_obj_expanded.subarea.is_actual,true)
+				and	nvl(v_addr_obj_expanded.street.is_actual,true);
+		end if;
+	end loop;
+end;
+-- Перенесено из проверки и сделано public --Башкиров В.Г. 28.01.2025
+	public procedure getOKTMO(p_AddrObj ref [ADDRESS_OBJ], p_oktmo in out ref [OKTMO]) is
+		i integer;
+		v_find boolean := false;
+		type AddrHierarType is table of number;
+		v_AddrHierar AddrHierarType;
+		
+	begin
+		&debug('.getOKTMO ->- p_oktmo=['||p_oktmo.[CODE]||']-'||p_oktmo.[NAME],dp)
+		if p_AddrObj is null then
+			p_oktmo := null;
+		else
+			v_AddrHierar.delete;
+			for
+				(select x(x.[OKTMO]:c_oktmo) 
+				in ::[ADDR_OBJ_HIERAR]
+				where x.[ADDR_OBJ] = p_AddrObj 
+			) loop
+				v_AddrHierar(v_AddrHierar.count+1) := x.c_oktmo;
+			end loop;
+			
+			if v_AddrHierar.count = 1 then
+				p_oktmo := p_AddrObj.[OKTMO]; 
+			elsif v_AddrHierar.count > 0 then
+				i := v_AddrHierar.first;
+				while i is not null loop
+					if v_AddrHierar(i) = p_oktmo then
+						v_find := true;
+						exit;
+					end if;
+					i := v_AddrHierar.next(i);
+				end loop;
+				if not v_find then
+					p_oktmo := v_AddrHierar(v_AddrHierar.first);
+				end if;
+			else
+				p_oktmo := null;
+			end if;
+		end if;
+		&debug('.getOKTMO -<- p_oktmo=['||p_oktmo.[CODE]||']-'||p_oktmo.[NAME],dp)
+	end;
+PSH_GET_ADDR_OBJ (
+	@name('Адресный объект')       P_ADDR_OBJ_REF in out [ADDRESS_OBJ_REF],
+	@name('Строка с адресом')      P_ADDR_STR     in     [STRING_4000]     default null,
+	@name('Тип адресного деления') P_STRUCT       in out [SHORT2]
+) is
+
+validate is
+	
+	procedure KladrAndContext is
+	begin
+		v_kladr_mode := ::[PERSONAL_ADDRESS].[LIB].GET_KLADR_MODE(V_TYPE, V_CITY, V_COUNTRY);
+		::[PERSONAL_ADDRESS].[LIB].SET_VIEW_CONTEXT(V_TYPE, V_CITY);
+	end;
+	
+	r_addr_hierar [LIST_ADDR_HIERAR];
+	type h_data_t is table of [LIST_ADDR_HIERAR];
+	h_data h_data_t;
+
+	/** / --Перенесено в ЛО и сделано public --Башкиров В.Г. 28.01.2025
+	procedure getOKTMO(p_AddrObj ref [ADDRESS_OBJ], p_oktmo in out ref [OKTMO]) is
+		i integer;
+		v_find boolean := false;
+		type AddrHierarType is table of number;
+		v_AddrHierar AddrHierarType;
+		
+	begin
+		
+		if p_AddrObj is null then
+			p_oktmo := null;
+		else
+			v_AddrHierar.delete;
+			for
+				(select x(x.[OKTMO]:c_oktmo) 
+				in ::[ADDR_OBJ_HIERAR]
+				where x.[ADDR_OBJ] = p_AddrObj 
+			) loop
+				v_AddrHierar(v_AddrHierar.count+1) := x.c_oktmo;
+			end loop;
+			
+			if v_AddrHierar.count = 1 then
+				p_oktmo := p_AddrObj.[OKTMO]; 
+			elsif v_AddrHierar.count > 0 then
+				i := v_AddrHierar.first;
+				while i is not null loop
+					if v_AddrHierar(i) = p_oktmo then
+						v_find := true;
+						exit;
+					end if;
+					i := v_AddrHierar.next(i);
+				end loop;
+				if not v_find then
+					p_oktmo := v_AddrHierar(v_AddrHierar.first);
+				end if;
+			else
+				p_oktmo := null;
+			end if;
+		end if;
+	end;
+	/**/
+
+	procedure get_ListAddrHierar (p_AddrObj ref [ADDRESS_OBJ], p_Oktmo ref [OKTMO] default null) is
+		v_name [ADDRESS_OBJ].[NAME]%type;
+		v_nameP [ADDRESS_OBJ].[NAME]%type;
+		v_cntAddrHierar integer;
+	begin
+		
+		v_cntAddrHierar := 0;
+		V_NEED_CHOOSE_OKTMO := null;
+		if p_Oktmo is not null then
+			for
+				(select x(	  x%id:c_id
+							, x.[OKTMO]:c_oktmo_ref
+							, x.[OKTMO].[CODE]:c_oktmo
+							, x.[PARENTID]:c_parentID
+				) 
+				in ::[ADDR_OBJ_HIERAR]
+				where x.[ADDR_OBJ] = p_AddrObj
+				and x.[OKTMO] = p_Oktmo
+				fetch 1  
+			) loop
+				v_cntAddrHierar := v_cntAddrHierar+1;
+			end loop;
+			if v_cntAddrHierar > 0 then
+				V_LIST_ADDR_REF := null;
+				expand_(p_AddrObj, V_STRUCT.[0], p_OKTMO);
+				return;
+			end if;
+		end if;
+		
+		if p_AddrObj is not null then
+			v_name := p_AddrObj.[NAME];
+			h_data%init;
+			
+			for
+				(select x(	  x%id:c_id
+							, x.[OKTMO]:c_oktmo_ref
+							, x.[OKTMO].[CODE]:c_oktmo
+							, x.[PARENTID]:c_parentID
+				) 
+				in ::[ADDR_OBJ_HIERAR]
+				where x.[ADDR_OBJ] = p_AddrObj
+			) loop
+				r_addr_hierar.[NAME] := v_name;
+				r_addr_hierar.[REC_ADDR_HIERAR] := x.c_id;
+				r_addr_hierar.[OKTMO] := x.c_oktmo;
+				v_nameP := null;
+				for (with recursive rc(id, addrObj, parent, oktmo, lvl, nocyc) as (
+						select h(h, h.[ADDR_OBJ], h.[PARENTID], h.[OKTMO], 1, ','||h||',') in ::[ADDR_OBJ_HIERAR]
+																			where h.[ADDR_OBJ] = p_AddrObj
+																			and h.[OKTMO] = x.c_oktmo_ref
+						union all
+						select h(h, h.[ADDR_OBJ], h.[PARENTID], h.[OKTMO], rr.lvl+1, rr.nocyc||h||',')
+						in ::[ADDR_OBJ_HIERAR]
+						join (rc : rr) on rr.parent = h.[ADDR_OBJ] and h.oktmo = x.c_oktmo_ref and instr(rr.nocyc, ','||h||',') = 0)
+					 select r(rr.lvl : lvl
+							, r.[ADDR_OBJ]%class : class_id
+							, r.[ADDR_OBJ].[NAME] : name
+							)
+					 in ::[ADDR_OBJ_HIERAR]
+					 join (rc : rr) on rr.id = r
+					 order by rr.lvl)
+				loop
+					if r.class_id = ::[REGION_AREA]%class then
+						v_nameP := r.name;
+						exit;
+					end if;
+				end loop;
+				r_addr_hierar.[REGION_NAME] := v_nameP;
+				h_data(h_data.count + 1) := r_addr_hierar;
+			end loop;
+		end if;
+		v_cntAddrHierar := h_data.count;
+		
+		if v_cntAddrHierar > 1 then
+			V_LIST_ADDR_ARR%delete;
+			V_LIST_ADDR_REF := null;
+			V_LIST_ADDR_ARR := rtl.next_value('SEQ_ID');
+			insert into V_LIST_ADDR_ARR for i in h_data loop
+				r(
+					r.[NAME] = h_data(i).[NAME]
+					, r.[REC_ADDR_HIERAR] = h_data(i).[REC_ADDR_HIERAR]
+					, r.[OKTMO] = h_data(i).[OKTMO]
+					, r.[REGION_NAME] = h_data(i).[REGION_NAME]
+				 );
+
+			if V_LIST_ADDR_ARR%size(0) > 1 then
+				V_NEED_CHOOSE_OKTMO := '1';
+			end if;
+		else
+			V_LIST_ADDR_REF := null;
+			V_OKTMO := p_AddrObj.[OKTMO];
+			expand_(p_AddrObj, V_STRUCT.[0], V_OKTMO);
+		end if;
+	end;
+	
+	procedure setOktmo is
+	begin
+		V_LIST_ADDR_REF := null;
+		V_NEED_CHOOSE_OKTMO := null;
+		&debug('.setOktmo ->- V_PARENT='||V_PARENT.[NAME]||'   V_STRUCT.[0]='||V_STRUCT.[0],dp)
+		if V_PARENT is null or V_STRUCT.[0] = 1 then
+			v_curOktmo=V_OKTMO := null;
+		elsif V_STRUCT.[0] = 2 then
+			getOKTMO(V_PARENT, V_OKTMO);
+			v_curOktmo := V_OKTMO;
+		end if;
+		&debug('.setOktmo -<- V_OKTMO=['||V_OKTMO.[CODE]||']-'||V_OKTMO.[NAME],dp)
+	end;
+	
+	v_addr_obj ref [ADDRESS_OBJ];
+	
+begin
+
+	if P_MESSAGE = 'DEFAULT' and P_INFO is null or P_MESSAGE = 'VALIDATE' and P_INFO = '%PLPCALL%' then
+		
+		::[RUNTIME].[STORAGE_MGR].init_temp_table('LIST_ADDR_HIERAR');
+
+		executor.set_context('ADDR_OBJ#PARENT', null);
+		
+		if sys_context(user_context, 'KLADR_MODE') is null then
+			executor.set_context('KLADR_MODE', '1');
+		end if;
+		
+		V_STRUCT.[0] := coalesce(P_STRUCT, 1);   
+		V_ACTUAL := nvl(V_ACTUAL, '0');
+		V_LEVEL_CITY := ::[PERSONAL_ADDRESS].[API_LIB].get_obj_level(5, 3);
+		V_LEVEL_SUBAREA := ::[PERSONAL_ADDRESS].[API_LIB].get_obj_level(7, 3);
+
+		&debug('(1)V_OKTMO=['||V_OKTMO.[CODE]||']-'||V_OKTMO.[NAME],dp)
+		expand_(P_ADDR_OBJ_REF, V_STRUCT.[0], V_OKTMO);
+		&debug('(2)V_OKTMO=['||V_OKTMO.[CODE]||']-'||V_OKTMO.[NAME],dp)
+
+		V_MODE := nvl(V_MODE, 4);
+		case V_MODE of
+		:1:  V_DISTRICT=V_SETTLEMENT=V_CITY=V_TOWN=V_SUBAREA=V_STREET := null;
+		:2:  V_CITY=V_TOWN=V_SUBAREA=V_STREET := null;
+		:3:  V_TOWN=V_SUBAREA=V_STREET := null;
+		:4:  V_SUBAREA=V_STREET := null;
+		:5:  V_STREET := null;
+		end;
+		V_NOT_CHECK_STRUCT := coalesce(V_NOT_CHECK_STRUCT, '0');
+		
+		KladrAndContext;
+		if P_ADDR_STR is not null then
+			FindAddrObjects(P_ADDR_STR, V_STRUCT.[0]);
+		end if;
+	elsif P_MESSAGE = 'VALIDATE' then
+		&debug('p_info='||p_info,dp)
+		if P_INFO in ('OK', 'CANCEL') then
+			executor.set_context('ADDR_OBJ#PARENT', null);
+		end if;
+					
+		if P_INFO = '%VAR%.V_LIST_ADDR_REF' then
+			declare
+				v_addrHierar ref [ADDR_OBJ_HIERAR];
+			begin
+				V_NEED_CHOOSE_OKTMO := null;
+				v_addrHierar := V_LIST_ADDR_REF.[REC_ADDR_HIERAR];
+				v_curOktmo=V_OKTMO := v_addrHierar.[OKTMO];
+				&debug('(3)V_OKTMO=['||V_OKTMO.[CODE]||']-'||V_OKTMO.[NAME],dp)
+				expand_(v_addrHierar.[ADDR_OBJ], V_STRUCT.[0], V_OKTMO);
+				&debug('(4)V_OKTMO=['||V_OKTMO.[CODE]||']-'||V_OKTMO.[NAME],dp)
+			end;
+		end if;
+		
+		if P_INFO = '%VAR%.V_COUNTRY' then
+			V_REGION=V_DISTRICT=V_SETTLEMENT=V_CITY=V_TOWN=V_SUBAREA=V_STREET := null;
+			V_PARENT := null;
+			setOktmo;
+			KladrAndContext;
+			
+		elsif P_INFO = '%VAR%.V_REGION' then
+			V_DISTRICT=V_SETTLEMENT=V_CITY=V_TOWN=V_SUBAREA=V_STREET := null;
+			V_PARENT := V_REGION%id;
+			executor.set_context('ADDR_OBJ#PARENT', V_PARENT);
+			KladrAndContext;
+			if V_REGION is not null then
+				if V_STRUCT.[0] = 2 then
+					getOKTMO(V_REGION, V_OKTMO);
+					v_curOktmo := V_OKTMO;
+				else
+					v_curOktmo=V_OKTMO := null;
+				end if;
+				expand_(V_REGION, V_STRUCT.[0], V_OKTMO);
+				&debug('(7)V_OKTMO=['||V_OKTMO.[CODE]||']-'||V_OKTMO.[NAME],dp)
+			else
+				setOktmo;
+			end if;
+			
+			
+		elsif P_INFO = '%VAR%.V_DISTRICT' then
+			V_SETTLEMENT=V_CITY=V_TOWN=V_SUBAREA=V_STREET := null;
+			V_PARENT := coalesce(V_DISTRICT%id, V_REGION%id);
+			executor.set_context('ADDR_OBJ#PARENT', V_PARENT);
+			KladrAndContext;
+			if V_DISTRICT is not null then
+				if V_STRUCT.[0] = 2 then
+					getOKTMO(V_DISTRICT, V_OKTMO);
+					v_curOktmo := V_OKTMO;
+				else
+					v_curOktmo=V_OKTMO := null;
+				end if;
+				expand_(V_DISTRICT, V_STRUCT.[0], V_OKTMO);
+			else
+				setOktmo;
+			end if;
+			
+		elsif P_INFO = '%VAR%.V_SETTLEMENT' then
+			V_CITY=V_TOWN=V_SUBAREA=V_STREET := null;
+			V_PARENT := coalesce(V_SETTLEMENT%id, V_DISTRICT%id, V_REGION%id);
+			executor.set_context('ADDR_OBJ#PARENT', V_PARENT);
+			if V_SETTLEMENT is not null then
+				if V_STRUCT.[0] = 2 then
+					getOKTMO(V_SETTLEMENT, V_OKTMO);
+					v_curOktmo := V_OKTMO;
+				else
+					v_curOktmo=V_OKTMO := null;
+				end if;
+				expand_(V_SETTLEMENT, V_STRUCT.[0], V_OKTMO);
+			else
+				setOktmo;
+			end if;
+			
+		elsif P_INFO = '%VAR%.V_CITY' then
+			V_TOWN=V_SUBAREA=V_STREET := null;
+			V_PARENT := coalesce(V_CITY%id, V_SETTLEMENT%id, V_DISTRICT%id, V_REGION%id);
+			executor.set_context('ADDR_OBJ#PARENT', V_PARENT);
+			KladrAndContext;
+			
+			if V_CITY is not null then
+				if V_STRUCT.[0] = 2 then
+					getOKTMO(V_CITY, V_OKTMO);
+					get_ListAddrHierar(V_CITY, v_curOktmo);
+					v_curOktmo := V_OKTMO;
+				else
+					V_LIST_ADDR_REF := null;
+					v_curOktmo=V_OKTMO := null;
+					expand_(V_CITY, V_STRUCT.[0]);
+				end if;
+			else
+				setOktmo;
+			end if;
+			
+		elsif P_INFO = '%VAR%.V_TOWN' then
+			V_SUBAREA=V_STREET := null;
+			V_PARENT := coalesce(V_TOWN%id, V_CITY%id, V_SETTLEMENT%id, V_DISTRICT%id, V_REGION%id);
+			executor.set_context('ADDR_OBJ#PARENT', V_PARENT);
+			KladrAndContext;
+			if V_TOWN is not null then
+				if V_STRUCT.[0] = 2 then
+					getOKTMO(V_TOWN, V_OKTMO);
+					get_ListAddrHierar(V_TOWN, v_curOktmo);
+					v_curOktmo := V_OKTMO;
+				else
+					V_LIST_ADDR_REF := null;
+					v_curOktmo=V_OKTMO := null;
+					expand_(V_TOWN, V_STRUCT.[0]);
+				end if;
+			else
+				setOktmo;
+			end if;
+			
+		elsif P_INFO = '%VAR%.V_SUBAREA' then
+			V_STREET := null;
+			V_PARENT := coalesce(V_SUBAREA%id, V_TOWN%id, V_CITY%id, V_SETTLEMENT%id, V_DISTRICT%id, V_REGION%id);
+			executor.set_context('ADDR_OBJ#PARENT', V_PARENT);
+			
+			if V_SUBAREA is not null then
+				if V_STRUCT.[0] = 2 then
+					get_ListAddrHierar(V_SUBAREA);
+				else
+					V_LIST_ADDR_REF := null;
+					v_curOktmo=V_OKTMO := null;
+					expand_(V_SUBAREA, V_STRUCT.[0]);
+				end if;
+			else
+				setOktmo;
+			end if;
+
+
+
+		elsif P_INFO = '%VAR%.V_STREET' then
+			if V_STREET is not null then
+				if V_STRUCT.[0] = 2 then
+					get_ListAddrHierar(V_STREET);
+				else
+					V_LIST_ADDR_REF := null;
+					v_curOktmo=V_OKTMO := null;
+					expand_(V_STREET, V_STRUCT.[0]);
+				end if;
+			else
+				setOktmo;
+			end if;
+			
+			
+			
+		elsif P_INFO = '%VAR%.V_STRUCT.0' then
+			v_addr_obj := coalesce(V_STREET, V_SUBAREA, V_TOWN, V_CITY, V_DISTRICT_CITY, V_DISTRICT, V_REGION_CITY, V_REGION); 
+			is_obj_exists(v_addr_obj, V_STRUCT.[0]);
+			if V_STRUCT.[0] = 2 then
+				getOKTMO(v_addr_obj, V_OKTMO);
+				v_curOktmo := V_OKTMO;
+			end if;
+			expand_(v_addr_obj, V_STRUCT.[0], V_OKTMO);
+			V_ADDR_OBJECTS.delete;
+			V_ADDR_INFO := null;
+			
+		elsif P_INFO = 'SetContext_District' then
+			V_PARENT := V_REGION%id;
+			executor.set_context('ADDR_OBJ#PARENT', V_PARENT);
+
+		elsif P_INFO = 'SetContext_Settlement' then
+			V_PARENT := coalesce(V_DISTRICT%id, V_REGION%id);
+			executor.set_context('ADDR_OBJ#PARENT', V_PARENT);	
+			
+		elsif P_INFO = 'SetContext_City' then
+			V_PARENT := coalesce(V_SETTLEMENT%id, V_DISTRICT%id, V_REGION%id);
+			executor.set_context('ADDR_OBJ#PARENT', V_PARENT);
+			
+		elsif P_INFO = 'SetContext_Town' then
+			V_PARENT := coalesce(V_CITY%id, V_SETTLEMENT%id, V_DISTRICT%id, V_REGION%id);
+			executor.set_context('ADDR_OBJ#PARENT', V_PARENT);
+			
+		elsif P_INFO = 'SetContext_Subarea' then
+			V_PARENT := coalesce(V_TOWN%id, V_CITY%id, V_SETTLEMENT%id, V_DISTRICT%id, V_REGION%id);
+			executor.set_context('ADDR_OBJ#PARENT', V_PARENT);
+			
+		elsif P_INFO = 'SetContext_Street' then
+			V_PARENT := coalesce(V_SUBAREA%id, V_TOWN%id, V_CITY%id, V_SETTLEMENT%id, V_DISTRICT%id, V_REGION%id);
+			executor.set_context('ADDR_OBJ#PARENT', V_PARENT);
+		
+		elsif P_INFO = 'FindButton' then
+			FindAddrObjects(P_ADDR_STR, V_STRUCT.[0]);
+
+		elsif P_INFO = 'SetFindedAddrObj' then
+			expand_(V_ADDR_OBJECTS(V_ROW).[FIELD_2], V_STRUCT.[0], V_OKTMO);
+		
+		end if;
+
+		if        V_STREET is not null then null;	&debug('!       V_STREET='||       V_STREET.[SHORT_NAME]||' '||       V_STREET%class||'.'||       V_STREET%id||' ['||       V_STREET.[OKTMO].[CODE]||']-'||       V_STREET.[OKTMO].[NAME],dp)
+		end if;
+		if       V_SUBAREA is not null then null;	&debug('!      V_SUBAREA='||      V_SUBAREA.[SHORT_NAME]||' '||      V_SUBAREA%class||'.'||      V_SUBAREA%id||' ['||      V_SUBAREA.[OKTMO].[CODE]||']-'||      V_SUBAREA.[OKTMO].[NAME],dp)
+		end if;
+		if          V_TOWN is not null then null;	&debug('!         V_TOWN='||         V_TOWN.[SHORT_NAME]||' '||         V_TOWN%class||'.'||         V_TOWN%id||' ['||         V_TOWN.[OKTMO].[CODE]||']-'||         V_TOWN.[OKTMO].[NAME],dp)
+		end if;
+		if          V_CITY is not null then null;	&debug('!         V_CITY='||         V_CITY.[SHORT_NAME]||' '||         V_CITY%class||'.'||         V_CITY%id||' ['||         V_CITY.[OKTMO].[CODE]||']-'||         V_CITY.[OKTMO].[NAME],dp)
+		end if;
+		if V_DISTRICT_CITY is not null then null;	&debug('!V_DISTRICT_CITY='||V_DISTRICT_CITY.[SHORT_NAME]||' '||V_DISTRICT_CITY%class||'.'||V_DISTRICT_CITY%id||' ['||V_DISTRICT_CITY.[OKTMO].[CODE]||']-'||V_DISTRICT_CITY.[OKTMO].[NAME],dp)
+		end if;
+		if    V_SETTLEMENT is not null then null;	&debug('!   V_SETTLEMENT='||   V_SETTLEMENT.[SHORT_NAME]||' '||   V_SETTLEMENT%class||'.'||   V_SETTLEMENT%id||' ['||   V_SETTLEMENT.[OKTMO].[CODE]||']-'||   V_SETTLEMENT.[OKTMO].[NAME],dp)
+		end if;
+		if      V_DISTRICT is not null then null;	&debug('!     V_DISTRICT='||     V_DISTRICT.[SHORT_NAME]||' '||     V_DISTRICT%class||'.'||     V_DISTRICT%id||' ['||     V_DISTRICT.[OKTMO].[CODE]||']-'||     V_DISTRICT.[OKTMO].[NAME],dp)
+		end if;
+		if   V_REGION_CITY is not null then null;	&debug('!  V_REGION_CITY='||  V_REGION_CITY.[SHORT_NAME]||' '||  V_REGION_CITY%class||'.'||  V_REGION_CITY%id||' ['||  V_REGION_CITY.[OKTMO].[CODE]||']-'||  V_REGION_CITY.[OKTMO].[NAME],dp)
+		end if;
+		if        V_REGION is not null then null;	&debug('!       V_REGION='||       V_REGION.[SHORT_NAME]||' '||       V_REGION%class||'.'||       V_REGION%id||' ['||       V_REGION.[OKTMO].[CODE]||']-'||       V_REGION.[OKTMO].[NAME],dp)
+		end if;
+		if  P_ADDR_OBJ_REF is not null then null;	&debug('! P_ADDR_OBJ_REF='|| P_ADDR_OBJ_REF.[SHORT_NAME]||' '|| P_ADDR_OBJ_REF%class||'.'|| P_ADDR_OBJ_REF%id||' ['||P_ADDR_OBJ_REF.[OKTMO].[CODE]||']-'||P_ADDR_OBJ_REF.[OKTMO].[NAME],dp)
+		end if;
+		if         V_OKTMO is not null then null;	&debug('!        V_OKTMO=['||V_OKTMO.[CODE]||']-'||V_OKTMO.[NAME],dp)
+		end if;
+	end if;
+end;
+
+execute is
+p_oktmo ref [OKTMO];
+begin
+	-- адресный объект всегда возвращаем в административном делении, но для этого он там должен существовать
+	&debug('>       V_STREET='||       V_STREET.[SHORT_NAME]||' '||       V_STREET%class||'.'||       V_STREET%id||' ['||       V_STREET.[OKTMO].[CODE]||']-'||       V_STREET.[OKTMO].[NAME],dp)
+	&debug('>      V_SUBAREA='||      V_SUBAREA.[SHORT_NAME]||' '||      V_SUBAREA%class||'.'||      V_SUBAREA%id||' ['||      V_SUBAREA.[OKTMO].[CODE]||']-'||      V_SUBAREA.[OKTMO].[NAME],dp)
+	&debug('>         V_TOWN='||         V_TOWN.[SHORT_NAME]||' '||         V_TOWN%class||'.'||         V_TOWN%id||' ['||         V_TOWN.[OKTMO].[CODE]||']-'||         V_TOWN.[OKTMO].[NAME],dp)
+	&debug('>         V_CITY='||         V_CITY.[SHORT_NAME]||' '||         V_CITY%class||'.'||         V_CITY%id||' ['||         V_CITY.[OKTMO].[CODE]||']-'||         V_CITY.[OKTMO].[NAME],dp)
+	&debug('>V_DISTRICT_CITY='||V_DISTRICT_CITY.[SHORT_NAME]||' '||V_DISTRICT_CITY%class||'.'||V_DISTRICT_CITY%id||' ['||V_DISTRICT_CITY.[OKTMO].[CODE]||']-'||V_DISTRICT_CITY.[OKTMO].[NAME],dp)
+	&debug('>   V_SETTLEMENT='||   V_SETTLEMENT.[SHORT_NAME]||' '||   V_SETTLEMENT%class||'.'||   V_SETTLEMENT%id||' ['||   V_SETTLEMENT.[OKTMO].[CODE]||']-'||   V_SETTLEMENT.[OKTMO].[NAME],dp)
+	&debug('>     V_DISTRICT='||     V_DISTRICT.[SHORT_NAME]||' '||     V_DISTRICT%class||'.'||     V_DISTRICT%id||' ['||     V_DISTRICT.[OKTMO].[CODE]||']-'||     V_DISTRICT.[OKTMO].[NAME],dp)
+	&debug('>  V_REGION_CITY='||  V_REGION_CITY.[SHORT_NAME]||' '||  V_REGION_CITY%class||'.'||  V_REGION_CITY%id||' ['||  V_REGION_CITY.[OKTMO].[CODE]||']-'||  V_REGION_CITY.[OKTMO].[NAME],dp)
+	&debug('>       V_REGION='||       V_REGION.[SHORT_NAME]||' '||       V_REGION%class||'.'||       V_REGION%id||' ['||       V_REGION.[OKTMO].[CODE]||']-'||       V_REGION.[OKTMO].[NAME],dp)
+	&debug('>        V_OKTMO=['||V_OKTMO.[CODE]||']-'||V_OKTMO.[NAME],dp)
+
+	P_ADDR_OBJ_REF := coalesce(V_STREET, V_SUBAREA, V_TOWN, V_CITY, V_DISTRICT_CITY, V_SETTLEMENT, V_DISTRICT, V_REGION_CITY, V_REGION);
+	&debug('(1)P_ADDR_OBJ_REF='||P_ADDR_OBJ_REF%class||'.'||P_ADDR_OBJ_REF%id||' '||P_ADDR_OBJ_REF.[FULL_NAME]||' ['||P_ADDR_OBJ_REF.[OKTMO].[CODE]||']-'||P_ADDR_OBJ_REF.[OKTMO].[NAME],dp2)
+
+	is_obj_exists(P_ADDR_OBJ_REF, 1);
+	&debug('(2)P_ADDR_OBJ_REF='||P_ADDR_OBJ_REF%class||'.'||P_ADDR_OBJ_REF%id||' '||P_ADDR_OBJ_REF.[FULL_NAME]||' ['||P_ADDR_OBJ_REF.[OKTMO].[CODE]||']-'||P_ADDR_OBJ_REF.[OKTMO].[NAME],dp2)
+
+	expand_(P_ADDR_OBJ_REF, 1);
+	&debug('(3)P_ADDR_OBJ_REF='||P_ADDR_OBJ_REF%class||'.'||P_ADDR_OBJ_REF%id||' '||P_ADDR_OBJ_REF.[FULL_NAME]||' ['||P_ADDR_OBJ_REF.[OKTMO].[CODE]||']-'||P_ADDR_OBJ_REF.[OKTMO].[NAME],dp2)
+
+	P_ADDR_OBJ_REF := coalesce(V_STREET, V_SUBAREA, V_TOWN, V_CITY, V_DISTRICT_CITY, V_SETTLEMENT, V_DISTRICT, V_REGION_CITY, V_REGION);
+	&debug('(4)P_ADDR_OBJ_REF='||P_ADDR_OBJ_REF%class||'.'||P_ADDR_OBJ_REF%id||' '||P_ADDR_OBJ_REF.[FULL_NAME]||' ['||P_ADDR_OBJ_REF.[OKTMO].[CODE]||']-'||P_ADDR_OBJ_REF.[OKTMO].[NAME],dp2)
+
+	&debug('>>       V_STREET='||       V_STREET.[SHORT_NAME]||' '||       V_STREET%class||'.'||       V_STREET%id||' ['||       V_STREET.[OKTMO].[CODE]||']-'||       V_STREET.[OKTMO].[NAME],dp)
+	&debug('>>      V_SUBAREA='||      V_SUBAREA.[SHORT_NAME]||' '||      V_SUBAREA%class||'.'||      V_SUBAREA%id||' ['||      V_SUBAREA.[OKTMO].[CODE]||']-'||      V_SUBAREA.[OKTMO].[NAME],dp)
+	&debug('>>         V_TOWN='||         V_TOWN.[SHORT_NAME]||' '||         V_TOWN%class||'.'||         V_TOWN%id||' ['||         V_TOWN.[OKTMO].[CODE]||']-'||         V_TOWN.[OKTMO].[NAME],dp)
+	&debug('>>         V_CITY='||         V_CITY.[SHORT_NAME]||' '||         V_CITY%class||'.'||         V_CITY%id||' ['||         V_CITY.[OKTMO].[CODE]||']-'||         V_CITY.[OKTMO].[NAME],dp)
+	&debug('>>V_DISTRICT_CITY='||V_DISTRICT_CITY.[SHORT_NAME]||' '||V_DISTRICT_CITY%class||'.'||V_DISTRICT_CITY%id||' ['||V_DISTRICT_CITY.[OKTMO].[CODE]||']-'||V_DISTRICT_CITY.[OKTMO].[NAME],dp)
+	&debug('>>   V_SETTLEMENT='||   V_SETTLEMENT.[SHORT_NAME]||' '||   V_SETTLEMENT%class||'.'||   V_SETTLEMENT%id||' ['||   V_SETTLEMENT.[OKTMO].[CODE]||']-'||   V_SETTLEMENT.[OKTMO].[NAME],dp)
+	&debug('>>     V_DISTRICT='||     V_DISTRICT.[SHORT_NAME]||' '||     V_DISTRICT%class||'.'||     V_DISTRICT%id||' ['||     V_DISTRICT.[OKTMO].[CODE]||']-'||     V_DISTRICT.[OKTMO].[NAME],dp)
+	&debug('>>  V_REGION_CITY='||  V_REGION_CITY.[SHORT_NAME]||' '||  V_REGION_CITY%class||'.'||  V_REGION_CITY%id||' ['||  V_REGION_CITY.[OKTMO].[CODE]||']-'||  V_REGION_CITY.[OKTMO].[NAME],dp)
+	&debug('>>       V_REGION='||       V_REGION.[SHORT_NAME]||' '||       V_REGION%class||'.'||       V_REGION%id||' ['||       V_REGION.[OKTMO].[CODE]||']-'||       V_REGION.[OKTMO].[NAME],dp)
+	&debug('>>        V_OKTMO=['||V_OKTMO.[CODE]||']-'||V_OKTMO.[NAME],dp)
+
+	getOKTMO(P_ADDR_OBJ_REF, V_OKTMO);
+	&debug('>>   ОКТМО АОпоMUN:['||V_OKTMO.[CODE]||']-'||V_OKTMO.[NAME],dp)
+	
+	&debug('<  P_ADDR_OBJ_REF='|| P_ADDR_OBJ_REF.[SHORT_NAME]||' '|| P_ADDR_OBJ_REF%class||'.'|| P_ADDR_OBJ_REF%id||' ['||P_ADDR_OBJ_REF.[OKTMO].[CODE]||']-'||P_ADDR_OBJ_REF.[OKTMO].[NAME],dp)
+end;
+end;
+end;

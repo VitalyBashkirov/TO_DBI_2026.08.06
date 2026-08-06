@@ -1,0 +1,3970 @@
+class HOOK_BANK;
+
+@import_plsql(true)
+@name('BAD. РКО. Вычислить параметр. Вер.01')
+@tag('COPIED')
+static method RKO_CALC_PAR_333 is
+public CASH_SYM 		string;
+public ID_CASH_SYM 	string;
+public CASH_SUB_SYM 	string;
+public PAY_GOAL_PART 	[MEMO];
+public pay_system 		[MEMO];
+public date_begin 		[DATE];
+public date_end 		[DATE];
+public tar 		ref [TARIF_BO];
+public date_per		[DATE];
+public acc_ref			ref [AC_FIN];
+public bal_acc			string;
+public pragma include([SYSTEM]::[PRODUCTS]);
+
+-- sadunov
+public type tobtbl is table of number(1) index by string;
+public obtbl tobtbl;
+
+pragma INCLUDE(::[SYSTEM].[PRODUCTS_DBO]);
+pragma macro (OpDate, 'today := ::[BRANCH].SLIB.opdate_filial(rk1.[FILIAL])');
+
+pragma include(::[RUNTIME].[DEBUG_MACRO]);
+dp  number:=0;	--управление debug_pipe
+dp2 number:=10;	--управление debug_pipe
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+fmt	   string(10):='dd/mm/yyyy';
+fmtHMS string(22):='dd/mm/yyyy HH24:MI:SS';
+
+procedure wr_log (aPar string, a_msg string)
+is
+begin
+		UNIMP.Reset;
+		UNIMP.fMess := stdio.open(UNIMP.PathToFile, 'RKO_CALC_PAR_1' || '_msg_'||aPar||to_char(sysdate, '_YYYYMMDD_HH24_MI_SS'), 'w');
+		--UNIMP.WriteMess(to_char(sysdate, 'DD/MM/YYYY   HH24:MI:SS'), 0);
+		UNIMP.WriteMess(aPAR||'-'|| a_msg, 0);
+		stdio.close(UNIMP.fMess);
+end;
+
+
+/*Установка значения глобальной переменной ::[HOOK_BANK].[RKO_CALC_PAR_1].bal_acc*/
+public procedure set_calc_par_bal_acc(P_VALUE string) is 
+begin
+	::[HOOK_BANK].[RKO_CALC_PAR_1].bal_acc := P_VALUE;
+end;
+/*Получение глобальной переменной ::[HOOK_BANK].[RKO_CALC_PAR_1].bal_acc*/
+/*Получение глобальной переменной ::[HOOK_BANK].[RKO_CALC_PAR].bal_acc*/
+/*Возвращает значение глобальной переменной ::[HOOK_BANK].[RKO_CALC_PAR_1].bal_acc*/
+public function get_calc_par_bal_acc return string is 
+begin
+	return ::[HOOK_BANK].[RKO_CALC_PAR_1].bal_acc;
+end;
+/*-----------------------------------------------------------
+Определение типа клиента по счету
+------------------------------------------------------------*/
+function type_cl_on_acc(acc [ACCNUM]) return string(40) is
+	ps	[PS$];
+	balance_account	varchar2(6);
+	vl ref [FT_MONEY];
+	result_priv string(20) default '';
+	result_org 	string(20) default '';
+	result_bank string(20) default '';
+	
+begin
+	balance_account := substr(acc, 1, 5) || '%';
+	begin
+		--Физик?
+		locate ps in ::[PS$] all
+		where ps%parent([PL_US]::[B_PS]).[NUM] like balance_account
+		and ps.[] in (	::[PS]([PS_CODE] = 'C_CL_PRIV')
+						);
+		result_priv := 'CL_PRIV';
+		exception when others then
+		null;
+	end;
+	begin --Юрик?
+		locate ps in ::[PS$] all
+		where ps%parent([PL_US]::[B_PS]).[NUM] like balance_account
+		and ps.[] in (	::[PS]([PS_CODE] = 'C_CL_ORG'));
+		result_org := 'CL_ORG';
+		exception when others then
+		null;
+	end;
+	begin
+		--Банк?
+		locate ps in ::[PS$] all
+		where ps%parent([PL_US]::[B_PS]).[NUM] like balance_account
+		and ps.[] in (	::[PS]([PS_CODE] = 'C_CL_BANK_F'),
+						::[PS]([PS_CODE] = 'C_CL_BANK_N')
+					);
+		result_bank := 'CL_BANK';
+		exception when others then
+		null;
+	end;
+	return result_priv||';'||result_org||';'||result_bank;
+
+end;
+--
+function EZP(md ref [MAIN_DOCUM]) return string(1) is
+begin
+		for i in ::[BC_MAIN_DOC_SIGN] where i.[MDOC_REF]= md
+		loop
+			return '1';
+			exit;
+		end loop;
+	/*if md.[DOCUMENT_UNO] like 'IB%' then
+		return '1';
+		exit;
+	end if;
+	*/
+	return '0';
+end;
+
+-- sadunov Возвращает true если находит хоть что-нибудь из реквизитов в массиве индексных строк
+public function req_is_our(req [REQ_CLIENT]) return boolean is 
+begin
+	if req.[0] = 1 then -- Клиент банка, проверяем Владельца счета
+		if obtbl.exists(req.[1].[2].[CLIENT_V]%id) then return true; end if;
+		if obtbl.exists(req.[1].[2].[CLIENT_V].[NAME]) then return true; end if;
+		if req.[1].[2].[CLIENT_V]%Class = 'CL_BANK_N' then
+				if obtbl.exists(req.[1].[2].[CLIENT_V]->(CL_BANK_N)[BIC]) then return true; end if;				
+		end if;
+	elsif req.[0] = 2 then -- не клиент банка
+		if obtbl.exists(req.[2].[2]) and obtbl.exists(req.[2].[3]%id) then return true; end if;
+	end if;
+	return false;
+end;
+
+-- sadunov Заполняет массив индексных строк данными о филиалах
+public procedure init_bank_table is 
+	procedure adtbl(idnt string) is
+	begin
+		if idnt is not null then
+			obtbl(idnt) := 1;
+		end if;
+	end;
+begin
+	if obtbl.count = 0 then
+		for fl in ::[BRANCH] loop
+			adtbl(fl.[BANK]%id);
+			adtbl(fl.[BANK].[BIC]);
+			adtbl(fl.[BANK].[NAME]);
+			adtbl(fl.[BANK].[SWIFT_C]);
+			adtbl(substr(fl.[BANK].[SWIFT_C],1,8));
+			adtbl(fl.[BANK_REQ]%id);
+			if fl.[BANK_REQ]%Class = 'CL_PART' then
+				adtbl(fl.[BANK_REQ]->(CL_PART)[BANK]%id);
+				adtbl(fl.[BANK_REQ]->(CL_PART)[BANK].[BIC]);
+				adtbl(fl.[BANK_REQ]->(CL_PART)[BANK].[SWIFT_C]);
+				adtbl(substr(fl.[BANK_REQ]->(CL_PART)[BANK].[SWIFT_C],1,8));
+				adtbl(fl.[BANK_REQ]->(CL_PART)[BANK_F]%id);
+				adtbl(fl.[BANK_REQ]->(CL_PART)[BANK_F].[SWIFT_C]);
+				adtbl(substr(fl.[BANK_REQ]->(CL_PART)[BANK_F].[SWIFT_C],1,8));
+			elsif fl.[BANK_REQ]%Class = 'CL_BANK_F' then
+				adtbl(fl.[BANK_REQ]->(CL_BANK_F)[SWIFT_C]);
+				adtbl(substr(fl.[BANK_REQ]->(CL_BANK_F)[SWIFT_C],1,8));
+			elsif fl.[BANK_REQ]%Class = 'CL_BANK_N' then
+				adtbl(fl.[BANK_REQ]->(CL_BANK_N)[BIC]);
+				adtbl(fl.[BANK_REQ]->(CL_BANK_N)[SWIFT_C]);
+				adtbl(substr(fl.[BANK_REQ]->(CL_BANK_N)[SWIFT_C],1,8));
+			end if;
+		end loop;	
+				
+	end if;	
+end;
+
+function GET_SUM_SCALE(RKO ref [RKO]) return [SUMMA] is
+rk1 			ref [RKO];
+today 			[DATE];
+SUMA_BP             [SUMMA] := 0;            -- СУММА БАЗНАЛИЧНЫХ ПОСТУПЛЕНИЙ
+SUMA_PRED           [SUMMA] := 0;            -- СУММА ПРЕДЫДУЩИХ СНЯТИЙ ЗА ПОСЛЕДНИЕ 30 ДНЕЙ
+SUMA                [SUMMA] := 0;            -- РАСЧЕТНАЯ СУММА
+SUMA_DOC            [SUMMA] := 0;            -- СУММА ДОКУМЕНТА
+SUM_DEN             [SUMMA] := 0;            -- СУММА СНЯТИЙ ЗА ДЕНЬ ПО СЧЕТУ
+SUMA_SH1            [SUMMA] := 149999;       -- СУММА ПО ШКАЛЕ №1
+SUMA_SH2            [SUMMA] := 599999;       -- СУММА ПО ШКАЛЕ №2
+SALDO               [SUMMA] := 0;            -- ВХОДЯЩИЙ ОСТАТОК ПО СЧЕТУ КЛИЕНТА
+SALDO_MID           [SUMMA] := 0;            -- СРЕДНЕДНЕВНОЙ ОСТАТОК
+SUMA_IN_NAL_RUB     [SUMMA] := 0;            -- РАСЧЕТНАЯ СУММА
+SUMA_IN_BN_RUB      [SUMMA] := 0;            -- РАСЧЕТНАЯ СУММА
+SUMA_OUT_NAL_RUB    [SUMMA] := 0;            -- РАСЧЕТНАЯ СУММА
+SUMA_OUT_BN_RUB     [SUMMA] := 0;            -- РАСЧЕТНАЯ СУММА
+
+mn_ref ref [MAIN_DOCUM];
+begin
+&OpDate;
+			BEGIN
+		         LOCATE MN_REF IN ::[MAIN_DOCUM] WHERE MN_REF%ID = RKO;
+				 EXCEPTION WHEN NO_DATA_FOUND THEN
+						MN_REF:=::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+			END;
+			IF MN_REF.[VID_DOC].[CODE] IN ('КАСС_ПРИХОД_ОРД', 'КАСС_ОБЪЯВ_ВЗНОС') OR MN_REF.[ACC_DT].[MAIN_USV].[NUM] = '20202' THEN
+			   RETURN 0;
+			END IF;					
+	       SUMA_DOC := mn_ref.[SUM];  -- СУММА ДОКУМЕНТА
+        -----------------------------   Обновление массива "Операции клиента" ---------------------------------------
+            ::[CLIENT].[GENERATOR_TASK](
+										 RKO.[FILIAL]           /*P_FILIAL*/		--Филиал
+										,TODAY                  /*P_DATE*/		--Дата начала
+										,TODAY                  /*P_DATE_END*/		--Дата окончания
+										,TRUE    		        --Удалить загруженные данные
+										,RKO.[CLIENT]           /*P_CLIENT*/		--Клиент
+										,NULL                   /*P_STAT_PAR*/		--Статистический параметр
+										,NULL                   /*P_ONLY_POST*/		--Пересчет стат.параметоров по документам вставки прошлой датой
+										,NULL                   /*P_DAY*/		--Контроль вставки документов прошлой датой (дней)
+										);	
+        -------------------------------   находим входящий остаток по счету на 01.01.2013 -----------
+          SALDO := ABS(F.A('И'||RKO.[ACCOUNT]||'СН', TO_DATE('01.01.2013', 'DD.MM.YYYY')));		
+        ------------------- СТАРТ ОПЕРАЦИИ КЛИЕНТА ПО КОДУ 'PSH_IN_NAL_RUB' -------------------------------------------------------------------
+          FOR (SELECT S(
+                        SUM(S.[OPER_SUM])    : SUMA_OPER
+                       )           												 			
+               IN [CL_OPERATIONS] ALL
+               WHERE RKO.[CLIENT].[CL_OPER1] = S%COLLECTION AND S.[OPER_ACC] = RKO.[ACCOUNT] AND S.[STATE_PARAM].[CODE] IN ('PSH_IN_NAL_RUB')
+              )
+          LOOP
+              SUMA_IN_NAL_RUB := NVL(SALDO,0) + NVL(S.SUMA_OPER,0);
+          END LOOP;
+        ------------------- СТАРТ ОПЕРАЦИИ КЛИЕНТА ПО КОДУ 'PSH_IN_BN_RUB' -------------------------------------------------------------------
+          FOR (SELECT S(
+                        SUM(S.[OPER_SUM])    : SUMA_OPER
+                       )           												 			
+               IN [CL_OPERATIONS] ALL
+               WHERE RKO.[CLIENT].[CL_OPER1] = S%COLLECTION AND S.[OPER_ACC] = RKO.[ACCOUNT] AND S.[STATE_PARAM].[CODE] IN ('PSH_IN_BN_RUB')
+              )
+          LOOP
+              SUMA_IN_BN_RUB := NVL(S.SUMA_OPER,0);
+          END LOOP;
+        ------------------- СТАРТ ОПЕРАЦИИ КЛИЕНТА ПО КОДУ 'PSH_OUT_NAL_RUB' -------------------------------------------------------------------
+          FOR (SELECT S(
+                        SUM(S.[OPER_SUM])    : SUMA_OPER
+                       )           												 			
+               IN [CL_OPERATIONS] ALL
+               WHERE RKO.[CLIENT].[CL_OPER1] = S%COLLECTION AND S.[OPER_ACC] = RKO.[ACCOUNT] AND S.[STATE_PARAM].[CODE] IN ('PSH_OUT_NAL_RUB')
+              )
+          LOOP
+              SUMA_OUT_NAL_RUB := NVL(S.SUMA_OPER,0);
+          END LOOP;
+        ------------------- СТАРТ ОПЕРАЦИИ КЛИЕНТА ПО КОДУ 'PSH_OUT_BN_RUB' -------------------------------------------------------------------
+          FOR (SELECT S(
+                        SUM(S.[OPER_SUM])    : SUMA_OPER
+                       )           												 			
+               IN [CL_OPERATIONS] ALL
+               WHERE RKO.[CLIENT].[CL_OPER1] = S%COLLECTION AND S.[OPER_ACC] = RKO.[ACCOUNT] AND S.[STATE_PARAM].[CODE] IN ('PSH_OUT_BN_RUB')
+              )
+          LOOP
+              SUMA_OUT_BN_RUB := NVL(S.SUMA_OPER,0);
+          END LOOP;
+        --------------------------------  РАССЧИТАЕМ СРЕДНЕДНЕВНОГО ОСТАТКА
+          SALDO_MID := RKO.[ACCOUNT].[GET_SALDO_AVER](
+														 (CASE WHEN RKO.[ACCOUNT].[DATE_OP] < TO_DATE('01.01.2013', 'DD.MM.YYYY') THEN
+														  TO_DATE('01.01.2013', 'DD.MM.YYYY') ELSE RKO.[ACCOUNT].[DATE_OP] END)  /*P#DATE_1*/		--Дата начала
+														,TRUNC(TODAY)              /*P#DATE_2*/		--Дата окончания
+														,SALDO                     /*P#SALDO*/		--Среднедневной остаток в валюте
+														,SALDO                     /*P#SALDO_NAT*/		--Среднедневной остаток в основной валюте
+														--22.6.05 ,FALSE                      /*P#ZO*/		--Признак учета ЗО
+														,FALSE                      /*P#NT*/		--Признак возвращения остатка в основной валюте
+													 ); 	
+		 -------------------СТАРТ ---- НАХОДИМ СУММУ СНЯТИЙ ЗА ДЕНЬ ПО СЧЕТУ --------------
+		   FOR (SELECT MD(
+			  	          SUM(MD.[SUM]) : SUM_DOC
+			  	         )
+			  	IN [MAIN_DOCUM]
+			  	WHERE TRUNC(MD.[DATE_PROV]) = TRUNC(TODAY) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+			  	      AND MD.[ACC_KT].[MAIN_USV].[NUM] in ('20202')
+			  	)
+		   LOOP
+	            SUM_DEN := MD.SUM_DOC;
+		   END LOOP;
+		 -- ----------------- НАХОДИМ СУММУ, С КОТОРОЙ НУЖНО БРАТЬ КОМИССИЮ ПО ШКАЛЕ -------
+		   SUMA_BP := NVL(SUMA_IN_NAL_RUB,0) - (NVL(SUMA_OUT_NAL_RUB,0) + NVL(SUMA_OUT_BN_RUB,0));
+		   IF SUM_DEN IS NOT NULL THEN
+	          SUMA := SUMA_DOC + NVL(SUM_DEN,0);
+		   ELSE
+		      SUMA := SUMA_DOC;
+		   END IF;
+		   IF SUMA_BP >= SUMA THEN
+		      RETURN 0;
+		   ELSE
+		      SUMA_BP := NVL(SUMA_IN_BN_RUB,0) - ABS(NVL(SUMA_BP,0)) - NVL(SALDO_MID,0);
+		   END IF;
+		
+	return greatest(SUMA_BP,0);
+end;
+
+function get_sum_calc(sum_oper [SUMMA],sum_bp [SUMMA]) return [SUMMA] is
+begin
+	if sum_oper <= sum_bp then
+		return sum_oper;
+	else
+		return sum_oper-sum_bp;
+	end if;	
+end;
+
+FUNCTION GET_SUM_FROM_RC(P_DOC REF [MAIN_DOCUM]) RETURN INTEGER
+IS
+                -- В случае если документ SWIFT с комиссией BEN, то сумма записи в БВО должна браться из поля 33B документа SWIFT
+   DRC_REF       REF [DOCUM_RC];
+   V_SUM_STR     STRING;
+   V_SUM         NUMBER(17,2);
+   SF            ::[TYPE_DOC_RC].[SFORM]%TYPE;
+BEGIN
+     DRC_REF := ::[FIN_ACCOUNT_INT].[PRX_DOCUMENT].DOCUM_RC_GETDOCRC(P_DOC);
+     IF DRC_REF IS NOT NULL THEN   -- Если определен документ РЦ и комиссия OUR = 0 И BEN = 1
+       IF DRC_REF.[MT103] IS NOT NULL AND DRC_REF.[CHARGPAY]=0 THEN
+          RETURN 1;
+       ELSIF DRC_REF.[MT103] IS NOT NULL AND DRC_REF.[CHARGPAY]=1 THEN
+          RETURN 2;
+       END IF;
+     END IF;
+     RETURN 0;
+end;
+
+function GET_SUM_OBOR_MONTH(RKO ref [RKO], P_PAR VARCHAR2(100)) return [SUMMA] is
+rk1 			ref [RKO];
+today 			[DATE];
+SUMA                [SUMMA] := 0;            -- РАСЧЕТНАЯ СУММА
+SUMA_DOC            [SUMMA] := 0;            -- СУММА ДОКУМЕНТА
+SUM_DEN             [SUMMA] := 0;            -- СУММА СНЯТИЙ ЗА ДЕНЬ ПО СЧЕТУ
+mn_ref ref [MAIN_DOCUM];
+begin
+&OpDate;
+   IF P_PAR = 'СУММА_РКОМ_ЗАЙМЫ' THEN
+  	FOR (SELECT MD(
+                   SUM(MD.[SUM_KSPL].[2]) : SUM_KSPL
+		  	      )
+		 IN [MAIN_DOCUM]
+		 WHERE TRUNC(TODAY, 'mm') <= TRUNC(MD.[DATE_PROV]) AND TRUNC(MD.[DATE_PROV]) <= TRUNC(TODAY) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+		  	   AND MD.[ACC_KT].[MAIN_USV].[NUM] = '20202'
+		  	   AND MD.[VID_DOC].[CODE] IN ('КАСС_ЧЕК_ВЫДАЧА', 'КАСС_РАСХОД_ОРД')
+		  	   AND MD.[SUM_KSPL].[1].[1] NOT IN ('40','41','50','58')
+		  	   AND SYSDATE > MD.[ASTR_DATE_PROV]+(60/86400)*5
+		)
+     LOOP
+         SUM_DEN := MD.SUM_KSPL;
+ 	 END LOOP;
+   ELSIF P_PAR = 'СУММА_РАСЧ_ИНД_ПРЕД' THEN
+  	FOR (SELECT MD(
+                   SUM(MD.[SUM_KSPL].[2]) : SUM_KSPL
+		  	      )
+		 IN [MAIN_DOCUM]
+		 WHERE TRUNC(TODAY, 'mm') <= TRUNC(MD.[DATE_PROV]) AND TRUNC(MD.[DATE_PROV]) <= TRUNC(TODAY) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+		  	   AND MD.[ACC_KT].[MAIN_USV].[NUM] = '20202'
+		  	   AND MD.[SUM_KSPL].[1].[1] IN ('58')
+		  	   AND SYSDATE > MD.[ASTR_DATE_PROV]+(60/86400)*5
+		)
+     LOOP
+         SUM_DEN := MD.SUM_KSPL;
+ 	 END LOOP;
+   ELSIF P_PAR = 'СУММА_РАСЧ_КОМИС_ЮР_ИНЫЕ' THEN
+  	FOR (SELECT MD(
+                   SUM(MD.[SUM_KSPL].[2]) : SUM_KSPL
+		  	      )
+		 IN [MAIN_DOCUM]
+		 WHERE TRUNC(TODAY, 'mm') <= TRUNC(MD.[DATE_PROV]) AND TRUNC(MD.[DATE_PROV]) <= TRUNC(TODAY) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+		  	   AND MD.[ACC_KT].[MAIN_USV].[NUM] = '20202'
+		  	   AND MD.[SUM_KSPL].[1].[1] NOT IN ('40','41','42') --,'54'
+		  	   AND SYSDATE > MD.[ASTR_DATE_PROV]+(60/86400)*5
+		)
+     LOOP
+         SUM_DEN := MD.SUM_KSPL;
+ 	 END LOOP;
+   ELSIF P_PAR = 'СУММА_РАСЧ_ЗП_СТИП' THEN
+  	FOR (SELECT MD(
+                   SUM(MD.[SUM_KSPL].[2]) : SUM_KSPL
+		  	      )
+		 IN [MAIN_DOCUM]
+		 WHERE TRUNC(TODAY, 'mm') <= TRUNC(MD.[DATE_PROV]) AND TRUNC(MD.[DATE_PROV]) <= TRUNC(TODAY) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+		  	   AND MD.[ACC_KT].[MAIN_USV].[NUM] = '20202'
+		  	   AND MD.[SUM_KSPL].[1].[1] IN ('40','41')
+		  	   AND SYSDATE > MD.[ASTR_DATE_PROV]+(60/86400)*5
+		)
+     LOOP
+         SUM_DEN := MD.SUM_KSPL;
+ 	 END LOOP;   	 	
+   END IF;
+    RETURN NVL(SUM_DEN,0);
+END;	
+
+
+function GET_SUM_OBOR_DN(RKO ref [RKO], P_PAR VARCHAR2(100)) return [SUMMA] is
+rk1 			ref [RKO];
+today 			[DATE];
+SUMA                [SUMMA] := 0;            -- РАСЧЕТНАЯ СУММА
+SUMA_DOC            [SUMMA] := 0;            -- СУММА ДОКУМЕНТА
+SUM_DEN             [SUMMA] := 0;            -- СУММА СНЯТИЙ ЗА ДЕНЬ ПО СЧЕТУ
+mn_ref ref [MAIN_DOCUM];
+begin
+&OpDate;
+   IF P_PAR = 'СУММА_РКОМ_ЗАЙМЫ' THEN
+  	FOR (SELECT MD(
+                   SUM(MD.[SUM_KSPL].[2]) : SUM_KSPL
+		  	      )
+		 IN [MAIN_DOCUM]
+		 WHERE TRUNC(MD.[DATE_PROV]) = TRUNC(TODAY) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+		  	   AND MD.[ACC_KT].[MAIN_USV].[NUM] = '20202'
+		  	   AND MD.[SUM_KSPL].[1].[1] NOT IN ('40','41','50','58')
+		  	   AND SYSDATE > MD.[ASTR_DATE_PROV]+(60/86400)*5
+		  	   and MD%state='PROV'
+		)
+     LOOP
+         SUM_DEN := MD.SUM_KSPL;
+ 	 END LOOP;
+   ELSIF P_PAR = 'СУММА_РАСЧ_ИНД_ПРЕД' THEN
+  	FOR (SELECT MD(
+                   SUM(MD.[SUM_KSPL].[2]) : SUM_KSPL
+		  	      )
+		 IN [MAIN_DOCUM]
+		 WHERE TRUNC(MD.[DATE_PROV]) = TRUNC(TODAY) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+		  	   AND MD.[ACC_KT].[MAIN_USV].[NUM] = '20202'
+		  	   AND MD.[SUM_KSPL].[1].[1] IN ('58')
+		  	   AND SYSDATE > MD.[ASTR_DATE_PROV]+(60/86400)*5
+		  	   and MD%state='PROV'
+		)
+     LOOP
+         SUM_DEN := MD.SUM_KSPL;
+ 	 END LOOP;
+   ELSIF P_PAR = 'СУММА_РАСЧ_КОМИС_ЮР_ИНЫЕ' THEN
+  	FOR (SELECT MD(
+                   SUM(MD.[SUM_KSPL].[2]) : SUM_KSPL
+		  	      )
+		 IN [MAIN_DOCUM]
+		 WHERE TRUNC(MD.[DATE_PROV]) = TRUNC(TODAY) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+		  	   AND MD.[ACC_KT].[MAIN_USV].[NUM] = '20202'
+		  	   AND MD.[SUM_KSPL].[1].[1] NOT IN ('40','41','42') --,'54'
+		  	   AND SYSDATE > MD.[ASTR_DATE_PROV]+(60/86400)*5
+		  	   and MD%state='PROV'
+		)
+     LOOP
+         SUM_DEN := MD.SUM_KSPL;
+ 	 END LOOP;
+   ELSIF P_PAR = 'СУММА_РАСЧ_ЗП_СТИП' THEN
+  	FOR (SELECT MD(
+                   SUM(MD.[SUM_KSPL].[2]) : SUM_KSPL
+		  	      )
+		 IN [MAIN_DOCUM]
+		 WHERE TRUNC(MD.[DATE_PROV]) = TRUNC(TODAY) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+		  	   AND MD.[ACC_KT].[MAIN_USV].[NUM] = '20202'
+		  	   AND MD.[SUM_KSPL].[1].[1] IN ('40','41')
+		  	   AND SYSDATE > MD.[ASTR_DATE_PROV]+(60/86400)*5
+		  	   and MD%state='PROV'
+		)
+     LOOP
+         SUM_DEN := MD.SUM_KSPL;
+ 	 END LOOP;   	 	
+   END IF;
+    RETURN NVL(SUM_DEN,0);
+END;	
+
+
+function GET_SUM_COMIS_DN(RKO ref [RKO], P_PAR VARCHAR2(100)) return [SUMMA] is
+rk1 			ref [RKO];
+today 			[DATE];
+SUMA                [SUMMA] := 0;            -- РАСЧЕТНАЯ СУММА
+SUMA_DOC            [SUMMA] := 0;            -- СУММА ДОКУМЕНТА
+SUM_DEN             [SUMMA] := 0;            -- СУММА СНЯТИЙ ЗА ДЕНЬ ПО СЧЕТУ
+SUM_COMIS           [SUMMA] := 0;            -- СУММА КОМИССИЙ ЗА ДЕНЬ ПО СЧЕТУ
+mn_ref ref [MAIN_DOCUM];
+begin
+&OpDate;
+    IF P_PAR = 'СУММА_РАСЧ_КОМИС_ЮР_ИНЫЕ' THEN
+	  	FOR (SELECT MD(
+	                    MD                  : ID
+	                   ,MD.[DOCUMENT_NUM]   : DOCUMENT_NUM
+			  	      )
+			 IN [MAIN_DOCUM]
+			 WHERE TRUNC(MD.[DATE_PROV]) = TRUNC(TODAY) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+			  	   AND MD.[ACC_KT].[MAIN_USV].[NUM] = '20202'
+			  	   AND MD.[SUM_KSPL].[1].[1] NOT IN ('40','41','42') --,'54'
+			)
+	     LOOP
+	         FOR (SELECT D(
+	                       D.[SUMMA]  :SUMA
+	                      )
+	              IN [DOC_COM_JOUR] ALL
+	              WHERE RKO.[ARRAY_OPER_DOG] = D%COLLECTION AND D.[FIRST_DOC] = MD.ID
+	             )
+	         LOOP
+	              SUM_COMIS := NVL(SUM_COMIS,0) + D.SUMA;
+	         END LOOP;
+	 	 END LOOP;
+    END IF;
+    RETURN NVL(SUM_COMIS,0);
+END;
+
+	--Башкиров В.Г. 17.06.2019 Расчет PSB_RECEIVER_FL-[ПСБ] Перевод со счета индивидуального предпринимателя на свой счёт физического лица или счет иного физического лица
+function CalcParamsBWG(P_PAR in [STRING_50], P_DOC in [DOCUMENT_REF], P_PROD in [A_PROD_REF], P_PATT in [STRING_32000]) return [MEMO] is
+ExMemo [MEMO];
+begin
+	return ExMemo;
+end;
+RKO_CALC_PAR_333 (
+	@name('Параметр') P_PAR  in [STRING_50],
+	@name('Документ') P_DOC  in [DOCUMENT_REF],
+	@name('Продукт')  P_PROD in [A_PROD_REF],
+	@name('Шаблон')   P_PATT in [STRING_32000]
+) return [MEMO] is
+
+execute is
+pragma INCLUDE( [SYSTEM]::[DEFINES] );
+
+rk1 			ref [RKO];
+md1 			ref [MAIN_DOCUM];
+md2 			[MAIN_DOCUM];	
+today 			[DATE];
+tar_pl 			::[TARIF_PLAN].[CODE]%type default 'Нет';
+FFPP			string(4);
+VO		    	string(10);
+col_dog			integer default 0;
+val				ref [DIC_INT_CUR];
+V_IS            boolean := FALSE;
+SUMA_BP             [SUMMA] := 0;            -- СУММА БАЗНАЛИЧНЫХ ПОСТ УПЛЕНИЙ
+SUMA_PRED           [SUMMA] := 0;            -- СУММА ПРЕДЫДУЩИХ СНЯТИЙ ЗА ПОСЛЕДНИЕ 30 ДНЕЙ
+SUMA                [SUMMA] := 0;            -- РАСЧЕТНАЯ СУММА
+SUMA_DOC            [SUMMA] := 0;            -- СУММА ДОКУМЕНТА
+SUM_DEN             [SUMMA] := 0;            -- СУММА СНЯТИЙ ЗА ДЕНЬ ПО СЧЕТУ
+SUM_MONTH           [SUMMA] := 0;            -- СУММА СНЯТИЙ ЗА месяц ПО СЧЕТУ
+SUMA_SH1            [SUMMA] := 149999;       -- СУММА ПО ШКАЛЕ №1
+SUMA_SH2            [SUMMA] := 599999;       -- СУММА ПО ШКАЛЕ №2
+SALDO               [SUMMA] := 0;            -- ВХОДЯЩИЙ ОСТАТОК ПО СЧЕТУ КЛИЕНТА
+SALDO_MID           [SUMMA] := 0;            -- СРЕДНЕДНЕВНОЙ ОСТАТОК
+SUMA_IN_NAL_RUB     [SUMMA] := 0;            -- РАСЧЕТНАЯ СУММА
+SUMA_IN_BN_RUB      [SUMMA] := 0;            -- РАСЧЕТНАЯ СУММА
+SUMA_OUT_NAL_RUB    [SUMMA] := 0;            -- РАСЧЕТНАЯ СУММА
+SUMA_OUT_BN_RUB     [SUMMA] := 0;            -- РАСЧЕТНАЯ СУММА
+OUR_SWIFT           INTEGER := 0;
+----------------  филиал шкала по юрикам
+SUMA_FIL_SH1        [SUMMA] := 1500000;       -- СУММА ПО ШКАЛЕ №1
+SUMA_FIL_SH2        [SUMMA] := 3000000;       -- СУММА ПО ШКАЛЕ №2
+SUMA_FIL_SH3        [SUMMA] := 5000000;       -- СУММА ПО ШКАЛЕ №3
+
+SUMA_SH_FIL			[SUMMA] := 100000;
+
+SUMA_SH_FILN        [SUMMA] := 149999.99;  -- для выдачи наличных физикам с 01.12.2015
+SUMA_SH_FILN1       [SUMMA] := 599999.99;  -- для выдачи наличных физикам с 01.12.2015
+
+SUMA_GOL_BEZ_COM    [SUMMA] := 10000;         -- СУММА ВЫДАЧ, НА КОТОРЫЕ НЕ РАССЧИТЫВАЕТСЯ КОМИССИЯ
+SUM_ZAYAV_SAL       [SUMMA] := 0;            -- СУММА ЗАЯВКИ НА ЗП И СТИПЕНДИИ ПО СЧЕТУ НА ОПЕР. ДЕНЬ
+SUM_ZAYAV           [SUMMA] := 0;            -- СУММА ЗАЯВКИ ПО СЧЕТУ НА ОПЕР. ДЕНЬ
+SUMAKS              [SUMMA] := 0;            -- СУММА ПО КАС. СИМВ.
+
+SUM_COMIS           [SUMMA] := 0;            -- СУММА КОМИССИЙ ЗА ДЕНЬ ПО СЧЕТУ
+PSH_SUMA            [SUMMA] := 0;
+PSH_RES            [SUMMA] := 0;
+
+P_HOUR              [INTEGER] := 0;
+P_MIN               [INTEGER] := 0;
+P_SS                [INTEGER] := 0;
+
+PSH_VID_MD     REF [NAME_PAYDOC];
+PSH_ACC_DT_MD  REF  [AC_FIN];
+
+mn_ref ref [MAIN_DOCUM];
+vacc ref [AC_FIN];
+cd	string;
+dtt date;
+dtt2 date;
+dta date;
+--knp ref [KOD_N_PAY];
+knp1 ref [KOD_N_PAY];
+knp2 ref [KOD_N_PAY];
+DOC_REF REF [MAIN_DOCUM];
+MD REF [MAIN_DOCUM];
+sprav_podp ref [PSH_PODP_3352U]; -- Справочник подписантов 3352-У
+KASSIR_OD ref [USER]; -- Кассир с ценностями
+
+SUMA_IN             [SUMMA] := 0;            -- Входящий остаток
+SUMA_DT             [SUMMA] := 0;            -- ДТ за день
+SUMA_KT             [SUMMA] := 0;            -- КТ за день
+ins number;
+--dtx time;
+
+RKO 		REF [RKO];
+N           INTEGER;
+CNT         NUMBER := 0;
+
+----------------------------------------------
+type mndc_a is
+	select dt(
+		sum(DECODE(dt.[SUM], 0, 0, 1))	: COUNT_DOC,
+		sum(dt.[SUM])					: SUMMA
+	)
+	in [MAIN_DOCUM] all
+	where
+	dt.[ACC_DT] = vacc
+	and dt.[ACC_KT].[MAIN_V_ID] like '30102%'
+	and dt.[DATE_PROV] >= dtt
+	and dt.[DATE_PROV] < dtt+1
+	and dt.[ASTR_DATE_PROV] <= dta
+	and dt%state = 'PROV'
+	order by dt.[ASTR_DATE_PROV]
+;
+
+type mndc_kas is
+	select dc(
+		dc			: dc,
+		dc.[SUM]	: SM
+	)
+	in [MAIN_DOCUM] all
+	where
+	dc.[ACC_DT] = vacc
+	and dc.[ACC_KT].[MAIN_V_ID] like '20202%'
+	and dc.[DATE_PROV] >= dtt
+	and dc.[DATE_PROV] < dtt+1
+	and dc%state = 'PROV'
+	order by dc.[ASTR_DATE_PROV]
+;
+
+type mndc_b is
+	select dt(
+		dt			: dt,
+		dt.[SUM]	: SM
+	)
+	in [MAIN_DOCUM]
+	where
+	dt.[ACC_DT] = vacc
+	and dt.[ACC_KT].[MAIN_V_ID] like '20202%'
+	and dt.[DATE_PROV] >= dtt2
+	and dt.[DATE_PROV] < dtt+1
+	and dt.[ASTR_DATE_PROV] <= dta
+	and dt%state = 'PROV'
+	order by dt.[ASTR_DATE_PROV]
+;
+
+type mndc_c is
+	select dt(
+		sum(DECODE(dt.[SUM], 0, 0, 1))	: COUNT_DOC,
+		sum(dt.[SUM])					: SUMMA
+	)
+	in [MAIN_DOCUM]
+	where
+	(dt.[ACC_DT] = vacc or dt.[ACC_KT] = vacc)
+	and dt.[DATE_PROV] >= dtt
+	and dt.[DATE_PROV] < dta+1
+	and dt%state = 'PROV'
+	--and dt.[KOD_NAZN_PAY] <> knp
+	--and (dt.[KOD_NAZN_PAY] is null or dt.[KOD_NAZN_PAY] <> knp)
+	and (dt.[KOD_NAZN_PAY] is null or (dt.[KOD_NAZN_PAY] <> knp1 and dt.[KOD_NAZN_PAY] <> knp2))
+	order by dt.[ASTR_DATE_PROV]
+;
+----------------------------------------------
+
+--Башкиров В.Г. 17.06.2019 Расчет PSB_RECEIVER_FL-[ПСБ] Перевод со счета индивидуального предпринимателя на свой счёт физического лица или счет иного физического лица
+ExMemo [MEMO];
+BEGIN
+	  --&debug(utils.call_stack, dp2)
+		&debug('P_PAR='||P_PAR||' P_DOC='||P_DOC%class||'.'||P_DOC%id||'.'||P_DOC%state||||' P_PROD='||P_PROD%class||'.'||P_PROD%id||'.'||P_PROD.[COM_STATUS].[CODE]||' P_PATT='||P_PATT,dp)
+
+		/*UNIMP.Reset;
+		UNIMP.fMess := stdio.open(UNIMP.PathToFile, 'RKO_CALC_PAR_1' || '_msg', 'w');
+		UNIMP.WriteMess(lpad(to_char(sysdate, 'DD/MM/YYYY   HH24:MI:SS'),78), 0);
+		UNIMP.WriteMess(P_PAR||' '||'-' , 0);
+		stdio.close(UNIMP.fMess);
+		*/
+		
+
+	-- Для операции возмещения по мерчанту ------ Кокорин АС 18.09.15
+	-- НП: Отражение суммы возмещения по операциям ( шт.) с платежными картами для [PSH_MERCHANT_NAME] (сумма комиссии -[PSH_MERCH_KOMISS])
+	If P_PAR = 'PSH_MERCHANT_NAME' then -- Наименование мерчанта для документа возмещения
+		ExMemo:= nvl(P_DOC->(MAIN_DOCUM)[KL_KT].[1].[1].[NAME],P_DOC->(MAIN_DOCUM)[KL_KT].[2].[2]); goto nnn;
+	end if;
+	
+	If P_PAR = 'PSH_MERCH_KOMISS' then -- Сумма комиссии за эквайринг по мерчанту за день
+		declare sum_kom [SUMMA] := 0;
+		begin
+			for vip_doc in P_DOC->(MAIN_DOCUM)[ACC_DT].[ARC_MOVE] where trunc(vip_doc.[DATE]) = trunc(P_DOC->(MAIN_DOCUM)[DATE_VAL]) and UPPER(vip_doc.[DOC]->(MAIN_DOCUM)[NAZN]) like '%КОМИС%' loop		
+				sum_kom := nvl(sum_kom,0) + nvl(vip_doc.[SUMMA_NAT],0);
+			end loop;
+			ExMemo:= sum_kom||' руб.';
+		end;	
+	end if;
+	--------------------------------------------
+	
+	IF P_PAR like 'ПСБ_3352У%' and (P_DOC%state !='PROV' or P_DOC->(MAIN_DOCUM)[VID_DOC].[CODE]='КАСС_ВАЛ_ОРД') THEN -- Подписи кассовых документов по 3352-У
+	sprav_podp:= null;
+	KASSIR_OD:= null;
+	
+		begin
+		select x (x) in ::[PSH_PODP_3352U] where x.[USER]=::[RUNTIME].[STDLIB].UserId into sprav_podp;
+					exception
+					when NO_DATA_FOUND then	sprav_podp:= null;
+					when TOO_MANY_ROWS then sprav_podp:= null;
+		end;
+		
+		if sprav_podp is null then
+			begin
+			select x (x) in ::[PSH_PODP_3352U] where (x.[KASSA]=P_DOC->(MAIN_DOCUM)[NUM_KS].[KASSA] or x.[KASSA]=P_DOC->(MAIN_DOCUM)[NUM_KS1].[KASSA]) and nvl(x.[USER],0)=0 into sprav_podp;
+						exception
+						when NO_DATA_FOUND then	sprav_podp:= null;
+						when TOO_MANY_ROWS then	sprav_podp:= null;
+			end;		
+		end if;
+
+				
+		if sprav_podp is not null then
+			if sprav_podp.[CENNOST_KASSIR] then
+				 if P_DOC->(MAIN_DOCUM)[ACC_KT].[MAIN_V_ID] like ('20202%') then
+				 				begin
+				 				select x(x.[USER]) in ::[RICHES_GUIDE] where x.[CERT].[ACCOUNT]=P_DOC->(MAIN_DOCUM)[ACC_KT] into KASSIR_OD;
+				 						exception
+										when NO_DATA_FOUND then	KASSIR_OD:= null;
+										when TOO_MANY_ROWS then	KASSIR_OD:= null;
+				 				end;
+				 elsif P_DOC->(MAIN_DOCUM)[ACC_DT].[MAIN_V_ID] like ('20202%') then null;
+				 				begin
+				 				select x(x.[USER]) in ::[RICHES_GUIDE] where x.[CERT].[ACCOUNT]=P_DOC->(MAIN_DOCUM)[ACC_DT] into KASSIR_OD;
+				 						exception
+										when NO_DATA_FOUND then	KASSIR_OD:= null;
+										when TOO_MANY_ROWS then	KASSIR_OD:= null;
+				 				end;
+				 else KASSIR_OD := null;
+				 end if;
+			end if;
+		
+			if 		P_PAR = 'ПСБ_3352У_SOZDAT_FIO' and sprav_podp.[NOT_SOZDAT] then ExMemo:= chr(13); goto nnn;
+			elsif 	P_PAR = 'ПСБ_3352У_SOZDAT_FIO' and nvl(sprav_podp.[NOT_SOZDAT],false) = false and sprav_podp.[SOZDAT] is not null then ExMemo:= nvl(::[RUNTIME].[STDLIB].FIO(sprav_podp.[SOZDAT].[NAME]),CHR(13));
+			elsif 	P_PAR = 'ПСБ_3352У_SOZDAT_FIO' and nvl(sprav_podp.[NOT_SOZDAT],false) = false and sprav_podp.[SOZDAT] is null then ExMemo:= nvl(::[RUNTIME].[STDLIB].FIO(P_DOC.[DOCUMENT_USER].[NAME]),CHR(13)); goto nnn;
+			elsif 	P_PAR = 'ПСБ_3352У_SOZDAT_DOL' and sprav_podp.[NOT_SOZDAT] then ExMemo:= chr(13);
+			elsif 	P_PAR = 'ПСБ_3352У_SOZDAT_DOL' and nvl(sprav_podp.[NOT_SOZDAT],false) = false and sprav_podp.[SOZDAT] is not null then ExMemo:= nvl(sprav_podp.[SOZDAT].[CASTA].[VALUE],CHR(13)); goto nnn;
+			elsif 	P_PAR = 'ПСБ_3352У_SOZDAT_DOL' and nvl(sprav_podp.[NOT_SOZDAT],false) = false and sprav_podp.[SOZDAT] is null then ExMemo:= nvl(P_DOC.[DOCUMENT_USER].[CASTA].[VALUE],CHR(13));
+
+			elsif 	P_PAR = 'ПСБ_3352У_KONTR_FIO' and sprav_podp.[NOT_KONTROL] then ExMemo:= chr(13); goto nnn;
+			elsif 	P_PAR = 'ПСБ_3352У_KONTR_FIO' and nvl(sprav_podp.[NOT_KONTROL],false) = false then ExMemo:= nvl(::[RUNTIME].[STDLIB].FIO(sprav_podp.[KONTROL].[NAME]),CHR(13));
+			elsif 	P_PAR = 'ПСБ_3352У_KONTR_DOL' and sprav_podp.[NOT_KONTROL] then ExMemo:= chr(13); goto nnn;
+			elsif 	P_PAR = 'ПСБ_3352У_KONTR_DOL' and nvl(sprav_podp.[NOT_KONTROL],false) = false then ExMemo:= nvl(sprav_podp.[KONTROL].[CASTA].[VALUE],CHR(13));
+
+			elsif 	P_PAR = 'ПСБ_3352У_KASS_FIO' and sprav_podp.[NOT_KASSIR] then ExMemo:= chr(13); goto nnn;
+			elsif 	P_PAR = 'ПСБ_3352У_KASS_FIO' and sprav_podp.[CENNOST_KASSIR] then ExMemo:= nvl(::[RUNTIME].[STDLIB].FIO(KASSIR_OD.[NAME]),CHR(13));
+			elsif 	P_PAR = 'ПСБ_3352У_KASS_FIO' and nvl(sprav_podp.[NOT_KASSIR],false) = false then ExMemo:= nvl(::[RUNTIME].[STDLIB].FIO(sprav_podp.[KASSIR].[KASSIR].[NAME]),CHR(13)); goto nnn;
+			elsif 	P_PAR = 'ПСБ_3352У_KASS_DOL' and sprav_podp.[NOT_KASSIR] then ExMemo:= chr(13);
+			elsif 	P_PAR = 'ПСБ_3352У_KASS_DOL' and sprav_podp.[CENNOST_KASSIR] then ExMemo:= nvl(KASSIR_OD.[CASTA].[VALUE],CHR(13)); goto nnn;
+			elsif 	P_PAR = 'ПСБ_3352У_KASS_DOL' and nvl(sprav_podp.[NOT_KASSIR],false) = false then ExMemo:= nvl(sprav_podp.[KASSIR].[KASSIR].[CASTA].[VALUE],CHR(13));
+			end if;
+		else
+			if 		P_PAR = 'ПСБ_3352У_SOZDAT_FIO' then ExMemo:= nvl(::[RUNTIME].[STDLIB].FIO(P_DOC.[DOCUMENT_USER].[NAME]),CHR(13)); goto nnn;
+			elsif 	P_PAR = 'ПСБ_3352У_SOZDAT_DOL' then ExMemo:= nvl(P_DOC.[DOCUMENT_USER].[CASTA].[VALUE],CHR(13));
+
+			elsif 	P_PAR = 'ПСБ_3352У_KONTR_FIO' then ExMemo:= chr(13); goto nnn;
+			elsif 	P_PAR = 'ПСБ_3352У_KONTR_DOL' then ExMemo:= chr(13);
+
+			elsif 	P_PAR = 'ПСБ_3352У_KASS_FIO' then ExMemo:= chr(13); goto nnn;
+			elsif 	P_PAR = 'ПСБ_3352У_KASS_DOL' then ExMemo:= chr(13);
+			end if;			
+		end if;
+		
+	elsif P_PAR like 'ПСБ_3352У%' and P_DOC%state ='PROV' THEN
+
+			if 		P_PAR = 'ПСБ_3352У_SOZDAT_FIO' then ExMemo:= chr(13); --nvl(::[RUNTIME].[STDLIB].FIO(P_DOC.[DOCUMENT_USER].[NAME]),CHR(13)); goto nnn;
+			elsif 	P_PAR = 'ПСБ_3352У_SOZDAT_DOL' then ExMemo:= chr(13); --nvl(P_DOC.[DOCUMENT_USER].[CASTA].[VALUE],CHR(13));
+
+			elsif 	P_PAR = 'ПСБ_3352У_KONTR_FIO' then ExMemo:= chr(13); goto nnn;
+			elsif 	P_PAR = 'ПСБ_3352У_KONTR_DOL' then ExMemo:= chr(13);
+
+			elsif 	P_PAR = 'ПСБ_3352У_KASS_FIO' then ExMemo:= nvl(::[RUNTIME].[STDLIB].FIO(P_DOC->(MAIN_DOCUM)[PROV_USER].[NAME]),CHR(13)); goto nnn;
+			elsif 	P_PAR = 'ПСБ_3352У_KASS_DOL' then ExMemo:= nvl(P_DOC->(MAIN_DOCUM)[PROV_USER].[CASTA].[VALUE],CHR(13));
+			end if;				
+	end if;
+
+	 -- Возвращает тип клиента: 'Ф' - физ. лицо, 'Ю' - юр. лицо
+     IF P_PAR = 'НОМ_ДОГОВОРА' THEN
+        IF P_PROD%CLASS IN ('RKO','RKO_CUR') then
+		   rko := P_PROD;
+        END IF;
+        IF RKO.[FILIAL].[CODE] = '001' THEN
+           N := 1;
+			IF RKO.[CLIENT]%CLASS = 'CL_PRIV' THEN
+			   --DEBUG_PIPE('VALUTA => '||RKO.[CONTRACT_CUR],0);
+			     --CNT := NUM_RKO_JUR.NEXTVAL;
+	           IF RKO.[CONTRACT_CUR].[CODE_ISO] = '643' THEN
+		          ExMemo:= 'ФЛ-'||N||'-'||RKO.[CONTRACT_CUR].[CODE_ACC]||'/'||rtl.next_value('SEQ_APP_32511533'); goto nnn;
+	           ELSE
+	              ExMemo:= 'ФЛ-'||N||'-'||RKO.[CONTRACT_CUR].[CODE_ISO]||'/'||rtl.next_value('SEQ_APP_32511533');
+	           END IF;
+			ELSE
+	           IF RKO.[CONTRACT_CUR].[CODE_ISO] = '643' THEN
+		          ExMemo:= 'ЮЛ-'||N||'-'||RKO.[CONTRACT_CUR].[CODE_ACC]||'/'||rtl.next_value('SEQ_APP_32511532'); goto nnn;
+	           ELSE
+	              ExMemo:= 'ЮЛ-'||N||'-'||RKO.[CONTRACT_CUR].[CODE_ISO]||'/'||rtl.next_value('SEQ_APP_32511532');
+	           END IF;
+			END IF;
+        ELSE
+           N := 3;
+			IF RKO.[CLIENT]%CLASS = 'CL_PRIV' THEN
+			   --DEBUG_PIPE('VALUTA => '||RKO.[CONTRACT_CUR],0);
+			     --CNT := NUM_RKO_JUR.NEXTVAL;
+	           IF RKO.[CONTRACT_CUR].[CODE_ISO] = '643' THEN
+		          ExMemo:= 'ФЛ-'||N||'-'||RKO.[CONTRACT_CUR].[CODE_ACC]||'/'||rtl.next_value('SEQ_APP_32511538'); goto nnn;
+	           ELSE
+	              ExMemo:= 'ФЛ-'||N||'-'||RKO.[CONTRACT_CUR].[CODE_ISO]||'/'||rtl.next_value('SEQ_APP_32511538');
+	           END IF;
+			ELSE
+	           IF RKO.[CONTRACT_CUR].[CODE_ISO] = '643' THEN
+		          ExMemo:= 'ЮЛ-'||N||'-'||RKO.[CONTRACT_CUR].[CODE_ACC]||'/'||rtl.next_value('SEQ_APP_32511535'); goto nnn;
+	           ELSE
+	              ExMemo:= 'ЮЛ-'||N||'-'||RKO.[CONTRACT_CUR].[CODE_ISO]||'/'||rtl.next_value('SEQ_APP_32511535');
+	           END IF;
+			END IF;
+        END IF;
+     ELSIF P_PAR = 'НОМЕР_ДОГ_ВАЛ' THEN
+        IF P_PROD%CLASS IN ('RKO','RKO_CUR') then
+		   rko := P_PROD;
+			IF RKO.[CLIENT]%CLASS = 'CL_PRIV' THEN
+                ExMemo:= 'ФЛ-'||RKO.[CONTRACT_CUR].[CODE_ISO]||'/'||rtl.next_value('SEQ_APP_32514450'); goto nnn;
+			ELSE
+	            ExMemo:= 'ЮЛ-'||RKO.[CONTRACT_CUR].[CODE_ISO]||'/'||rtl.next_value('SEQ_APP_32514454');
+			END IF;
+        END IF;
+     END IF;
+
+--------------------------  Еврокомм ------------
+	--debug_pipe('bal_acc='||bal_acc,0);
+	::[PATTERN_DOC].[LIB].write_debug(&method$||' P_PAR='||P_PAR||' P_DOC='||P_DOC%id||' '||P_DOC%class||' P_PROD='||P_PROD%id||' '||P_PROD%class||' P_PATT='||P_PATT);
+	if P_PROD%class like 'RKO%' then
+		rk1%id := P_PROD%id;
+	end if;
+	begin
+		locate md1 in ::[MAIN_DOCUM] where md1%id = [STR].get_num_par(P_PATT, 'DOC_RKO');
+	exception when NO_DATA_FOUND then
+		if P_DOC%class = 'MAIN_DOCUM' then
+			md1%id := P_DOC%id;
+		elsif P_DOC%class = 'FOLDER_PAY' then
+			for x in P_DOC->([FOLDER_PAY])[DOCS_IN_FOLD] where x.[DOCUMENT]%class = 'MAIN_DOCUM'
+				and (x.[DOCUMENT]->([MAIN_DOCUM])[KOD_NAZN_PAY].[KOD_NAZN] not like 'РКО_КОМИССИЯ%'
+					or x.[DOCUMENT]->([MAIN_DOCUM])[KOD_NAZN_PAY] is null)
+			loop
+				md1%id := x.[DOCUMENT]%id;
+				exit;
+			end loop;
+		end if;
+	end;
+	md2 := ::[PATTERN_DOC].[BUSINESS_OP].mdoc;
+	if nvl(md2.[SUM], 0) <= 0 then
+		md2 := md1;
+	end if;	
+	if rk1 is null then ExMemo:= null; end if; goto nnn;
+
+	if P_PAR = 'КОЛ_ДОК' then
+		ExMemo:= to_char(::[RKO_INTERFACE].[PRX_DOCUMENT].BO_GET_KOL_DOC);		
+	end if;
+	if P_PAR = 'КОД_ВО' then
+       if P_DOC%class = 'FOLDER_PAY' then
+			for x in P_DOC->([FOLDER_PAY])[DOCS_IN_FOLD] where x.[DOCUMENT]%class = 'MAIN_DOCUM'
+		    loop
+				md1%id := x.[DOCUMENT]%id;
+				exit;
+			end loop;
+		end if;
+		vo := md1.[CURR_OPER].[HIGH].[CODE]||md1.[CURR_OPER].[CODE];
+		ExMemo:= nvl(vo,'EMPTY');		 goto nnn;
+	end if;		
+	-- ************************************************************************************
+	-- Параметры, вычисляемые исходя из договора РКО***********************************
+	if P_PROD%class in ('RKO','RKO_CUR', 'TRC') then
+		rko := P_PROD;	
+		
+		if P_PAR = 'FIL_CODE' then
+			ExMemo:= RKO.[FILIAL].[CODE];
+		end if;	
+		-- Еврокоммерц
+		-- Возвращает '1',  если в выписке по расчетному счету договора РКО есть записи за последний месяц (считая от даты
+		-- операционного дня), либо '0' в противном случае
+		if P_PAR = 'ОПЕР_ПР_М' then --
+			&OpDate;
+			for m in rko.[ACCOUNT].[ARC_MOVE] where
+			m.[DATE] >= trunc(today,'MM') and
+			m.[DATE] <= trunc(today) loop
+				ExMemo:= '1'; goto nnn;
+			end loop;
+			ExMemo:= '0';
+		elsif P_PAR = 'ВВЕД_СЧ_ОТС_ИНИЦ_КЛ' then --
+			&OpDate;
+			--debug_pipe('rko.[ACCOUNT].[ARC_MOVE] =>'||rko.[ACCOUNT].[ARC_MOVE],0);
+			for m in rko.[ACCOUNT].[ARC_MOVE] where
+		    	m.[DATE] >= trunc(today,'MM') and
+			    m.[DATE] <= last_day(trunc(today))
+			    and m.[DOC]%class = 'MAIN_DOCUM'
+				and not(	m.[DOC]->([MAIN_DOCUM])[DOCUMENT_NUM] = '777'
+							and lower(m.[DOC]->([MAIN_DOCUM])[NAZN]) like '%перенос%'
+				)
+				and m.[DOC]->([MAIN_DOCUM])[ACC_KT].[MAIN_USV].[NUM] not in ('70601')
+				and m.[DOC]->([MAIN_DOCUM])[VID_DOC].[CODE] not in ('БЕЗН_ИНКАСС_ПОР')
+			loop
+				ExMemo:= '1'; goto nnn;
+			end loop;
+			ExMemo:= '0';	
+		elsif P_PAR = 'КЛБ_СМС_ИНФО' then
+			&OpDate;
+			select t(count (t)) in rko.[CLIENT].[ADD_PROP] where t.[GROUP_PROP]=::[PROPERTY_GRP]([CODE] = 'SMS_IBANK2') and (t.[DATE_END] is null or t.[DATE_END]>=trunc(today,'MM')) and t.[DATE_BEG]<=last_day(trunc(today)) into ins;
+			if ins=0 then ExMemo:= '0'; goto nnn;
+			else ExMemo:= '1';
+			end if;		
+		-- Возвращает дату операционного  дня
+		elsif P_PAR = 'ДАТА_ОПД' then
+		    &OpDate;
+			ExMemo:= to_char(today,'DD/MM/YYYY'); goto nnn;
+		elsif P_PAR = 'МЕСЯЦ_ПЕРИОДА' then
+			&OpDate;
+			ExMemo:= to_char(today,'MONTH YYYY');								
+		elsif P_PAR = 'ВВЕД_СЧ_КЛБАНК_М' then --
+			&OpDate;
+			for m in rko.[ACCOUNT].[ARC_MOVE] where
+		    	m.[DATE] >= trunc(today,'MM') and
+			    m.[DATE] <= last_day(trunc(today))
+			    and m.[DOC]%class = 'MAIN_DOCUM'
+				and ((m.[DOC]->([MAIN_DOCUM])[KOD_NAZN_PAY].[KOD_NAZN] like 'CLIENT_BANK%')
+				or (m.[DOC]->([MAIN_DOCUM])[DT_SEND] = ::[RKC_DOC_STATES]([CODE]='IBANK2')))
+			loop
+				ExMemo:= '1'; goto nnn;
+			end loop;
+			ExMemo:= '0';	
+		elsif P_PAR = 'ВВЕД_СЧ_КЛ' then --
+		-- debug_pipe('rko.[ACCOUNT].[ARC_MOVE] =>'||rko.[ACCOUNT].[ARC_MOVE],0);
+			&OpDate;
+			for m in rko.[ACCOUNT].[ARC_MOVE] where
+		    	m.[DATE] >= trunc(today,'MM') and
+			    m.[DATE] <= last_day(trunc(today))
+			    and m.[DOC]%class = 'MAIN_DOCUM'
+			loop
+				ExMemo:= '1'; goto nnn;
+			end loop;
+			ExMemo:= '0';				
+		elsif P_PAR = 'ВВЕД_СЧ_СВ_КЛ_КЛБ' then --
+		    ExMemo:= ::[CLIENT].[PSH_LIB].IsClientBank(rko.[CLIENT]);				 goto nnn;
+		elsif P_PAR = 'ТАРИФ_ПОВЫШ' then -- с даты регистрации которых на момент открытия счета прошло менее 3-х месяцев, применяется в течение первых 3-х месяцев
+		        IF P_PROD%CLASS IN ('RKO','RKO_CUR') then
+		   		rko := P_PROD;
+        		END IF;
+        		&OpDate;
+				if trunc(rko.[CLIENT]->(CL_ORG)[REGISTER].[DATE_REG]) >= trunc(add_months(rko.[DATE_BEGINING], -3))
+					and rko.[DATE_BEGINING] is not null
+					and rko.[CLIENT]->(CL_ORG)[REGISTER].[DATE_REG] is not null
+					and trunc(last_day(add_months(rko.[DATE_BEGINING],-1))+1) > trunc(last_day(add_months(today, -4)))
+					and P_PROD%CLASS ='RKO'
+				then ExMemo:= '1';
+				else ExMemo:= '0'; goto nnn;
+				END IF;
+		elsif P_PAR = 'ПРОВЕРКА_КЛБАНК' then --
+			&OpDate;
+			begin
+			locate mn_ref in ::[MAIN_DOCUM] where mn_ref%id = P_PROD%id;
+			exception when NO_DATA_FOUND then
+				   mn_ref:=::[PATTERN_DOC].[BUSINESS_OP].doc_ref;
+		    end;
+            if mn_ref->([MAIN_DOCUM])[KOD_NAZN_PAY].[KOD_NAZN] like 'CLIENT_BANK%' or
+               mn_ref->([MAIN_DOCUM])[DT_SEND] = ::[RKC_DOC_STATES]([CODE]='IBANK2')
+            then
+                BEGIN
+	                SELECT V(TO_NUMBER(TO_CHAR(V.TIME, 'HH24')), TO_NUMBER(TO_CHAR(V.TIME, 'MI')), TO_NUMBER(TO_CHAR(V.TIME, 'SS')))
+	                IN OBJECT_STATE_HISTORY%ROWTYPE
+	                WHERE V.OBJ_ID = mn_ref AND v.STATE_ID = 'FORM'
+	                ORDER BY V.ID DESC
+	                INTO P_HOUR, P_MIN, P_SS;
+			    EXCEPTION
+			        WHEN NO_DATA_FOUND THEN
+			             P_HOUR := TO_NUMBER(TO_CHAR(SYSDATE, 'HH24'));
+			             P_MIN  := TO_NUMBER(TO_CHAR(SYSDATE, 'MI'));
+			             P_SS   := TO_NUMBER(TO_CHAR(SYSDATE, 'SS'));
+			        WHEN TOO_MANY_ROWS THEN
+			             P_HOUR := TO_NUMBER(TO_CHAR(SYSDATE, 'HH24'));
+			             P_MIN  := TO_NUMBER(TO_CHAR(SYSDATE, 'MI'));
+			             P_SS   := TO_NUMBER(TO_CHAR(SYSDATE, 'SS'));
+                END;
+
+                --Кокорин АС 22.11.2016 в связи с переходом Саратова в другой часовой пояс
+                declare	difference integer;
+                begin
+	                if mn_ref.[DOCUMENT_DATE] > [FP_TUNE]::[LIB].get_date_value('PSH_SAR_TIME_ZONE_CHANGE') and mn_ref.[FILIAL].[CODE]='101' then
+	                	difference := nvl(::[SYSTEM].[VARIABLES].OurBranch.[DIFFERENCE],0);
+	                else
+	                	difference := 0;	
+	                end if;
+	
+		            IF P_HOUR < 16-difference AND P_MIN <= 59 AND P_SS <= 59  THEN
+						ExMemo:= '1';	
+		            ELSIF P_HOUR >= 17-difference AND P_MIN >= 0 AND P_SS >= 0 THEN
+		            	ExMemo:= '1'; goto nnn;
+		            ELSIF P_HOUR >= 16-difference AND P_MIN >= 0 AND P_SS >= 0 AND P_HOUR < 17-difference AND P_MIN <= 59 AND P_SS <= 59 THEN
+						ExMemo:= '2';						 				
+		            END IF;
+                end;
+	
+            end if;
+			ExMemo:= '0';		 goto nnn;
+		elsif P_PAR = 'ИСКЛ_НАЛОГ' then --
+			&OpDate;
+			begin
+			mn_ref:=::[PATTERN_DOC].[BUSINESS_OP].doc_ref;
+			if substr(nvl(mn_ref.[KL_KT].[2].[1], mn_ref.[KL_KT].[1].[2].[MAIN_V_ID]),1,3) not in ('401', '402', '403', '404') then
+			  ExMemo:= 1;
+			end if;
+			exception when NO_DATA_FOUND then
+				   ExMemo:= '0'; goto nnn;
+		    end;
+				ExMemo:= '0';				
+		elsif P_PAR = 'ПРОВЕРКА_СЧ_КТ' then --
+			&OpDate;
+			begin
+			locate mn_ref in ::[MAIN_DOCUM] where mn_ref%id = P_PROD%id;
+			exception when NO_DATA_FOUND then
+				   mn_ref:=::[PATTERN_DOC].[BUSINESS_OP].doc_ref;
+		    end;
+            if mn_ref->([MAIN_DOCUM])[ACC_KT].[MAIN_V_ID] not like '70601%'
+              -- and mn_ref->([MAIN_DOCUM])[VID_DOC].[CODE] = 'БЕЗН_ПЛ_ПОРУЧ'
+ -- Кокорин АС 15.07.14 За платежный ордер тоже берем
+ -- Кокорин АС 20.10.15 И за остальные тоже берем
+              and mn_ref->([MAIN_DOCUM])[VID_DOC].[CODE]  IN ('БЕЗН_ПЛ_ПОРУЧ', 'БЕЗН_ПЛ_ОР', 'БЕЗН_ПЛ_ТРЕБ', 'БЕЗН_ИНКАСС_ПОР', 'ЗАЯВ_АККРЕД')
+              and (mn_ref->([MAIN_DOCUM])[DOC_SEND_REF] is null or mn_ref->([MAIN_DOCUM])[DOC_SEND_REF].[COD] != '4')
+               --and mn_ref->([MAIN_DOCUM])[DOC_SEND_REF].[COD] != '4'
+-- Кокорин АС 10.07.14 для корректного расчета комиссии по импортированным докментам. у них  BUDGET_PAYMENT = null
+               --and mn_ref->([MAIN_DOCUM])[BUDGET_PAYMENT] != 1
+               and nvl(mn_ref->([MAIN_DOCUM])[BUDGET_PAYMENT],false) != true
+------------------------------------------------------------------------------------------------------------------
+            then
+                BEGIN
+	                SELECT V(TO_NUMBER(TO_CHAR(V.TIME, 'HH24')), TO_NUMBER(TO_CHAR(V.TIME, 'MI')), TO_NUMBER(TO_CHAR(V.TIME, 'SS')))
+	                IN OBJECT_STATE_HISTORY%ROWTYPE
+	                WHERE V.OBJ_ID = mn_ref AND v.STATE_ID = 'FORM'
+	                ORDER BY V.ID DESC
+	                INTO P_HOUR, P_MIN, P_SS;
+			    EXCEPTION
+			        WHEN NO_DATA_FOUND THEN
+			             P_HOUR := TO_NUMBER(TO_CHAR(SYSDATE, 'HH24'));
+			             P_MIN  := TO_NUMBER(TO_CHAR(SYSDATE, 'MI'));
+			             P_SS   := TO_NUMBER(TO_CHAR(SYSDATE, 'SS'));
+			        WHEN TOO_MANY_ROWS THEN
+			             P_HOUR := TO_NUMBER(TO_CHAR(SYSDATE, 'HH24'));
+			             P_MIN  := TO_NUMBER(TO_CHAR(SYSDATE, 'MI'));
+			             P_SS   := TO_NUMBER(TO_CHAR(SYSDATE, 'SS'));
+                END;
+
+                --Кокорин АС 22.11.2016 в связи с переходом Саратова в другой часовой пояс
+                declare	difference integer;
+                begin
+	                if mn_ref.[DOCUMENT_DATE] > [FP_TUNE]::[LIB].get_date_value('PSH_SAR_TIME_ZONE_CHANGE') and mn_ref.[FILIAL].[CODE]='101' then
+	                	difference := nvl(::[SYSTEM].[VARIABLES].OurBranch.[DIFFERENCE],0);
+	                else
+	                	difference := 0;	
+	                end if;
+	
+		            IF P_HOUR < 16-difference AND P_MIN <= 59 AND P_SS <= 59  THEN
+						ExMemo:= '1';	 goto nnn;
+		            ELSIF P_HOUR >= 17-difference AND P_MIN >= 0 AND P_SS >= 0 THEN
+		            	ExMemo:= '1';
+		            ELSIF P_HOUR >= 16-difference AND P_MIN >= 0 AND P_SS >= 0 AND P_HOUR < 17-difference AND P_MIN <= 59 AND P_SS <= 59 THEN
+						ExMemo:= '2';						 				 goto nnn;
+		            END IF;
+                end;
+            end if;
+			ExMemo:= '0';		
+		elsif P_PAR = 'ПРОВЕРКА_СЧ_КТ_ГОЛ' then --
+			&OpDate;
+			begin
+			locate mn_ref in ::[MAIN_DOCUM] where mn_ref%id = P_PROD%id;
+			exception when NO_DATA_FOUND then
+				   mn_ref:=::[PATTERN_DOC].[BUSINESS_OP].doc_ref;
+		    end;
+            if mn_ref->([MAIN_DOCUM])[ACC_KT].[MAIN_V_ID] not like '70601%'
+               and mn_ref->([MAIN_DOCUM])[VID_DOC].[CODE] IN ('БЕЗН_ПЛ_ПОРУЧ', 'БЕЗН_ПЛ_ОР', 'БЕЗН_ПЛ_ТРЕБ', 'БЕЗН_ИНКАСС_ПОР', 'ЗАЯВ_АККРЕД')
+            then
+				ExMemo:= '1'; goto nnn;
+            end if;
+			ExMemo:= '0';				
+		elsif P_PAR = 'ВИД_ПЕРЕСЫЛКИ' then --
+			&OpDate;
+			begin
+			locate mn_ref in ::[MAIN_DOCUM] where mn_ref%id = P_PROD%id;
+			exception when NO_DATA_FOUND then
+				   mn_ref:=::[PATTERN_DOC].[BUSINESS_OP].doc_ref;
+		    end;
+            if mn_ref->([MAIN_DOCUM])[ACC_KT].[MAIN_V_ID] not like '70601%'
+               and mn_ref->([MAIN_DOCUM])[VID_DOC].[CODE] IN ('БЕЗН_ПЛ_ПОРУЧ', 'БЕЗН_ПЛ_ОР', 'БЕЗН_ПЛ_ТРЕБ', 'БЕЗН_ИНКАСС_ПОР', 'ЗАЯВ_АККРЕД')
+               and (mn_ref->([MAIN_DOCUM])[DOC_SEND_REF]  is not null and mn_ref->([MAIN_DOCUM])[DOC_SEND_REF].[COD] = '4')
+               --and mn_ref->([MAIN_DOCUM])[DOC_SEND_REF].[COD] = 4
+            then
+                BEGIN
+	                SELECT V(TO_NUMBER(TO_CHAR(V.TIME, 'HH24')), TO_NUMBER(TO_CHAR(V.TIME, 'MI')), TO_NUMBER(TO_CHAR(V.TIME, 'SS')))
+	                IN OBJECT_STATE_HISTORY%ROWTYPE
+	                WHERE V.OBJ_ID = mn_ref AND v.STATE_ID = 'FORM'
+	                ORDER BY V.ID DESC
+	                INTO P_HOUR, P_MIN, P_SS;
+			    EXCEPTION
+			        WHEN NO_DATA_FOUND THEN
+			             P_HOUR := TO_NUMBER(TO_CHAR(SYSDATE, 'HH24'));
+			             P_MIN  := TO_NUMBER(TO_CHAR(SYSDATE, 'MI'));
+			             P_SS   := TO_NUMBER(TO_CHAR(SYSDATE, 'SS'));
+			        WHEN TOO_MANY_ROWS THEN
+			             P_HOUR := TO_NUMBER(TO_CHAR(SYSDATE, 'HH24'));
+			             P_MIN  := TO_NUMBER(TO_CHAR(SYSDATE, 'MI'));
+			             P_SS   := TO_NUMBER(TO_CHAR(SYSDATE, 'SS'));
+                END;
+
+                --Кокорин АС 22.11.2016 в связи с переходом Саратова в другой часовой пояс
+                declare	difference integer;
+                begin
+	                if mn_ref.[DOCUMENT_DATE] > [FP_TUNE]::[LIB].get_date_value('PSH_SAR_TIME_ZONE_CHANGE') and mn_ref.[FILIAL].[CODE]='101' then
+	                	difference := nvl(::[SYSTEM].[VARIABLES].OurBranch.[DIFFERENCE],0);
+	                else
+	                	difference := 0;	
+	                end if;
+	
+		            IF P_HOUR < 16-difference AND P_MIN <= 59 AND P_SS <= 59  THEN
+						ExMemo:= '1';	 goto nnn;
+		            ELSIF P_HOUR >= 17-difference AND P_MIN >= 0 AND P_SS >= 0 THEN
+		            	ExMemo:= '1';
+		            ELSIF P_HOUR >= 16-difference AND P_MIN >= 0 AND P_SS >= 0 AND P_HOUR < 17-difference AND P_MIN <= 59 AND P_SS <= 59 THEN
+						ExMemo:= '2';						 				 goto nnn;
+		            END IF;
+                end;
+            end if;
+			ExMemo:= '0';	
+		elsif P_PAR = 'СУММА_ДОК' then --
+			&OpDate;
+			begin
+			locate mn_ref in ::[MAIN_DOCUM] where mn_ref%id = P_PROD%id;
+			exception when NO_DATA_FOUND then
+				   mn_ref:=::[PATTERN_DOC].[BUSINESS_OP].doc_ref;
+		    end;
+            if mn_ref->([MAIN_DOCUM])[SUM] <= 1500000
+            then
+				ExMemo:= 1; goto nnn;
+            elsif mn_ref->([MAIN_DOCUM])[SUM] >= 1500001 and mn_ref->([MAIN_DOCUM])[SUM] <=3000000 then
+                ExMemo:= 2;
+            elsif mn_ref->([MAIN_DOCUM])[SUM] >= 3000001 and mn_ref->([MAIN_DOCUM])[SUM] <=5000000 then
+                ExMemo:= 3; goto nnn;
+            elsif mn_ref->([MAIN_DOCUM])[SUM] >= 5000001 then
+                ExMemo:= 4;
+            end if;
+			ExMemo:= '0';		 goto nnn;
+		elsif P_PAR = 'КАСС_СИМВ_ЗВ_КОМ' then --
+			if CASH_SYM is null /*and main_ref is not null*/ then
+				declare
+					ksim ref [SUM_SYMKS];
+				begin	
+				    &OpDate;
+					begin
+					     locate mn_ref in ::[MAIN_DOCUM] where mn_ref%id = P_PROD%id;
+					exception when NO_DATA_FOUND then
+						   mn_ref:=::[PATTERN_DOC].[BUSINESS_OP].doc_ref;
+				    end;			
+			        locate ksim in mn_ref.[SUM_KSPL];
+					CASH_SYM := ksim.[1].[1];
+				exception when NO_DATA_FOUND then
+					ExMemo:= '0';
+				end;
+			end if;
+			if CASH_SYM in (40, 41, 42, 44, 50)
+			then
+			     ExMemo:= '1'; goto nnn;
+			end if;
+			ExMemo:= '0';		
+         ELSIF P_PAR = 'ДРОРГ_0445' then
+			&OpDate;
+			begin
+			locate mn_ref in ::[MAIN_DOCUM] where mn_ref%id = P_PROD%id;
+			exception when NO_DATA_FOUND then
+				   mn_ref:=::[PATTERN_DOC].[BUSINESS_OP].doc_ref;
+		    end;
+		    IF MN_REF.[ACC_KT].[MAIN_USV].[NUM] IN ('30102', '47408') AND MN_REF.[VID_DOC].[CODE] IN ('БЕЗН_ПЛ_ПОРУЧ', 'БЕЗН_ПЛ_ОР', 'БЕЗН_ПЛ_ТРЕБ', 'БЕЗН_ИНКАСС_ПОР', 'ЗАЯВ_АККРЕД') THEN
+		       ExMemo:= 1; goto nnn;
+		    ELSE
+		       ExMemo:= 0;
+		    END IF;
+		
+		    /*
+		       IF mn_ref.[KL_KT].[2].[3].[BIC] IS NOT NULL THEN
+                IF mn_ref.[KL_KT].[2].[3].[BIC] IN ('044579771', '046375892') THEN  --AND (SUBSTR(MD.[KL_KT].[2].[1],1,5) IN (40817, 40820) OR SUBSTR(MD.[KL_KT].[2].[1],1,3) IN ('423','426')) THEN
+                   ExMemo:= 0; goto nnn;
+                ELSE
+                   ExMemo:= 1;
+                END IF;	
+		       ELSE
+                ExMemo:= 0;													 goto nnn;
+		       END IF;*/
+		elsif P_PAR = 'ОПЕР_ОБОР_ДН' then --
+			&OpDate;
+			SUM_DEN := 0; SUMA := 0;
+			BEGIN
+		         LOCATE MN_REF IN ::[MAIN_DOCUM] WHERE MN_REF%ID = P_PROD%ID;
+				 EXCEPTION WHEN NO_DATA_FOUND THEN
+						MN_REF:=::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+			END;	
+			SUMA := MN_REF.[SUM];		
+		  	for (select MD(
+		  	               SUM(MD.[SUM_KSPL].[2]) : SUM_KSPL
+		  	             )
+		  	     in [MAIN_DOCUM]
+		  	     where trunc(MD.[DATE_PROV]) = trunc(today) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+		  	           AND MD.[ACC_KT].[MAIN_USV].[NUM] = '20202'
+		  	           AND MD.[SUM_KSPL].[1].[1] NOT IN (40, 41, 42, 44, 50)
+		  	    )
+		  	loop
+                SUM_DEN := MD.SUM_KSPL;
+			end loop;
+			IF SUM_DEN IS NOT NULL THEN
+               SUMA := SUMA + NVL(SUM_DEN,0);
+			END IF;		 	
+			   ExMemo:= SUMA;
+		elsif P_PAR = 'СУММА_ДОКУМ' then --
+			&OpDate;
+			SUM_DEN := 0; SUMA := 0;
+			BEGIN
+		         LOCATE MN_REF IN ::[MAIN_DOCUM] WHERE MN_REF%ID = P_PROD%ID;
+				 EXCEPTION WHEN NO_DATA_FOUND THEN
+						MN_REF:=::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+			END;	
+			SUMA := MN_REF.[SUM];	
+			ExMemo:= SUMA;			   		 goto nnn;
+		elsif P_PAR = 'ОБОР_ДН_БЕЗН' then --
+			&OpDate;
+			SUM_DEN := 0; SUMA := 0;		
+		  	for (select MD(
+		  	               SUM(MD.[SUM]) : SUM_DOC
+		  	              )
+		  	     in [MAIN_DOCUM]
+		  	     where trunc(MD.[DATE_PROV]) >= trunc(today)-30 and trunc(MD.[DATE_PROV]) <= trunc(today)
+		  	           AND MD.[ACC_KT] = RKO.[ACCOUNT]
+		  	           and MD.[VID_DOC].[TYPE_DOC].[CODE] not like 'KASSA_DOCUM%'
+		  	    )
+		  	loop
+                SUM_DEN := MD.SUM_DOC;
+			end loop;
+			IF SUM_DEN IS NOT NULL THEN
+               ExMemo:= NVL(SUM_DEN,0);
+			END IF;		 	
+			   ExMemo:= 0; goto nnn;
+		elsif P_PAR = 'ОБОР_ДН_КАС' then --
+			&OpDate;
+			SUM_DEN := 0; SUMA := 0;
+			BEGIN
+		         LOCATE MN_REF IN ::[MAIN_DOCUM] WHERE MN_REF%ID = P_PROD%ID;
+				 EXCEPTION WHEN NO_DATA_FOUND THEN
+						MN_REF:=::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+			END;	
+			SUMA := MN_REF.[SUM];		
+		  	for (select MD(
+		  	               SUM(MD.[SUM]) : SUM_DOC
+		  	             )
+		  	     in [MAIN_DOCUM]
+		  	     where trunc(MD.[DATE_PROV]) = trunc(today) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+		  	           AND MD.[ACC_KT].[MAIN_USV].[NUM] = '20202'
+		  	    )
+		  	loop
+                SUM_DEN := MD.SUM_DOC;
+			end loop;
+			IF SUM_DEN IS NOT NULL THEN
+               SUMA := SUMA + NVL(SUM_DEN,0);
+			END IF;		 	
+			   ExMemo:= SUMA;	
+		ELSIF P_PAR = 'ПРОВЕРКА_СВИФТ' then --
+			&OpDate;
+			begin
+			locate mn_ref in ::[MAIN_DOCUM] where mn_ref%id = P_PROD%id;
+			exception when NO_DATA_FOUND then
+				   mn_ref:=::[PATTERN_DOC].[BUSINESS_OP].doc_ref;
+		    end;
+		    OUR_SWIFT := GET_SUM_FROM_RC(mn_ref);
+            IF OUR_SWIFT = 1 THEN    --Если определен документ РЦ и комиссия OUR = 0
+				ExMemo:= '1'; goto nnn;
+            ELSIF OUR_SWIFT = 2 THEN   --Если определен документ РЦ и комиссия BEN = 1
+                ExMemo:= '2';
+            END IF;
+			ExMemo:= '0';				 goto nnn;
+------------------ ПСХБ РАСЧЕТ СУММЫ ПО ШКАЛЕ
+		ELSIF P_PAR = 'СУММА_РАСЧ_КОМ' THEN
+		   &OpDate;
+			BEGIN
+		         LOCATE MN_REF IN ::[MAIN_DOCUM] WHERE MN_REF%ID = P_PROD%ID;
+				 EXCEPTION WHEN NO_DATA_FOUND THEN
+						MN_REF:=::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+			END;
+	       SUMA_DOC := mn_ref.[SUM];  -- СУММА ДОКУМЕНТА
+	
+        	FOR (SELECT MD(
+			  	          SUM(MD.[SUM]) : SUM_DOC
+			  	         )
+			  	IN [MAIN_DOCUM]
+			  	WHERE TRUNC(MD.[DATE_PROV]) = TRUNC(TODAY) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+			  	      AND MD.[ACC_KT].[MAIN_USV].[NUM] in ('20202')
+			  	)
+		   LOOP
+	            SUM_DEN := MD.SUM_DOC;
+		   END LOOP;
+		 -- ----------
+		  IF SUM_DEN IS NOT NULL THEN
+	          SUMA := SUMA_DOC + NVL(SUM_DEN,0);
+		   ELSE
+		      SUMA := SUMA_DOC;
+		   END IF;
+		
+		   SUMA_BP := GET_SUM_SCALE(RKO);
+		  ------------------------   КОНЕЦ --------------------------------------------------
+	       IF SUMA_BP > 0 AND SUM_DEN IS NOT NULL THEN
+	          IF SUMA <= SUMA_SH1 AND SUMA_BP >= SUMA_DOC THEN
+	             ExMemo:= SUMA_DOC;
+	          ELSIF SUMA <= SUMA_SH1 AND SUMA_BP < SUMA_DOC AND SUM_DEN IS NULL THEN
+	             SUMA := SUMA_BP;
+	          ELSIF SUMA <= SUMA_SH1 AND SUMA_BP < SUMA_DOC AND SUM_DEN IS NOT NULL THEN
+	             SUMA := SUMA_BP - NVL(SUM_DEN,0);
+	          END IF;
+	          IF SUMA > SUMA_SH1 AND SUMA_BP >= SUMA_SH1 THEN
+	             SUMA := SUMA_SH1 - NVL(SUM_DEN,0);
+	             IF SUMA > 0 THEN
+	                ExMemo:= SUMA; goto nnn;
+	             ELSE
+	                SUMA := 0;
+	                ExMemo:= SUMA;
+	             END IF;
+	          ELSIF SUMA > SUMA_SH1 AND SUMA_BP < SUMA_SH1 THEN
+	             SUMA := SUMA_BP - NVL(SUM_DEN,0);
+	             IF SUMA > 0 THEN
+	                ExMemo:= SUMA; goto nnn;
+	             ELSE
+	                ExMemo:= 0;
+	             END IF;
+	          END IF;
+	       END IF;		
+	       IF SUMA_BP >= SUMA_DOC AND SUMA_DOC <= SUMA_SH1 THEN
+	          ExMemo:= SUMA_DOC;			   	 goto nnn;
+	       ELSIF SUMA_BP >= SUMA_DOC AND SUMA_DOC > SUMA_SH1 THEN
+	          ExMemo:= SUMA_BP;
+	       ELSIF SUMA_BP < SUMA_DOC AND SUMA_DOC <= SUMA_SH1 THEN
+	          ExMemo:= SUMA_BP;	 goto nnn;
+	       ELSIF SUMA_BP < SUMA_DOC AND SUMA_DOC > SUMA_SH1 THEN
+	          IF SUMA_BP <= SUMA_SH1 THEN
+	             ExMemo:= SUMA_BP;
+	          ELSE
+	             ExMemo:= SUMA_SH1;	 goto nnn;
+	          END IF;	
+	       END IF;
+	       ExMemo:= 0;
+------------------  КОНЕЦ РАСЧЕТА СУММЫ ПО ШКАЛЕ	
+		ELSIF  P_PAR = 'СУММА_РАСЧ_КОМ2' THEN
+		   &OpDate;
+			BEGIN
+		         LOCATE MN_REF IN ::[MAIN_DOCUM] WHERE MN_REF%ID = P_PROD%ID;
+				 EXCEPTION WHEN NO_DATA_FOUND THEN
+						MN_REF:=::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+			END;
+	       SUMA_DOC := mn_ref.[SUM];  -- СУММА ДОКУМЕНТА
+	
+        	FOR (SELECT MD(
+			  	          SUM(MD.[SUM]) : SUM_DOC
+			  	         )
+			  	IN [MAIN_DOCUM]
+			  	WHERE TRUNC(MD.[DATE_PROV]) = TRUNC(TODAY) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+			  	      AND MD.[ACC_KT].[MAIN_USV].[NUM] in ('20202')
+			  	)
+		   LOOP
+	            SUM_DEN := MD.SUM_DOC;
+		   END LOOP;
+		 -- ----------
+		  IF SUM_DEN IS NOT NULL THEN
+	          SUMA := SUMA_DOC + NVL(SUM_DEN,0);
+		   ELSE
+		      SUMA := SUMA_DOC;
+		   END IF;
+		
+		   SUMA_BP := GET_SUM_SCALE(RKO);
+		  ------------------------   КОНЕЦ --------------------------------------------------
+	       IF SUMA_BP > 0 AND SUM_DEN IS NOT NULL THEN
+	          IF SUMA > SUMA_SH1 AND SUMA <= SUMA_SH2 AND SUMA_BP >= SUMA_DOC THEN
+	             IF NVL(SUM_DEN,0) > SUMA_SH1 THEN
+	                ExMemo:= SUMA_DOC; goto nnn;
+	             ELSE
+	                SUMA := SUMA - SUMA_SH1;
+	             END IF;
+	             ExMemo:= SUMA;
+	          ELSIF SUMA <= SUMA_SH1 THEN
+	             SUMA := 0;
+	             ExMemo:= SUMA; goto nnn;
+	          ELSIF SUMA > SUMA_SH2 AND SUMA_BP >= SUMA_DOC THEN
+	             IF NVL(SUM_DEN,0) > SUMA_SH2 THEN
+	                SUMA := 0;
+	                ExMemo:= SUMA;
+	             ELSIF NVL(SUM_DEN,0) <= SUMA_SH1 THEN
+	                SUMA := SUMA_SH2 - SUMA_SH1;
+	                ExMemo:= SUMA; goto nnn;
+	             ELSIF NVL(SUM_DEN,0) > SUMA_SH1 AND NVL(SUM_DEN,0) <= SUMA_SH2 THEN
+	                SUMA := SUMA_SH2 - NVL(SUM_DEN,0);
+	                ExMemo:= SUMA;
+	             END IF;
+	          ELSIF SUMA > SUMA_SH2 AND SUMA_BP < SUMA_DOC THEN    --- ESLI SUMA SNIATII > 2 GRANITSI SHKALI I NEHVATAET BEZNALICHNIH PEREVODOV
+	             IF (SUM_DEN + SUMA_BP)<= SUMA_SH1 THEN
+	                SUMA := 0;
+	                ExMemo:= SUMA; goto nnn;
+	             ELSIF SUM_DEN > SUMA_SH2 THEN
+	                SUMA := 0;
+	                ExMemo:= SUMA;
+	             ELSIF SUM_DEN <= SUMA_SH2 AND SUM_DEN > SUMA_SH1 AND (SUM_DEN + SUMA_BP) <= SUMA_SH2 THEN
+	                ExMemo:= SUMA_BP; goto nnn;
+	             ELSIF SUM_DEN <= SUMA_SH2 AND SUM_DEN > SUMA_SH1 AND (SUM_DEN + SUMA_BP) > SUMA_SH2 THEN
+	                SUMA := SUMA_SH2 - SUM_DEN;
+	                ExMemo:= SUMA;
+	             END IF;
+	          ELSIF SUMA > SUMA_SH1 AND SUMA <= SUMA_SH2 AND SUMA_BP < SUMA_DOC THEN
+	             IF (SUM_DEN + SUMA_BP) <= SUMA_SH1 THEN
+	                SUMA := 0;
+	                ExMemo:= SUMA; goto nnn;
+	             ELSIF SUM_DEN > SUMA_SH1 AND (SUM_DEN + SUMA_BP) <= SUMA_SH2 THEN
+	                ExMemo:= SUMA_BP;
+	             ELSIF SUM_DEN > SUMA_SH1 AND SUM_DEN <= SUMA_SH2 AND (SUM_DEN + SUMA_BP) > SUMA_SH2 THEN
+	                SUMA := SUMA_SH2 - SUM_DEN;
+	                ExMemo:= SUMA_BP; goto nnn;
+	             END IF;
+	          END IF;
+	       END IF;		
+	       IF SUMA_BP >= SUMA_DOC AND SUMA_DOC <= SUMA_SH1 THEN
+	          ExMemo:= 0;			   	
+	       ELSIF SUMA_BP >= SUMA_DOC AND SUMA_DOC > SUMA_SH1 AND SUMA_DOC <= SUMA_SH2 THEN
+	          SUMA := SUMA_DOC - SUMA_SH1;
+	          ExMemo:= SUMA; goto nnn;
+	       ELSIF SUMA_BP >= SUMA_DOC AND SUMA_DOC > SUMA_SH2 THEN
+	          SUMA := SUMA_SH2 - SUMA_SH1;
+	          ExMemo:= SUMA;	
+	       ELSIF SUMA_BP < SUMA_DOC AND SUMA_DOC <= SUMA_SH1 THEN
+	          ExMemo:= 0;	 goto nnn;
+	       ELSIF SUMA_BP < SUMA_SH1 THEN
+	          ExMemo:= 0;
+	       ELSIF SUMA_BP < SUMA_SH2 THEN
+	          ExMemo:= SUMA_DOC; goto nnn;
+	       ELSIF SUMA_BP < SUMA_DOC AND SUMA_DOC > SUMA_SH1 AND SUMA_DOC <= SUMA_SH2 AND SUMA_BP < SUMA_SH1 THEN
+              ExMemo:= 0;
+	       ELSIF SUMA_BP < SUMA_DOC AND SUMA_DOC > SUMA_SH1 AND SUMA_DOC <= SUMA_SH2 AND SUMA_BP > SUMA_SH1 THEN
+	          SUMA := SUMA_BP - SUMA_SH1;
+              ExMemo:= SUMA;              	 goto nnn;
+	       END IF;
+	        ExMemo:= 0;
+-------------------------------------------------- КОНЕЦ -----
+---------------------------------------    РАСЧЕТ СУММЫ ДЛЯ 3 ШКАЛЫ -----
+	       ELSIF  P_PAR = 'СУММА_РАСЧ_КОМ3' THEN
+		   &OpDate;
+			BEGIN
+		         LOCATE MN_REF IN ::[MAIN_DOCUM] WHERE MN_REF%ID = P_PROD%ID;
+				 EXCEPTION WHEN NO_DATA_FOUND THEN
+						MN_REF:=::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+			END;
+	       SUMA_DOC := mn_ref.[SUM];  -- СУММА ДОКУМЕНТА
+	
+        	FOR (SELECT MD(
+			  	          SUM(MD.[SUM]) : SUM_DOC
+			  	         )
+			  	IN [MAIN_DOCUM]
+			  	WHERE TRUNC(MD.[DATE_PROV]) = TRUNC(TODAY) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+			  	      AND MD.[ACC_KT].[MAIN_USV].[NUM] in ('20202')
+			  	)
+		   LOOP
+	            SUM_DEN := MD.SUM_DOC;
+		   END LOOP;
+		 -- ----------
+		  IF SUM_DEN IS NOT NULL THEN
+	          SUMA := SUMA_DOC + NVL(SUM_DEN,0);
+		   ELSE
+		      SUMA := SUMA_DOC;
+		   END IF;
+		
+		   SUMA_BP := GET_SUM_SCALE(RKO);
+		  ------------------------   КОНЕЦ --------------------------------------------------
+		   --DEBUG_PIPE('SUMA_DEN => '||SUM_DEN, 0);
+	       IF SUMA_BP > 0 AND SUM_DEN IS NOT NULL THEN
+	          IF SUMA > SUMA_SH2 AND SUMA_BP >= SUMA_DOC THEN
+	             IF NVL(SUM_DEN,0) > SUMA_SH2 THEN
+	                ExMemo:= SUMA_DOC; goto nnn;
+	             ELSE
+	                SUMA := SUMA - SUMA_SH2;
+	             END IF;
+	             ExMemo:= SUMA;
+	          ELSIF SUMA <= SUMA_SH2 THEN
+	             SUMA := 0;
+	             ExMemo:= SUMA; goto nnn;
+	          ELSIF SUMA > SUMA_SH2 AND SUMA_BP < SUMA_DOC THEN    --- ESLI SUMA SNIATII > 2 GRANITSI SHKALI I NEHVATAET BEZNALICHNIH PEREVODOV
+	             IF (SUM_DEN + SUMA_BP) <= SUMA_SH2 THEN
+	                SUMA := 0;
+	                ExMemo:= SUMA;
+	             ELSIF SUM_DEN > SUMA_SH2 AND SUMA_BP > SUM_DEN THEN
+	                SUMA := SUMA_BP - SUM_DEN;
+	                ExMemo:= SUMA; goto nnn;
+	             ELSIF SUM_DEN < SUMA_SH2 AND SUMA_BP > SUMA_SH2 THEN
+	                SUMA := SUMA_BP - SUMA_SH2;
+	                ExMemo:= SUMA;
+	             ELSIF SUM_DEN > SUMA_BP THEN
+	                SUMA := 0;
+	                ExMemo:= SUMA; goto nnn;
+	             END IF;
+	          END IF;
+	       END IF;		
+	       IF SUMA_BP >= SUMA_DOC AND SUMA_DOC <= SUMA_SH2 THEN
+	          ExMemo:= 0;			   	
+	       ELSIF SUMA_BP >= SUMA_DOC AND SUMA_DOC > SUMA_SH2 THEN
+	          SUMA := SUMA_DOC - SUMA_SH2;
+	          ExMemo:= SUMA; goto nnn;
+	       ELSIF SUMA_BP < SUMA_DOC AND SUMA_DOC <= SUMA_SH2 THEN
+	          ExMemo:= 0;	
+	       ELSIF SUMA_BP < SUMA_DOC AND SUMA_DOC > SUMA_SH2 THEN
+	          IF SUMA_BP <= SUMA_SH2 THEN
+	             ExMemo:= 0; goto nnn;
+	          ELSE
+	             ExMemo:= SUMA_BP;	
+	          END IF;	
+	       END IF;
+	       ExMemo:= 0; goto nnn;
+----------------------------------------------------- КОНЕЦ -------
+		elsif P_PAR ='PSH_VSTRECHKA'  then
+		   &OpDate;
+	       MN_REF := P_DOC;	
+	       if MN_REF.[ACC_KT].[MAIN_V_ID] like ('30102%') then
+				
+				       SUMA_DOC := mn_ref.[SUM];  -- СУММА ДОКУМЕНТА
+				       SUMA_IN:=abs(::[RUNTIME].[F_5].A('И'||MN_REF.[ACC_DT]||'СН',TRUNC(TODAY)));
+				       SUMA_DT:=abs(::[RUNTIME].[F_5].A('И'||MN_REF.[ACC_DT]||'ДН',TRUNC(TODAY),TRUNC(TODAY),ACTION=='В',ACT_PAR=='30102%'));
+				       SUMA_KT:=abs(::[RUNTIME].[F_5].A('И'||MN_REF.[ACC_DT]||'КН',TRUNC(TODAY),TRUNC(TODAY),ACTION=='И',ACT_PAR=='30102%'));
+				       debug_pipe('SUMA_IN '|| SUMA_IN,0);
+				       debug_pipe('SUMA_DT '|| SUMA_DT,0);
+				       debug_pipe('SUMA_KT '|| SUMA_KT,0);
+				
+				       --if MN_REF%state='PROV' then SUMA_DT:=SUMA_DT-SUMA_DOC;
+				       --end if;
+				
+				       if SUMA_IN+SUMA_KT-SUMA_DT>=0 then ExMemo:= 0;
+				       else
+				       		if SUMA_IN+SUMA_KT-SUMA_DT < 0 then ExMemo:= abs(SUMA_IN+SUMA_KT-SUMA_DT); goto nnn;
+				       		--else ExMemo:=(SUMA_DOC-abs(SUMA_IN+SUMA_KT-SUMA_DT));
+				       		end if;
+				       end if;
+				       /*
+				       if MN_REF%state='PROV' then SUMA_DT:=SUMA_DT-SUMA_DOC;
+				       end if;
+				
+				       if SUMA_IN+SUMA_KT-SUMA_DOC-SUMA_DT>=0 then ExMemo:= 0; goto nnn;
+				       else if abs(SUMA_IN+SUMA_KT-SUMA_DT)>=SUMA_DOC then ExMemo:=(SUMA_DOC);
+				       		else ExMemo:=(SUMA_DOC-abs(SUMA_IN+SUMA_KT-SUMA_DT)); goto nnn;
+				       		end if;
+				       end if;
+				
+				       */
+	       else ExMemo:= 0;
+	       end if;
+			   				
+		elsif P_PAR = 'СУММА_ДОК_ПРЕД' then --
+			&OpDate;
+			SUM_DEN := 0; SUMA := 0;
+		  	for (select MD(
+		  	               SUM(MD.[SUM_KSPL].[2]) : SUM_KSPL
+		  	             )
+		  	     in [MAIN_DOCUM]
+		  	     where trunc(MD.[DATE_PROV]) = trunc(today) AND MD.[ACC_DT] = RKO.[ACCOUNT]
+		  	           AND MD.[ACC_KT].[MAIN_USV].[NUM] = '20202'
+		  	           AND MD.[SUM_KSPL].[1].[1] NOT IN (40, 41, 42, 44, 50)
+		  	    )
+		  	loop
+                SUM_DEN := MD.SUM_KSPL;
+			end loop; 	
+			   ExMemo:= SUMA;				   					   		 goto nnn;
+		ELSIF P_PAR = 'КЛИЕНТ_РКО_КАТЕГОР_БК' THEN
+			&OpDate;		
+            FOR I IN rko.[CLIENT].[VIDS_CL] WHERE I.[DATE_BEGIN] <= TRUNC(TODAY) AND NVL(I.[DATE_END],TO_DATE('31.12.3000', 'DD.MM.YYYY')) >= trunc(today)
+            LOOP
+                IF I.[CATEGORY].CODE = 'RKO_CAT_BC' THEN
+                  V_IS := TRUE;
+				  FOR M IN RKO.[ACCOUNT].[ARC_MOVE] WHERE M.[DATE] >= TRUNC(TODAY-5,'MM') AND
+					                                      M.[DATE] <= TRUNC(TODAY) AND
+					                                      (M.[ACC_CORR].[MAIN_USV].[NUM] NOT IN (47426,70601) OR
+					                                      UPPER(M.[DOC].[NAZN]) NOT LIKE UPPER('%ОШИБ%'))
+				  LOOP
+					  ExMemo:= '1';
+				  END LOOP;
+                END IF;
+            END LOOP;
+            IF V_IS = FALSE THEN
+  			   FOR M IN RKO.[ACCOUNT].[ARC_MOVE] WHERE M.[DATE] >= TRUNC(TODAY-5,'MM') AND
+				                                       M.[DATE] <= TRUNC(TODAY) AND
+					                                   (M.[ACC_CORR].[MAIN_USV].[NUM] NOT IN (47426,70601) OR
+					                                   UPPER(M.[DOC].[NAZN]) NOT LIKE UPPER('%ОШИБ%'))
+			   LOOP
+				   ExMemo:= '0'; goto nnn;
+			   END LOOP;
+            END IF;
+			ExMemo:= '2';		
+		ELSIF P_PAR = 'КОМИСС_ОБОР_1000000' THEN
+			&OpDate;		
+				  FOR M IN RKO.[ACCOUNT].[ARC_MOVE] WHERE M.[DATE] >= TRUNC(TODAY-30) AND
+					                                      M.[DATE] <= TRUNC(TODAY) /*AND
+					                                      (M.[ACC_CORR].[MAIN_USV].[NUM] NOT IN (47426,70601) OR
+					                                      UPPER(M.[DOC].[NAZN]) NOT LIKE UPPER('%ОШИБ%'))*/
+				  LOOP
+				      SUMA := SUMA + M.[SUMMA_NAT];
+				  END LOOP;
+				  IF SUMA < 1000000 THEN
+				     ExMemo:= '1'; goto nnn;
+				  ELSIF SUMA >= 1000000 AND SUMA < 3000000 THEN
+				     ExMemo:= '2';
+				  ELSE
+				     ExMemo:= '3'; goto nnn;
+				  END IF;
+			ExMemo:= '4';	
+       ELSIF P_PAR = 'КАССА_ДОК' then
+             if p_prod%class in ('RKO', 'RKO_CUR') then
+                DOC_REF := ::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+                    BEGIN
+                          SELECT M(M)
+                          IN [MAIN_DOCUM]
+                          WHERE M = DOC_REF
+                          INTO MD;
+                    EXCEPTION
+                          WHEN NO_DATA_FOUND THEN
+                               MD := NULL;
+                          WHEN OTHERS THEN
+                               MD := NULL;
+                    END;
+             END IF;
+             IF MD.[ACC_DT].[MAIN_USV].[NUM] IN (20202) THEN
+                ExMemo:= '1'; goto nnn;
+             END IF;
+             ExMemo:= '0';							
+       ELSIF P_PAR = 'ВНПЛ_0445' then
+             if p_prod%class in ('RKO', 'RKO_CUR') then
+                DOC_REF := ::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+                    BEGIN
+                          SELECT M(M)
+                          IN [MAIN_DOCUM]
+                          WHERE M = DOC_REF
+                          INTO MD;
+                    EXCEPTION
+                          WHEN NO_DATA_FOUND THEN
+                               MD := NULL;
+                          WHEN OTHERS THEN
+                               MD := NULL;
+                    END;
+                    IF MD.[KL_KT].[2].[3].[BIC] IS NULL AND (SUBSTR(MD.[KL_KT].[2].[1],1,5) IN (40817, 40820) OR SUBSTR(MD.[KL_KT].[2].[1],1,3) IN ('423','426')) THEN
+                        ExMemo:= 2; goto nnn;
+                    END IF;
+              IF SUBSTR(MD.[KL_KT].[2].[3].[BIC],1,4) IN ('0445', '0483') THEN
+                IF MD.[KL_KT].[2].[3].[BIC] IN ('044599205', '048327752') AND (SUBSTR(MD.[KL_KT].[2].[1],1,5) IN (40817, 40820) OR SUBSTR(MD.[KL_KT].[2].[1],1,3) IN ('423','426')) THEN
+                   ExMemo:= 2;
+                ELSE
+                   ExMemo:= 1; goto nnn;
+                END IF;
+              ELSE
+                 ExMemo:= 0;
+              END IF;
+             end if;
+
+       ELSIF P_PAR = 'ВЫДАЧА_ЗП_ХЗ' then
+	       &OpDate;
+             if p_prod%class in ('RKO', 'RKO_CUR') then
+                DOC_REF := ::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+                    BEGIN
+                          SELECT M(M)
+                          IN [MAIN_DOCUM]
+                          WHERE M = DOC_REF
+                          INTO MD;
+                    EXCEPTION
+                          WHEN NO_DATA_FOUND THEN
+                               MD := NULL;
+                          WHEN OTHERS THEN
+                               MD := NULL;
+                    END;
+	           FOR i IN RKO.[DAILY] WHERE I.[DAT_GIVE]<=TRUNC(TODAY) AND I.[DAT_GIVE] = (SELECT J(MAX(J.[DAT_GIVE])) IN RKO.[DAILY] WHERE J.[DAT_GIVE] <= TRUNC(TODAY)) LOOP
+			       SELECT M(SUM(M.[SUMMA_NAT]))			
+			       IN RKO.[ACCOUNT].[ARC_MOVE] WHERE TRUNC(M.[DATE]) = TRUNC(TODAY) AND SUBSTR(M.[ACC_CORR].[MAIN_V_ID],1,5)!='70601'
+			       INTO SUM_DEN;
+			       SUM_DEN := NVL(SUM_DEN,0) + NVL(MD.[SUM],0);
+			       --DEBUG_PIPE('SUM_DEN => '||SUM_DEN, 0);
+			       IF SUM_DEN <= 300000 THEN
+			          ExMemo:= '1'; goto nnn;
+			       ELSIF SUM_DEN > 300000 AND SUM_DEN <= 3000000 THEN
+			          ExMemo:= '2';
+			       ELSIF SUM_DEN > 3000000 AND SUM_DEN <= 7000000 THEN
+			          ExMemo:= '3'; goto nnn;
+			       ELSIF SUM_DEN > 7000000 THEN
+			          ExMemo:= '4';
+			       END IF;
+	           END LOOP;
+			       SELECT M(SUM(M.[SUMMA_NAT]))			
+			       IN RKO.[ACCOUNT].[ARC_MOVE] WHERE TRUNC(M.[DATE]) = TRUNC(TODAY) AND SUBSTR(M.[ACC_CORR].[MAIN_V_ID],1,5)!='70601'
+			       INTO SUM_DEN;
+			       SUM_DEN := NVL(SUM_DEN,0) + NVL(MD.[SUM],0);
+			  --     DEBUG_PIPE('SUM_DEN => '||SUM_DEN, 0);
+			       IF SUM_DEN <= 600000 THEN
+			          ExMemo:= '10'; goto nnn;
+			       ELSIF SUM_DEN > 600000 AND SUM_DEN <= 3000000 THEN
+			          ExMemo:= '11';
+			       ELSIF SUM_DEN > 3000000 AND SUM_DEN <= 7000000 THEN
+			          ExMemo:= '12'; goto nnn;
+			       ELSIF SUM_DEN > 7000000 THEN
+			          ExMemo:= '13';
+			       END IF;
+             END IF;
+            ExMemo:= '100'; goto nnn;
+		ELSIF P_PAR = 'КЛИЕНТ_РКО_ОВЕРДРАФТ' THEN
+			&OpDate;		
+			FOR O IN ::[OVERDRAFTS] WHERE O.[CLIENT] = RKO.[CLIENT] LOOP
+				  FOR M IN O.[ACCOUNT].[ARC_MOVE] WHERE M.[DATE] >= TRUNC(TODAY-5,'MM') AND
+					                                      M.[DATE] <= TRUNC(TODAY) AND
+					                                      M.[ACC_CORR].[MAIN_USV].[NUM] NOT IN (47426,70601) AND
+					                                      UPPER(M.[DOC].[NAZN]) NOT LIKE UPPER('%ОШИБ%')
+				  LOOP
+					  ExMemo:= '1';
+				  END LOOP;
+			END LOOP;
+			ExMemo:= '0';			 goto nnn;
+		elsif P_PAR = 'ТАРИФ_ПЛАН' then --
+			&OpDate;
+			for p in rko.[TARIF_PLAN] where p.[DATE_BEGIN] is null or trunc(p.[DATE_BEGIN]) <= trunc(today)
+			loop
+				--debug_pipe('ТАРИф='||p.[TAR_PLAN].[CODE],0);
+				tar_pl := p.[TAR_PLAN].[CODE];
+			end loop;
+			ExMemo:= tar_pl;
+		-- Возвращает сумму списаний по кассе по расчетному счету договора РКО за текущий день
+		elsif P_PAR = 'КАСС_СПИС' then --
+			&OpDate;
+			--debug_pipe('Data='||trunc(today, 'MONTH'),0);
+			Select m(sum(m.[SUMMA_NAT]))			
+				in rko.[ACCOUNT].[ARC_MOVE] where
+			trunc(m.[DATE]) = trunc(today) And
+			substr(m.[ACC_CORR].[MAIN_V_ID],1,5)='20202' and			
+			m.[DT]= 1
+			Into Sum_den;
+			--debug_pipe('Sum_month='||Sum_den,0);
+			ExMemo:= to_char(nvl(Sum_den,0)); goto nnn;
+		--Балансовый счет договора РКО
+		elsif P_PAR = 'БАЛ_СЧ' then
+			val	:= rko.[CONTRACT_CUR].[CODE_ISO];
+			--debug_pipe(' val='||val,0);		
+			if val != 643 then
+				bal_acc := bal_acc || to_char(val);
+			end if;	
+						
+			ExMemo:= nvl(bal_acc,'0');
+		--Код филиала и подразделения
+		elsif P_PAR = 'ФФПП' then --
+			FFPP := lpad(nvl(rko.[FILIAL].[LOCAL_CODE],'0'),2,'0')||lpad(nvl(rko.[DEPART].[NUM], '0'),2,'0');
+			ExMemo:= FFPP; goto nnn;
+		--Количество договоров в подразделении
+		elsif P_PAR = 'НОМ_ДОГ_ДО' then --
+			begin
+				Select m(count(m))	in ::[RKO] all where m.[DEPART] = rko.[DEPART] Into col_dog;
+				exception when others then
+				pragma error ('Ошибка при вычислении номера договора в разрезе подразделения');
+			end;
+			ExMemo:= to_char(nvl(col_dog,'0'));
+			
+		--yach
+		ELSIF P_PAR like 'СУММА_РАСЧ_КОМ_Э%' THEN
+			suma_bp := nvl(GET_SUM_SCALE(RKO),0);
+			suma := get_sum_calc(md2.[SUM],suma_bp);
+			
+			if P_PAR = 'СУММА_РАСЧ_КОМ_Э' THEN
+				if suma <= SUMA_SH_FIL then
+					ExMemo:= suma; goto nnn;
+				else
+					ExMemo:= SUMA_SH_FIL;
+				end if;
+			elsif P_PAR = 'СУММА_РАСЧ_КОМ_Э2' THEN
+				if suma <= SUMA_SH_FIL then
+					ExMemo:= 0; goto nnn;
+				else
+					ExMemo:= suma - SUMA_SH_FIL;
+				end if;	
+			end if;	
+		 -- Лопухов
+		 ELSIF P_PAR like 'СУММА_РАСЧ_КОМ_НЭ%' THEN
+               suma :=md2.[SUM];
+
+               if P_PAR = 'СУММА_РАСЧ_КОМ_НЭ' THEN
+                  if suma <= SUMA_SH_FILN then
+                     ExMemo:= suma; goto nnn;
+                  else
+                     ExMemo:= 0.0;
+                  end if;
+               elsif P_PAR = 'СУММА_РАСЧ_КОМ_НЭ1' THEN
+                     if (suma > SUMA_SH_FILN) and (suma <= SUMA_SH_FILN1) then
+                        ExMemo:= suma; goto nnn;
+                     else
+                        ExMemo:= 0.0;
+                     end if;
+               elsif P_PAR = 'СУММА_РАСЧ_КОМ_НЭ2' THEN
+                     if suma > SUMA_SH_FILN1 then
+                        ExMemo:= suma; goto nnn;
+                     else
+                        ExMemo:= 0.0;
+                     end if;
+               end if;
+               ExMemo:= 0;	 goto nnn;
+		ELSIF P_PAR = 'СУММА_РАСЧ_КОМИС' THEN
+            &OpDate;
+			BEGIN
+		         LOCATE MN_REF IN ::[MAIN_DOCUM] WHERE MN_REF%ID = RKO;
+				 EXCEPTION WHEN NO_DATA_FOUND THEN
+						MN_REF:=::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+			END;
+			IF MN_REF.[VID_DOC].[CODE] IN ('КАСС_ПРИХОД_ОРД', 'КАСС_ОБЪЯВ_ВЗНОС') OR MN_REF.[ACC_DT].[MAIN_USV].[NUM] = '20202' THEN
+			   ExMemo:= 0;
+			END IF;			
+			suma_bp := nvl(GET_SUM_SCALE(RKO),0);
+			ExMemo:= get_sum_calc(nvl(md2.[SUM],0),nvl(suma_bp,0)); goto nnn;
+		ELSIF P_PAR like 'СУММА_ПРИЕМ_ДН' THEN
+			&OpDate;
+			BEGIN
+		         LOCATE MN_REF IN ::[MAIN_DOCUM] WHERE MN_REF%ID = RKO;
+				 EXCEPTION WHEN NO_DATA_FOUND THEN
+						MN_REF:=::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+			END;
+			IF MN_REF.[VID_DOC].[CODE] IN ('КАСС_ПРИХОД_ОРД', 'КАСС_ОБЪЯВ_ВЗНОС') OR MN_REF.[ACC_DT].[MAIN_USV].[NUM] = '20202' THEN
+			   ExMemo:= MN_REF.[SUM];
+			ELSE
+			   ExMemo:= 0; goto nnn;
+			END IF;		
+			ExMemo:= 0;			
+	    ELSIF P_PAR = 'СУММА_РАСЧ_ЗП_СТИП' THEN
+			&OpDate;
+			
+			BEGIN
+		         LOCATE MN_REF IN ::[MAIN_DOCUM] WHERE MN_REF%ID = RKO;
+				 EXCEPTION WHEN NO_DATA_FOUND THEN
+						MN_REF:=::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+			END;
+			PSH_VID_MD := ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_VID_DOC; -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+			PSH_ACC_DT_MD := ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_ACC_DT; -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+			PSH_SUMA := ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_SUMA; -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+			IF ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_VID_DOC IS NOT NULL OR ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_ACC_DT IS NOT NULL THEN -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+				IF PSH_VID_MD.[CODE] IN ('КАСС_ПРИХОД_ОРД', 'КАСС_ОБЪЯВ_ВЗНОС') OR PSH_ACC_DT_MD.[MAIN_USV].[NUM] = '20202' THEN
+				   ExMemo:= 0; goto nnn;
+				END IF;	
+			END IF;			
+			IF MN_REF.[VID_DOC].[CODE] IN ('КАСС_ПРИХОД_ОРД', 'КАСС_ОБЪЯВ_ВЗНОС') OR MN_REF.[ACC_DT].[MAIN_USV].[NUM] = '20202' THEN
+			   ExMemo:= 0;
+			END IF;				
+			SUMA_DOC := NVL(MN_REF.[SUM], PSH_SUMA);
+			SUM_ZAYAV_SAL := 0;
+			FOR i IN RKO.[DAILY] WHERE I.[DAT] = TRUNC(TODAY) AND I.[TO_ARM] IS NOT NULL --AND NVL(I.[SALARY],0) != 0
+			LOOP
+			    --SUM_ZAYAV_SAL := SUM_ZAYAV_SAL + I.[SALARY];
+			    SUM_ZAYAV_SAL := SUM_ZAYAV_SAL + I.[TO_ARM];
+			END LOOP;		
+			declare
+				ksim ref [SUM_SYMKS];
+			begin
+				FOR R IN RKO.[ARRAY_OPER_DOG] WHERE R.[FIRST_DOC] = MN_REF
+				LOOP
+                   FOR SYM in mn_ref.[SUM_KSPL] WHERE SYM.[1].[1] = R.[SYM_KS].[1] AND R.[SYM_KS].[1] IN ('40','41')
+				   LOOP
+					   SUMAKS := NVL(SUMA,0) + SYM.[2];
+				   END LOOP;				
+				END LOOP;
+				ksim := ::[RUNTIME].[STR].get_str_par(P_PATT, 'SUM_KS');
+				if ksim.[1].[1] in ('40','41') then
+					suma := ksim.[2];
+				end if;
+			end;
+			SUM_DEN := GET_SUM_OBOR_DN(RKO, 'СУММА_РАСЧ_ЗП_СТИП');
+			IF SUM_DEN IS NULL THEN
+			   SUM_DEN := 0;
+			END IF;
+			IF SUM_ZAYAV_SAL < SUMA_GOL_BEZ_COM AND SUMA_DOC <= SUMA_GOL_BEZ_COM THEN
+			   SUM_ZAYAV_SAL := SUMA_GOL_BEZ_COM;
+			END IF;				
+			/*IF SUM_ZAYAV_SAL >= SUMAKS THEN
+			   SUM_ZAYAV_SAL := SUM_ZAYAV_SAL - SUMAKS;
+			END IF;	*/ --Хрень какая то			
+			IF (SUMA + SUM_DEN) <= SUM_ZAYAV_SAL  THEN
+			   ExMemo:= SUMA; goto nnn;
+			ELSIF SUM_DEN >= SUM_ZAYAV_SAL THEN
+			   ExMemo:= 0;
+			ELSIF SUM_DEN < SUM_ZAYAV_SAL AND (SUMA + SUM_DEN) > SUM_ZAYAV_SAL THEN
+			   ExMemo:= SUM_ZAYAV_SAL - SUM_DEN; goto nnn;
+			END IF;
+			ExMemo:= 0;	
+	    ELSIF P_PAR = 'СУММА_РАСЧ_ЗП_СТИП05' THEN
+			&OpDate;
+			BEGIN
+		         LOCATE MN_REF IN ::[MAIN_DOCUM] WHERE MN_REF%ID = RKO;
+				 EXCEPTION WHEN NO_DATA_FOUND THEN
+						MN_REF:=::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+			END;
+			PSH_VID_MD := ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_VID_DOC; -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+			PSH_ACC_DT_MD := ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_ACC_DT; -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+			PSH_SUMA := ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_SUMA; -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+			IF ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_VID_DOC IS NOT NULL OR ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_ACC_DT IS NOT NULL THEN -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+				IF PSH_VID_MD.[CODE] IN ('КАСС_ПРИХОД_ОРД', 'КАСС_ОБЪЯВ_ВЗНОС') OR PSH_ACC_DT_MD.[MAIN_USV].[NUM] = '20202' THEN
+				   ExMemo:= 0; goto nnn;
+				END IF;	
+			END IF;			
+			IF MN_REF.[VID_DOC].[CODE] IN ('КАСС_ПРИХОД_ОРД', 'КАСС_ОБЪЯВ_ВЗНОС') OR MN_REF.[ACC_DT].[MAIN_USV].[NUM] = '20202' THEN
+			   ExMemo:= 0;
+			END IF;				
+			SUMA_DOC := NVL(MN_REF.[SUM], PSH_SUMA);
+			SUM_ZAYAV_SAL := 0;
+			FOR i IN RKO.[DAILY] WHERE I.[DAT] = TRUNC(TODAY) AND I.[TO_ARM] IS NOT NULL--AND NVL(I.[SALARY],0) != 0
+			LOOP
+			    --SUM_ZAYAV_SAL := SUM_ZAYAV_SAL + I.[SALARY];
+			    SUM_ZAYAV_SAL := SUM_ZAYAV_SAL + I.[TO_ARM];
+			END LOOP;
+			declare
+				ksim ref [SUM_SYMKS];
+			begin
+				FOR R IN RKO.[ARRAY_OPER_DOG] WHERE R.[FIRST_DOC] = MN_REF
+				LOOP
+                   FOR SYM in mn_ref.[SUM_KSPL] WHERE SYM.[1].[1] = R.[SYM_KS].[1] AND R.[SYM_KS].[1] IN ('40','41')
+				   LOOP
+					   SUMAKS := NVL(SUMA,0) + SYM.[2];
+				   END LOOP;				
+				END LOOP;			
+				ksim := ::[RUNTIME].[STR].get_str_par(P_PATT, 'SUM_KS');
+				if ksim.[1].[1] in ('40','41') then
+					suma := ksim.[2];
+				end if;
+			end;
+			
+			SUM_DEN := GET_SUM_OBOR_DN(RKO, 'СУММА_РАСЧ_ЗП_СТИП');
+			IF SUM_DEN IS NULL THEN
+			   SUM_DEN := 0;
+			END IF;	
+			IF SUM_ZAYAV_SAL < SUMA_GOL_BEZ_COM  AND SUMA_DOC <= SUMA_GOL_BEZ_COM THEN
+			   SUM_ZAYAV_SAL := SUMA_GOL_BEZ_COM;
+			END IF;				
+			/*IF SUM_ZAYAV_SAL >= SUMAKS THEN
+			   SUM_ZAYAV_SAL := SUM_ZAYAV_SAL - SUMAKS;
+			END IF;	*/ --Хрень какая то
+            IF (SUMA + SUM_DEN) <= SUM_ZAYAV_SAL THEN
+			    ExMemo:= 0; goto nnn;
+			ELSIF SUM_DEN >= SUM_ZAYAV_SAL THEN
+			    ExMemo:= SUMA;
+			ELSIF SUM_DEN < SUM_ZAYAV_SAL AND (SUM_DEN + SUMA) > SUM_ZAYAV_SAL THEN
+			    ExMemo:= (SUM_DEN + SUMA) - SUM_ZAYAV_SAL; goto nnn;
+			END IF;
+			ExMemo:= 0;				
+		ELSIF P_PAR like 'СУММА_РКОМ_ЗАЙМЫ%' THEN
+			&OpDate;
+			BEGIN
+		         LOCATE MN_REF IN ::[MAIN_DOCUM] WHERE MN_REF%ID = RKO;
+				 EXCEPTION WHEN NO_DATA_FOUND THEN
+						MN_REF:=::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+			END;
+			PSH_VID_MD := ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_VID_DOC; -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+			PSH_ACC_DT_MD := ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_ACC_DT; -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+			PSH_SUMA := ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_SUMA; -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+			IF ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_VID_DOC IS NOT NULL OR ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_ACC_DT IS NOT NULL THEN -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+				IF PSH_VID_MD.[CODE] IN ('КАСС_ПРИХОД_ОРД', 'КАСС_ОБЪЯВ_ВЗНОС') OR PSH_ACC_DT_MD.[MAIN_USV].[NUM] = '20202' THEN
+				   ExMemo:= 0; goto nnn;
+				END IF;	
+			END IF;	
+			IF MN_REF.[VID_DOC].[CODE] IN ('КАСС_ПРИХОД_ОРД', 'КАСС_ОБЪЯВ_ВЗНОС') OR MN_REF.[ACC_DT].[MAIN_USV].[NUM] = '20202' THEN
+			   ExMemo:= 0;
+			END IF;				
+			SUMA_DOC := NVL(MN_REF.[SUM], PSH_SUMA);
+			SUM_ZAYAV := 0;
+			FOR i IN RKO.[DAILY] WHERE I.[DAT] = TRUNC(TODAY) AND I.[TO_ARM] IS NOT NULL
+			LOOP
+			    SUM_ZAYAV := I.[TO_ARM]; -- - NVL(I.[SALARY],0);
+			    --DEBUG_PIPE('TO_ARM =>>>>>>>'||I.[TO_ARM],0);
+			    --DEBUG_PIPE('SUM_ZAYAV =>>>>>>>'||SUM_ZAYAV,0);
+			END LOOP;
+
+			IF SUM_ZAYAV < SUMA_GOL_BEZ_COM  AND SUMA_DOC <= SUMA_GOL_BEZ_COM THEN
+			   SUM_ZAYAV := SUMA_GOL_BEZ_COM;
+			END IF;	
+			SUM_DEN := GET_SUM_OBOR_DN(RKO, 'СУММА_РКОМ_ЗАЙМЫ');
+			SUM_MONTH := GET_SUM_OBOR_MONTH(RKO, 'СУММА_РКОМ_ЗАЙМЫ');
+			
+			declare
+				ksim ref [SUM_SYMKS];
+			begin
+				FOR R IN RKO.[ARRAY_OPER_DOG] WHERE R.[FIRST_DOC] = MN_REF
+				LOOP
+                   FOR SYM in mn_ref.[SUM_KSPL] WHERE SYM.[1].[1] = R.[SYM_KS].[1] AND R.[SYM_KS].[1] NOT IN ('40','41','50','58')
+				   LOOP
+					   SUMAKS := NVL(SUMA,0) + SYM.[2];
+				   END LOOP;				
+				END LOOP;			
+				ksim := ::[RUNTIME].[STR].get_str_par(P_PATT, 'SUM_KS');
+				if ksim.[1].[1] not in ('40','41','50','58') then --('42','53','54') then
+					suma := ksim.[2];
+				end if;
+			end;
+
+			/*IF SUM_ZAYAV >= SUMAKS THEN
+			   SUM_ZAYAV := SUM_ZAYAV - SUMAKS;
+			END IF;	*/ --Хрень какая то
+
+			IF SUM_DEN IS NULL THEN
+			   SUM_DEN := 0;
+			END IF;
+
+            --DEBUG_PIPE('SUM_DEN => '||SUM_DEN, 0);
+            --DEBUG_PIPE('SUM_ZAYAV => '||SUM_ZAYAV, 0);
+            --DEBUG_PIPE('SUM_MONTH => '||SUM_MONTH, 0);
+            --DEBUG_PIPE('SUMA => '||SUMA, 0);
+
+			if P_PAR = 'СУММА_РКОМ_ЗАЙМЫ1' THEN
+			    IF NVL(SUM_DEN,0) > 0 OR NVL(SUM_MONTH,0) > 0 THEN
+			      IF NVL(SUM_DEN,0) > 0 THEN
+				      SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+				      IF SUM_ZAYAV < 0 THEN
+				         SUM_ZAYAV := 0;
+				      END IF;
+			      END IF;			
+			      IF (SUM_MONTH + SUMA) < SUMA_FIL_SH1 THEN
+			         SUMA := SUMA;
+			      ELSIF (SUM_MONTH + SUMA) > SUMA_FIL_SH1 THEN
+			         IF SUM_MONTH < SUMA_FIL_SH1 THEN
+			            SUMA := SUMA_FIL_SH1 - SUM_MONTH;
+   			         ELSIF SUM_MONTH >= SUMA_FIL_SH1 THEN
+   			            ExMemo:= 0; goto nnn;
+			         END IF;			
+			      END IF;
+			    END IF;
+			
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0  THEN
+			       ExMemo:= SUMA;
+			    ELSIF SUMA > 0 AND SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 AND SUM_DEN > 0  THEN
+			       ExMemo:= SUM_ZAYAV; goto nnn;
+			    ELSIF SUMA > 0 AND  SUM_ZAYAV = 0 AND SUM_DEN > 0  THEN
+			       ExMemo:= 0;
+                ELSIF SUMA > 0 AND  SUMA <= SUM_ZAYAV AND SUM_MONTH > 0 AND SUM_DEN = 0 THEN
+			       ExMemo:= SUMA;			 goto nnn;
+                ELSIF SUMA > 0 AND  SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 AND SUM_MONTH > 0 AND SUM_DEN = 0 THEN
+			       ExMemo:= SUM_ZAYAV;					
+			    END IF;
+			
+				IF suma <= SUMA_FIL_SH1 then
+				   IF SUMA <= SUM_ZAYAV THEN
+					  ExMemo:= SUMA; goto nnn;
+				   ELSE
+				      IF SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 THEN
+				            ExMemo:= SUM_ZAYAV;
+				      ELSIF SUM_ZAYAV = 0 THEN
+				            ExMemo:= 0;	 goto nnn;
+				      END IF;
+				   END IF;				
+				ELSE
+				    IF SUMA_FIL_SH1 <= SUM_ZAYAV THEN
+					   ExMemo:= SUMA_FIL_SH1;
+				    ELSE
+				       IF SUMA_FIL_SH1 >= SUM_ZAYAV AND SUM_ZAYAV > 0 THEN
+				             ExMemo:= SUM_ZAYAV; goto nnn;
+				       ELSIF SUM_ZAYAV = 0 THEN
+				             ExMemo:= 0;	
+				       END IF;
+				    END IF;
+				END IF;
+				ExMemo:= 0; goto nnn;
+			ELSIF P_PAR = 'СУММА_РКОМ_ЗАЙМЫ105' THEN
+			    IF NVL(SUM_DEN,0) > 0 OR NVL(SUM_MONTH,0) > 0 THEN
+			      IF NVL(SUM_DEN,0) > 0 THEN
+				      SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+				      IF SUM_ZAYAV < 0 THEN
+				         SUM_ZAYAV := 0;
+				      END IF;
+			      END IF;
+			      IF (SUM_MONTH + SUMA) < SUMA_FIL_SH1 THEN
+			         SUMA := SUMA;
+			      ELSIF (SUM_MONTH + SUMA) > SUMA_FIL_SH1 THEN
+			         IF SUM_MONTH < SUMA_FIL_SH1 THEN
+			            SUMA := SUMA_FIL_SH1 - SUM_MONTH;
+   			         ELSIF SUM_MONTH >= SUMA_FIL_SH1 THEN
+			            ExMemo:= 0;
+			         END IF;			
+			      END IF;
+			    END IF;
+			
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0  THEN
+			       ExMemo:= 0; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV AND SUM_DEN > 0  THEN
+			       ExMemo:= SUMA - SUM_ZAYAV;
+			    ELSIF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN = 0 AND SUM_MONTH > 0 THEN
+			       ExMemo:= 0; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV AND SUM_DEN = 0 AND SUM_MONTH > 0 THEN
+			       ExMemo:= SUMA - SUM_ZAYAV;			
+			    END IF;	
+			
+				if suma <= SUMA_FIL_SH1 then
+				   IF SUMA <= SUM_ZAYAV THEN
+					  ExMemo:= 0; goto nnn;
+				   ELSE
+				      ExMemo:= (SUMA - SUM_ZAYAV);	
+				   END IF;				
+				else
+				    IF SUMA_FIL_SH1 <= SUM_ZAYAV THEN
+					   ExMemo:= 0; goto nnn;
+				    ELSE
+				       ExMemo:= (SUMA_FIL_SH1 - SUM_ZAYAV);
+				    END IF;
+				end if;
+				ExMemo:= 0;				 goto nnn;
+			elsif P_PAR = 'СУММА_РКОМ_ЗАЙМЫ2' THEN
+			    IF NVL(SUM_DEN,0) > 0 OR NVL(SUM_MONTH,0) > 0 THEN
+			      IF NVL(SUM_DEN,0) > 0 THEN
+				      SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+				      IF SUM_ZAYAV < 0 THEN
+				         SUM_ZAYAV := 0;
+				      END IF;
+			      END IF;			
+			      IF (SUM_MONTH + SUMA) > SUMA_FIL_SH1 AND (SUM_MONTH + SUMA) <= SUMA_FIL_SH2 THEN
+			         IF SUM_MONTH > SUMA_FIL_SH1 THEN
+			             SUMA := SUMA;
+			             --ExMemo:= SUMA;
+			         ELSE
+			             SUMA := (SUM_MONTH + SUMA - SUMA_FIL_SH1);
+			             --ExMemo:= (SUM_DEN + SUMA - SUMA_FIL_SH1); goto nnn;
+			         END IF;	
+			      ELSIF (SUM_MONTH + SUMA) < SUMA_FIL_SH1 THEN
+			            ExMemo:= 0;	
+			      ELSIF (SUM_MONTH + SUMA) > SUMA_FIL_SH2 THEN
+			         IF SUM_MONTH > SUMA_FIL_SH2 THEN
+			            ExMemo:= 0; goto nnn;
+			         ELSIF SUM_MONTH < SUMA_FIL_SH1 THEN	
+			            SUMA :=  (SUMA_FIL_SH2 - SUMA_FIL_SH1);
+			            --ExMemo:= (SUMA_FIL_SH2 - SUMA_FIL_SH1);
+			         ELSIF SUM_MONTH > SUMA_FIL_SH1 AND SUM_MONTH < SUMA_FIL_SH2 THEN
+			            SUMA := (SUMA_FIL_SH2 - SUM_MONTH);
+			            --ExMemo:= (SUMA_FIL_SH2 - SUM_DEN); goto nnn;
+			         END IF;
+			      END IF;
+			    END IF;
+
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0  THEN
+			       ExMemo:= SUMA;
+			    ELSIF SUMA > 0 AND SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 AND SUM_DEN > 0  THEN
+			       ExMemo:= SUM_ZAYAV; goto nnn;
+			    ELSIF SUM_ZAYAV = 0  AND SUM_DEN > 0 THEN
+			       ExMemo:= 0;
+                ELSIF SUMA > 0 AND  SUMA <= SUM_ZAYAV AND SUM_MONTH > 0 AND SUM_DEN = 0 THEN
+			       ExMemo:= SUMA;			 goto nnn;
+                ELSIF SUMA > 0 AND  SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 AND SUM_MONTH > 0 AND SUM_DEN = 0 THEN
+			       ExMemo:= SUM_ZAYAV;				
+			    END IF;				    					    		
+			    		
+				if suma <= SUMA_FIL_SH1 then
+					ExMemo:= 0; goto nnn;
+				elsif suma > SUMA_FIL_SH1 and suma <= SUMA_FIL_SH2 then
+					SUMA := suma - SUMA_FIL_SH1;
+					--ExMemo:= suma - SUMA_FIL_SH1;
+				else
+				    SUMA := SUMA_FIL_SH2 - SUMA_FIL_SH1;
+					--ExMemo:= SUMA_FIL_SH2 - SUMA_FIL_SH1; goto nnn;
+				end if;	
+			
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV THEN
+			       ExMemo:= SUMA;
+			    ELSIF SUMA > 0 AND SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 THEN
+			       ExMemo:= SUM_ZAYAV; goto nnn;
+			    ELSIF SUM_ZAYAV = 0 THEN
+			       ExMemo:= 0;
+			    END IF;	
+			
+				ExMemo:= 0; goto nnn;
+			elsif P_PAR = 'СУММА_РКОМ_ЗАЙМЫ205' THEN
+			    IF NVL(SUM_DEN,0) > 0 OR NVL(SUM_MONTH,0) > 0 THEN
+			      IF NVL(SUM_DEN,0) > 0 THEN
+				      SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+				      IF SUM_ZAYAV < 0 THEN
+				         SUM_ZAYAV := 0;
+				      END IF;
+			      END IF;				
+			      IF (SUM_MONTH + SUMA) > SUMA_FIL_SH1 AND (SUM_MONTH + SUMA) <= SUMA_FIL_SH2 THEN
+			         IF SUM_MONTH > SUMA_FIL_SH1 THEN
+			             SUMA := SUMA;
+			             --ExMemo:= SUMA;
+			         ELSE
+			             SUMA := (SUM_MONTH + SUMA - SUMA_FIL_SH1);
+			             --ExMemo:= (SUM_DEN + SUMA - SUMA_FIL_SH1); goto nnn;
+			         END IF;	
+			      ELSIF (SUM_MONTH + SUMA) < SUMA_FIL_SH1 THEN
+			            ExMemo:= 0;	
+			      ELSIF (SUM_MONTH + SUMA) > SUMA_FIL_SH2 THEN
+			         IF SUM_MONTH > SUMA_FIL_SH2 THEN
+			            ExMemo:= 0; goto nnn;
+			         ELSIF SUM_MONTH < SUMA_FIL_SH1 THEN	
+			            SUMA :=  (SUMA_FIL_SH2 - SUMA_FIL_SH1);
+			            --ExMemo:= (SUMA_FIL_SH2 - SUMA_FIL_SH1);
+			         ELSIF SUM_MONTH > SUMA_FIL_SH1 AND SUM_MONTH < SUMA_FIL_SH2 THEN
+			            SUMA := (SUMA_FIL_SH2 - SUM_MONTH);
+			            --ExMemo:= (SUMA_FIL_SH2 - SUM_DEN); goto nnn;
+			         END IF;
+			      END IF;
+			    END IF;
+			
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0  THEN
+			       ExMemo:= 0;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV AND SUM_DEN > 0  THEN
+			       ExMemo:= SUMA - SUM_ZAYAV; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN = 0 AND SUM_MONTH > 0 THEN
+			       ExMemo:= 0;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV AND SUM_DEN = 0 AND SUM_MONTH > 0 THEN
+			       ExMemo:= SUMA - SUM_ZAYAV;				 goto nnn;
+			    END IF;		
+			
+				if suma <= SUMA_FIL_SH1 then
+					ExMemo:= 0;
+				elsif suma > SUMA_FIL_SH1 and suma <= SUMA_FIL_SH2 then
+					SUMA := suma - SUMA_FIL_SH1;
+					--ExMemo:= suma - SUMA_FIL_SH1; goto nnn;
+				else
+				    SUMA := SUMA_FIL_SH2 - SUMA_FIL_SH1;
+					--ExMemo:= SUMA_FIL_SH2 - SUMA_FIL_SH1;
+				end if;	
+			
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV THEN
+			       ExMemo:= 0; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV THEN
+			       ExMemo:= SUMA - SUM_ZAYAV;
+			    END IF;	
+			
+				ExMemo:= 0;				 goto nnn;
+			elsif P_PAR = 'СУММА_РКОМ_ЗАЙМЫ3' THEN		
+			    IF NVL(SUM_DEN,0) > 0 OR NVL(SUM_MONTH,0) > 0 THEN
+			      IF NVL(SUM_DEN,0) > 0 THEN
+				      SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+				      IF SUM_ZAYAV < 0 THEN
+				         SUM_ZAYAV := 0;
+				      END IF;
+			      END IF;		
+                  IF (SUM_MONTH + SUMA) > SUMA_FIL_SH2 AND (SUM_MONTH + SUMA) <= SUMA_FIL_SH3 THEN
+			         IF SUM_MONTH > SUMA_FIL_SH2 THEN
+			             SUMA := SUMA;
+			             --ExMemo:= SUMA;
+			         ELSE
+			             SUMA := (SUM_MONTH + SUMA - SUMA_FIL_SH2);
+			             --ExMemo:= (SUM_DEN + SUMA - SUMA_FIL_SH2); goto nnn;
+			         END IF;
+                  ELSIF (SUM_MONTH + SUMA) < SUMA_FIL_SH2 THEN
+                     ExMemo:= 0;	
+                  ELSIF (SUM_MONTH + SUMA) > SUMA_FIL_SH3 THEN
+                     IF SUM_MONTH > SUMA_FIL_SH3 THEN
+                        ExMemo:= 0; goto nnn;
+                     ELSIF SUM_MONTH < SUMA_FIL_SH2 THEN
+                        SUMA := (SUMA_FIL_SH3 - SUMA_FIL_SH2);
+                        --ExMemo:= (SUMA_FIL_SH3 - SUMA_FIL_SH2);
+                     ELSIF SUM_MONTH > SUMA_FIL_SH2 AND SUM_MONTH < SUMA_FIL_SH3 THEN
+                        SUMA := (SUMA_FIL_SH3 - SUM_MONTH);
+                        --ExMemo:= (SUMA_FIL_SH3 - SUM_DEN); goto nnn;
+                     END IF;  	
+                  END IF;
+			    END IF;
+			
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0  THEN
+			       ExMemo:= SUMA;
+			    ELSIF SUMA > 0 AND SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 AND SUM_DEN > 0  THEN
+			       ExMemo:= SUM_ZAYAV; goto nnn;
+			    ELSIF SUM_ZAYAV = 0  AND SUM_DEN > 0 THEN
+			       ExMemo:= 0;
+                ELSIF SUMA > 0 AND  SUMA <= SUM_ZAYAV AND SUM_MONTH > 0 AND SUM_DEN = 0 THEN
+			       ExMemo:= SUMA;			 goto nnn;
+                ELSIF SUMA > 0 AND  SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 AND SUM_MONTH > 0 AND SUM_DEN = 0 THEN
+			       ExMemo:= SUM_ZAYAV;				
+			    END IF;	
+			
+				if suma <= SUMA_FIL_SH2 then
+					ExMemo:= 0; goto nnn;
+				elsif suma > SUMA_FIL_SH2 and suma <= SUMA_FIL_SH3 then
+					SUMA := suma - SUMA_FIL_SH2;
+					--ExMemo:= suma - SUMA_FIL_SH2;
+				else
+				    SUMA := SUMA_FIL_SH3 - SUMA_FIL_SH2;
+					--ExMemo:= SUMA_FIL_SH3 - SUMA_FIL_SH2; goto nnn;
+				end if;	
+				
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV THEN
+			       ExMemo:= SUMA;
+			    ELSIF SUMA > 0 AND SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 THEN
+			       ExMemo:= SUM_ZAYAV; goto nnn;
+			    ELSIF SUM_ZAYAV = 0 THEN
+			       ExMemo:= 0;
+			    END IF;				
+			
+				ExMemo:= 0;	 goto nnn;
+			elsif P_PAR = 'СУММА_РКОМ_ЗАЙМЫ305' THEN	
+			    IF NVL(SUM_DEN,0) > 0 OR NVL(SUM_MONTH,0) > 0 THEN
+			      IF NVL(SUM_DEN,0) > 0 THEN
+				      SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+				      IF SUM_ZAYAV < 0 THEN
+				         SUM_ZAYAV := 0;
+				      END IF;
+			      END IF;		
+                  IF (SUM_MONTH + SUMA) > SUMA_FIL_SH2 AND (SUM_MONTH + SUMA) <= SUMA_FIL_SH3 THEN
+			         IF SUM_MONTH > SUMA_FIL_SH2 THEN
+			             SUMA := SUMA;
+			             --ExMemo:= SUMA;
+			         ELSE
+			             SUMA := (SUM_MONTH + SUMA - SUMA_FIL_SH2);
+			             --ExMemo:= (SUM_DEN + SUMA - SUMA_FIL_SH2); goto nnn;
+			         END IF;
+                  ELSIF (SUM_MONTH + SUMA) <= SUMA_FIL_SH2 THEN
+                     ExMemo:= 0;	
+                  ELSIF (SUM_MONTH + SUMA) > SUMA_FIL_SH3 THEN
+                     IF SUM_MONTH > SUMA_FIL_SH3 THEN
+                        ExMemo:= 0; goto nnn;
+                     ELSIF SUM_MONTH < SUMA_FIL_SH2 THEN
+                        SUMA := (SUMA_FIL_SH3 - SUMA_FIL_SH2);
+                        --ExMemo:= (SUMA_FIL_SH3 - SUMA_FIL_SH2);
+                     ELSIF SUM_MONTH > SUMA_FIL_SH2 AND SUM_MONTH < SUMA_FIL_SH3 THEN
+                        SUMA := (SUMA_FIL_SH3 - SUM_MONTH);
+                        --ExMemo:= (SUMA_FIL_SH3 - SUM_DEN); goto nnn;
+                     END IF;  	
+                  END IF;
+			    END IF;
+
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0  THEN
+			       ExMemo:= 0;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV AND SUM_DEN > 0  THEN
+			       ExMemo:= SUMA - SUM_ZAYAV; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN = 0 AND SUM_MONTH > 0 THEN
+			       ExMemo:= 0;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV AND SUM_DEN = 0 AND SUM_MONTH > 0 THEN
+			       ExMemo:= SUMA - SUM_ZAYAV;				 goto nnn;
+			    END IF;	
+			
+				if suma <= SUMA_FIL_SH2 then
+					ExMemo:= 0;
+				elsif suma > SUMA_FIL_SH2 and suma <= SUMA_FIL_SH3 then
+					SUMA := suma - SUMA_FIL_SH2;
+					--ExMemo:= suma - SUMA_FIL_SH2; goto nnn;
+				else
+				    SUMA := SUMA_FIL_SH3 - SUMA_FIL_SH2;
+					--ExMemo:= SUMA_FIL_SH3 - SUMA_FIL_SH2;
+				end if;	
+				
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV THEN
+			       ExMemo:= 0; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV THEN
+			       ExMemo:= SUMA - SUM_ZAYAV;
+			    END IF;			
+			
+				ExMemo:= 0;								 goto nnn;
+			elsif P_PAR = 'СУММА_РКОМ_ЗАЙМЫ4' THEN
+			    IF NVL(SUM_DEN,0) > 0 OR NVL(SUM_MONTH,0) > 0 THEN
+			      IF NVL(SUM_DEN,0) > 0 THEN
+				      SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+				      IF SUM_ZAYAV < 0 THEN
+				         SUM_ZAYAV := 0;
+				      END IF;
+			      END IF;			
+                 IF (SUM_MONTH + SUMA) > SUMA_FIL_SH3 THEN
+			       IF SUM_MONTH < SUMA_FIL_SH3 THEN
+			          SUMA := (SUM_MONTH + SUMA - SUMA_FIL_SH3);
+			          --ExMemo:= (SUM_DEN + SUMA - SUMA_FIL_SH3);
+			       ELSIF SUM_MONTH > SUMA_FIL_SH3 THEN
+			          SUMA := SUMA;
+			          --ExMemo:= SUMA; goto nnn;
+			       END IF;
+                 ELSIF (SUM_MONTH + SUMA) < SUMA_FIL_SH3 THEN
+                      ExMemo:= 0;
+                 END IF;
+			   END IF;			
+			   IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0  THEN
+			      ExMemo:= SUMA; goto nnn;
+			   ELSIF SUMA > 0 AND SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 AND SUM_DEN > 0  THEN
+			      ExMemo:= SUM_ZAYAV;
+			   ELSIF SUM_ZAYAV = 0 AND SUM_DEN > 0  THEN
+			      ExMemo:= 0; goto nnn;
+               ELSIF SUMA > 0 AND  SUMA <= SUM_ZAYAV AND SUM_MONTH > 0 AND SUM_DEN = 0 THEN
+			      ExMemo:= SUMA;			
+               ELSIF SUMA > 0 AND  SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 AND SUM_MONTH > 0 AND SUM_DEN = 0 THEN
+			      ExMemo:= SUM_ZAYAV;			 goto nnn;
+			   END IF;			      	
+			   	
+				if suma <= SUMA_FIL_SH3 then
+					ExMemo:= 0;
+				else
+				    SUMA := suma - SUMA_FIL_SH3;
+					--ExMemo:= suma - SUMA_FIL_SH3; goto nnn;
+				end if;	
+				
+			   IF SUMA > 0 AND SUMA <= SUM_ZAYAV THEN
+			      ExMemo:= 0;
+			   ELSIF SUMA > 0 AND SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 THEN
+			      ExMemo:= SUM_ZAYAV; goto nnn;
+			   ELSIF SUM_ZAYAV = 0 THEN
+			      ExMemo:= 0;
+			   END IF;					
+				
+			   ExMemo:= 0; goto nnn;
+			elsif P_PAR = 'СУММА_РКОМ_ЗАЙМЫ405' THEN
+			    IF NVL(SUM_DEN,0) > 0 OR NVL(SUM_MONTH,0) > 0 THEN
+			      IF NVL(SUM_DEN,0) > 0 THEN
+				      SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+				      IF SUM_ZAYAV < 0 THEN
+				         SUM_ZAYAV := 0;
+				      END IF;
+			      END IF;				
+                 IF (SUM_MONTH + SUMA) > SUMA_FIL_SH3 THEN
+			       IF SUM_MONTH < SUMA_FIL_SH3 THEN
+			          SUMA := (SUM_MONTH + SUMA - SUMA_FIL_SH3);
+			          --ExMemo:= (SUM_DEN + SUMA - SUMA_FIL_SH3);
+			       ELSIF SUM_MONTH > SUMA_FIL_SH3 THEN
+			          SUMA := SUMA;
+			          --ExMemo:= SUMA; goto nnn;
+			       END IF;
+                 ELSIF (SUM_MONTH + SUMA) <= SUMA_FIL_SH3 THEN
+                      ExMemo:= 0;
+                 END IF;
+			   END IF;		
+			  	
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0  THEN
+			       ExMemo:= 0; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV AND SUM_DEN > 0  THEN
+			       ExMemo:= SUMA - SUM_ZAYAV;
+			    ELSIF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN = 0 AND SUM_MONTH > 0 THEN
+			       ExMemo:= 0; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV AND SUM_DEN = 0 AND SUM_MONTH > 0 THEN
+			       ExMemo:= SUMA - SUM_ZAYAV;				
+			    END IF;		      	
+			   	
+				if suma <= SUMA_FIL_SH3 then
+					ExMemo:= 0; goto nnn;
+				else
+				    SUMA := suma - SUMA_FIL_SH3;
+					--ExMemo:= suma - SUMA_FIL_SH3;
+				end if;	
+				
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV THEN
+			       ExMemo:= 0; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV THEN
+			       ExMemo:= SUMA - SUM_ZAYAV;
+			    END IF;
+			    ExMemo:= 0;							   	 goto nnn;
+			end if;	
+				
+			ExMemo:= 0;
+---------------------
+		ELSIF P_PAR like 'СУММА_РАСЧ_ИНД_ПРЕД%' THEN
+			&OpDate;
+			BEGIN
+		         LOCATE MN_REF IN ::[MAIN_DOCUM] WHERE MN_REF%ID = RKO;
+				 EXCEPTION WHEN NO_DATA_FOUND THEN
+						MN_REF:=::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+			END;
+			PSH_VID_MD := ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_VID_DOC; -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+			PSH_ACC_DT_MD := ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_ACC_DT; -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+			PSH_SUMA := ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_SUMA; -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+			IF ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_VID_DOC IS NOT NULL OR ::[MAIN_DOCUM].[PSH_NEW_KASSA].PSH_ACC_DT IS NOT NULL THEN -- updated CHANGE_SHORT_NAME NEW_KASSA_EXT->PSH_NEW_KASSA 26/08/14
+				IF PSH_VID_MD.[CODE] IN ('КАСС_ПРИХОД_ОРД', 'КАСС_ОБЪЯВ_ВЗНОС') OR PSH_ACC_DT_MD.[MAIN_USV].[NUM] = '20202' THEN
+				   ExMemo:= 0; goto nnn;
+				END IF;	
+			END IF;			
+			IF MN_REF.[VID_DOC].[CODE] IN ('КАСС_ПРИХОД_ОРД', 'КАСС_ОБЪЯВ_ВЗНОС') OR MN_REF.[ACC_DT].[MAIN_USV].[NUM] = '20202' THEN
+			   ExMemo:= 0;
+			END IF;	
+			SUMA_DOC := NVL(MN_REF.[SUM], PSH_SUMA);
+			IF SUM_ZAYAV < SUMA_GOL_BEZ_COM  AND SUMA_DOC <= SUMA_GOL_BEZ_COM THEN
+			   SUM_ZAYAV := SUMA_GOL_BEZ_COM;
+			END IF;	
+			SUM_ZAYAV := 0;
+			FOR i IN RKO.[DAILY] WHERE I.[DAT] = TRUNC(TODAY) AND I.[TO_ARM] IS NOT NULL
+			LOOP
+			    SUM_ZAYAV := I.[TO_ARM];-- - NVL(I.[SALARY],0);
+			END LOOP;			
+			SUM_DEN := GET_SUM_OBOR_DN(RKO, 'СУММА_РАСЧ_ИНД_ПРЕД');			
+			declare
+				ksim ref [SUM_SYMKS];
+			begin
+				FOR R IN RKO.[ARRAY_OPER_DOG] WHERE R.[FIRST_DOC] = MN_REF
+				LOOP
+                   FOR SYM in mn_ref.[SUM_KSPL] WHERE SYM.[1].[1] = R.[SYM_KS].[1] AND R.[SYM_KS].[1] IN ('58')
+				   LOOP
+					   SUMAKS := NVL(SUMA,0) + SYM.[2];
+				   END LOOP;				
+				END LOOP;			
+				ksim := ::[RUNTIME].[STR].get_str_par(P_PATT, 'SUM_KS');
+				if ksim.[1].[1] in ('58') then
+					suma := ksim.[2];
+				end if;
+			end;
+			
+			/*IF SUM_ZAYAV >= SUMAKS THEN
+			   SUM_ZAYAV := SUM_ZAYAV - SUMAKS;
+			END IF;	*/ --Хрень какая то
+			
+			IF SUM_DEN IS NULL THEN
+			   SUM_DEN := 0;
+			END IF;
+ 			
+			if P_PAR = 'СУММА_РАСЧ_ИНД_ПРЕД1' THEN
+			    IF NVL(SUM_DEN,0) > 0 THEN
+			      SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+			      IF SUM_ZAYAV < 0 THEN
+			         SUM_ZAYAV := 0;
+			      END IF;				
+			      IF (SUM_DEN + SUMA) < SUMA_FIL_SH1 THEN
+			         SUMA := SUMA;
+			         --ExMemo:= SUMA; goto nnn;
+			      ELSIF (SUM_DEN + SUMA) > SUMA_FIL_SH1 THEN
+			         IF SUM_DEN < SUMA_FIL_SH1 THEN
+			            SUMA := SUMA_FIL_SH1 - SUM_DEN;
+			            --ExMemo:= SUMA_FIL_SH1 - SUM_DEN;
+   			         ELSIF SUM_DEN >= SUMA_FIL_SH1 THEN
+			            ExMemo:= 0; goto nnn;
+			         END IF;			
+			      END IF;
+			    END IF;	
+
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0 THEN
+			       ExMemo:= SUMA;
+			    ELSIF SUMA > 0 AND SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0  AND SUM_DEN > 0 THEN
+			       ExMemo:= SUM_ZAYAV; goto nnn;
+			    ELSIF SUMA > 0 AND  SUM_ZAYAV = 0 AND SUM_DEN > 0 THEN
+			       ExMemo:= 0;
+			    END IF;			    	
+			    		
+				if suma <= SUMA_FIL_SH1 then
+				    SUMA := SUMA;
+					--ExMemo:= suma; goto nnn;
+				else
+				    SUMA := SUMA_FIL_SH1;
+					--ExMemo:= SUMA_FIL_SH1;
+				end if;
+				
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV THEN
+			       ExMemo:= SUMA; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 THEN
+			       ExMemo:= SUM_ZAYAV;
+			    ELSIF SUMA > 0 AND  SUM_ZAYAV = 0 AND SUMA > SUMA_GOL_BEZ_COM THEN
+			       ExMemo:= 0; goto nnn;
+			    ELSIF SUMA > 0 AND  SUM_ZAYAV = 0 AND SUMA <= SUMA_GOL_BEZ_COM THEN
+			       ExMemo:= SUMA;			
+			    END IF;				
+				
+				ExMemo:= 0; goto nnn;
+			ELSIF P_PAR = 'СУММА_РАСЧ_ИНД_ПРЕД105' THEN
+			    IF NVL(SUM_DEN,0) > 0 THEN
+			      SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+			      IF SUM_ZAYAV < 0 THEN
+			         SUM_ZAYAV := 0;
+			      END IF;				
+			      IF (SUM_DEN + SUMA) < SUMA_FIL_SH1 THEN
+			         SUMA := SUMA;
+			         --ExMemo:= SUMA;
+			      ELSIF (SUM_DEN + SUMA) > SUMA_FIL_SH1 THEN
+			         IF SUM_DEN < SUMA_FIL_SH1 THEN
+			            SUMA := SUMA_FIL_SH1 - SUM_DEN;
+			            --ExMemo:= SUMA_FIL_SH1 - SUM_DEN; goto nnn;
+   			         ELSIF SUM_DEN >= SUMA_FIL_SH1 THEN
+			            ExMemo:= 0;
+			         END IF;			
+			      END IF;
+			    END IF;	
+			    	
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0 THEN
+			       ExMemo:= 0; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV AND SUM_DEN > 0 THEN
+			       ExMemo:= SUMA - SUM_ZAYAV;
+			    END IF;			    	
+			    		
+				if suma <= SUMA_FIL_SH1 then
+				    SUMA := SUMA;
+					--ExMemo:= suma; goto nnn;
+				else
+				    SUMA := SUMA_FIL_SH1;
+					--ExMemo:= SUMA_FIL_SH1;
+				end if;
+
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV THEN
+			       ExMemo:= 0; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV AND SUMA > SUMA_GOL_BEZ_COM THEN
+			       ExMemo:= SUMA - SUM_ZAYAV;
+			    END IF;					
+				
+				ExMemo:= 0;				 goto nnn;
+			elsif P_PAR = 'СУММА_РАСЧ_ИНД_ПРЕД2' THEN
+			    IF NVL(SUM_DEN,0) > 0 THEN
+			      SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+			      IF SUM_ZAYAV < 0 THEN
+			         SUM_ZAYAV := 0;
+			      END IF;				
+			      IF (SUM_DEN + SUMA) > SUMA_FIL_SH1 AND (SUM_DEN + SUMA) <= SUMA_FIL_SH2 THEN
+			         IF SUM_DEN > SUMA_FIL_SH1 THEN
+			             SUMA := SUMA;
+			             --ExMemo:= SUMA;
+			         ELSE
+			             SUMA := (SUM_DEN + SUMA - SUMA_FIL_SH1);
+			             --ExMemo:= (SUM_DEN + SUMA - SUMA_FIL_SH1); goto nnn;
+			         END IF;	
+			      ELSIF (SUM_DEN + SUMA) < SUMA_FIL_SH1 THEN
+			            ExMemo:= 0;	
+			      ELSIF (SUM_DEN + SUMA) > SUMA_FIL_SH2 THEN
+			         IF SUM_DEN > SUMA_FIL_SH2 THEN
+			            ExMemo:= 0; goto nnn;
+			         ELSIF SUM_DEN < SUMA_FIL_SH1 THEN	
+			            SUMA := (SUMA_FIL_SH2 - SUMA_FIL_SH1);
+			            --ExMemo:= (SUMA_FIL_SH2 - SUMA_FIL_SH1);
+			         ELSIF SUM_DEN > SUMA_FIL_SH1 AND SUM_DEN < SUMA_FIL_SH2 THEN
+			            SUMA := (SUMA_FIL_SH2 - SUM_DEN);
+			            --ExMemo:= (SUMA_FIL_SH2 - SUM_DEN); goto nnn;
+			         END IF;
+			      END IF;
+			    END IF;		
+			
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0 THEN
+			       ExMemo:= SUMA;
+			    ELSIF SUMA > 0 AND SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 AND SUM_DEN > 0 THEN
+			       ExMemo:= SUM_ZAYAV; goto nnn;
+			    ELSIF SUM_ZAYAV = 0 AND SUM_DEN > 0 THEN
+			       ExMemo:= 0;
+			    END IF;				
+			    	
+				if suma <= SUMA_FIL_SH1 then
+					ExMemo:= 0; goto nnn;
+				elsif suma > SUMA_FIL_SH1 and suma <= SUMA_FIL_SH2 then
+				    SUMA := suma - SUMA_FIL_SH1;
+					--ExMemo:= suma - SUMA_FIL_SH1;
+				else
+				    SUMA := SUMA_FIL_SH2 - SUMA_FIL_SH1;
+					--ExMemo:= SUMA_FIL_SH2 - SUMA_FIL_SH1; goto nnn;
+				end if;	
+				
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV THEN
+			       ExMemo:= SUMA;
+			    ELSIF SUMA > 0 AND SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 THEN
+			       ExMemo:= SUM_ZAYAV; goto nnn;
+			    ELSIF SUM_ZAYAV = 0 THEN
+			       ExMemo:= 0;
+			    END IF;	
+			
+			    ExMemo:= 0;	 goto nnn;
+			elsif P_PAR = 'СУММА_РАСЧ_ИНД_ПРЕД205' THEN
+			    IF NVL(SUM_DEN,0) > 0 THEN
+			      SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+			      IF SUM_ZAYAV < 0 THEN
+			         SUM_ZAYAV := 0;
+			      END IF;				
+			      IF (SUM_DEN + SUMA) > SUMA_FIL_SH1 AND (SUM_DEN + SUMA) <= SUMA_FIL_SH2 THEN
+			         IF SUM_DEN > SUMA_FIL_SH1 THEN
+			             SUMA := SUMA;
+			             --ExMemo:= SUMA;
+			         ELSE
+			             SUMA := (SUM_DEN + SUMA - SUMA_FIL_SH1);
+			             --ExMemo:= (SUM_DEN + SUMA - SUMA_FIL_SH1); goto nnn;
+			         END IF;	
+			      ELSIF (SUM_DEN + SUMA) <= SUMA_FIL_SH1 THEN
+			            ExMemo:= 0;	
+			      ELSIF (SUM_DEN + SUMA) > SUMA_FIL_SH2 THEN
+			         IF SUM_DEN > SUMA_FIL_SH2 THEN
+			            ExMemo:= 0; goto nnn;
+			         ELSIF SUM_DEN < SUMA_FIL_SH1 THEN	
+			            SUMA := (SUMA_FIL_SH2 - SUMA_FIL_SH1);
+			            --ExMemo:= (SUMA_FIL_SH2 - SUMA_FIL_SH1);
+			         ELSIF SUM_DEN > SUMA_FIL_SH1 AND SUM_DEN < SUMA_FIL_SH2 THEN
+			            SUMA := (SUMA_FIL_SH2 - SUM_DEN);
+			            --ExMemo:= (SUMA_FIL_SH2 - SUM_DEN); goto nnn;
+			         END IF;
+			      END IF;
+			    END IF;		
+			
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0 THEN
+			       ExMemo:= 0;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV AND SUM_DEN > 0 THEN
+			       ExMemo:= SUMA - SUM_ZAYAV; goto nnn;
+			    END IF;				
+			    	
+				if suma <= SUMA_FIL_SH1 then
+					ExMemo:= 0;
+				elsif suma > SUMA_FIL_SH1 and suma <= SUMA_FIL_SH2 then
+				    SUMA := suma - SUMA_FIL_SH1;
+					--ExMemo:= suma - SUMA_FIL_SH1; goto nnn;
+				else
+				    SUMA := SUMA_FIL_SH2 - SUMA_FIL_SH1;
+					--ExMemo:= SUMA_FIL_SH2 - SUMA_FIL_SH1;
+				end if;	
+				
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV THEN
+			       ExMemo:= 0; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV THEN
+			       ExMemo:= SUMA - SUM_ZAYAV;
+			    END IF;	
+			
+			    ExMemo:= 0;				    			 goto nnn;
+			elsif P_PAR = 'СУММА_РАСЧ_ИНД_ПРЕД3' THEN
+			    IF NVL(SUM_DEN,0) > 0 THEN
+			      SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+			      IF SUM_ZAYAV < 0 THEN
+			         SUM_ZAYAV := 0;
+			      END IF;			
+                  IF (SUM_DEN + SUMA) > SUMA_FIL_SH2 AND (SUM_DEN + SUMA) <= SUMA_FIL_SH3 THEN
+			         IF SUM_DEN > SUMA_FIL_SH2 THEN
+			             SUMA := SUMA;
+			             --ExMemo:= SUMA;
+			         ELSE
+			             SUMA := (SUM_DEN + SUMA - SUMA_FIL_SH2);
+			             --ExMemo:= (SUM_DEN + SUMA - SUMA_FIL_SH2); goto nnn;
+			         END IF;
+                  ELSIF (SUM_DEN + SUMA) <= SUMA_FIL_SH2 THEN
+                     ExMemo:= 0;	
+                  ELSIF (SUM_DEN + SUMA) > SUMA_FIL_SH3 THEN
+                     IF SUM_DEN > SUMA_FIL_SH3 THEN
+                        ExMemo:= 0; goto nnn;
+                     ELSIF SUM_DEN < SUMA_FIL_SH2 THEN
+                        SUMA := (SUMA_FIL_SH3 - SUMA_FIL_SH2);
+                        --ExMemo:= (SUMA_FIL_SH3 - SUMA_FIL_SH2);
+                     ELSIF SUM_DEN > SUMA_FIL_SH2 AND SUM_DEN < SUMA_FIL_SH3 THEN
+                        SUMA := (SUMA_FIL_SH3 - SUM_DEN);
+                        --ExMemo:= (SUMA_FIL_SH3 - SUM_DEN); goto nnn;
+                     END IF;  	
+                  END IF;
+			    END IF;	
+			
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0 THEN
+			       ExMemo:= SUMA;
+			    ELSIF SUMA > 0 AND SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 AND SUM_DEN > 0 THEN
+			       ExMemo:= SUM_ZAYAV; goto nnn;
+			    ELSIF SUM_ZAYAV = 0 AND SUM_DEN > 0 THEN
+			       ExMemo:= 0;
+			    END IF;				
+			    		
+				if suma <= SUMA_FIL_SH2 then
+					ExMemo:= 0; goto nnn;
+				elsif suma > SUMA_FIL_SH2 and suma <= SUMA_FIL_SH3 then
+				    SUMA := suma - SUMA_FIL_SH2;
+					--ExMemo:= suma - SUMA_FIL_SH2;
+				else
+				    SUMA := SUMA_FIL_SH3 - SUMA_FIL_SH2;
+					--ExMemo:= SUMA_FIL_SH3 - SUMA_FIL_SH2; goto nnn;
+				end if;	
+				
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV THEN
+			       ExMemo:= SUMA;
+			    ELSIF SUMA > 0 AND SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 THEN
+			       ExMemo:= SUM_ZAYAV; goto nnn;
+			    ELSIF SUM_ZAYAV = 0 THEN
+			       ExMemo:= 0;
+			    END IF;					
+				
+				ExMemo:= 0;	 goto nnn;
+			elsif P_PAR = 'СУММА_РАСЧ_ИНД_ПРЕД305' THEN
+			    IF NVL(SUM_DEN,0) > 0 THEN
+			      SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+			      IF SUM_ZAYAV < 0 THEN
+			         SUM_ZAYAV := 0;
+			      END IF;			
+                  IF (SUM_DEN + SUMA) > SUMA_FIL_SH2 AND (SUM_DEN + SUMA) <= SUMA_FIL_SH3 THEN
+			         IF SUM_DEN > SUMA_FIL_SH2 THEN
+			             SUMA := SUMA;
+			             --ExMemo:= SUMA;
+			         ELSE
+			             SUMA := (SUM_DEN + SUMA - SUMA_FIL_SH2);
+			             --ExMemo:= (SUM_DEN + SUMA - SUMA_FIL_SH2); goto nnn;
+			         END IF;
+                  ELSIF (SUM_DEN + SUMA) <= SUMA_FIL_SH2 THEN
+                     ExMemo:= 0;	
+                  ELSIF (SUM_DEN + SUMA) > SUMA_FIL_SH3 THEN
+                     IF SUM_DEN > SUMA_FIL_SH3 THEN
+                        ExMemo:= 0; goto nnn;
+                     ELSIF SUM_DEN < SUMA_FIL_SH2 THEN
+                        SUMA := (SUMA_FIL_SH3 - SUMA_FIL_SH2);
+                        --ExMemo:= (SUMA_FIL_SH3 - SUMA_FIL_SH2);
+                     ELSIF SUM_DEN > SUMA_FIL_SH2 AND SUM_DEN < SUMA_FIL_SH3 THEN
+                        SUMA := (SUMA_FIL_SH3 - SUM_DEN);
+                        --ExMemo:= (SUMA_FIL_SH3 - SUM_DEN); goto nnn;
+                     END IF;  	
+                  END IF;
+			    END IF;	
+			
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0 THEN
+			       ExMemo:= 0;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV AND SUM_DEN > 0 THEN
+			       ExMemo:= SUMA - SUM_ZAYAV; goto nnn;
+			    END IF;				
+			    		
+				if suma <= SUMA_FIL_SH2 then
+					ExMemo:= 0;
+				elsif suma > SUMA_FIL_SH2 and suma <= SUMA_FIL_SH3 then
+				    SUMA := suma - SUMA_FIL_SH2;
+					--ExMemo:= suma - SUMA_FIL_SH2; goto nnn;
+				else
+				    SUMA := SUMA_FIL_SH3 - SUMA_FIL_SH2;
+					--ExMemo:= SUMA_FIL_SH3 - SUMA_FIL_SH2;
+				end if;	
+				
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV THEN
+			       ExMemo:= 0; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV THEN
+			       ExMemo:= SUMA - SUM_ZAYAV;
+			    END IF;					
+				
+				ExMemo:= 0;								 goto nnn;
+			elsif P_PAR = 'СУММА_РАСЧ_ИНД_ПРЕД4' THEN
+			   IF NVL(SUM_DEN,0) > 0 THEN
+			     SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+			     IF SUM_ZAYAV < 0 THEN
+			        SUM_ZAYAV := 0;
+			     END IF;			
+                 IF (SUM_DEN + SUMA) > SUMA_FIL_SH3 THEN
+			       IF SUM_DEN < SUMA_FIL_SH3 THEN
+			          SUMA := (SUM_DEN + SUMA - SUMA_FIL_SH3);
+			          --ExMemo:= (SUM_DEN + SUMA - SUMA_FIL_SH3);
+			       ELSIF SUM_DEN > SUMA_FIL_SH3 THEN
+			          SUMA := SUMA;
+			          --ExMemo:= SUMA; goto nnn;
+			       END IF;
+                 ELSIF (SUM_DEN + SUMA) <= SUMA_FIL_SH3 THEN
+                      ExMemo:= 0;
+                 END IF;
+			   END IF;	
+			
+			   IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0 THEN
+			      ExMemo:= 0; goto nnn;
+			   ELSIF SUMA > 0 AND SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 AND SUM_DEN > 0 THEN
+			      ExMemo:= SUM_ZAYAV;
+			   ELSIF SUM_ZAYAV = 0 AND SUM_DEN > 0 THEN
+			      ExMemo:= 0; goto nnn;
+			   END IF;			
+			   		
+			   if suma <= SUMA_FIL_SH3 then
+				  ExMemo:= 0;
+			   else
+				  SUMA := suma - SUMA_FIL_SH3;
+				  --ExMemo:= suma - SUMA_FIL_SH3; goto nnn;
+		       end if;	
+		
+			   IF SUMA > 0 AND SUMA <= SUM_ZAYAV THEN
+			      ExMemo:= 0;
+			   ELSIF SUMA > 0 AND SUMA >= SUM_ZAYAV AND SUM_ZAYAV > 0 THEN
+			      ExMemo:= SUM_ZAYAV; goto nnn;
+			   ELSIF SUM_ZAYAV = 0 THEN
+			      ExMemo:= 0;
+			   END IF;		
+		
+		       ExMemo:= 0; goto nnn;
+			elsif P_PAR = 'СУММА_РАСЧ_ИНД_ПРЕД405' THEN
+			   IF NVL(SUM_DEN,0) > 0 THEN
+			     SUM_ZAYAV := SUM_ZAYAV - SUM_DEN;
+			     IF SUM_ZAYAV < 0 THEN
+			        SUM_ZAYAV := 0;
+			     END IF;			
+                 IF (SUM_DEN + SUMA) > SUMA_FIL_SH3 THEN
+			       IF SUM_DEN < SUMA_FIL_SH3 THEN
+			          SUMA := (SUM_DEN + SUMA - SUMA_FIL_SH3);
+			          --ExMemo:= (SUM_DEN + SUMA - SUMA_FIL_SH3);
+			       ELSIF SUM_DEN > SUMA_FIL_SH3 THEN
+			          SUMA := SUMA;
+			          --ExMemo:= SUMA; goto nnn;
+			       END IF;
+                 ELSIF (SUM_DEN + SUMA) <= SUMA_FIL_SH3 THEN
+                      ExMemo:= 0;
+                 END IF;
+			   END IF;	
+			
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV AND SUM_DEN > 0 THEN
+			       ExMemo:= 0; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV AND SUM_DEN > 0 THEN
+			       ExMemo:= SUMA - SUM_ZAYAV;
+			    END IF;				
+			   		
+			   if suma <= SUMA_FIL_SH3 then
+				  ExMemo:= 0; goto nnn;
+			   else
+				  SUMA := suma - SUMA_FIL_SH3;
+				  --ExMemo:= suma - SUMA_FIL_SH3;
+		       end if;	
+		
+			    IF SUMA > 0 AND SUMA <= SUM_ZAYAV THEN
+			       ExMemo:= 0; goto nnn;
+			    ELSIF SUMA > 0 AND SUMA > SUM_ZAYAV THEN
+			       ExMemo:= SUMA - SUM_ZAYAV;
+			    END IF;		
+		
+		       ExMemo:= 0;		 goto nnn;
+			end if;	
+        -- end DOrlov										
+	    ELSIF P_PAR = 'СУММА_РАСЧ_КОМИС_ЮР_СКП' THEN
+			declare
+				ksim ref [SUM_SYMKS];
+			begin
+				ksim := ::[RUNTIME].[STR].get_str_par(P_PATT, 'SUM_KS');
+				if ksim.[1].[1] in ('40','41','42') then -- ,'54'
+					suma := ksim.[2];
+				end if;
+			end;
+			ExMemo:= suma;	
+		ELSIF P_PAR like 'СУММА_РАСЧ_КОМИС_ЮР_ИНЫЕ%' THEN
+			&OpDate;
+			BEGIN
+		         LOCATE MN_REF IN ::[MAIN_DOCUM] WHERE MN_REF%ID = RKO;
+				 EXCEPTION WHEN NO_DATA_FOUND THEN
+						MN_REF:=::[PATTERN_DOC].[BUSINESS_OP].DOC_REF;
+			END;
+			IF MN_REF.[VID_DOC].[CODE] IN ('КАСС_ПРИХОД_ОРД', 'КАСС_ОБЪЯВ_ВЗНОС') OR MN_REF.[ACC_DT].[MAIN_USV].[NUM] = '20202' THEN
+			   ExMemo:= 0; goto nnn;
+			END IF;	
+			SUM_DEN := GET_SUM_OBOR_DN(RKO, 'СУММА_РАСЧ_КОМИС_ЮР_ИНЫЕ');
+			--SUM_COMIS := GET_SUM_COMIS_DN(RKO, 'СУММА_РАСЧ_КОМИС_ЮР_ИНЫЕ');	
+	
+			declare
+				ksim ref [SUM_SYMKS];
+			begin
+				ksim := ::[RUNTIME].[STR].get_str_par(P_PATT, 'SUM_KS');
+				if ksim.[1].[1] not in ('40','42','41','50') then --,'54'
+					suma := ksim.[2];
+				end if;
+			end;
+			if P_PAR = 'СУММА_РАСЧ_КОМИС_ЮР_ИНЫЕ' THEN
+			    IF NVL(SUM_DEN,0) > 0 THEN
+			      IF (SUM_DEN + SUMA) < SUMA_SH1 THEN
+			         ExMemo:= SUMA;
+			      ELSIF (SUM_DEN + SUMA) > SUMA_SH1 THEN
+			         IF SUM_DEN < SUMA_SH1 THEN
+			            ExMemo:= SUMA_SH1 - SUM_DEN; goto nnn;
+   			         ELSIF SUM_DEN >= SUMA_SH1 THEN
+			            ExMemo:= 0;
+			         END IF;			
+			      END IF;
+			    END IF;				
+				if suma <= SUMA_SH1 then
+					ExMemo:= suma; goto nnn;
+				else
+					--ExMemo:= SUMA_SH1;
+					ExMemo:= 0; goto nnn;
+				end if;	
+			elsif P_PAR = 'СУММА_РАСЧ_КОМИС_ЮР_ИНЫЕ12' THEN	       --- ВЫЧИСЛЯЕМ СУММУ ВЫДАЧИ 1 шкалы, ПО КОТОРОЙ ДОЛЖНА БЫТЬ ДОНАЧИСЛЕНА КОМИССИЯ ПО 2 ШКАЛЕ
+			    IF NVL(SUM_DEN,0) > 0 THEN
+			      IF (SUM_DEN + SUMA) > SUMA_SH1 AND (SUM_DEN + SUMA) <= SUMA_SH2 THEN
+			         IF SUM_DEN < SUMA_SH1 THEN
+			            ExMemo:= SUMA_SH1;
+   			         ELSIF SUM_DEN >= SUMA_SH1 THEN
+			            ExMemo:= 0; goto nnn;
+			         END IF;
+			      END IF;
+			    END IF;
+			    ExMemo:= 0;
+			elsif P_PAR = 'СУММА_РАСЧ_КОМИС_ЮР_ИНЫЕ13' THEN			--- ВЫЧИСЛЯЕМ СУММУ ВЫДАЧИ 1 ШКАЛЫ, ПО КОТОРОЙ ДОЛЖНА БЫТЬ ДОНАЧИСЛЕНА КОМИССИЯ ПО 3 ШКАЛЕ	
+			    IF NVL(SUM_DEN,0) > 0 THEN			
+			      IF (SUM_DEN + SUMA) > SUMA_SH2 THEN
+			         ExMemo:=	SUMA_SH1; goto nnn;
+			      ELSE
+			         ExMemo:= 0;
+			      END IF;			
+			    END IF;
+			    ExMemo:= 0;	 goto nnn;
+			elsif P_PAR = 'СУММА_РАСЧ_КОМИС_ЮР_ИНЫЕ23' THEN	       --- ВЫЧИСЛЯЕМ СУММУ ВЫДАЧИ 2 ШКАЛЫ, ПО КОТОРОЙ ДОЛЖНА БЫТЬ ДОНАЧИСЛЕНА КОМИССИЯ ПО 3 ШКАЛЕ
+			    IF NVL(SUM_DEN,0) > 0 THEN
+			      IF (SUM_DEN + SUMA) > SUMA_SH2 THEN
+			         IF SUM_DEN < SUMA_SH2 THEN
+			            ExMemo:= (SUMA_SH2 - SUMA_SH1);
+			         ELSE
+			            ExMemo:= 0; goto nnn;
+			         END IF;			
+			      END IF;			
+			    END IF;
+			    ExMemo:= 0;				    						
+			elsif P_PAR = 'СУММА_РАСЧ_КОМИС_ЮР_ИНЫЕ2' THEN
+			    IF NVL(SUM_DEN,0) > 0 THEN
+			      IF (SUM_DEN + SUMA) > SUMA_SH1 AND (SUM_DEN + SUMA) <= SUMA_SH2 THEN
+			         IF SUM_DEN > SUMA_SH1 THEN
+			             ExMemo:= SUMA; goto nnn;
+			         ELSE
+			             ExMemo:= (SUM_DEN + SUMA - SUMA_SH1);
+			         END IF;	
+			      ELSIF (SUM_DEN + SUMA) < SUMA_SH1 THEN
+			            ExMemo:= 0;	 goto nnn;
+			      ELSIF (SUM_DEN + SUMA) > SUMA_SH2 THEN
+			         IF SUM_DEN > SUMA_SH2 THEN
+			            ExMemo:= 0;
+			         ELSIF SUM_DEN < SUMA_SH1 THEN	
+			            ExMemo:= (SUMA_SH2 - SUMA_SH1); goto nnn;
+			         ELSIF SUM_DEN > SUMA_SH1 AND SUM_DEN < SUMA_SH2 THEN
+			            ExMemo:= (SUMA_SH2 - SUM_DEN);
+			         END IF;
+			      END IF;
+			    END IF;				
+				if suma <= SUMA_SH1 then
+					ExMemo:= 0; goto nnn;
+				elsif suma > SUMA_SH1 and suma <= SUMA_SH2 then
+					--ExMemo:= suma - SUMA_SH1;
+					ExMemo:= SUMA; goto nnn;
+				else
+					--ExMemo:= SUMA_SH2 - SUMA_SH1;
+					ExMemo:= 0; goto nnn;
+				end if;	
+			elsif P_PAR = 'СУММА_РАСЧ_КОМИС_ЮР_ИНЫЕ3' THEN
+			   IF NVL(SUM_DEN,0) > 0 THEN
+                 IF (SUM_DEN + SUMA) > SUMA_SH2 THEN
+			       IF SUM_DEN < SUMA_SH2 THEN
+			          ExMemo:= (SUM_DEN + SUMA - SUMA_SH2);
+			       ELSIF SUM_DEN > SUMA_SH2 THEN
+			          ExMemo:= SUMA; goto nnn;
+			       END IF;
+                 ELSIF (SUM_DEN + SUMA) < SUMA_SH2 THEN
+                      ExMemo:= 0;
+                 END IF;
+			   END IF;			
+				if suma <= SUMA_SH2 then
+					ExMemo:= 0; goto nnn;
+				else
+					--ExMemo:= suma - SUMA_SH2;
+					ExMemo:= SUMA; goto nnn;
+				end if;					
+			end if;				
+	       -- end yach
+		end if;
+	
+	end if;
+	
+	
+	-- ************************************************************************************
+	-- Параметры, вычисляемые исходя из документа       ***********************************
+	
+	
+	--Возвращает "1", если есть ссылка на пл.документ	из справочника "ДБО: Подписи платежных документов", иначе "0"
+	if P_PAR = 'ДОК_ИКБ' then		
+		ExMemo:= EZP(md1);
+	
+	elsif P_PAR = 'ВР_ОТПРАВКИ' then
+		declare dat_begin DATE_TIME;
+				hor number;
+		begin
+			for d in ::[DOCUM_RC] where d.[MAIN_DOC] = md1 and d.[FLAG_EXPORT_DOC] and d.[OUT_DOC_1].[F_TIME] is not null
+			loop
+			  begin
+				select b(min(b.[DATE]))
+				in md1.[HISTORY_STATE]
+				into dat_begin;
+				debug_pipe('--------------dat_begin='||to_number(to_char(dat_begin, 'hh24'))||' F_TIME='||to_number(to_char(d.[OUT_DOC_1].[F_TIME], 'hh24')),0);
+				debug_pipe(to_number(to_char(d.[OUT_DOC_1].[F_TIME], 'dd')) - to_number(to_char(dat_begin, 'dd')),0);
+				hor := (to_number(to_char(d.[OUT_DOC_1].[F_TIME], 'dd')) - to_number(to_char(dat_begin, 'dd')))*24 + to_number(to_char(d.[OUT_DOC_1].[F_TIME], 'hh24')) - to_number(to_char(dat_begin, 'hh24'));
+				debug_pipe('--------------dat_begin='||to_char(dat_begin)||' F_TIME='||to_char(d.[OUT_DOC_1].[F_TIME]),0);					
+			  	exception when others then
+			  		null;
+			  end;	
+				hor := nvl(hor, 0);
+				ExMemo:= to_char(hor); goto nnn;
+			end loop;
+		end;
+		ExMemo:= '0';	
+	
+	elsif P_PAR = 'САМ_СЕБЕ' then
+		MN_REF := P_DOC;	
+		if 	MN_REF.[ACC_DT].[CLIENT_V]=MN_REF.[ACC_KT].[CLIENT_V] or MN_REF.[ACC_DT].[CLIENT_V]=MN_REF.[ACC_KT].[CLIENT_R] then
+			ExMemo:= '1'; goto nnn;
+		else
+			ExMemo:= '0';
+		end if;				
+	
+	elsif P_PAR = 'ПАСПОРТ_СДЕЛКИ' then
+		if 	md1.[DEAL_PASP] is null then
+			ExMemo:= '0'; goto nnn;
+		else
+			ExMemo:= '1';
+		end if;	
+	elsif P_PAR = 'ВАЛ_КОНТРОЛЬ' then
+			for b in md1.[HISTORY_STATE] where b.[STATE]='TO_RKO_CUR'
+			loop
+				ExMemo:= '1'; goto nnn;
+			end loop;
+			ExMemo:= '0';					
+	Elsif P_PAR = 'НАИМ_ПОЛУЧ' Then
+		ExMemo:= nvl(md2.[KL_KT].[1].[1].[NAME],md2.[KL_KT].[2].[2]); goto nnn;
+	end if;
+	
+	if P_PAR = 'EUC_A_1' then
+		if rko is not null then
+			debug_pipe(22,0);
+			if rko.[ACCOUNT] is not null then
+				debug_pipe(3,0);
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],1,1);
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_2' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],2,1); goto nnn;
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_3' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],3,1);
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_4' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],4,1); goto nnn;
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_5' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],5,1);
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_6' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],6,1); goto nnn;
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_7' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],7,1);
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_8' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],8,1); goto nnn;
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_9' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],9,1);
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_10' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],10,1); goto nnn;
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_11' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],11,1);
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_12' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],12,1); goto nnn;
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_13' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],13,1);
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_14' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],14,1); goto nnn;
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_15' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],15,1);
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_16' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],16,1); goto nnn;
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_17' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],17,1);
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_18' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],18,1); goto nnn;
+			end if;
+		end if;
+	end if;
+	
+	if P_PAR = 'EUC_A_19' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],19,1);
+			end if;
+		end if;
+	end if;
+	
+	
+	if P_PAR = 'EUC_A_20' then
+		if rko is not null then
+			if rko.[ACCOUNT] is not null then
+				ExMemo:= substr(rko.[ACCOUNT].[MAIN_V_ID],20,1); goto nnn;
+			end if;
+		end if;
+	end if;
+	
+	/*-------------ТАРИФЫ И ПРОЧЕЕ---------------------*/
+	
+	--------------------------------
+	if P_PAR = 'ОРЛ_ПРЕД_МЕС' then
+		/*if trunc([SYSTEM]::[OP_DATE]) = to_date('31.12.'||to_char([SYSTEM]::[OP_DATE],'YYYY'),'DD.MM.YYYY') or trunc([SYSTEM]::[OP_DATE]) = to_date('30.12.'||to_char([SYSTEM]::[OP_DATE],'YYYY'),'DD.MM.YYYY') then
+			ExMemo:= nazn_p(to_number(to_char([SYSTEM]::[OP_DATE], 'MM')), to_number(to_char([SYSTEM]::[OP_DATE], 'YYYY')));
+		else
+			ExMemo:= nazn_p(to_number(to_char([SYSTEM]::[OP_DATE], 'MM')-1), to_number(to_char([SYSTEM]::[OP_DATE], 'YYYY'))); goto nnn;
+		end if;*/
+		null;
+	end if;
+	-------------------------------
+	if P_PAR = 'ОРЛ_МЕС_ТЕК' then
+		--ExMemo:= nazn_p(to_number(to_char([SYSTEM]::[OP_DATE], 'MM')), to_number(to_char([SYSTEM]::[OP_DATE], 'YYYY')));
+		null;
+	end if;
+	-------------------------------
+	if P_PAR = 'ОРЛ_ДАТА_ДОГ' then
+		ExMemo:= nvl(to_char(P_PROD->([RKO])[DATE_BEGIN],'DD.MM.YYYY'),'EMPTY'); goto nnn;
+	end if;
+	-------------------------------
+	if P_PAR = 'ОРЛ_ПУНКТ_ДОГ' then
+		vacc := null;
+		vacc := P_PROD->([RKO])[ACCOUNT];
+		if substr(vacc.[MAIN_V_ID],1,3) = '301' then
+			ExMemo:= '3.9';
+		else
+			ExMemo:= '3.2.3'; goto nnn;
+		end if;
+	end if;
+	-------------------------------
+	if P_PAR = 'ОРЛ_КЛ_БНК_Д_НП' then
+		/*declare
+			klrc	ref [OSB_KB2_CLIENT];
+		begin
+			locate klrc in ::[OSB_KB2_CLIENT] where klrc.[CLIENT] = P_PROD->([RKO])[CLIENT];
+			if klrc.[KL_WEB] = true then
+				ExMemo:= '5.6';
+			else
+				ExMemo:= '5.1'; goto nnn;
+			end if;
+		exception
+		when others then
+			ExMemo:= ' ';
+		end;*/
+		null;
+	end if;
+	-------------------------------
+	if P_PAR = 'ОРЛ_КЛ_БНК_ЕСТЬ' then
+		/*declare
+			klrc	ref [OSB_KB2_CLIENT];
+			dt		date;
+			dt_op	date;
+			acc_kom	ref [AC_FIN];
+			dt_oper_d date;
+		begin
+			debug_pipe('Клиент-Банк',0);
+			dt_oper_d := [SYSTEM]::[OP_DATE];
+			if trunc(dt_oper_d) = to_date('31.12.'||to_char(dt_oper_d,'YYYY'),'DD.MM.YYYY') then
+				dt_oper_d := dt_oper_d + 1;
+			elsif trunc(dt_oper_d) = to_date('30.12.'||to_char(dt_oper_d,'YYYY'),'DD.MM.YYYY') then
+				dt_oper_d := dt_oper_d + 2;
+			end if;
+			dt := LAST_DAY(ADD_MONTHS(dt_oper_d,-2)) + 1;
+			dt_op := LAST_DAY(ADD_MONTHS(dt_oper_d,-1)) + 1;
+			acc_kom := null;
+			locate klrc in ::[OSB_KB2_CLIENT] where klrc.[CLIENT] = P_PROD->([RKO])[CLIENT] and (klrc.[DT_BLOCK] is null or (to_char(klrc.[DT_BLOCK],'MM.YYYY') = to_char(dt,'MM.YYYY') and klrc.[DT_BLOCK] >= dt)) and (klrc.[DT_N] is not null and klrc.[DT_N] < dt_op) and P_PROD->([RKO])[FILIAL].[CODE] <> '004' and klrc.[NOM_CL_RFC] is not null;
+			for k in klrc.[ARRAY_ACCOUNT] where k.[FOR_KOM] = true loop
+				acc_kom := k.SCH;
+			end loop;
+			if acc_kom is not null then
+				if acc_kom = P_PROD->([RKO])[ACCOUNT] then
+					ExMemo:= '1'; goto nnn;
+				else
+					ExMemo:= '0';
+				end if;
+			else
+				ExMemo:= '0'; goto nnn;
+			end if;
+		exception
+		when others then
+			ExMemo:= '0';
+		end;*/
+		null;
+	end if;
+	-------------------------------
+	if P_PAR = 'OSB_IBANK_UR' then
+		/*declare
+			klrc	ref [OSB_KB2_CLIENT];
+			dt		date;
+			dt_e	date;
+			dt_op	date;
+			acc_kom	ref [AC_FIN];
+			dt_oper_d date;
+			
+		begin
+			begin
+				dt_e := to_date(::[RUNTIME].[STR].get_str_par(P_PATT, 'DE'),'DD/MM/YYYY HH24:MI:SS');
+				--debug_pipe('DE '||to_char(dt_e,'DD.MM.YYYY'),0);
+			exception when OTHERS then
+				dt_e := null;
+			end;
+			dt_oper_d := [SYSTEM]::[OP_DATE];
+			dt := LAST_DAY(ADD_MONTHS(dt_oper_d,-1)) + 1;
+			if nvl(dt_e,dt_oper_d) <= dt_oper_d then
+				dt_op := nvl(dt_e,dt_oper_d);
+			else
+				dt_op := dt_oper_d;
+			end if;
+			acc_kom := null;
+			locate klrc in ::[OSB_KB2_CLIENT] where klrc.[CLIENT] = P_PROD->([RKO])[CLIENT] and (klrc.[DT_BLOCK] is null or (to_char(klrc.[DT_BLOCK],'MM.YYYY') = to_char(dt,'MM.YYYY') and klrc.[DT_BLOCK] >= dt)) and (klrc.[DT_N] is not null and klrc.[DT_N] < dt_op) and klrc.[NOM_CL_IBANK] is not null;
+			for k in klrc.[ARRAY_ACCOUNT] where k.[FOR_KOM] = true loop
+				acc_kom := k.SCH;
+			end loop;
+			if acc_kom is not null then
+				if acc_kom = P_PROD->([RKO])[ACCOUNT] then
+					ExMemo:= '1'; goto nnn;
+				else
+					ExMemo:= '0';
+				end if;
+			else
+				ExMemo:= '0'; goto nnn;
+			end if;
+		exception
+		when others then
+			ExMemo:= '0';
+		end;*/
+		null;
+	end if;
+	-------------------------------
+	if P_PAR = 'ГОЛОС_ИНФОРМ' then
+		declare
+			utype	ref [USER_TYPE];
+		begin
+			utype:= P_PROD->([RKO])[USER_TYPE]([CODE]='ГОЛОС_ИНФОРМ');
+			ExMemo:= '1'; goto nnn;
+		exception
+		when others then
+			ExMemo:= '0';
+		end;
+	end if;
+	-------------------------------
+	if P_PAR = 'ИНТЕР_КЛИЕНТ' then
+		declare
+			utype	ref [USER_TYPE];
+		begin
+			utype:= P_PROD->([RKO])[USER_TYPE]([CODE]='ИНТЕР_КЛИЕНТ');
+			ExMemo:= '1'; goto nnn;
+		exception
+		when others then
+			ExMemo:= '0';
+		end;
+	end if;
+	--------------------------------
+	if P_PAR = 'ОРЛ_ПОДР' then
+		cd := '';
+		cd := nvl(P_PROD->([RKO])[ACCOUNT].[OTV].[DEPART].[CODE], '0');
+		if cd like '001%' then
+			cd := substr(cd,1,6);
+		else
+			cd := substr(cd,1,3);
+		end if;
+		ExMemo:= cd; goto nnn;
+	end if;
+	--------------------------------
+	/*
+	if vacc.[DATE_LAST] is not null then
+				debug_pipe(vacc.[DATE_LAST]);
+			else
+				debug_pipe('_');
+			end if;
+	*/
+	if P_PAR = 'ОРЛ_ОБ_П' then
+	/*declare
+		sm number;
+		ftod ref [OSB_OAO_F_TO_D];
+	begin
+		vacc := P_PROD->([RKO])[ACCOUNT];
+		sm:=0;
+		
+		dtt := LAST_DAY(ADD_MONTHS([SYSTEM]::[OP_DATE],-2))+1;
+		dta := LAST_DAY(ADD_MONTHS([SYSTEM]::[OP_DATE],-1));
+		
+		-- ищем соответствие для счета
+		ftod := null;
+		begin
+			locate ftod in ::[OSB_OAO_F_TO_D] where ftod.[ACC_NEW] = vacc;
+		exception when OTHERS then
+			ftod := null;
+		end;
+		if ftod is not null then
+			if LAST_DAY(dta+1) = LAST_DAY(ftod.[ACC_PR].[DATE_CLOSE]) then
+				vacc := ftod.[ACC_PR];
+			end if;
+		end if;
+		
+		--locate knp in [KOD_N_PAY] where knp.[KOD_NAZN] = 'РКО_КОМИССИЯ';
+		locate knp1 in [KOD_N_PAY] where knp1.[KOD_NAZN] = 'РКО_КОМИССИЯ';
+		locate knp2 in [KOD_N_PAY] where knp2.[KOD_NAZN] = 'NDS_NO_DEMAND';
+		
+		--debug_pipe(dtt||' '||dta||' '||vacc.[MAIN_V_ID]);
+		
+		for doo in CURSOR mndc_c Loop
+		--debug_pipe(dtt||' '||dta||' '||doo.COUNT_DOC||' '||doo.SUMMA);
+			sm:=doo.SUMMA;
+		end Loop;
+		if sm>0 then  --убрал = , Леха просил
+			ExMemo:= 1;
+		else
+			ExMemo:= 0; goto nnn;
+		end if;
+	end;*/
+	null;
+	end if;
+	--------------------------------
+	if P_PAR = 'ОРЛ_ОБ_Т' then
+	/*declare
+		sm number;
+		ftod ref [OSB_OAO_F_TO_D];
+	begin
+		vacc := P_PROD->([RKO])[ACCOUNT];
+		sm:=0;
+		
+		dtt := LAST_DAY(ADD_MONTHS([SYSTEM]::[OP_DATE],-1))+1;
+		dta := [SYSTEM]::[OP_DATE];
+		
+		-- ищем соответствие для счета
+		ftod := null;
+		begin
+			locate ftod in ::[OSB_OAO_F_TO_D] where ftod.[ACC_NEW] = vacc;
+		exception when OTHERS then
+			ftod := null;
+		end;
+		if ftod is not null then
+			if LAST_DAY(dta+1) = LAST_DAY(ftod.[ACC_PR].[DATE_CLOSE]) then
+				vacc := ftod.[ACC_PR];
+			end if;
+		end if;
+		
+		--locate knp in [KOD_N_PAY] where knp.[KOD_NAZN] = 'РКО_КОМИССИЯ';
+		locate knp1 in [KOD_N_PAY] where knp1.[KOD_NAZN] = 'РКО_КОМИССИЯ';
+		locate knp2 in [KOD_N_PAY] where knp2.[KOD_NAZN] = 'NDS_NO_DEMAND';
+		
+		--debug_pipe(dtt||' '||dta||' '||vacc.[MAIN_V_ID]);
+		
+		for doo in CURSOR mndc_c Loop
+		--debug_pipe(dtt||' '||dta||' '||doo.COUNT_DOC||' '||doo.SUMMA);
+			sm:=doo.SUMMA;
+		end Loop;
+		if sm>0 then  --убрал = , Леха просил
+			ExMemo:= 1;
+		else
+			ExMemo:= 0; goto nnn;
+		end if;
+	end;*/
+	null;
+	end if;
+	--------------------------------
+	if P_PAR = 'ОРЛ_СМО_Т' then --комиссия за текущий
+		/*declare
+			sm number;
+			sms number;
+			smm number;
+			sm_nt number;
+			ftod ref [OSB_OAO_F_TO_D];
+			dy number;
+		begin
+			sm := 0;
+			sms := 0;
+			smm := 0;
+			sm_nt := 0;
+			dy := 0;
+			vacc := P_PROD->([RKO])[ACCOUNT];
+			dtt := [SYSTEM]::[OP_DATE];
+			dta := LAST_DAY(ADD_MONTHS([SYSTEM]::[OP_DATE],-1))+1;
+			-- ищем соответствие для счета
+			ftod := null;
+			begin
+				locate ftod in ::[OSB_OAO_F_TO_D] where ftod.[ACC_NEW] = vacc;
+			exception when OTHERS then
+				ftod := null;
+			end;
+			if ftod is not null then
+				if LAST_DAY(dtt+1) = LAST_DAY(ftod.[ACC_PR].[DATE_CLOSE]) then
+					vacc := ftod.[ACC_PR];
+				end if;
+			end if;
+			dy := dtt - dta;
+			for i in 0..dy loop
+				smm := nvl(vacc.[GET_SALDO](dta+i, sm, sm_nt, null, true),0);
+				sms := sms + smm;
+				--debug_pipe(dta+i||' '||dtt||' '||smm);
+			end loop;
+			--debug_pipe(sms);
+			sms := sms/(dy+1);
+			debug_pipe(sms);
+			if sms <= 50000 then
+				ExMemo:= 0;
+			else
+				ExMemo:= 1; goto nnn;
+			end if;
+		end;*/
+		null;
+	end if;
+	--------------------------------
+	if P_PAR = 'ОРЛ_СМО_П' then --комиссия за пердъидущий месяц
+		/*declare
+			sm number;
+			sms number;
+			smm number;
+			sm_nt number;
+			dy number;
+			ftod ref [OSB_OAO_F_TO_D];
+			dt_oper_d date;
+		begin
+			sm := 0;
+			sms := 0;
+			smm := 0;
+			sm_nt := 0;
+			dy := 0;
+			vacc := P_PROD->([RKO])[ACCOUNT];
+			dt_oper_d := [SYSTEM]::[OP_DATE];
+			if trunc(dt_oper_d) = to_date('31.12.'||to_char(dt_oper_d,'YYYY'),'DD.MM.YYYY') then
+				dt_oper_d := dt_oper_d + 1;
+			end if;
+			dtt := LAST_DAY(ADD_MONTHS(dt_oper_d,-1));
+			dta := LAST_DAY(ADD_MONTHS(dt_oper_d,-2))+1;
+			-- ищем соответствие для счета
+			ftod := null;
+			begin
+				locate ftod in ::[OSB_OAO_F_TO_D] where ftod.[ACC_NEW] = vacc;
+			exception when OTHERS then
+				ftod := null;
+			end;
+			if ftod is not null then
+				if LAST_DAY(dtt+1) = LAST_DAY(ftod.[ACC_PR].[DATE_CLOSE]) then
+					vacc := ftod.[ACC_PR];
+				end if;
+			end if;
+			dy := dtt - dta;
+			for i in 0..dy loop
+				smm := nvl(vacc.[GET_SALDO](dta+i, sm, sm_nt, null, true),0);
+				sms := sms + smm;
+				--debug_pipe(dta+i||' '||dtt||' '||smm);
+			end loop;
+			--debug_pipe(sms);
+			sms := sms/(dy+1);
+			debug_pipe(sms);
+			if sms <= 50000 then
+				ExMemo:= 0;
+			else
+				ExMemo:= 1; goto nnn;
+			end if;
+		end;*/
+		null;
+	end if;
+	--------------------------------	
+	begin
+		locate mn_ref in ::[MAIN_DOCUM] where mn_ref%id = P_PROD%id;
+		exception when NO_DATA_FOUND then
+			mn_ref:=::[PATTERN_DOC].[BUSINESS_OP].doc_ref;
+	end;
+	if mn_ref is not null then
+		if P_PAR = 'ОРЛ_СПКС_0309' then
+			declare
+				sm number;
+				sm_10 number;
+			begin
+				begin
+					sm := 0;
+					sm_10 := 0;
+					dtt := mn_ref.[DATE_PROV];
+					dtt2 := LAST_DAY(ADD_MONTHS(dtt,-1))+1;
+					dta := mn_ref.[ASTR_DATE_PROV];
+					vacc := P_PROD->([RKO])[ACCOUNT];
+					
+					for doo in CURSOR mndc_b Loop null;
+						--debug_pipe(doo.COUNT_DOC||' '||doo.SUMMA);
+						for ksim in doo.dt.[SUM_KSPL] loop
+							if ksim.[1].[1]<>40 and ksim.[1].[1]<>50 then
+								sm_10 := sm_10 + ksim.[2];
+								--debug_pipe(ksim.[2]);
+							end if;
+						end loop;
+					end Loop;
+					debug_pipe(sm_10);
+					if sm_10 > 10000000 then
+						ExMemo:= 6;
+					end if;
+					
+					vacc := P_PROD->([RKO])[ACCOUNT];
+					if mn_ref%state = 'PROV' then
+						dtt := trunc(mn_ref.[DATE_PROV]);
+						dta := mn_ref.[ASTR_DATE_PROV];
+					else
+						dtt := [SYSTEM]::[OP_DATE];
+						dta := [SYSTEM]::[OP_DATE]+1;
+					end if;
+					
+					for doo in CURSOR mndc_kas Loop null;
+						for ksim in doo.dc.[SUM_KSPL] loop
+							if ksim.[1].[1]<>40 and ksim.[1].[1]<>50 then
+								sm := sm + ksim.[2];
+								--debug_pipe(ksim.[2]);
+							end if;
+						end loop;
+					end Loop;
+					debug_pipe(sm);
+					
+					/*for ksim in mn_ref.[SUM_KSPL] loop
+						if ksim.[1].[1]<>40 and ksim.[1].[1]<>50 then
+							sm := sm + ksim.[2];
+						end if;
+					end loop;*/
+					if sm<=10000 then
+						ExMemo:= 1; goto nnn;
+					elsif sm>10000 and sm<=100000 then
+						ExMemo:= 2;
+					elsif sm>100000 and sm<=1000000 then
+						ExMemo:= 3; goto nnn;
+					elsif sm>1000000 and sm<=5000000 then
+						ExMemo:= 4;
+					elsif sm>5000000 then
+						ExMemo:= 5; goto nnn;
+					end if;
+				exception
+				when NO_DATA_FOUND then
+					Null;
+				end;
+				ExMemo:= Null;
+			end;
+		end if;
+		if P_PAR = 'ОРЛ_СУММА_ПО_СИМ' then
+			declare
+				sm number;
+			begin
+				begin
+					sm := 0;
+					
+					vacc := P_PROD->([RKO])[ACCOUNT];
+					if mn_ref%state = 'PROV' then
+						dtt := trunc(mn_ref.[DATE_PROV]);
+						dta := mn_ref.[ASTR_DATE_PROV];
+					else
+						dtt := [SYSTEM]::[OP_DATE];
+						dta := [SYSTEM]::[OP_DATE]+1;
+					end if;
+					
+					for doo in CURSOR mndc_kas Loop null;
+						for ksim in doo.dc.[SUM_KSPL] loop
+							if ksim.[1].[1]<>40 and ksim.[1].[1]<>50 then
+								sm := sm + ksim.[2];
+								--debug_pipe(ksim.[2]);
+							end if;
+						end loop;
+					end Loop;
+					debug_pipe(sm);
+					/*for ksim in mn_ref.[SUM_KSPL] loop
+						if ksim.[1].[1]<>40 and ksim.[1].[1]<>50 then
+							sm := sm + ksim.[2];
+						end if;
+					end loop;*/
+					
+					if sm<=10000 then
+						ExMemo:= 1; goto nnn;
+					elsif sm>10000 and sm<=100000 then
+						ExMemo:= 2;
+					elsif sm>100000 and sm<=1000000 then
+						ExMemo:= 3; goto nnn;
+					elsif sm>1000000 and sm<=5000000 then
+						ExMemo:= 4;
+					elsif sm>5000000 then
+						ExMemo:= 5; goto nnn;
+					end if;
+				exception
+				when NO_DATA_FOUND then
+					Null;
+				end;
+				ExMemo:= Null;
+			end;
+		end if;
+		if P_PAR = 'ОРЛ_СУММА_ПО_СП' then
+			declare
+				sm number;
+			begin
+				begin
+					sm := 0;
+					
+					vacc := P_PROD->([RKO])[ACCOUNT];
+					if mn_ref%state = 'PROV' then
+						dtt := trunc(mn_ref.[DATE_PROV]);
+						dta := mn_ref.[ASTR_DATE_PROV];
+					else
+						dtt := [SYSTEM]::[OP_DATE];
+						dta := [SYSTEM]::[OP_DATE]+1;
+					end if;
+					
+					for doo in CURSOR mndc_kas Loop null;
+						for ksim in doo.dc.[SUM_KSPL] loop
+							if ksim.[1].[1]<>40 and ksim.[1].[1]<>50 then
+								sm := sm + ksim.[2];
+								--debug_pipe(ksim.[2]);
+							end if;
+						end loop;
+					end Loop;
+					debug_pipe(sm);
+					
+					/*for ksim in mn_ref.[SUM_KSPL] loop
+						if ksim.[1].[1]<>40 and ksim.[1].[1]<>50 then
+							sm := sm + ksim.[2];
+						end if;
+					end loop;*/
+					
+					if sm<=10000 then
+						ExMemo:= 1; goto nnn;
+					elsif sm>10000 and sm<=100000 then
+						ExMemo:= 2;
+					elsif sm>100000 and sm<=1000000 then
+						ExMemo:= 3; goto nnn;
+					elsif sm>1000000 then
+						ExMemo:= 4;
+					end if;
+				exception
+				when NO_DATA_FOUND then
+					Null;
+				end;
+				ExMemo:= Null; goto nnn;
+			end;
+		end if;
+		if P_PAR = 'ОРЛ_СМПОСИМ_М_1' then
+			declare
+				sm number;
+			begin
+				begin
+					sm := 0;
+					
+					vacc := P_PROD->([RKO])[ACCOUNT];
+					if mn_ref%state = 'PROV' then
+						dtt := trunc(mn_ref.[DATE_PROV]);
+						dta := mn_ref.[ASTR_DATE_PROV];
+					else
+						dtt := [SYSTEM]::[OP_DATE];
+						dta := [SYSTEM]::[OP_DATE]+1;
+					end if;
+					
+					for doo in CURSOR mndc_kas Loop null;
+						for ksim in doo.dc.[SUM_KSPL] loop
+							if ksim.[1].[1]<>40 and ksim.[1].[1]<>50 then
+								sm := sm + ksim.[2];
+								--debug_pipe(ksim.[2]);
+							end if;
+						end loop;
+					end Loop;
+					debug_pipe(sm);
+					
+					/*for ksim in mn_ref.[SUM_KSPL] loop
+						if ksim.[1].[1]<>40 and ksim.[1].[1]<>50 then
+							sm := sm + ksim.[2];
+						end if;
+					end loop;*/
+					
+					if sm<=10000 then
+						ExMemo:= 1;
+					elsif sm>10000 and sm<=100000 then
+						ExMemo:= 2; goto nnn;
+					elsif sm>100000 and sm<=1000000 then
+						ExMemo:= 3;
+					elsif sm>1000000 and sm<=3000000 then
+						ExMemo:= 4; goto nnn;
+					elsif sm>3000000 and sm<=5000000 then
+						ExMemo:= 5;
+					elsif sm>5000000 then
+						ExMemo:= 6; goto nnn;
+					end if;
+				exception
+				when NO_DATA_FOUND then
+					Null;
+				end;
+				ExMemo:= Null;
+			end;
+		end if;
+		if P_PAR = 'ОРЛ_СМПОСИМ_Н_1' then
+			declare
+				sm number;
+			begin
+				begin
+					sm := 0;
+					
+					vacc := P_PROD->([RKO])[ACCOUNT];
+					if mn_ref%state = 'PROV' then
+						dtt := trunc(mn_ref.[DATE_PROV]);
+						dta := mn_ref.[ASTR_DATE_PROV];
+					else
+						dtt := [SYSTEM]::[OP_DATE];
+						dta := [SYSTEM]::[OP_DATE]+1;
+					end if;
+					
+					for doo in CURSOR mndc_kas Loop null;
+						for ksim in doo.dc.[SUM_KSPL] loop
+							if ksim.[1].[1]<>40 and ksim.[1].[1]<>50 then
+								sm := sm + ksim.[2];
+								--debug_pipe(ksim.[2]);
+							end if;
+						end loop;
+					end Loop;
+					debug_pipe(sm);
+					
+					/*for ksim in mn_ref.[SUM_KSPL] loop
+						if ksim.[1].[1]<>40 and ksim.[1].[1]<>50 then
+							sm := sm + ksim.[2];
+						end if;
+					end loop;*/
+					
+					if sm<=10000 then
+						ExMemo:= 1; goto nnn;
+					elsif sm>10000 and sm<=500000 then
+						ExMemo:= 2;
+					elsif sm>500000 and sm<=1000000 then
+						ExMemo:= 3; goto nnn;
+					elsif sm>1000000 and sm<=5000000 then
+						ExMemo:= 4;
+					elsif sm>5000000 then
+						ExMemo:= 5; goto nnn;
+					end if;
+				exception
+				when NO_DATA_FOUND then
+					Null;
+				end;
+				ExMemo:= Null;
+			end;
+		end if;
+		
+		if P_PAR = 'ОРЛ_БЮДЖЕТ' then
+			if mn_ref.[BUDGET_PAYMENT] then
+				if mn_ref.[PRIORITET]>=5 then
+					ExMemo:= '0'; goto nnn;
+				else
+					ExMemo:= '1';
+				end if;
+			else
+				ExMemo:= '0'; goto nnn;
+			end if;
+		end if;
+		
+		if P_PAR = 'ОРЛ_ПЛ_ДБ' then
+			vacc := P_PROD->([RKO])[ACCOUNT];
+			declare
+				sm number;
+				sm_nt number;
+				smx number;
+			begin
+				sm := 0;
+				sm_nt := 0;
+				smx := 0;
+				smx:=mn_ref.[SUM];
+				if mn_ref%state = 'PROV' then
+					dtt := trunc(mn_ref.[DATE_PROV]);
+					--dtt := [SYSTEM]::[OP_DATE];
+					dta := mn_ref.[ASTR_DATE_PROV];
+				else
+					dtt := [SYSTEM]::[OP_DATE];
+					dta := [SYSTEM]::[OP_DATE]+1;
+				end if;
+				debug_pipe(dtt||' '||dta);
+				debug_pipe(vacc.[MAIN_V_ID]||' '||nvl(vacc.[GET_SALDO](dtt-1, sm, sm_nt, null, true),0)||' '||smx);
+				debug_pipe(vacc.[MAIN_V_ID]||' '||nvl(vacc.[GET_SALDO](dtt, sm, sm_nt, null, true),0)||' '||smx);
+				for doo in CURSOR mndc_a Loop null;
+					debug_pipe(doo.COUNT_DOC||' '||doo.SUMMA);
+					if doo.SUMMA<=sm then
+						ExMemo:= '0';
+					else
+						ExMemo:= '1'; goto nnn;
+					end if;
+				end Loop;
+			end;
+		end if;
+		
+		if P_PAR = 'ОРЛ_СУМ_ПР_ЗАЯ' then
+			vacc := P_PROD->([RKO])[ACCOUNT];
+			declare
+				sm number;
+				sk number;
+				sp number;
+				rko ref	[RKO];
+				dc ref	[MAIN_DOCUM];
+			begin
+				begin
+					sm := 0;
+					sk := 0;
+					sp := 0;
+					dc := null;
+					rko := P_PROD;
+					
+					if mn_ref%state = 'PROV' then
+						dtt := trunc(mn_ref.[DATE_PROV]);
+						dta := mn_ref.[ASTR_DATE_PROV];
+					else
+						dtt := [SYSTEM]::[OP_DATE];
+						dta := [SYSTEM]::[OP_DATE]+1;
+					end if;
+					
+					for s in rko.[DAILY] where s.[DAT] = trunc(nvl(mn_ref.[DATE_PROV],mn_ref.[DATE_DOC])) loop
+						sk := sk + s.[TO_ARM];
+						--debug_pipe('1 '||sk);
+					end loop;
+					
+					for doo in CURSOR mndc_kas Loop null;
+						--debug_pipe(doo.dc||' '||doo.SM);
+						for ksim in doo.dc.[SUM_KSPL] loop
+							if ksim.[1].[1]<>40 and ksim.[1].[1]<>50 then
+								sm := sm + ksim.[2];
+								--debug_pipe('2 '||ksim.[2]);
+								
+								if sm <= sk then
+									null;
+								else
+									if sp = 0 then
+										sp := sm - sk;
+									else
+										sp := ksim.[2];
+									end if;
+								end if;
+								
+							end if;
+						end loop;
+						
+						dc := mn_ref;
+						if doo.dc = mn_ref then
+							exit;
+						end if;
+					end Loop;
+					
+					debug_pipe(sm||' '||sk||' '||sp);
+					ExMemo:= sp;
+				exception
+				when NO_DATA_FOUND then
+					Null;
+				end;
+				ExMemo:= Null; goto nnn;
+			end;
+		end if;
+	end if;
+	ExMemo:= null;
+
+	--Башкиров В.Г. 17.06.2019 Расчет PSB_RECEIVER_FL-[ПСБ] Перевод со счета индивидуального предпринимателя на свой счёт физического лица или счет иного физического лица
+	ExMemo:=CalcParamsBWG(P_PAR,P_DOC,P_PROD,P_PATT);
+	
+	<<nnn>>
+	&debug('ExMemo->'||ExMemo,dp)
+END;
+end;
+end;

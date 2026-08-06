@@ -1,0 +1,1439 @@
+class F_405_DATA;
+@import_plsql(true)
+@generate_ansi_joins(true)
+@name('Общий функционал')
+library LIB_FUNC_005 is
+
+pragma include (::[REPS_DEBUG].[LIB]);
+pragma include(::[REPS_DATA].[LIB_VIEW]);
+pragma include(::[RUNTIME].[MACRO_LIB]);
+
+
+pragma macro(lc,		'::[REPS_DATA].[LIB_CLIENT]');
+pragma macro(cf,		'::[REPS_COPYFILES].[LIB_CSV]');
+pragma macro(lib_type,	'::[REPS_DATA].[LIB_TYPE]');
+
+lvClOrgGr				varchar2(32767); -- шаблон по аналитическому признаку CR_ORG_290FZ
+lvFOREIGN_ORG_BR_NAME	varchar2(32767); -- шаблон по аналитическому признаку FOREIGN_ORG_BR_NAME
+vTmp1					varchar2(32767);
+vTmp2					varchar2(32767);
+vTmp3					varchar2(32767);
+lrProf					ref [REPS_PROF_TUN];
+
+lcrPP_REPS_CLIENT	const	ref	[PATTERN_PRODUCT] := ::[PATTERN_PRODUCT].[SLIB].get_pp('REPS_CLIENTS');
+
+-- Тип для хранения параметров реализации
+public type rec_Param is record
+		( rParam		ref [REPS_PARAMS]
+		-- Ссылка на реализацию
+		, rProf			ref [REPS_PROF_TUN]
+		-- Профиль настроек
+		, rBranch		ref [BRANCH]
+		-- Филиал
+		, dBeg				date
+		-- Дата начала отчетного периода
+		, dEnd				date
+		-- Дата окончания отчетного периода
+		, vInfo				varchar2(4000)
+		-- Доп. параметры расчета
+		, bProtocol				boolean
+		-- Признак необходимости формирования протокола
+		, vProtocolName		varchar2(128)
+		-- Имя протокола
+		, vProtocolIsklName	varchar2(128)
+		-- Имя протокола по исключаемым сделкам
+		);
+
+-- Тип для хранения данных для выгрузки в протокол
+public type	rec_Protocol is record
+		( rTuning		ref [REPS_TUNING]		-- Настройка
+		, vProduct			varchar2(100)		-- Продукт
+		, dOper				date				-- Дата операции
+		, vIDDeal			varchar2(50)		-- ID Сделки
+		, nIDSupply			number				-- ID Поставки
+		, vCodeDeal			varchar2(20)		-- Номер сделки
+		, vCoagent			varchar2(160)		-- Наименование контрагента
+		, vRZCoagent		varchar2(1)			-- Резидентность контрагента
+		, vInvestor			varchar2(160)		-- Наименование инвестора
+		, vRZInvestor		varchar2(1)			-- Резидентность инвестора
+		, vBuyerName		varchar2(160)		-- Наименование покупателя
+		, vSellerName		varchar2(160)		-- Наименование продавца
+		, vEmitent			varchar2(160)		-- Наименование эмитента
+		, vRZEmitent		varchar2(1)			-- Резидентность эмитента
+		, vKindDeal			varchar2(35)		-- Вид сделки
+		, vTypeDeal			varchar2(20)		-- Тип сделки
+		, vCBClass			varchar2(30)		-- Класс ЭЦБ
+		, vOperCode			varchar2(30)		-- Код операции
+		, vPaperCode		varchar2(30)		-- Код инструмента
+		, vMarket			varchar2(50)		-- Торговая площадка
+		, vCBName			varchar2(100)		-- Наименование ЦБ
+		, vCurPay			varchar2(15)		-- Валюта платежа
+		, vRegNum			varchar2(35)		-- Регистрационный номер
+		, vISIN				varchar2(20)		-- Международный идентификационный код ценной бумаги (ISIN)
+		, vRegNumRep		varchar2(35)		-- Код который пошел в отчет
+		, dRegCB			date				-- Дата регистрации ЦБ
+		, dRegRep			date				-- Дата регистрации ЦБ в отчет
+		, vReasonIskl		varchar2(1000)		-- Причина исключения
+		, vFilialNum		::[BRANCH].[BANK].[REG_NUM]%type	-- Порядковый номер филиала
+		, nSumTotal			number				-- Сумма платежа
+		, nSumTotalUsd		number				-- Сумма платежа в $
+		, nSumPrc			number				-- Сумма процентов
+		, vBal2ACC			varchar2(256)		-- Балансовый счет второго порядка
+		);
+
+public	type	arr_Protocol is table of rec_Protocol;
+
+-- Параметры реализации
+public grecParam		rec_Param;
+
+-- Разбивка по КВВО
+public type map_SumFragment is table of [F_405_SUMS] index by varchar2(128);
+
+-- структура данных по эмитенту
+public type rec_IssuerData is record
+		(	-- Эмитент
+			rIssuer				ref [CLIENT]
+		,	-- Наименование эмитента
+			vIssuerName			varchar2(32767)
+		,	-- Страна эмитента
+			rIssuerCountry		ref [COUNTRY]
+		,	-- Код страны эмитента
+			vIssuerCountryCode	varchar2(128)
+		,	-- ИНН эмитента
+			vIssuerInn			varchar2(128)
+		);
+
+-- кэш данных по эмитенту
+public type map_IssuerData is table of rec_IssuerData index by varchar2(128);
+lmIssuerData		map_IssuerData;
+
+-- структура для хранения данных интерфейса GetCBData405
+public type rec_CBDataInt is record
+	(	-- Наименование фин. инструмента
+		vFTName			varchar2(100)
+		-- Эмитент
+	,	recIssuer		rec_IssuerData
+		-- класс ЦБ
+	,	vFTClass		varchar2(20)
+		-- Код ЦБ
+	,	vCBCode			varchar2(5)
+	,	-- Регистрационный номер ЦБ
+		vRegNum			varchar2(30)
+		-- Регистрационный номер ISIN
+	,	vIsinNum		varchar2(16)
+		-- Признак эмиссионной ЦБ
+	,	iIsEmission		integer
+		--Дата выпуска ЦБ
+	,	dDateEmission	date
+	,	--Дата погашения ЦБ
+		dDateMaturity	date
+	,	--Валюта ЦБ
+		rCBCur			ref [FT_MONEY]
+	);
+
+-- Кэш клиентов с кодом страны из справочника из справочника "ОП Группы клиентов"(REPS_CLIENTS)
+-- с индексом [Код группы#CLIENT]
+lmRepsClientCodeCountry	&lib_type.map_str;
+-- Кэш наименований клиентов с учетом историчности
+lmNameClQualHist	&lib_type.map_str;
+-- маркер сессии
+lvMarker		varchar2(32767)	:= '#';
+
+/**
+ * Функция для получения кода для графы 12 по ссылке на клиента
+ * 
+ * @param P_CLIENT			ссылка на клиента
+ * @param P_IS_FIRST_RAZD	принадлежность к первому разделу
+ * @return					код для графы 12
+ */
+public function GetResCode
+		(
+			P_CLIENT		ref [CLIENT]
+		,	P_IS_FIRST_RAZD	boolean := false
+		,	P_DATE			date := null
+		)
+	return					varchar2(128)
+is
+	-- Информация о клиенте: класс и тип клиента
+	recClientInfo	&lc.ClientTypeRec;
+	vCode			varchar2(128);
+	rHeadBnk		ref [CL_BANK];
+	rClient			ref [CLIENT];
+	bClPart			boolean := false;
+begin
+	rClient := P_CLIENT;
+
+	-- Если клиент - участник расчёта, то ищем в участниках расчёта
+	if P_CLIENT%class = ::[CL_PART]%class then
+		for (
+				select	x
+					(
+						coalesce(
+									to_char(x.[BANK_F].[REGISTR_NUM])
+								,	x.[REG_NUM]
+								)					: C_CODE
+					,	x.[BANK]					: C_BANK
+					)
+				in ::[CL_PART] all
+				where	x%id = rClient%id
+				fetch 1
+			)
+		loop
+			vCode := x.C_CODE;
+			-- клиент - нацбанк - участник расчетов
+			bClPart := x.C_BANK is not null;
+		end loop;
+		--Если клиент - участник расчетов и клиент нацбанка при этом, определяется головная организация ЗА ДАТУ сделки (операции), или за дату начала период расчета
+		if bClPart then
+			rHeadBnk	:= nvl(::[REPS_INTERFACE].[PRX_CLIENT].getHeadClient(rClient, nvl(P_DATE, grecParam.dBeg) + 1), rClient);
+			if rHeadBnk%class = ::[CL_BANK_N]%class then
+				vCode := rHeadBnk->(::[CL_BANK_N])[REG_NUM];
+			end if;
+		end if;
+	else
+		-- Получение информации по клиенту
+		--	Класс (ClClass) может принимать следующие значения:
+		--		CL_PRIV 	- Физическое лицо;
+		--		CL_ORG 		- Некредитная организация;
+		--		CL_BANK_N 	- Российская кредитная организация;
+		--		CL_BANK_F 	- Иностранная кредитная организация.
+		recClientInfo := &lc.GetClientType(rClient);
+
+		-- Если клиент - нац. банк,
+		-- то код равен рег.номеру банка,
+		if recClientInfo.ClClass = ::[CL_BANK_N]%class then
+			--	Определение головной организации клиента
+			rHeadBnk	:= nvl(::[REPS_INTERFACE].[PRX_CLIENT].getHeadClient(rClient, nvl(P_DATE, grecParam.dBeg) + 1), rClient);
+			if rHeadBnk is not null and rClient <> rHeadBnk then
+				rClient	:= rHeadBnk;
+			end if;
+			vCode := rClient->(::[CL_BANK_N])[REG_NUM];
+		elsif recClientInfo.ClClass = ::[CL_BANK_F]%class then
+			vCode := rClient->(::[CL_BANK_F])[REGISTR_NUM];
+		-- если клиент - юр.лицо,
+		elsif recClientInfo.ClClass = ::[CL_ORG]%class then
+			-- то код равен ИНН клиента,
+			vCode := &lc.GetClientINN(rClient);
+		-- если клиент - физ. лицо,
+		else
+			-- если первый раздел
+			if P_IS_FIRST_RAZD then
+				-- то заполняется рег.номером клиента
+				vCode := to_char(rClient.[REGISTR_NUM]);
+			else
+				-- иначе не заполняется
+				vCode := null;
+			end if;
+		end if;
+	end if;
+	-- возвращаем регистрационный номер или ИНН клиента
+	return vCode;
+end;
+
+
+/**
+ * Предварительное заполнение таблицы со списком видов валютных операций
+ *
+ * @param	P_TAB_SF			- массив с Разбивкой по КВВО
+ * @param	P_DOC				- id документа
+ * @param	P_DOC_CURR_OPER		- Вид валютной операции
+ * @param	P_DOC_SUM			- Сумма по дебету
+ * @param	P_DOC_SUM_PO		- Сумма по кредиту
+ *
+ * @return	- массив с Разбивкой по КВВО
+ */
+public function FillSumFragment
+		(
+			P_TAB_SF			map_SumFragment
+		,	P_DOC				ref [MAIN_DOCUM]
+		,	P_DOC_CURR_OPER		ref [CURR_OPERATION]
+		,	P_DOC_SUM			number
+		,	P_DOC_SUM_PO		number
+		)
+	return	map_SumFragment
+is
+	mSumFragment	map_SumFragment;
+	bIsFound		boolean := false;
+
+	procedure AddSum
+		(
+			P_OPER ref [CURR_OPERATION]
+		,	P_SUM number
+		)
+	is
+		recSumFragment	[F_405_SUMS];
+		vIdx			varchar2(128);
+	begin
+		if nvl(P_SUM, 0) = 0 then
+			return;
+		end if;
+
+		vIdx := nvl(to_char(P_OPER), 'EMPTY_OPER');
+		if mSumFragment.exists(vIdx) then
+			recSumFragment			:= mSumFragment(vIdx);
+			recSumFragment.[SUMMA]	:= recSumFragment.[SUMMA] + P_SUM;
+		else
+			recSumFragment					:= null;
+			recSumFragment.[CUR_OPER_REF]	:= P_OPER;	-- Вид валютной операции
+			recSumFragment.[SUMMA]			:= P_SUM;	-- Сумма
+		end if;
+		mSumFragment(vIdx) := recSumFragment;
+	end;
+begin
+	mSumFragment := P_TAB_SF;
+
+	&debug_output('+ Определение видов валютных операций для документа ID:[' || to_char(P_DOC) || '], '
+				|| 'вид операции с документа: "' || P_DOC_CURR_OPER.[CODE] || '", '
+				|| 'сумма документа ДТ: [' || P_DOC_SUM || '], '
+				|| 'сумма документа КТ: [' || P_DOC_SUM_PO || '], '
+				|| 'собрано ВВО: ' || mSumFragment.count, 10);
+
+	-- Выполняем поиск связи платежного документа с БДВО
+	for (
+			select	b
+				(	b							: ID
+				,	b.[CONTRACTS]				: C_CONTRACTS
+				,	case
+						when b.[PAYMENT_TYPE] = 1
+						then P_DOC_SUM_PO
+						else P_DOC_SUM
+					end							: C_DOC_SUM
+				)
+			in	::[BASE_VAL_OP] all
+			where	b.[DOC] = P_DOC
+			order by b%id desc
+			fetch 1
+		)
+	loop
+		&debug_output('Найдена связь документа с БДВО ID:[' || to_char(b.ID) || '], '
+					|| 'массив контрактов: [' || to_char(b.C_CONTRACTS) || '], '
+					|| 'вид операции с документа: "' || P_DOC_CURR_OPER.[CODE] || '", '
+					|| 'сумма документа с учетом направления платежа: [' || b.C_DOC_SUM || ']', 10);
+		
+		-- Если массив контрактов на БДВО заполнен, то информации о КВВО берется из него
+		for	(
+				select cntr
+					(	cntr.[CURR_OPER]			: C_CURR_OPER
+					,	cntr.[SUMMA]				: C_SUMMA
+					,	cntr.[CURR_OPER].[CODE]		: C_CURR_OPER_CODE
+					)
+				in b.C_CONTRACTS
+				where	coalesce(cntr.[SUMMA], 0) > 0
+					and	cntr.[CURR_OPER] is not null
+			)
+		loop
+			&debug_output('	Данные из массива контрактов БДВО: вид операции: "' || cntr.C_CURR_OPER_CODE || '", '
+						|| 'сумма: [' || cntr.[C_SUMMA] || ']', 10);
+
+			-- Найдены записи в массиве контрактов
+			bIsFound := true;
+
+			-- Добавление операции с суммой
+			AddSum(cntr.C_CURR_OPER, cntr.C_SUMMA);
+		end loop;
+
+		-- В случае, если массив контрактов пустой и вид валютной операции заполнен на документе
+		if not bIsFound and P_DOC_CURR_OPER is not null then
+			&debug_output('Массив контрактов пустой, добавлена запись с информацией с документа: '
+						|| 'вид операции: "' || P_DOC_CURR_OPER.[CODE] || '", '
+						|| 'сумма: [' || b.C_DOC_SUM || ']', 10);
+
+			-- Добавление операции с суммой
+			AddSum(P_DOC_CURR_OPER, b.C_DOC_SUM);
+			-- В БВДО была найдена информация
+			bIsFound := true;
+		end if;
+
+		exit;
+	end loop;
+
+	-- Если в БДВО не было найдено информации и вид валютной операции заполнен на документе, берем ее с платежного документа
+	if	not bIsFound
+	and	P_DOC_CURR_OPER is not null
+	then
+		&debug_output('В БДВО не было найдено информации о документе, добавлена запись с информацией с документа: '
+					|| 'вид операции: "' || P_DOC_CURR_OPER.[CODE] || '", '
+					|| 'сумма: [' || P_DOC_SUM || ']', 10);
+
+		-- Добавление операции с суммой
+		AddSum(P_DOC_CURR_OPER, P_DOC_SUM);
+	end if;
+	&debug_output('- Всего собрано ВВО: ' || mSumFragment.count, 10);
+
+	return mSumFragment;
+end;
+
+/**
+ * Сопоставление разбиваемой суммы со сделки и собранной информации по КВВО
+ *
+ * @param	P_TAB_SF		- массив с Разбивкой по КВВО
+ * @param	P_SUM_PAY		- Сумма
+ * @param	P_AMMOUNT		- Количество по агенту
+ *
+ *	@return	- массив с Разбивкой по КВВО
+ */
+public function EquateSumFragment
+		(
+			P_TAB_SF	map_SumFragment
+		,	P_SUM_PAY	number
+		,	P_AMMOUNT	number
+		)
+	return map_SumFragment
+is
+	recSumFragment	[F_405_SUMS];
+	mSumFragment	map_SumFragment;
+	nSumTotal		number;
+	nRatio			number;
+	nRndErrSum		number;
+	nRndErrQua		number;
+	nMaxSum			number;
+	vMaxIdx			varchar2(128);
+	vIdx			varchar2(128);
+begin
+	mSumFragment := P_TAB_SF;
+	-- Если таблица с КВВО не заполнена, либо сумма для разбивки нулевая
+	if		mSumFragment.count = 0
+		or	nvl(P_SUM_PAY, 0) = 0
+	then
+		return mSumFragment;
+	end if;
+	&debug_output('+ Выравнивание собранного списка валютных операций, всего: ' || mSumFragment.count || ', '
+				|| 'сумма для разбиения: [' || P_SUM_PAY || '], '
+				|| 'количество для разбиения: [' || P_AMMOUNT || ']', 10);
+
+	-- Если только одна запись
+	if mSumFragment.count = 1 then
+		vIdx := mSumFragment.first;
+		recSumFragment := mSumFragment(vIdx);
+		recSumFragment.[SUMMA]	:= round(P_SUM_PAY, 2);
+		recSumFragment.[QUANTITY] := P_AMMOUNT;
+		mSumFragment(vIdx) := recSumFragment;
+		&debug_output('	 Одна запись в списке валютных операций, количество = ' || recSumFragment.[QUANTITY] || ' '
+					|| 'сумма=' || recSumFragment.[SUMMA],10);
+	-- Если несколько записей
+	else
+		nSumTotal := 0;
+		-- Подсчет общей суммы по всем собранным записям
+		vIdx := mSumFragment.first;
+		while vIdx is not null
+		loop
+			nSumTotal := nSumTotal + nvl(mSumFragment(vIdx).[SUMMA], 0);
+			vIdx := mSumFragment.next(vIdx);
+		end loop;
+
+		&debug_output('	Количество записей в списке валютных операций ' || mSumFragment.count || '. '
+					|| 'Общая сумма по всем записям: [' || nSumTotal || ']', 10);
+
+		-- Если сумма для разбивки превышает общую сумму по КВВО
+		if P_SUM_PAY > nSumTotal then
+			vIdx := 'EMPTY_OPER';
+			if not mSumFragment.exists(vIdx) then
+				mSumFragment(vIdx).[SUMMA] := 0;
+			end if;
+			mSumFragment(vIdx).[SUMMA] := mSumFragment(vIdx).[SUMMA] + (P_SUM_PAY - nSumTotal);
+
+			-- Теперь общая сумма по массиву равна сумме для разбивки
+			nSumTotal := P_SUM_PAY;
+			&debug_output('	Добавлена недостающая разница к записи с незаполненной операцией, '
+						|| 'общая сумма по всем записям: [' || nSumTotal || ']', 10);
+		end if;
+
+		&debug_output('	Распределение суммы [' || P_SUM_PAY || '] и количества [' || P_AMMOUNT || '] для разбивки по списку КВВО >>', 10);
+		-- Выполняем распределение суммы и количества
+		vIdx := mSumFragment.first;
+		while vIdx is not null
+		loop
+			recSumFragment := mSumFragment(vIdx);
+			-- Определяем долю, приходящуюся на текущую запись
+			if nSumTotal <> 0 then
+				nRatio := recSumFragment.[SUMMA] / nSumTotal;
+			else
+				nRatio := 1 / mSumFragment.count;
+			end if;
+
+			&debug_output('	Запись [' || vIdx || '] '
+						|| 'сумма исходная: [' || recSumFragment.[SUMMA] || '], '
+						|| 'операция: "' || recSumFragment.[CUR_OPER_REF].[CODE] || '", '
+						|| 'доля: [' || nRatio || ']', 10);
+
+			-- Если общая сумма по разбивке превышает сумму на сделке, то будем распределять сумму на сделке пропорционально
+			if nSumTotal > P_SUM_PAY then
+				recSumFragment.[SUMMA] := round(P_SUM_PAY * nRatio, 2);
+			else
+				recSumFragment.[SUMMA] := round(recSumFragment.[SUMMA], 2);
+			end if;
+
+			-- Количество также распределяем пропорционально
+			recSumFragment.[QUANTITY] := round(P_AMMOUNT * nRatio);
+
+			&debug_output('	Скорректированная сумма: [' || recSumFragment.[SUMMA] || '], '
+						|| 'количество, приходящееся на эту запись: [' || recSumFragment.[QUANTITY] || ']', 10);
+
+			-- Подсчитываем ошибку округления, в итоге сумма всех записей массива должна сходится с суммой для разбивки
+			nRndErrSum := nvl(nRndErrSum, P_SUM_PAY) - recSumFragment.[SUMMA];
+			nRndErrQua := nvl(nRndErrQua, P_AMMOUNT) - recSumFragment.[QUANTITY];
+
+			if	nMaxSum is null
+			or	recSumFragment.[SUMMA] > nMaxSum
+			then
+				nMaxSum := recSumFragment.[SUMMA];
+				vMaxIdx	:= vIdx;
+			end if;
+
+			mSumFragment(vIdx) := recSumFragment;
+			vIdx := mSumFragment.next(vIdx);
+		end loop;
+
+		-- Если после распределения сформировалась ошибка округления, скидываем ее на запись с максимальной суммой
+		if	nvl(nRndErrSum, 0) <> 0
+		or	nvl(nRndErrQua, 0) <> 0
+		and	mSumFragment.exists(vMaxIdx)
+		then
+			recSumFragment := mSumFragment(vMaxIdx);
+			recSumFragment.[SUMMA]	:= recSumFragment.[SUMMA]		+ nvl(nRndErrSum, 0);
+			recSumFragment.[QUANTITY] := recSumFragment.[QUANTITY]	+ nvl(nRndErrQua, 0);
+			mSumFragment(vMaxIdx) := recSumFragment;
+			
+			&debug_output('	Ошибка округления учтена на записи [' || vMaxIdx || '], '
+						|| 'получившаяся сумма: [' || recSumFragment.[SUMMA] || '], '
+						|| 'количество: [' || recSumFragment.[QUANTITY] || ']', 10);
+		end if;
+	end if;
+
+	&debug_output('- Выполнено выравнивание списка КВВО', 10);
+
+	return mSumFragment;
+end;
+
+
+/**
+ * Инициализация протокола расчета
+ * 
+ */
+procedure InitProtocol
+is
+	vTmp		varchar2(4000);
+begin
+	if grecParam.bProtocol then
+		-- Протокол по включенным сделкам
+		&debug_output('>>> Инициализация протокола расчета', 1);
+		&cf.set_column('PART'		, 10, 'C', null	, 'Раздел');
+		&cf.set_column('TUNING'		, 10, 'C', null	, 'Подраздел');
+		&cf.set_column('PRODUCT'	, 30, 'C', null	, 'Продукт');
+		&cf.set_column('DATE'		, 15, 'C', null	, 'Дата операции');
+		&cf.set_column('ID_DEAL'	, 30, 'C', null	, 'ID сделки');
+		&cf.set_column('DEAL_CODE'	, 30, 'C', null	, 'Код сделки');
+		&cf.set_column('ID_SUPPLY'	, 30, 'C', null	, 'ID поставки');
+		&cf.set_column('COAGENT'	, 30, 'C', null	, 'Контрагент');
+		&cf.set_column('RZ_COAGENT'	, 30, 'C', null	, 'Резидентность контрагента');
+		&cf.set_column('INVESTOR'	, 30, 'C', null	, 'Инвестор');
+		&cf.set_column('RZ_INVESTOR', 30, 'C', null	, 'Резидентность инвестора');
+		&cf.set_column('EMITENT'	, 30, 'C', null	, 'Эмитент');
+		&cf.set_column('RZ_EMITENT'	, 30, 'C', null	, 'Резидентность эмитента');
+		&cf.set_column('BUYER'		, 30, 'C', null	, 'Покупатель');
+		&cf.set_column('SELLER'		, 30, 'C', null	, 'Продавец');
+		&cf.set_column('KIND_DEAL'	, 30, 'C', null	, 'Вид сделки');
+		&cf.set_column('TYPE_DEAL'	, 30, 'C', null	, 'Тип сделки');
+		&cf.set_column('SUM_TOTAL'	, 22, 'N', 2	, 'Сумма платежа');
+		&cf.set_column('SUM_PRC'	, 22, 'N', 2	, 'Сумма процентов');
+		&cf.set_column('CLASS_CB'	, 30, 'C', null	, 'Класс ЭЦБ');
+		&cf.set_column('KOD_CB'		, 15, 'C', null	, 'Код инструмента');
+		&cf.set_column('KOD_OPER'	, 17, 'C', null	, 'Код вида операции');
+		&cf.set_column('MARKET'		, 30, 'C', null	, 'Торговая площадка');
+		&cf.set_column('CB'			, 30, 'C', null	, 'ЦБ');
+		&cf.set_column('CURRENCY'	, 30, 'C', null	, 'Валюта платежа');
+		&cf.set_column('REG_NUM'	, 30, 'C', null	, 'Рег. № ЦБ');
+		&cf.set_column('ISIN'		, 30, 'C', null	, 'ISIN ЦБ');
+		&cf.set_column('REG_NUM_REP', 30, 'C', null	, 'Рег. № ЦБ в отчет');
+		&cf.set_column('DATE_REG'	, 15, 'C', null	, 'Дата регистрации ЦБ');
+		&cf.set_column('DATE_RG_RP'	, 15, 'C', null	, 'Дата регистрации ЦБ отчет');
+		&cf.set_column('FILIAL_NUM'	, 15, 'C', null	, 'Номер филиала');
+		&cf.set_column('BAL2ACC'	, 10, 'C', null	, 'Балансовый счет 2-го порядка');
+		
+		vTmp := &cf.fcreate
+					( p_file_name	== grecParam.vProtocolName
+					, p_path		== ::[REPS_DATA].[LIB_FILE].default_local_path
+					, p_uid			== grecParam.rParam%id
+					);
+
+		&debug_output('<<< Завершена инициализация протокола расчета', 1);
+
+		-- Протокол по исключаемым из расчета сделкам
+		&debug_output('>>> Инициализация протокола расчета по исключаемым сделкам', 1);
+
+		&cf.set_column('PART'			, 10, 'C', null	, 'Раздел');
+		&cf.set_column('TUNING'			, 10, 'C', null	, 'Подраздел');
+		&cf.set_column('PRODUCT'		, 30, 'C', null	, 'Продукт');
+		&cf.set_column('DATE'			, 15, 'C', null	, 'Дата операции');
+		&cf.set_column('ID_DEAL'		, 30, 'C', null	, 'ID сделки');
+		&cf.set_column('DEAL_CODE'		, 30, 'C', null	, 'Код сделки');
+		&cf.set_column('ID_SUPPLY'		, 30, 'C', null	, 'ID поставки');
+		&cf.set_column('COAGENT'		, 30, 'C', null	, 'Контрагент');
+		&cf.set_column('RZ_COAGENT'		, 30, 'C', null	, 'Резидентность контрагента');
+		&cf.set_column('INVESTOR'		, 30, 'C', null	, 'Инвестор');
+		&cf.set_column('RZ_INVESTOR'	, 30, 'C', null	, 'Резидентность инвестора');
+		&cf.set_column('EMITENT'		, 30, 'C', null	, 'Эмитент');
+		&cf.set_column('RZ_EMITENT'		, 30, 'C', null	, 'Резидентность эмитента');
+		&cf.set_column('KIND_DEAL'		, 30, 'C', null	, 'Вид сделки');
+		&cf.set_column('TYPE_DEAL'		, 30, 'C', null	, 'Тип сделки');
+		&cf.set_column('SUM_TOTAL'		, 22, 'N', 2	, 'Сумма платежа');
+		&cf.set_column('SUM_TOTAL_U'	, 22, 'N', 2	, 'Сумма платежа, долл.');
+		&cf.set_column('CLASS_CB'		, 30, 'C', null	, 'Класс ЭЦБ');
+		&cf.set_column('MARKET'			, 30, 'C', null	, 'Торговая площадка');
+		&cf.set_column('CB'				, 30, 'C', null	, 'ЦБ');
+		&cf.set_column('CURRENCY'		, 30, 'C', null	, 'Валюта платежа');
+		&cf.set_column('REG_NUM'		, 30, 'C', null	, 'Рег. № ЦБ');
+		&cf.set_column('ISIN'			, 30, 'C', null	, 'ISIN ЦБ');
+		&cf.set_column('REG_NUM_REP'	, 30, 'C', null	, 'Рег. № ЦБ в отчет');
+		&cf.set_column('DATE_REG'		, 15, 'C', null	, 'Дата регистрации ЦБ');
+		&cf.set_column('DATE_RG_RP'		, 15, 'C', null	, 'Дата регистрации ЦБ отчет');
+		&cf.set_column('FILIAL_NUM'		, 15, 'C', null	, 'Номер филиала');
+		&cf.set_column('BAL2ACC'		, 10, 'C', null	, 'Балансовый счет 2-го порядка');
+		&cf.set_column('REASON_ISKL'	, 100, 'C', null	, 'Причина исключения');
+
+		vTmp := &cf.fcreate
+					( p_file_name	== grecParam.vProtocolIsklName
+					, p_path		== ::[REPS_DATA].[LIB_FILE].default_local_path
+					, p_uid			== grecParam.rParam%id
+					);
+		&debug_output('<<< Завершена инициализация протокола расчета по исключаемым сделкам', 1);
+	end if;
+end;
+
+
+/**
+ * Функция, по ан.признаку.
+ * 
+ * @param	P_AN_CODE	-	ссылка на ан.признак.
+ * 
+ * @return	boolean	-	возвращает TRUE, если клиент был в группе клиентов
+ */
+function GetNormPatTun
+		(
+			P_AN_CODE	ref [ANALYTIC_CODE]
+		)
+	return	varchar2(32767)
+is
+	bRes	boolean;
+begin
+	::[REPS_DATA].[LIB_DOP_PRODUCT].InitDopPatt(lrProf, true);
+	bRes := ::[REPS_DATA].[LIB_DOP_PRODUCT].GetDopPatt(P_AN_CODE, lcrPP_REPS_CLIENT, lvClOrgGr, vTmp1, vTmp2, vTmp3);
+	return lvClOrgGr;
+end;
+
+
+/**
+ * Функция, по ан.признаку.
+ * 
+ * @param	P_AN_CODE	-	ссылка на ан.признак.
+ * 
+ * @return	boolean	-	возвращает TRUE, если клиент был в группе клиентов
+ */
+function GetNormPatTunL
+		(
+			P_AN_CODE	ref [ANALYTIC_CODE]
+		)
+	return	varchar2(32767)
+is
+	bRes	boolean;
+begin
+	::[REPS_DATA].[LIB_DOP_PRODUCT].InitDopPatt(lrProf, true);
+	bRes := ::[REPS_DATA].[LIB_DOP_PRODUCT].GetDopPatt(P_AN_CODE, lcrPP_REPS_CLIENT, lvFOREIGN_ORG_BR_NAME, vTmp1, vTmp2, vTmp3);
+	return lvFOREIGN_ORG_BR_NAME;
+end;
+
+/**
+ * Инициализация шаблона по коду настройки
+ * 
+ * @param P_PARAM	ссылка на реализацию
+ */
+public procedure GetAcPatTun
+		(
+			P_PROF			ref [REPS_PROF_TUN]
+		)
+is
+begin
+	lrProf := P_PROF;
+	for(
+		select	t
+			(	ac			: ID
+			,	t.[CODE]	: C_CODE
+			,	t			: ID_TUN
+			)
+		in		::[REPS_TUNING]
+			,	(::[ANALYTIC_CODE] all		: ac) all
+		where	t.[PROF]		= P_PROF
+			and ac%collection	= t.[ANALYTIC]
+			and	t.[CODE]		in ('FOREIGN_ORG_BR_NAME', 'CR_ORG_290FZ')
+		)
+	loop
+		if t.C_CODE = 'CR_ORG_290FZ' then 
+			lvClOrgGr				:= GetNormPatTun(t.ID);
+			::[REPS_DATA].[LIB_DOC].SetListClientGroups(lvClOrgGr);
+		elsif t.C_CODE = 'FOREIGN_ORG_BR_NAME' then
+			lvFOREIGN_ORG_BR_NAME	:= GetNormPatTunL(t.ID);
+		end if;
+	end loop;
+end;
+
+/**
+ * Возвращает шаблон по аналитическому признаку CR_ORG_290FZ
+ */
+public function GetClOrgGr
+	return varchar2(32767)
+is
+begin
+	return lvClOrgGr;
+end;
+
+
+/**
+ * Инициализация параметров реализации
+ * 
+ * @param P_PARAM	ссылка на реализацию
+ */
+public procedure InitParamInfo
+		(
+			P_PARAM ref [REPS_PARAMS]
+		)
+is
+begin
+	grecParam := null;
+	-- Получение данных для переданной реализации
+	for	(
+			select p
+				(	p			: id
+				,	p.[DATE1]	: C_DATE_BEG
+				,	p.[DATE2]	: C_DATE_END
+				,	p.[PROF]	: C_PROF
+				,	p.[BRANCH]	: C_BRANCH
+				,	p.[INFO]	: C_INFO
+				)
+			in ::[REPS_PARAMS] all
+			where p = P_PARAM
+		)
+	loop
+		grecParam.rParam	:= p.id;
+		grecParam.dBeg		:= p.C_DATE_BEG;
+		grecParam.dEnd		:= p.C_DATE_END;
+		grecParam.rProf		:= p.C_PROF;
+		lrProf				:= p.C_PROF;
+		grecParam.rBranch	:= p.C_BRANCH;
+		grecParam.vInfo		:= p.C_INFO;
+	end loop;
+
+	if grecParam.rParam is null then
+		pragma error ('Не найдена реализация. Расчет не возможен');
+	end if;
+
+	-- инициализация протокола
+	grecParam.bProtocol	:= nvl(char_bool(::[RUNTIME].[STR].Get_bool_Par(grecParam.vInfo, 'P_PROTOCOL')), false);
+	if grecParam.bProtocol then
+		grecParam.vProtocolIsklName := 'F_405_ISKL_'
+										|| bool_char(grecParam.rBranch is null, '', grecParam.rBranch.[CODE] || '_')
+										|| to_char(nvl(grecParam.dBeg, grecParam.dEnd), 'DD-MM-YYYY')
+										|| '.csv';
+		grecParam.vProtocolName := 'F_405_'
+										|| bool_char(grecParam.rBranch is null, '', grecParam.rBranch.[CODE] || '_')
+										|| to_char(nvl(grecParam.dBeg, grecParam.dEnd), 'DD-MM-YYYY')
+										|| '.csv';
+		InitProtocol;
+	end if;
+
+end;
+
+/**
+ * Сохранение данных в протокол
+ * 
+ * @param P_TAB_PROTOCOL	массив с данными для протокола
+ */
+public procedure SaveProtocol
+		(
+			P_TAB_PROTOCOL arr_Protocol
+		)
+is
+	pragma macro('chkNull', 'nvl([1], ''не определено'')', substitute);
+
+	iIdx			integer;
+	recProtocol		rec_Protocol;
+	vTunCode		::[REPS_TUNING].[CODE]%type;
+begin
+	if not nvl(grecParam.bProtocol, false) then
+		return;
+	end if;
+
+	-- Формирование протокола включаемых сделок
+	iIdx := P_TAB_PROTOCOL.first;
+	while iIdx is not null
+	loop
+		recProtocol := P_TAB_PROTOCOL(iIdx);
+
+		vTunCode := recProtocol.rTuning.[CODE];
+		&cf.set_str('PART'			, substr(vTunCode, 1, 1));
+		&cf.set_str('TUNING'		, vTunCode);
+		&cf.set_str('PRODUCT'		, &chkNull(recProtocol.vProduct));												-- "Продукт"
+		&cf.set_str('DATE'			, &chkNull(to_char(recProtocol.dOper, 'dd/mm/yyyy')));							-- "Дата операции"
+		&cf.set_str('ID_DEAL'		, &chkNull(recProtocol.vIDDeal));												-- "Сделка"
+		&cf.set_str('DEAL_CODE'		, &chkNull(recProtocol.vCodeDeal));												-- "Код сделки"
+		&cf.set_str('ID_SUPPLY'		, &chkNull(to_char(recProtocol.nIdSupply)));									-- "Поставка"		
+		&cf.set_str('COAGENT'		, &chkNull(recProtocol.vCoagent));												-- "Контрагент"
+		&cf.set_str('RZ_COAGENT'	, &chkNull(bool_char(recProtocol.vRZCoagent = '1', 'Резидент', 'Нерезидент')));	-- "Резидентность контрагента"
+		&cf.set_str('INVESTOR'		, &chkNull(recProtocol.vInvestor));												-- "Инвестор"
+		&cf.set_str('RZ_INVESTOR'	, &chkNull(bool_char(recProtocol.vRZInvestor = '1', 'Резидент', 'Нерезидент')));-- "Резидентность инвестора"
+		&cf.set_str('EMITENT'		, &chkNull(recProtocol.vEmitent));												-- "Эмитент"
+		&cf.set_str('RZ_EMITENT'	, &chkNull(bool_char(recProtocol.vRZEmitent = '1', 'Резидент', 'Нерезидент')));	-- "Резидентность эмитента"
+		&cf.set_str('KIND_DEAL'		, &chkNull(recProtocol.vKindDeal));												-- "Вид сделки"
+		&cf.set_str('TYPE_DEAL'		, &chkNull(recProtocol.vTypeDeal));												-- "Тип сделки"
+		&cf.set_str('SUM_TOTAL'		, recProtocol.nSumTotal);														-- "Сумма платежа"
+		&cf.set_str('CLASS_CB'		, &chkNull(recProtocol.vCBClass));												-- "Класс ЭЦБ"
+		&cf.set_str('KOD_CB'		, &chkNull(recProtocol.vPaperCode));											-- Код инструмента
+		&cf.set_str('KOD_OPER'		, &chkNull(recProtocol.vOperCode));												-- Код операции
+		&cf.set_str('MARKET'		, &chkNull(recProtocol.vMarket));												-- "Торговая площадка"
+		&cf.set_str('CB'			, &chkNull(recProtocol.vCBName));												-- "ЦБ"
+		&cf.set_str('CURRENCY'		, &chkNull(recProtocol.vCurPay));												-- "Валюта платежа"
+		&cf.set_str('REG_NUM'		, &chkNull(recProtocol.vRegNum));												-- "Рег. № ЦБ"
+		&cf.set_str('ISIN'			, &chkNull(recProtocol.vISIN));													-- "ISIN ЦБ"
+		&cf.set_str('REG_NUM_REP'	, recProtocol.vRegNumRep);														-- "Рег. № ЦБ в отчет"
+		&cf.set_str('DATE_REG'		, &chkNull(to_char(recProtocol.dRegCB, 'dd/mm/yyyy')));							-- "Дата регистрации ЦБ"
+		&cf.set_str('DATE_RG_RP'	, &chkNull(to_char(recProtocol.dRegRep, 'dd/mm/yyyy')));						-- "Дата регистрации ЦБ отчет"
+		&cf.set_str('FILIAL_NUM'	, &chkNull(recProtocol.vFilialNum));											-- Номер Филиала
+		&cf.set_str('BAL2ACC'		, &chkNull(recProtocol.vBal2Acc));												-- Балансовый счет 2-го порядка
+		
+		-- Сохраняются данные в протокол по включенным сделкам
+		if recProtocol.vReasonIskl is null then
+			&cf.set_str('BUYER'			, &chkNull(recProtocol.vBuyerName));										-- "Покупатель"
+			&cf.set_str('SELLER'		, &chkNull(recProtocol.vSellerName));										-- "Продавец"
+			&cf.set_str('SUM_PRC'		, recProtocol.nSumPrc);														-- "Сумма процентов"
+			&cf.fappend(grecParam.vProtocolName);
+
+		-- Сохраняются данные в протокол по исключенным сделкам
+		else
+			&cf.set_str('SUM_TOTAL_U', recProtocol.nSumTotal);		-- "Сумма платежа в долл."
+			&cf.set_str('REASON_ISKL', recProtocol.vReasonIskl);	-- "Причина исключения"
+			&cf.fappend(grecParam.vProtocolIsklName);
+		end if;
+
+		iIdx := P_TAB_PROTOCOL.next(iIdx);
+	end loop;
+end;
+
+
+/*
+ * Инициализация кэша данных по эмитенту
+ * 
+ */
+public procedure DeleteIssuerData
+is
+begin
+	lmIssuerData.delete;
+end;
+
+
+/*
+ * Возвращает структуру данных по эмитенту
+ * 
+ * @param P_ISSUER	ссылка на эмитента (клиент)
+ * @return			структура с данными в формате rec_IssuerData
+ */
+function GetIssuerData
+		(
+			P_ISSUER	ref [CLIENT]
+		)
+	return		rec_IssuerData
+is
+	recIssuerData	rec_IssuerData;
+begin
+
+	if P_ISSUER is null then
+		return null;
+	end if;
+
+	if lmIssuerData.exists(P_ISSUER) then
+		recIssuerData := lmIssuerData(P_ISSUER);
+	else
+		recIssuerData.rIssuer := P_ISSUER;
+
+		for
+			(
+				select cl
+					(	cl.[NAME]			: C_NAME
+					,	cl.[COUNTRY].[CODE]	: C_COUNTRY_CODE
+					,	cl.[COUNTRY]		: C_COUNTRY
+					,	cl.[INN]			: C_INN
+					)
+				in ::[CLIENT] all
+				where cl%id = P_ISSUER
+			)
+		loop
+			recIssuerData.vIssuerName			:= cl.C_NAME;
+			recIssuerData.rIssuerCountry		:= cl.C_COUNTRY;
+			recIssuerData.vIssuerCountryCode	:= cl.C_COUNTRY_CODE;
+			recIssuerData.vIssuerInn			:= cl.C_INN;
+		end loop;
+		lmIssuerData(P_ISSUER) := recIssuerData;
+	end if;
+
+	return recIssuerData;
+end;
+
+
+/**
+ * Вызывает интерфейс GetCBData405 и возвращает результат
+ * 
+ * @param P_CB_ID	ссылка на ЦБ
+ * @return			структура с данными в формате rec_CBDataInt
+ */
+public function GetCBDataInt
+		(
+			P_CB_ID		ref [PAPER]
+		,	P_VEKS_ID	ref [VEKSEL_GUIDE]	default null
+		,	P_DATE			date
+		)
+	return		rec_CBDataInt
+is
+	-- структура получаемая 
+	arrCBData		::[REPS_F_405_INT].[PRX_STOCK].arr_CBDataOnDate;
+	recCBDataInt		rec_CBDataInt;
+	varrCbId			type_number_table := type_number_table();
+	varrVeksId			type_number_table := type_number_table();
+
+begin
+
+	varrCbId.extend;
+	varrCbId(varrCbId.count) := to_number(P_CB_ID);
+	varrVeksId.extend;
+	varrVeksId(varrVeksId.count) := to_number(P_CB_ID);
+	-- в интерфейсе реализована порционная передача данных, в рамках нормативки 7047, поправить архитектуру для порционной передачи
+	arrCBData := ::[REPS_F_405_INT].[PRX_STOCK].GetCBDataOnDay	(	P_CB_ARR		== varrCbId
+																,	P_VEKS_ARR		== varrVeksId
+																,	P_DATE			== P_DATE
+																,	P_CB_CODE_VAR	== 2
+																);
+
+	varrCbId.delete;
+	varrCbId.delete;
+
+	if arrCBData.count > 0 then
+		recCBDataInt.recIssuer			:= GetIssuerData(arrCBData(arrCBData.first).ISSUER);
+		recCBDataInt.dDateEmission		:= arrCBData(arrCBData.first).DATE_EMISSION;
+		recCBDataInt.dDateMaturity		:= arrCBData(arrCBData.first).DATE_MATURITY;
+		recCBDataInt.iIsEmission		:= arrCBData(arrCBData.first).IS_EMISSION;
+		recCBDataInt.rCBCur				:= arrCBData(arrCBData.first).CB_CUR;
+		recCBDataInt.vCBCode			:= arrCBData(arrCBData.first).CB_CODE;
+		if recCBDataInt.vCBCode = 'DR2' then
+			-- Если клиент эмитент состоит в группе, указанной в настройке CR_ORG_290FZ, то заменяем код DR2 на код DR1
+			if ::[REPS_CLIENTS].[LIB].ClientInGroups
+										(
+											P_DATE		== P_DATE - 1
+										,	P_CLIENT	== arrCBData(arrCBData.first).ISSUER
+										,	P_GROUPS	== lvClOrgGr
+										)
+			then
+				recCBDataInt.vCBCode := 'DR1';
+			end if;
+		end if;
+		recCBDataInt.vFTClass			:= arrCBData(arrCBData.first).vFTClass;
+		recCBDataInt.vIsinNum			:= arrCBData(arrCBData.first).ISIN_NUM;
+		recCBDataInt.vRegNum			:= arrCBData(arrCBData.first).REG_NUM;
+		recCBDataInt.vFTName			:= arrCBData(arrCBData.first).vFTName;
+	end if;
+
+	return recCBDataInt;
+end;
+
+
+/**
+ * Инициализация типов комиссий в соответствии с торговыми площадками
+ * 
+ * @param P_PROF	профиль настроек
+ * @return			массив типов комиссий по торговым площадкам
+ */
+public function InitComissTypes
+		(
+			P_PROF	ref [REPS_PROF_TUN]
+		)
+	return		&lib_type.map_str
+is
+	mComissTypes			&lib_type.map_str;
+	-- Торговые площадки
+	rPP_MARKET_PLACE	ref [PATTERN_PRODUCT] := ::[PATTERN_PRODUCT].[SLIB].get_pp('MARKET_PLACE');
+	-- Вид комиссий
+	rPP_SVU_COM_TYPE	ref [PATTERN_PRODUCT] := ::[PATTERN_PRODUCT].[SLIB].get_pp('SVU_COM_TYPE');
+	vComissType			varchar2(32767);
+begin
+	&debug_output(lpad('-', 80, '-'), 0);
+	&debug_output('|' || lpad('Код площадки    ' , 20, ' ') || '|  Код комиссии ', 0);
+	&debug_output(lpad('-', 80, '-'), 0);
+	-- Выполняем проход по торговым площадкам
+	for(
+			select distinct mr
+				(	mr.[ANALYTIC].[PATT_NORMAL].[PATTERN] : C_PLACE
+				)
+			in ::[REPS_TUNING] all
+			where	mr.[CALC]
+				and	mr.[PROF] = P_PROF
+				and	mr.[ANALYTIC].[PATT_NORMAL].[PRODUCT] = rPP_MARKET_PLACE
+				and	not mr.[ANALYTIC].[PATT_NORMAL].[PATTERN] is null
+		)
+	loop
+		vComissType := '#';
+
+		-- Собираем виды комиссий для соответствующей торговой площадки
+		for(
+				select distinct tn
+					(	tn.[ANALYTIC].[PATT_NORMAL].[PATTERN] : C_PATT
+					)
+				in ::[REPS_TUNING] all
+				where	tn.[CALC]
+					and	tn.[PROF] = P_PROF
+					and	tn.[ANALYTIC].[PATT_NORMAL].[PRODUCT] = rPP_SVU_COM_TYPE
+					and	not tn.[ANALYTIC].[PATT_NORMAL].[PATTERN] is null
+					and	exists	(	select s(1)
+									in	tn.[ANALYTIC].[PATT_NORMAL]
+									where	s.[PRODUCT] = rPP_MARKET_PLACE
+										and	s.[PATTERN] = mr.C_PLACE
+								)
+			)
+		loop
+			vComissType := vComissType || tn.C_PATT || '#';
+		end loop;
+
+		-- Для торговой площадки сохраняем перечень видов комиссий
+		mComissTypes(mr.C_PLACE) := vComissType;
+
+		&debug_output('|' || lpad(mr.C_PLACE, 20, ' ') || '| ' || vComissType, 0);
+	end loop;
+	&debug_output(lpad('-', 80, '-'), 0);
+	return mComissTypes;
+end;
+
+
+/**
+ * Инициализация списка видов акций
+ * 
+ * @param P_PROF	профиль настроек
+ * @return			список видов акций
+ */
+public function InitSharePref
+		(
+			P_PROF		ref [REPS_PROF_TUN]
+		)
+	return			varchar2(32767)
+is
+	vSharePref				varchar2(32767)		:= '#';
+	-- Вид акций
+	rPP_SHARE_KIND		ref [PATTERN_PRODUCT]	:= ::[PATTERN_PRODUCT].[SLIB].get_pp('SHARE_KIND');
+begin
+	-- Собираем виды акций
+	for(
+		select	mr
+			(	mr.[ANALYTIC].[PATT_NORMAL].[PATTERN]	: C_PATT
+			,	mr.[ANALYTIC].[CODE]					: C_CODE
+			)
+		in	::[REPS_TUNING] all
+		where	mr.[CALC]
+			and	mr.[PROF] = grecParam.rProf
+			and	mr.[ANALYTIC].[PATT_NORMAL].[PRODUCT] = rPP_SHARE_KIND
+		)
+	loop
+		if instr(vSharePref, '#' || mr.C_PATT || '#') = 0 then
+			vSharePref := vSharePref || mr.C_PATT || '#';
+		end if;
+	end loop;
+	return vSharePref;
+end;
+
+
+-- Массив для сборки структуры классов
+type map_FTtypes is table of boolean index by varchar2(128);
+lmFTtypes	map_FTtypes;
+
+/**
+ *	Поиск дочерних элементов 
+ *
+ *	@param	P_PARRENT	- родитель
+ *	@return - логика, истина, если для элемента найдены дочерние
+*/
+function FillChildFTtypes
+		(
+			P_PARRENT	varchar2(16)
+		)
+return boolean
+is
+	bRet	boolean := false;
+begin
+
+	-- проверка есть или родитель в массиве
+	if not lmFTtypes.exists(P_PARRENT) then
+		lmFTtypes(P_PARRENT) := false;
+	end if;
+
+	-- Проверка находили ли уже для элемента дочерние
+	if lmFTtypes(P_PARRENT) then
+		return false;
+	end if;
+
+	-- все нижестоящие
+	for(select x (x%id : C_ID) in ::[METACLASS] where x.[PARENT] = P_PARRENT)
+	loop
+		if lmFTtypes.exists(x.C_ID) then
+			continue;
+		else
+			lmFTtypes(x.C_ID) := false;
+			bRet := true;
+		end if;
+	end loop;
+
+	-- Установка признака что для элемента найдены дочерние
+	lmFTtypes(P_PARRENT) := true;
+
+	return bRet;
+end;
+
+
+/**
+ * Инициализация фин. инструментов
+ * 
+ * @return			Список типов ЭЦБ
+ */
+public function InitFTtypes
+
+	return			varchar2(32767)
+is
+	--Список типов ЭЦБ
+	vFTtypes				varchar2(32767) := '#SHARE#DR_SHARE#INV_PAY#'; -- Акции, депозитарные расписки, паи
+	mTmpFTtypes				map_FTtypes;
+	bIsChild				boolean;
+begin
+	
+	lmFTtypes := null;
+	-- заполнение стартовым родителем и его дочерними
+	FillChildFTtypes('OBLIGATION');
+
+	-- Заполнение структуры
+	loop
+		mTmpFTtypes := lmFTtypes;
+		bIsChild	:= false;
+		&fforeach(mTmpFTtypes, vIdx, null)
+			if FillChildFTtypes(vIdx) then
+				bIsChild := true;
+			end if;
+		&end_foreach;
+		-- выход, если не найден ни один дочерний элемент
+		exit when not bIsChild;
+	end loop;
+
+	--Формирование строки
+	&fforeach(lmFTtypes, vIdx, null)
+		if vIdx != 'GKO' then
+			vFTtypes := vFTtypes || vIdx || '#';
+		end if;
+	&end_foreach;
+
+	return vFTtypes;
+end;
+
+
+/**
+ * очистка кэша lmRepsClientCodeCountry
+ */
+public procedure DeleteMapRepsClient
+is
+begin
+	lmRepsClientCodeCountry.delete;
+end;
+
+
+/**
+ * Инициализация кэша клиентов из справочника "ОП Группы клиентов"(REPS_CLIENTS)
+ * с кодом страны и индексом [Код группы#CLIENT]
+ */
+public procedure InitRepsClient
+is
+	vIdx	varchar2(128);
+begin
+	DeleteMapRepsClient;
+
+	for (
+		select z
+				(	z.[CLIENTS].[CLIENT]			: C_CLIENT
+				,	z.[CLIENTS].[COUNTRY].[CODE]	: C_CODE_CLIENT
+				,	z.[CODE]						: C_CODE_GR
+				)
+		in ::[REPS_CLIENTS] all
+		where	upper(z.[CODE]) in ('F_405_COUNTRY_CODE','BROKER')
+			and	z.[CLIENTS].[DATE_BEG]	<= grecParam.dEnd
+			and	coalesce(z.[CLIENTS].[DATE_END], grecParam.dBeg) >= grecParam.dBeg
+		)
+	loop
+		vIdx := upper(z.C_CODE_GR) || '#' || z.C_CLIENT%id;
+		lmRepsClientCodeCountry(vIdx) := z.C_CODE_CLIENT;
+	end loop;
+end;
+
+
+/** 
+ * Получение кода страны из справочника из справочника "ОП Группы клиентов"(REPS_CLIENTS)
+ * для клиента по ключу [Код группы#CLIENT]
+ * 
+ * @param P_CODE_GROUP	код группы клиентов
+ * @param P_CLIENT		ссылка на клиента
+ * @return				код страны
+ */
+public function GetRepsClientCodeCountry
+	(
+		P_CODE_GROUP	varchar2(32767)
+	,	P_CLIENT		ref [CLIENT]
+	)
+	return				varchar2(32767)
+is
+	vIdx			varchar2(128);
+	vCodeCountry	varchar2(32767);
+begin
+	vIdx := upper(P_CODE_GROUP) || '#' || P_CLIENT;
+	if lmRepsClientCodeCountry.exists(vIdx) then
+		vCodeCountry := lmRepsClientCodeCountry(vIdx);
+	end if;
+	return vCodeCountry;
+end;
+
+
+/**
+ * Проверка по группе клиента
+ *
+ * @param P_CLIENT	ссылка на клиента
+ * @param P_GROUP	группа клиентов в [REPS_CLIENTS]
+ * 
+ * @return			признак наличия клиента P_CLIENT в P_GROUP
+ */
+public function CheckRepsClients
+	(
+		P_CLIENT		ref	[CLIENT]
+	,	P_CODE_GROUP		varchar2(32767)
+	)
+	return			boolean
+is
+	vIdx			varchar2(32767);
+begin
+	vIdx := upper(P_CODE_GROUP) || '#' || P_CLIENT;
+	if lmRepsClientCodeCountry.exists(vIdx) then
+		return true;
+	end if;
+	return false;
+end;
+
+
+/**
+ *	Функция для определения резидентности клиента на дату, в зависимости от настройки.
+ *
+ *	@param	P_CLIENT	- ссылка на клиента
+ *	@param	P_DATE		- (опц.) дата, на которую определяется резидентность
+ *	lvClOrgGr			– список групп, разделённых #.
+ *	@return	true, если клиент является резидентом по валютному законодательству
+ *			false, если клиент не является резидентом по валютному законодательству, 
+			null, если информация отсутствует
+ */
+public function IsResident
+		(
+			P_CLIENT	ref [CLIENT]
+		,	P_DATE		date
+		)
+	return	boolean
+is
+	bRet	boolean;
+begin
+	::[REPS_DATA].[LIB_DOC].SetListClientGroups(lvClOrgGr);
+
+	bRet := ::[REPS_DATA].[LIB_DOC].isResident(P_CLIENT, P_DATE);
+	return bRet;
+end;
+
+
+/**
+ *	Функция для определения имени клиента в зависимости от P_QUAL клиента на дату.
+ *
+ *	@param	P_CLIENT	- ссылка на клиента
+ *	@param	P_DATE		- (опц.) дата, на которую определяется имя клиента
+ *	@param	P_QUAL		– NAME? I_NAME, LONG_NAME
+ *	@return	имя клиента англ, если нерезидент, русское, если резидент
+ *	
+ */
+public function GetNameClQual
+		(
+			P_CLIENT	ref [CLIENT]
+		,	P_QUAL		varchar2(32767)
+		,	P_DATE		date
+		)
+	return	varchar2(32767)
+is
+	vIdx			varchar2(32767);
+	aClHistValue	::[REPS_INTERFACE].[PRX_CLIENT].tpTblClHistValue_v;
+begin
+	vIdx := P_CLIENT || '#' || P_QUAL || '#' || to_char(P_DATE, 'ddmmyyyy');
+
+	if		nvl(lvMarker, '#') <> ::[REPS_DATA].[LIB_MARKER].value
+		or	lmNameClQualHist.count = 50000
+	then
+		-- необходимо очистить кэш
+		lmNameClQualHist.delete;
+		lvMarker := ::[REPS_DATA].[LIB_MARKER].VALUE;
+	end if;
+
+	if not lmNameClQualHist.exists(vIdx) then
+		--инициализирование индекса-квалификатора, значения которого необходимо получить.
+		aClHistValue(P_QUAL) := null;
+		::[REPS_INTERFACE].[PRX_CLIENT].CL_HIST_GET_VALUES(P_CLIENT, P_DATE + 1, aClHistValue);
+		lmNameClQualHist(vIdx) := aClHistValue(P_QUAL);
+	end if;
+
+	return lmNameClQualHist(vIdx);
+end;
+
+
+/**
+ *	Функция для определения имени клиента в зависимости от наличия связи с клиентом по виду связи 'ГОЛОВНАЯ_ОРГ'
+ *
+ *	@param	P_CLIENT	- ссылка на клиента
+ *	@param	P_DATE		- (опц.) дата, на которую определяется имя клиента
+ *	@return	имя клиента из массива связи клиентов
+ *	
+ */
+public function GetNameClLink
+		(
+			P_CLIENT	ref [CLIENT]
+		,	P_DATE		date
+		)
+	return	varchar2(32767)
+is
+begin
+	for (
+			select	x
+				(	lcl.[PARTNER]		: C_PARTNER
+				,	cll.[NAME]			: C_NAME
+				,	lcl.[CLIENT_NAME]	: C_CLIENT_NAME
+				)
+			in		::[CLIENT]
+				,	(::[LINKS_CL] all	: lcl) 
+				,	(::[CL_LINK] all	: cll) all
+			where	x.[LINKS_OTHER] = lcl%collection
+				and	x = P_CLIENT
+				and	cll%id = lcl.[VID_LINK]
+				and cll.[CODE] = 'ГОЛОВНАЯ_ОРГ'
+				and lcl.[DATE_BEG] <= P_DATE
+				and	coalesce(lcl.[DATE_END], P_DATE) >= P_DATE
+		)
+	loop
+		-- не заполнена колонка "Связь с клиентом"
+		if x.C_PARTNER is null then
+			-- заполнена колонка "Наименование клиента"
+			if x.C_CLIENT_NAME is not null then
+				return 'Филиал ' || x.C_CLIENT_NAME;
+			else
+				return GetNameClQual(P_CLIENT, 'LONG_NAME', P_DATE);
+			end if;
+		else
+			return 'Филиал ' || nvl(GetNameClQual(x.C_PARTNER, 'LONG_NAME', P_DATE), GetNameClQual(x.C_PARTNER, 'NAME', P_DATE));
+		end if;
+	end loop;
+
+	return nvl(GetNameClQual(P_CLIENT, 'LONG_NAME', P_DATE), GetNameClQual(P_CLIENT, 'NAME', P_DATE));
+end;
+
+
+/**
+ *	Функция для определения имени клиента в зависимости от резидентности клиента на дату.
+ *
+ *	@param	P_CLIENT	- ссылка на клиента
+ *	@param	P_DATE		- (опц.) дата, на которую определяется имя клиента
+ *	@param	P_RES		– признак резидентности '1' - резидент, '0' - нерезидент.
+ *	@param	P_PROF		- ссылка на профиль
+ *	@return	имя клиента англ, если нерезидент, русское, если резидент
+ *	
+ */
+public function GetNameClRes
+		(
+			P_CLIENT	ref [CLIENT]
+		,	P_RES		boolean default true
+		,	P_DATE		date
+		,	P_PROF		ref [REPS_PROF_TUN]
+		)
+	return	varchar2(32767)
+is
+	vName			varchar2(32767);
+
+begin
+	lrProf := P_PROF;
+	if P_RES then
+
+		if lvFOREIGN_ORG_BR_NAME is null then
+			GetAcPatTun(P_PROF);
+		end if;
+
+		if ::[REPS_CLIENTS].[LIB].ClientInGroups(P_DATE, P_CLIENT, lvFOREIGN_ORG_BR_NAME) then
+			vName	:=	GetNameClLink(P_CLIENT, P_DATE);
+
+			return vName;
+		end if;
+		vName		:=	GetNameClQual(P_CLIENT, 'NAME', P_DATE);
+
+	else
+		vName		:=	nvl(GetNameClQual(P_CLIENT, 'I_NAME', P_DATE), GetNameClQual(P_CLIENT, 'NAME', P_DATE));
+	end if;
+
+	return vName;
+end;
+
+-- функция возвращает тип клиента резидента
+public function GetTypeRes
+		(
+			P_CLIENT ref [CLIENT]
+		)
+	return varchar2(10)
+is
+	rec_ClientInfo	::[REPS_DATA].[LIB_CLIENT].ClientTypeRec; -- Информация о клиенте: класс и тип клиента
+	vRet varchar2(10);
+begin
+	vRet := '';
+	-- если ссылка на резидента заполнена
+	if P_CLIENT is not null then
+		--типа класса клиента-резидента
+		rec_ClientInfo := ::[REPS_DATA].[LIB_CLIENT].GetClientType(P_CLIENT);
+		if rec_ClientInfo.ClClass = 'CL_ORG' and rec_ClientInfo.ClType = 'CL_CHP' then
+			vRet := 'ИП';
+		elsif rec_ClientInfo.ClClass = 'CL_ORG' then  
+			vRet := 'ЮЛ';
+		elsif rec_ClientInfo.ClClass = 'CL_PRIV' then
+			vRet := 'ФЛ';
+		else
+			vRet := 'КО';
+		end if;
+	end if;
+	return vRet;
+end;
+
+-- функция возвращает тип клиента нерезидента
+public function GetTypeNRes
+		(
+			P_CLIENT ref [CLIENT]
+		)
+	return varchar2(10)
+is
+	-- Информация о клиенте: класс и тип клиента
+	rec_ClientInfo	::[REPS_DATA].[LIB_CLIENT].ClientTypeRec;
+	vRet varchar2(10);
+begin
+	vRet := '';
+	-- если ссылка на Не резидента заполнена
+	if P_CLIENT is not null then
+		rec_ClientInfo := null;
+		rec_ClientInfo := ::[REPS_DATA].[LIB_CLIENT].GetClientType(P_CLIENT);
+		if rec_ClientInfo.ClClass = 'CL_PRIV' then
+			vRet := 'ФЛ';
+		else
+			vRet := 'ЮЛ';
+		end if;
+	end if;
+	return vRet;
+end;
+
+end;

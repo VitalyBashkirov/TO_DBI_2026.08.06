@@ -1,0 +1,57 @@
+class PSH_EVENT;
+
+@import_plsql(true)
+@name('[ПСБ] Добавить')
+@tag('CREATED')
+constructor PSH_NEW#AUTO is
+PSH_NEW#AUTO (
+	@name('Класс')                     P_OBJ_CLASS in [STRING_16],
+	@name('Экземпляр')                 P_OBJ_ID    in [NUMBER],
+	@name('Операция над объектом')     P_OPER      in [STRING_1]  default null,
+	@name('Дополнительная информация') P_ADD_INFO  in [MEMO]      default null,
+	@name('Приоритет')                 P_PRIORITY  in [NUMBER]    default null
+) return ref [PSH_EVENT] is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_OBJ_CLASS := this.[OBJ_CLASS];
+	P_OBJ_ID := this.[OBJ_ID];
+	P_OPER := this.[OPER];
+	P_PRIORITY := this.[PRIORITET];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+begin
+	if P_OBJ_CLASS is null
+	or P_OBJ_ID is null then
+		pragma error('Класс и экземпляр должны быть заполнены!');
+	end if;
+
+	-- Установка значения реквизита "Состояние"
+	[PSH_LIB].to_new(this); -- updated CHANGE_SHORT_NAME LIB->PSH_LIB 18/12/25
+--	[STATUS] := LIB.C_STATUS_NEW;
+	
+	-- Установка значения реквизита "Класс"
+	[OBJ_CLASS] := P_OBJ_CLASS;
+	-- Установка значения реквизита "Экземпляр"
+	[OBJ_ID] := P_OBJ_ID;
+	-- Установка значения реквизита "Операция над объектом"
+	[OPER] := P_OPER;
+
+	-- Установка значения реквизита "Дата создания"
+	[DATE_CREATE] := sysdate;
+	
+	[TRY_COUNT] := 0;
+	
+	[USER_CREATE] := STDLIB.User_ID;
+	
+	[ADD_INFO] := substr(P_ADD_INFO, 1, [ADD_INFO]%size);
+
+	[PRIORITET] := P_PRIORITY;
+end;
+end;
+end;

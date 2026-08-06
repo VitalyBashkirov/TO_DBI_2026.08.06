@@ -1,0 +1,26 @@
+class DEPOSIT_PRIV;
+
+@name('[ПСБ] Редактировать счета для возврата , зачисления (служебная)')
+method PSH__ACCS_ENROL is
+PSH__ACCS_ENROL (
+	@name('Счет для возвратов по депозиту') P_ACC_RETURN    in [REQ_CLIENT],
+	@name('Счет для зачисления процентов')  P_ACC_ENROL_PRC in [REQ_CLIENT]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_ACC_RETURN := this.[ACC_RETURN];
+	P_ACC_ENROL_PRC := this.[ACC_ENROL_PRC];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+begin
+	this.[ACC_ENROL_PRC]:=P_ACC_ENROL_PRC;
+	this.[ACC_RETURN]:=P_ACC_RETURN;
+end;
+end;
+end;

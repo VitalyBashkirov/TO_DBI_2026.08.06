@@ -1,0 +1,1262 @@
+class PSH_CUST_DOCS;
+
+@import_plsql(true)
+@name('[ПСБ] Библиотека обработки')
+@tag('COPIED')
+library PSH_LIB is
+fmt string(10):='dd/mm/yyyy';
+
+public type R_Doc is record(
+						  doc			ref [PSH_CUST_DOCS] -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+						, doc_type			::[PSH_CUST_DOCS].[DOC_TYPE]%type -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+						, doc_state			::[PSH_CUST_DOCS].[DOC_STATE]%type -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+						, doc_content		::[PSH_CUST_DOCS].[FILE_CONTENT]%type -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+						, doc_fname			::[PSH_CUST_DOCS].[FILE_NAME]%type -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+						, doc_version		::[PSH_CUST_DOCS].[VERSION]%type -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+					);
+
+public type T_Doc is table of R_Doc;
+
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma include(::[RUNTIME].[MACRO_LIB]);
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB_TC]); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB_FUN]); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+
+-- return
+--	1 - есть ответ (созданы документы)
+--	0 - ответов нет
+public function processAnswer(p_doc ref [PSH_CUST_DOCS_IN], p_requests &libtc.T_reqs) return pls_integer -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+is
+begin
+	&debug('>> processAnswer ',0)
+	
+	case p_doc.[DOC_TYPE] of
+		: &libtc.typeTPO, &libtc.typeTOO :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_TPO].processAnswer(p_doc, p_requests); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+
+		: &libtc.typeUCO :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_UCO].processAnswer(p_doc, p_requests); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+
+		: &libtc.typeUCC :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_UCC].processAnswer(p_doc, p_requests); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+
+		: &libtc.typeTFO :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_TFO].processAnswer(p_doc, p_requests); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+
+		: &libtc.typeCSO :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_CSO].processAnswer(p_doc, p_requests); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+
+		: &libtc.typeSTO :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_STO].processAnswer(p_doc, p_requests); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+
+		: &libtc.typeCMO :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_CMO].processAnswer(p_doc, p_requests); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+
+		: &libtc.typeCMC :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_CMC].processAnswer(p_doc, p_requests); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+
+		else
+			return null;
+	end;
+end;
+
+-- return
+--	1 - проверка успешно пройдена
+--	0 - проверка не пройдена
+public function checkDoc(
+	p_doc		in	ref [PSH_CUST_DOCS_IN], -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+	p_type_doc	in		::[PSH_CUST_DOCS].[DOC_TYPE]%type, -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	p_branch	out	ref [BRANCH],
+	p_version	out		::[PSH_CUST_DOCS].[VERSION]%type -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+) return integer is
+	v_doc 			&xml.DOMDocument;
+	v_node 			&xml.DOMNode;
+	v_elem 			&xml.DOMElement;
+	v_errors		&libtc.T_Errors;
+begin
+	&debug('>> checkDoc ',0)
+	
+	&debug('p_doc ' || p_doc.[FILE_NAME],0)
+	
+	p_doc.[CHECK_DATE] := &curdate_d(&libfun.getDogFromName(p_doc.[FILE_NAME]).[FILIAL]);
+	begin
+		v_doc := &xml_doc(p_doc.[FILE_CONTENT]);
+		v_elem	:= &xml_docElem(v_doc);
+		v_node 	:= &xml_node(v_elem);
+	exception when others then
+		-- нужно обработать все ошибки разбора содержимого в DOMDocument и сохранить ошибку разбора в массив
+		&xml.freeDocument(v_doc);
+		&debug('Формат электронного сообщения не соответствуют установленным требованиям',0)
+		&libfun.setError(v_errors, 'Формат электронного сообщения не соответствуют установленным требованиям', '13');
+		&libfun.pushErrors(v_errors, p_doc);
+		return 0;
+	end;
+	
+	case p_type_doc of
+		: &libtc.typeTPO, &libtc.typeTOO : -- для TPO и TOO проверки структуры документа одинаковые
+			::[PSH_CUST_DOCS].[PSH_DOC_TPO].checkDoc(v_node, v_errors, p_type_doc, p_branch); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		
+		: &libtc.typeUCO :
+			::[PSH_CUST_DOCS].[PSH_DOC_UCO].checkDoc(v_node, v_errors, p_type_doc, p_branch); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		
+		: &libtc.typeUCC :
+			::[PSH_CUST_DOCS].[PSH_DOC_UCC].checkDoc(v_node, v_errors, p_type_doc, p_branch); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		
+		: &libtc.typeTFO :
+			::[PSH_CUST_DOCS].[PSH_DOC_TFO].checkDoc(v_node, v_errors, p_type_doc, p_branch); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		
+		: &libtc.typeCSO :
+			::[PSH_CUST_DOCS].[PSH_DOC_CSO].checkDoc(v_node, v_errors, p_type_doc, p_branch); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		
+		: &libtc.typeSTO :
+			::[PSH_CUST_DOCS].[PSH_DOC_STO].checkDoc(v_node, v_errors, p_type_doc, p_branch); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		
+		: &libtc.typeCMO :
+			::[PSH_CUST_DOCS].[PSH_DOC_CMO].checkDoc(v_node, v_errors, p_type_doc, p_branch); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		
+		: &libtc.typeCMC :
+			::[PSH_CUST_DOCS].[PSH_DOC_CMC].checkDoc(v_node, v_errors, p_type_doc, p_branch); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		
+		else null;
+	end;
+	
+	&debug('p_branch = ' || p_branch,0)
+	
+	&libfun.pushErrors(v_errors, p_doc);
+	
+	&xml.freeDocument(v_doc);
+	
+	if v_errors.count = 0 then
+		p_doc.[DOC_CR_DATE] := &curdate_d(p_branch);
+		return 1;
+	else
+		return 0;
+	end if;
+exception when others then
+	-- нужно обработать все ошибки разбора DOMDocument и сохранить ошибку разбора в массив
+	&xml.freeDocument(v_doc);
+	&libfun.setError(v_errors, 'Ошибка проверки содержимого файла: '|| utils.error_stack, '13');
+	&libfun.pushErrors(v_errors, p_doc);
+	
+	if v_errors.count = 0 then
+		return 1;
+	else
+		return 0;
+	end if;
+end;
+
+public function convertMessage(p_inDoc in clob, p_type_doc in ::[PSH_CUST_DOCS].[DOC_TYPE]%type) return clob is -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+begin
+	case p_type_doc of
+		: &libtc.typeTPO, &libtc.typeTOO :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_TPO].convertMessage(p_inDoc); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		: &libtc.typeUCO :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_UCO].convertMessage(p_inDoc); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		: &libtc.typeUCC :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_UCC].convertMessage(p_inDoc); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		: &libtc.typeTFO :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_TFO].convertMessage(p_inDoc); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		: &libtc.typeCSO :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_CSO].convertMessage(p_inDoc); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		: &libtc.typeSTO :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_STO].convertMessage(p_inDoc); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		: &libtc.typeCMO :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_CMO].convertMessage(p_inDoc); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		: &libtc.typeCMC :
+			return ::[PSH_CUST_DOCS].[PSH_DOC_CMC].convertMessage(p_inDoc); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		else
+			return null;
+	end;
+end;
+
+public procedure filePack(p_doc in ref [PSH_CUST_DOCS], p_clob in out clob) is -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	v_clob clob;
+	v_xmldoc xmltype;
+	v_domdoc &xml.DOMDocument;
+	v_nodedoc &xml.DOMNode;
+	v_nodefile &xml.DOMNode;
+begin
+	v_domdoc := &xml.newDomDocument;
+	v_nodedoc := &xml.makeNode(v_domdoc);
+	v_nodefile := &xml.appendchild(v_nodedoc, &xml.makeNode(&xml.createElement(v_domdoc, 'Файл')));
+	&xml.setAttribute(&xml.makeElement(v_nodefile), 'ИмяФайла', p_doc.[FILE_NAME]);
+	
+	dbms_lob.createtemporary(v_clob, true);
+	&xml.writetoclob(v_domdoc, v_clob);
+	v_xmldoc := xmltype(v_clob);
+	dbms_lob.freetemporary(v_clob);
+	
+	-- на всякий случай удалим пролог xml перед тем как вложить наш xml в узел Файл
+	&xml.set_xml_encoding(p_clob, null);
+	v_xmldoc := v_xmldoc.appendChildXML('//Файл', xmltype(p_clob));
+	p_clob := v_xmldoc.getClobVal();
+end;
+
+public procedure linkDoc(
+	p_docOrigin ref [PSH_CUST_DOCS], -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	p_docResult ref [PSH_CUST_DOCS], -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	p_linkType ref [TAX_EXC_LINK_TYP]
+) is
+	v_link	[PSH_CUST_LINK]; -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+begin
+	v_link.[DOC_ORIGIN] := p_docOrigin;
+	v_link.[DOC_RESULT] := p_docResult;
+	v_link.[LINK_TYPE] 	:= p_linkType;
+	
+	::[PSH_CUST_LINK]%insert(v_link); -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+end;
+
+
+
+pragma macro(set_error, '
+&rb([1])
+
+v_err := substr([2], 1, v_err%size);
+
+&debug(''err=''||v_err,0)
+
+::[MEMO_HOLDER].[L].set_memo(
+								  p_owner_class 	== [3]%class
+								, p_owner_ID		== [3]
+								, p_attribute		== ''ERR_MESSAGE''
+								, p_memo 			== v_err
+							);									
+', substitute);
+
+type R_UpDoc is record(
+						  doc				ref [PSH_CUST_DOCS_IN] -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+						, doc_state				::[PSH_CUST_DOCS].[DOC_STATE]%type -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+						, doc_branch		ref [BRANCH]
+						, doc_version			::[PSH_CUST_DOCS].[VERSION]%type -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+						);
+
+type T_UpDoc is table of R_UpDoc;
+
+public procedure check_files(p_tab_docs T_Doc) is
+v_tab_up_docs	T_UpDoc;
+v_idx			pls_integer;
+v_err			varchar2(4000);
+v_st_doc		&libfun.TFileStates;
+begin
+	&sp(ch#0)
+
+	v_idx := p_tab_docs.first;
+	while v_idx is not null loop
+		begin
+			&sp(ch#1)
+
+			if p_tab_docs(v_idx).doc.[DOC_STATE] <> &libtc.stNew then
+				-- уже обработано
+				v_idx := p_tab_docs.next(v_idx);
+				continue;
+			end if;				
+
+			begin
+				p_tab_docs(v_idx).doc%lock;
+			exception
+				when CANNOT_LOCK then
+					p_tab_docs.delete(v_idx);
+					v_idx := p_tab_docs.next(v_idx);			
+					continue;
+			end;
+			
+			v_tab_up_docs(v_idx).doc%id := p_tab_docs(v_idx).doc%id;
+			if checkDoc(
+							  p_tab_docs(v_idx).doc
+							, p_tab_docs(v_idx).doc_type
+							, v_tab_up_docs(v_idx).doc_branch
+							, v_tab_up_docs(v_idx).doc_version
+						) = 1
+			then
+				v_tab_up_docs(v_idx).doc_state  := &libtc.stChecked;
+				&libfun.addDoc(v_st_doc, v_tab_up_docs(v_idx).doc, &libtc.stChecked);
+			else
+				v_tab_up_docs(v_idx).doc_state  := &libtc.stCheckErr;
+				&libfun.addDoc(v_st_doc, v_tab_up_docs(v_idx).doc, &libtc.stCheckErr);
+			end if;
+		exception
+			when message.APP_EXCEPTION then
+				v_tab_up_docs(v_idx).doc_state  := &libtc.stCheckErr;
+				&set_error(ch#1, utils.error_stack, p_tab_docs(v_idx).doc)
+
+		end;					
+		
+		v_idx := p_tab_docs.next(v_idx);
+	end loop;
+	
+	update 	for i in v_tab_up_docs loop
+		d(
+			  d.[DOC_STATE] 	= v_tab_up_docs(i).doc_state
+			, d.[BRANCH] 		= v_tab_up_docs(i).doc_branch
+			, d.[VERSION] 		= v_tab_up_docs(i).doc_version
+		)
+	in		::[PSH_CUST_DOCS] all -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	where	d = v_tab_up_docs(i).doc;
+	
+	commit;
+	
+	::[HOOK].[PSB_CUST_CH_ST](v_st_doc);
+exception
+	when others then
+		&rb(ch#0)
+		raise;
+end;
+
+pragma macro(setDocsState, '
+update	for i in v_tab_up_docs loop
+	d(d.[DOC_STATE] = v_tab_up_docs(i).doc_state)
+in		::[PSH_CUST_DOCS] all -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+where	d = v_tab_up_docs(i).doc;
+', substitute);
+
+public procedure form_confirm(p_tab_docs T_Doc) is
+
+	function processOne(p_doc ref [PSH_CUST_DOCS])	return ::[PSH_CUST_DOCS].[DOC_STATE]%type -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	is
+	v_res pls_integer;
+	begin
+		&debug('>> processOne', 0)
+		
+		v_res := &libfun.formPT(p_doc);
+		
+		if v_res = 1 then
+			return &libtc.stPodtv;
+		elsif v_res = 0 then
+			if &libfun.checkApp('1B028090') is null then
+				return &libtc.stAnswXSD;
+			else
+				return &libtc.stFormAnsw;
+			end if;
+		end if;
+	end;
+	
+v_idx			pls_integer;
+v_err			varchar2(4000);
+v_tab_up_docs	T_Doc;
+v_st			::[PSH_CUST_DOCS].[DOC_STATE]%type; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+v_st_doc		&libfun.TFileStates;
+begin
+	&sp(cn#0)
+	
+	v_idx := p_tab_docs.first;
+	while v_idx is not null loop
+		begin
+			&sp(cn#1)
+			
+			if p_tab_docs(v_idx).doc.[DOC_STATE] not in (&libtc.stChecked, &libtc.stCheckErr) then
+				-- уже обработано
+				v_idx := p_tab_docs.next(v_idx);
+				continue;
+			end if;							
+			
+			begin
+				p_tab_docs(v_idx).doc%lock;
+			exception
+				when CANNOT_LOCK then
+					p_tab_docs.delete(v_idx);
+					v_idx := p_tab_docs.next(v_idx);
+					continue;
+			end;	
+
+			v_st := processOne(p_tab_docs(v_idx).doc);
+			if v_st is not null then
+				v_tab_up_docs(v_idx).doc%id := p_tab_docs(v_idx).doc%id;
+				v_tab_up_docs(v_idx).doc_state := v_st;
+				&libfun.addDoc(v_st_doc, v_tab_up_docs(v_idx).doc, v_st);
+			end if;
+
+		exception
+			when message.APP_EXCEPTION then
+				&set_error(cn#1, utils.error_stack, p_tab_docs(v_idx).doc)
+				
+		end;
+
+		v_idx := p_tab_docs.next(v_idx);
+	end loop;
+
+	&setDocsState
+	
+	commit;
+	
+	::[HOOK].[PSB_CUST_CH_ST](v_st_doc);
+exception
+	when others then
+		&rb(cn#0)
+		raise;
+end;
+
+procedure checkAppByType(p_type_doc in ::[PSH_CUST_DOCS].[DOC_TYPE]%type) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+is
+v_appCode	varchar2(8);
+v_errText	varchar2(2000);
+begin
+	case p_type_doc of
+		:&libtc.typeTPO, &libtc.typeTOO:
+			v_appCode := '1B028010';
+		:&libtc.typeBFN:
+			v_appCode := '1B028040';
+		:&libtc.typeUCO, &libtc.typeCMO, &libtc.typeTFO:
+			v_appCode := '1B028050';
+		:&libtc.typeUCC, &libtc.typeCMC:
+			v_appCode := '1B028080';
+		:&libtc.typeCSO:
+			v_appCode := '1B028060';
+		:&libtc.typeSTO:
+			v_appCode := '1B028070';
+		else
+			return;	-- пока так
+	end;
+	
+	v_errText := ::[PSH_CUST_DOCS].[PSH_LIB_FUN].checkApp(v_appCode); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	if v_errText is not null then
+		pragma error(v_errText);
+	end if;
+end;
+
+public procedure process_docs(p_tab_docs T_Doc) is
+
+	procedure makeError(p_doc ref [PSH_CUST_DOCS], p_branch ref [BRANCH], p_errCode varchar2(10), p_errNote varchar2(1000)) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	is
+	errList		&libtc.T_Errors;
+	idx			integer;
+	docOutObj	&libtc.R_docOut;
+	docOutRef	ref [PSH_CUST_DOCS_OU]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+	begin
+		idx := errList.count;
+		errList(idx).[ERR_TYPE] := nvl(p_errCode, '31');
+		errList(idx).[ERR_TEXT] := p_errNote;
+		
+		docOutObj := &libfun.formPT2(p_doc, p_branch, errList);
+		
+		if docOutObj.r_fileName is not null then
+			docOutRef := ::[PSH_CUST_DOCS_OU].[PSH_NEW_AUTO]( -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+														 P_FILE_NAME 	== docOutObj.r_fileName				--Имя файла
+														,P_FILE_CONTENT	== docOutObj.r_clob					--Содержимое файла
+														,P_FILE_CR_DATE == null								--Дата создания файла
+														,P_DOC_CR_DATE	== sysdate							--Дата создания документа
+														,P_VERSION		== null								--Версия формата
+														,P_DOC_TYPE		== docOutObj.r_docType				--Тип документа
+														,P_BRANCH		== docOutObj.r_branch				--Филиал
+												);
+												
+			linkDoc(p_doc, docOutRef, docOutObj.r_link);
+		end if;	
+	end;
+
+	function processOne(p_doc ref [PSH_CUST_DOCS], p_type_doc in ::[PSH_CUST_DOCS].[DOC_TYPE]%type) return ::[PSH_CUST_DOCS].[DOC_STATE]%type -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	is
+	deliveryList	&libtc.T_sysAbs;
+	branch		ref [BRANCH];
+	n				integer;
+	v_err			varchar2(4000);
+	execErrors		&libtc.TErrExecList;
+	execError		[TAX_ERROR_EXEC];
+	requestContent 	clob;
+	v_bic 			varchar2(7);
+	v_brExist		boolean;
+	v_bank		ref [CL_BANK_N];
+	v_onDate [DATE];
+	begin
+		&debug('>> processOne', 0)
+		
+		::[MEMO_HOLDER].[L].set_memo(p_doc%class, p_doc, 'ERR_MESSAGE', v_err); -- очистка сообщений об ошибках перед отправкой. v_err - пусто  
+
+		&sp(s#1)
+		p_doc%lock;
+		
+		branch := p_doc.[BRANCH];
+
+		if branch is null then -- если филиал пустой, тогда формируем ошибку
+			v_bank := &libfun.getDogFromName(p_doc.[FILE_NAME]).[FILIAL].[BANK];
+			execError.[ERROR].[CODE] := '21';
+			execError.[ERROR].[ERR_TEXT] := 'Электронный документ ошибочно направлен таможенным органом не в тот банк '||v_bank.[NAME]||', БИК '||v_bank.[BIC];
+			execErrors(execErrors.count + 1) := execError;
+		else
+			-- проверим наличие договора, по которому филиал, в который направлен документ (филиал по БИК из имени файла),
+			-- может отчитываться за филиал, указанный непосредственно в документе
+			v_brExist := false;
+			v_bic := substr(p_doc.[FILE_NAME], 5, 7);
+			v_onDate := to_date(substr(p_doc.[FILE_NAME], 22, 8), 'YYYYMMDD');
+			
+			&debug('Проверка филиала на возможность исполнения ' || branch,0)
+			&debug(' v_bic = '||v_bic,0)
+			&debug(' v_onDate = '||v_onDate,0)
+			
+			-- найдем договор для филиала
+			for (select x(x.[FILIAL] : branch) in ::[PSH_FTS_AGR] -- updated CHANGE_QUALIFIER PSB_FTS_AGR->PSH_FTS_AGR 08/10/25
+			where
+				(exists (select y(1) in x.[FILIAL_ARR] all where y.[FILIAL] = branch) or x.[FILIAL] = branch)
+			 	and (x.[DATE_BEGIN] is null or x.[DATE_BEGIN] <= v_onDate)
+			 	and (x.[DATE_END] is null or x.[DATE_END] >= v_onDate)
+			)
+			loop
+				if &libtc.branchesInfo.exists(x.branch%id) and substr(&libtc.branchesInfo(x.branch%id).f_bicF, 3) = v_bic then
+					v_brExist := true;
+					exit;
+				end if;
+			end loop;
+			
+			if not v_brExist then
+				v_bank := &libfun.getDogFromName(p_doc.[FILE_NAME]).[FILIAL].[BANK];
+				execError.[ERROR].[CODE] := '21';
+				execError.[ERROR].[ERR_TEXT] := 'Электронный документ ошибочно направлен таможенным органом не в тот банк '||v_bank.[NAME]||', БИК '||v_bank.[BIC];
+				execErrors(execErrors.count + 1) := execError;
+			end if;
+		end if;
+		
+		if execErrors.count = 0 then
+			-- проверка приложения
+			checkAppByType(p_type_doc);
+			
+			-- поиск настройки для типа документа
+			&libfun.getTuneDelivery(p_doc, p_type_doc, deliveryList);
+			
+			::[HOOK].[PSB_CUST_GET_DLV](p_doc, p_type_doc, p_doc.[FILE_CONTENT], deliveryList, execErrors);
+		end if;
+		
+		if deliveryList.count > 0 and execErrors.count = 0 then
+			n := deliveryList.first;
+			
+			&debug('>> processOne n = ' || n, 0)
+			&debug('>> processOne v_sysAbs(n) = ' || deliveryList(n).[SYS_AB], 0)
+			
+			while n is not null loop
+				requestContent := case when dbms_lob.getlength(deliveryList(n).[DATA]) > 0 then deliveryList(n).[DATA] else p_doc.[FILE_CONTENT] end;
+				::[PSH_CUST_DOCS].[PSH_LIB_OUT].Send( -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+					p_doc,
+					deliveryList(n).[SYS_AB],
+					requestContent
+				);
+				n := deliveryList.next(n);
+			end loop;
+			
+			return &libtc.stSendReqs;
+			
+		else
+			&debug('>> формируем PT2' , 0)
+
+			if execErrors.count > 0 then
+				n := execErrors.first;
+				while n is not null loop
+					makeError(p_doc, nvl(execErrors(n).[ERR_BRANCH], branch), execErrors(n).[ERROR].[CODE], execErrors(n).[ERROR].[ERR_TEXT]);
+					
+					n := execErrors.next(n);
+				end loop;
+				
+			else
+				makeError(p_doc, branch, '31', v_err);
+			
+			end if;
+
+			if nvl(&ft.get_bool_value('CUST_REVIEW_EXEC_ERR',null, '0'), false) then
+				return &libtc.stExecErr;
+			
+			else				
+				if &libfun.checkApp('1B028090') is not null then
+					return &libtc.stFormAnsw;
+				else
+					return &libtc.stAnswXSD;
+				end if;				
+				
+			end if;
+			
+		end if;	
+	exception
+		when message.APP_EXCEPTION then
+			&set_error(s#1, utils.error_stack, p_doc)
+
+			return p_doc.[DOC_STATE];
+		when rtl.CANNOT_LOCK then
+			&set_error(s#1, sqlerrm||NL$||'Документ заблокирован!', p_doc)
+
+			return null;
+	end;
+
+v_idx			pls_integer;	
+v_tab_up_docs	T_Doc;
+v_st			::[PSH_CUST_DOCS].[DOC_STATE]%type; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+v_st_doc		&libfun.TFileStates;
+begin
+	&sp(s#0)
+
+	v_idx := p_tab_docs.first;
+	while v_idx is not null loop
+		v_st := processOne(p_tab_docs(v_idx).doc, p_tab_docs(v_idx).doc_type);
+		if v_st is not null then
+			null;
+			v_tab_up_docs(v_idx).doc%id := p_tab_docs(v_idx).doc%id;
+			v_tab_up_docs(v_idx).doc_state := v_st;
+			&libfun.addDoc(v_st_doc, v_tab_up_docs(v_idx).doc, v_st);
+		else
+			p_tab_docs.delete(v_idx);
+		end if;
+
+		v_idx := p_tab_docs.next(v_idx);
+	end loop;
+
+	&setDocsState
+	
+	commit;
+	
+	::[HOOK].[PSB_CUST_CH_ST](v_st_doc);
+exception
+	when others then
+		&rb(s#0)
+		raise;
+end;
+
+function stateByOut(p_doc ref [PSH_CUST_DOCS_IN]) return ::[PSH_CUST_DOCS].[DOC_STATE]%type -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25 -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+/*определение состояния входящего документа по состояниям связанных исходящих*/
+is
+v_res	pls_integer;
+v_st	::[PSH_CUST_DOCS].[DOC_STATE]%type; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+begin
+	-- если ответы не сформированы, нужно перевести документ в состояние в зависимости от состояния сформированных ответов.
+	-- в это время у входящего документа уже будет подтверждение1, поэтому в зависимости от состояния этого документа изменяем состояние
+	-- входящего докумета. При этом не забываем про корректировки.
+	select	x(min(case d.[DOC_STATE]
+					when &libtc.stCheckXSD	then 1
+					when &libtc.stErrXSD	then 2
+					when &libtc.stNew		then 3
+					when &libtc.stSend		then 4
+					when &libtc.stNAdopt	then 5
+					when &libtc.stFinish	then 6
+				end))
+	in		(
+				with recursive rec(DOC_RESULT) as
+					(
+					select cl(	cl.[DOC_RESULT] : DOC_RESULT) 
+						in	::[PSH_CUST_LINK] all  -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+						where cl.[DOC_ORIGIN] = p_doc
+					union all
+					select cl( cl.[DOC_RESULT] : DOC_RESULT)
+						in	::[PSH_CUST_LINK] -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+							join (rec : r) on r.DOC_RESULT = cl.[DOC_ORIGIN] all
+					)
+				select r(r.DOC_RESULT : res) in rec
+			)
+			, (::[PSH_CUST_DOCS] all : d) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	where	x.res = d
+		and d%class = ::[PSH_CUST_DOCS_OU]%class -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+	into	v_res;
+
+	v_st := case v_res
+				when 1 then &libtc.stAnswXSD
+				when 2 then &libtc.stAnswErr
+				when 3 then &libtc.stFormAnsw
+				when 4 then &libtc.stSendAnsw
+				when 5 then &libtc.stNAdopt
+				when 6 then &libtc.stFinish
+				else		&libtc.stFinish
+	end;					
+	
+	return v_st;
+end;
+
+public procedure create_messages(p_tab_docs T_Doc) is
+v_reqsTable		&libtc.T_reqs;
+v_res 			pls_integer;
+v_state			::[PSH_CUST_DOCS].[DOC_STATE]%type; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+v_idx			pls_integer;
+v_err			varchar2(4000);
+v_docIn		ref [PSH_CUST_DOCS_IN]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+v_result		pls_integer;
+v_st_doc		&libfun.TFileStates;
+
+/** Состояния входящих документов после формирования ответов:
+* 1. "Ответ сформирован", если были сформированы исходящие документы
+* 2. "Ответ сформирован", если исходящих документов сформировано не было, но среди связанных исходящих документов есть документ в состоянии "Новый" (это может быть Подтверждение 1)
+* 3. "Ответ отправлен", если исходящих документов сформировано не было, но уже есть связанный исходящий документ в состоянии "Отправлен" (это может быть Подтверждение 1)
+* 4. "Ответ не принят", если исходящих документов сформировано не было, но уже есть связанный исходящий документ в состоянии "Не принят" (это может быть Подтверждение 1)
+* 5. "Обработка завершена", в остальных случаях
+*/
+
+begin
+	v_idx := p_tab_docs.first;
+	
+	while v_idx is not null loop
+		v_res := null;
+		v_state := null;
+
+		begin
+			&sp(cm#1)		
+			
+			v_docIn := p_tab_docs(v_idx).doc;
+			begin
+				v_docIn%lock;
+			exception
+				when CANNOT_LOCK then
+					v_idx := p_tab_docs.next(v_idx);
+					continue;
+			end;	
+
+			with recursive rec(cr, is_out) as
+				(
+					select cr	(	cr	 		: cr,
+									cr.[IS_OUT]	: is_out
+								) 
+						in	::[PSH_CUST_REQS] all  -- updated CHANGE_QUALIFIER PSB_CUST_REQS->PSH_CUST_REQS 08/10/25
+						where cr.[DOC] = v_docIn
+					union all
+					select cr	(	cr	 		: cr,
+									cr.[IS_OUT]	: is_out
+								) 
+						in	::[PSH_CUST_REQS]  -- updated CHANGE_QUALIFIER PSB_CUST_REQS->PSH_CUST_REQS 08/10/25
+							join (rec : r) on r.cr = cr.[INITIAL_REQ] all
+				)
+			select r(r.cr : res)
+				in		rec
+				where	r.is_out = '0'
+				into	v_reqsTable;
+				
+			&debug('>> CREATE_MESSAGES ',0)
+			&debug('v_reqsTable ' || v_reqsTable.count,0)
+			
+			v_result := processAnswer(v_docIn, v_reqsTable);
+
+			&debug('v_result = ' || v_result,0)
+			
+			if v_result = 1 then
+				if &libfun.checkApp('1B028090') is not null then
+					v_state := &libtc.stFormAnsw;
+				else
+					v_state := &libtc.stAnswXSD;
+				end if;
+
+			else
+				v_state := stateByOut(p_tab_docs(v_idx).doc);
+
+			end if;	
+					
+			v_reqsTable.delete;
+					
+			-- если заполнен массив с ошибками исполнения, тогда переводим в ошибки исполнения
+			if v_docIn.[EXEC_ERRS]%size(1) > 0 then					
+				v_state := &libtc.stExecErr;		
+			end if;
+			
+			if v_state is not null then
+				&libfun.addDoc(v_st_doc, p_tab_docs(v_idx).doc, v_state);
+				p_tab_docs(v_idx).doc.[DOC_STATE] := v_state;
+				commit;
+			end if;		
+		exception
+			when message.APP_EXCEPTION then
+				&set_error(cm#1, utils.error_stack, p_tab_docs(v_idx).doc)
+
+		end;				
+		
+		v_idx := p_tab_docs.next(v_idx);
+	end loop;
+	
+	::[HOOK].[PSB_CUST_CH_ST](v_st_doc);
+end;
+
+public procedure check_xsd(p_tab_docs T_Doc) is
+v_idx		pls_integer;
+v_count		pls_integer;
+v_err_txt	[MEMO_4000];
+v_inFile	ref [PSH_CUST_DOCS_IN]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+v_st_doc	&libfun.TFileStates;
+
+v_errCount 	pls_integer;
+begin
+	&sp(cx0)
+
+	v_idx := p_tab_docs.first;
+	while v_idx is not null loop
+		begin
+			p_tab_docs(v_idx).doc%lock;
+		exception
+			when CANNOT_LOCK then
+				p_tab_docs.delete(v_idx);
+				v_idx := p_tab_docs.next(v_idx);
+				continue;
+		end;
+		
+		if p_tab_docs(v_idx).doc_type in (&libtc.typeBFN, &libtc.typePT1, &libtc.typePT2, &libtc.typeUV1, &libtc.typeUV2, &libtc.typeUV3) then
+			v_err_txt := ::[PSH_CUST_SCHEMA].[PSH_LIB].check_doc_by_xsd(p_tab_docs(v_idx).doc_content, p_tab_docs(v_idx).doc_type, p_tab_docs(v_idx).doc_version); -- updated CHANGE_SHORT_NAME LIB->PSH_LIB 15/10/25
+		end if;
+		
+		if v_err_txt is not null then
+			p_tab_docs(v_idx).doc_state := &libtc.stErrXSD;
+			&libfun.addDoc(v_st_doc, p_tab_docs(v_idx).doc, &libtc.stErrXSD);
+
+			::[MEMO_HOLDER].[L].set_memo(
+				  p_owner_class 	== p_tab_docs(v_idx).doc%class
+				, p_owner_ID		== p_tab_docs(v_idx).doc
+				, p_attribute		== 'SCHEMA_ERROR'
+				, p_memo 			== v_err_txt
+			);
+		else
+			p_tab_docs(v_idx).doc_state := &libtc.stNew;
+			&libfun.addDoc(v_st_doc, p_tab_docs(v_idx).doc, &libtc.stNew);
+		end if;
+
+		v_idx := p_tab_docs.next(v_idx);
+	end loop;
+	
+	update for i in p_tab_docs loop
+			d(d.[DOC_STATE] = p_tab_docs(i).doc_state)
+	in		::[PSH_CUST_DOCS] all -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	where	d = p_tab_docs(i).doc;
+	
+	v_idx := p_tab_docs.first;
+	while v_idx is not null loop	
+		v_inFile := ::[PSH_CUST_DOCS].[PSH_LOAD_DOCS].getInFile(p_tab_docs(v_idx).doc); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		
+		select a(count(1)) in v_inFile.[EXEC_ERRS]
+		into v_errCount;  
+		
+		if p_tab_docs(v_idx).doc_state = &libtc.stNew then
+			if v_inFile is not null and v_inFile.[DOC_STATE] = &libtc.stAnswXSD then
+				select	x(count(1))
+				in		::[PSH_CUST_DOCS] all -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+				where	x%class = ::[PSH_CUST_DOCS_OU]%class -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+					and x.[DOC_STATE] = &libtc.stCheckXSD
+					and x in (
+								with recursive rec(DOC_RESULT) as
+									(
+									select cl(	cl.[DOC_RESULT] : DOC_RESULT) 
+										in	::[PSH_CUST_LINK] all  -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+										where cl.[DOC_ORIGIN] = v_inFile
+									union all
+									select cl( cl.[DOC_RESULT] : DOC_RESULT)
+										in	::[PSH_CUST_LINK] -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+											join (rec : r) on r.DOC_RESULT = cl.[DOC_ORIGIN] all
+									)
+								select r(r.DOC_RESULT : res) in rec
+							)
+				into	v_count;
+				&debug('v_count = ' || v_count,0)		
+				if v_count = 0 then -- все проверены
+					&libfun.addDoc(v_st_doc, v_inFile, &libtc.stFormAnsw);
+					v_inFile.[DOC_STATE] := &libtc.stFormAnsw;
+				end if;
+			end if;
+		elsif p_tab_docs(v_idx).doc_state = &libtc.stErrXSD 
+				and ((p_tab_docs(v_idx).doc_type.[CODE] like 'PB%' and v_errCount!= 0)
+					or (p_tab_docs(v_idx).doc_type.[CODE] not like 'PB%' and v_errCount = 0)
+					or v_inFile.[DOC_STATE] = &libtc.stAnswXSD) 
+		then
+			&libfun.addDoc(v_st_doc, v_inFile, &libtc.stAnswErr);
+			v_inFile.[DOC_STATE] := &libtc.stAnswErr;
+		end if;
+		
+		v_idx := p_tab_docs.next(v_idx);
+	end loop;			
+	
+	commit;
+	
+	::[HOOK].[PSB_CUST_CH_ST](v_st_doc);
+exception
+	when others then
+		&rb(cx0)
+		raise;
+end;
+
+public procedure getFilePart
+/* Процедура для взятия содержимого XML без пролога */
+(
+	p_text in out nocopy [CLOB]
+	/* Исходный текст XML */
+)
+is
+	v_clob clob;
+	v_posBegin integer;
+	v_posTagXML integer;
+	v_posTagNext integer;
+begin
+	
+	v_posBegin := 1;
+	loop
+		v_posTagXML := dbms_lob.instr(p_text, '<?xml', v_posBegin);
+		exit when v_posTagXML = 0;
+		v_posTagNext := dbms_lob.instr(p_text, '<', v_posBegin, 2);
+		exit when v_posTagNext <= v_posTagXML;
+		v_posBegin := v_posTagNext;
+	end loop;
+	
+	if v_posBegin > 1 then
+		begin
+			dbms_lob.createtemporary(v_clob, true);
+			dbms_lob.copy(v_clob, p_text, dbms_lob.getlength(p_text) - v_posBegin + 1, 1, v_posBegin);
+			dbms_lob.trim(p_text, 0);
+			dbms_lob.append(p_text, v_clob);
+			dbms_lob.freetemporary(v_clob);
+		exception
+			when others then
+				dbms_lob.freetemporary(v_clob);
+				raise;
+		end;
+	end if;
+end;
+
+public procedure unload_files(p_tab_docs T_Doc) is
+
+v_idx			pls_integer;
+v_path			[FILE$PATH];
+v_blob 			blob;
+v_dir 			pls_integer;
+v_file 			pls_integer;
+v_res 			pls_integer;
+v_lineSize		pls_integer;
+i				pls_integer;
+v_inFile	ref [PSH_CUST_DOCS_IN]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+v_outFile	ref [PSH_CUST_DOCS_OU]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+v_count			pls_integer;
+v_cl			CLOB;
+v_err 			[MEMO];
+v_corr_date		boolean;
+v_c_date		date;
+v_st_doc		&libfun.TFileStates;
+begin
+	&debug('>> unload_files',0)
+	
+	v_corr_date := coalesce(&ft.GET_BOOL_VALUE('CUST_UPDATE_WHEN_UNLOAD', null, '0'), false);
+	
+	v_path 		:= &libfun.getPath();
+	v_path 		:= v_path || &libtc.defSlash || 'OUT';
+	&debug(TB$||'v_path='||v_path,0)
+	
+	v_dir 		:= stdio.opendir(v_path);
+	&debug(TB$||'v_dir='||v_dir,0)
+	
+	v_lineSize	:= stdio.SETTING('STDIO_LINE_SIZE');
+	&debug(TB$||'v_lineSize='||v_lineSize,0)
+	
+	dbms_lob.createtemporary(v_blob, true);
+	
+	i := 0;
+
+	v_idx := p_tab_docs.first;
+	&debug(TB$||'v_idx='||v_idx||' p_tab_docs.count='||p_tab_docs.count,0)
+	while v_idx is not null loop
+		v_err := null;
+		begin
+			p_tab_docs(v_idx).doc%lock;
+		exception
+			when CANNOT_LOCK then
+				v_idx := p_tab_docs.next(v_idx);
+				continue;
+		end;	
+		-- ищем входящий документ
+		v_outFile 	:= p_tab_docs(v_idx).doc;
+		v_inFile 	:= ::[PSH_CUST_DOCS].[PSH_LOAD_DOCS].getInFile(v_outFile); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+		&debug(TB$||TB$||'v_outFile='||v_outFile.[FILE_NAME],0)
+		&debug(TB$||TB$||'v_inFile='||v_inFile.[FILE_NAME],0)
+		begin
+			v_inFile%lock;
+		exception
+			when CANNOT_LOCK then
+				v_err := 'Нельзя выгрузить исходящий документ, потому что входящий документ заблокирован.';
+				::[MEMO_HOLDER].[L].set_memo(
+								  p_owner_class 	== ::[PSH_CUST_DOCS_OU]%class -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+								, p_owner_ID		== v_outFile
+								, p_attribute		== 'ERR_MESSAGE'
+								, p_memo 			== v_err
+							);	
+				v_idx := p_tab_docs.next(v_idx);
+				continue;
+		end;						
+
+		begin
+			v_c_date := &curdate_d(&libfun.getBranch4Exch(v_outFile.[BRANCH]));
+			&debug(TB$||TB$||'v_c_date='||to_char(v_c_date,fmt),0)
+			
+			&debug(TB$||TB$||' dbms_lob.getlength(p_tab_docs(v_idx).doc_content)='|| dbms_lob.getlength(p_tab_docs(v_idx).doc_content),0)
+			&debug(TB$||TB$||' p_tab_docs(v_idx).doc_fname='||p_tab_docs(v_idx).doc_fname,0)
+			if dbms_lob.getlength(p_tab_docs(v_idx).doc_content) > 0 and p_tab_docs(v_idx).doc_fname is not null then
+				if v_corr_date and p_tab_docs(v_idx).doc_type = &libtc.typeBFN then
+					declare
+						v_n_date date;
+						v_f_date date;
+					begin
+						
+	
+						v_n_date := to_date(substr(p_tab_docs(v_idx).doc_fname, instr(p_tab_docs(v_idx).doc_fname, '_', -1, 2) + 1, 8), 'yyyymmdd');
+						&debug(TB$||TB$||'v_n_date='||to_char(v_n_date,fmt),0)
+						if v_n_date <> v_c_date then
+							p_tab_docs(v_idx).doc_fname := substr(p_tab_docs(v_idx).doc_fname, 1, instr(p_tab_docs(v_idx).doc_fname, '_', -1, 2)) || to_char(v_c_date, 'yyyymmdd') || substr(p_tab_docs(v_idx).doc_fname, instr(p_tab_docs(v_idx).doc_fname, '_', -1, 2) + 9);
+							v_outFile.[FILE_NAME] := p_tab_docs(v_idx).doc_fname;
+							&debug(TB$||TB$||' v_outFile.[FILE_NAME]='||v_outFile.[FILE_NAME],0)
+						end if;
+						
+						v_f_date := to_date(dbms_lob.SUBSTR(p_tab_docs(v_idx).doc_content, 10, dbms_lob.INSTR(p_tab_docs(v_idx).doc_content, 'DocAppDate') + 11), 'yyyy-mm-dd');
+						&debug(TB$||TB$||'v_f_date='||to_char(v_f_date,fmt),0)
+						if v_f_date <> v_c_date then
+							declare
+								v_temp_clob1 CLOB;
+								v_temp_clob2 CLOB;							
+							begin
+								dbms_lob.createtemporary(v_temp_clob1, true);
+								dbms_lob.createtemporary(v_temp_clob2, true);
+								dbms_lob.copy(v_temp_clob1, p_tab_docs(v_idx).doc_content, dbms_lob.INSTR(p_tab_docs(v_idx).doc_content, 'DocAppDate') + 10);
+								dbms_lob.copy(v_temp_clob2, p_tab_docs(v_idx).doc_content, dbms_lob.getlength(p_tab_docs(v_idx).doc_content)-dbms_lob.INSTR(p_tab_docs(v_idx).doc_content, 'DocAppDate') - 20, 1, dbms_lob.INSTR(p_tab_docs(v_idx).doc_content, 'DocAppDate') + 21);
+	
+								dbms_lob.trim(p_tab_docs(v_idx).doc_content, 0);							
+								dbms_lob.append(p_tab_docs(v_idx).doc_content, v_temp_clob1);
+								dbms_lob.append(p_tab_docs(v_idx).doc_content, to_clob(to_char(v_c_date, 'yyyy-mm-dd')));
+								dbms_lob.append(p_tab_docs(v_idx).doc_content, v_temp_clob2);
+		
+								v_outFile.[FILE_CONTENT] := p_tab_docs(v_idx).doc_content;
+								dbms_lob.freetemporary(v_temp_clob1);
+								dbms_lob.freetemporary(v_temp_clob2);
+								
+								&debug(TB$||TB$||'v_idx='||v_idx||' dbms_lob.getlength(v_outFile.[FILE_CONTENT])='|| dbms_lob.getlength(v_outFile.[FILE_CONTENT]),0)
+							exception
+								when others then
+									dbms_lob.freetemporary(v_temp_clob1);
+									dbms_lob.freetemporary(v_temp_clob2);
+									raise;
+							end;
+						end if;
+					end;
+				end if;
+				
+				-- сохранить файлы
+				dbms_lob.trim(v_blob, 0);
+				
+				-- Если в файле есть пролог, то его необходимо удалить, так как он будет добавлен в ручном режиме. 
+				getFilePart(p_tab_docs(v_idx).doc_content);
+				
+				&debug(TB$||TB$||'v_outFile.[DOC_TYPE]='||v_outFile.[DOC_TYPE].[CODE],0)
+				if v_outFile.[DOC_TYPE] in (&libtc.typePT1, &libtc.typePT2, &libtc.typeUV1, &libtc.typeUV2, &libtc.typeUV3) then -- для подтверждений и уведомлений XML-файл в кодировке windows-1251
+					v_cl := '<?xml version="1.0" encoding="windows-1251"?>'||NL$||p_tab_docs(v_idx).doc_content;
+					[LOB_UTILS].clob2blob(v_blob, v_cl, 'CL8MSWIN1251');
+				elsif v_outFile.[DOC_TYPE] = &libtc.typeBFN then -- для справки об остатках XML-файл в кодировке utf-8
+					v_cl := '<?xml version="1.0" encoding="UTF-8"?>'||NL$||p_tab_docs(v_idx).doc_content;
+					[LOB_UTILS].clob2blob(v_blob, v_cl, 'UTF8');
+				end if;
+				
+				v_file := stdio.f_open(v_path||&libtc.defSlash||p_tab_docs(v_idx).doc_fname, 'w');
+				&debug(TB$||TB$||'Выводим в '||v_path||&libtc.defSlash||p_tab_docs(v_idx).doc_fname||' v_file='||v_file,0)
+				
+				if v_file > 0 then
+					begin
+						for k in 1..ceil(dbms_lob.getlength(v_blob)/v_lineSize) loop
+							v_res := stdio.f_write(v_file, dbms_lob.substr(v_blob,v_lineSize,(k-1)*v_lineSize+1));
+						end loop;
+					exception
+						when others then
+							null;
+					end;
+					
+					v_res := stdio.f_close(v_file);
+					&debug(TB$||TB$||'Закрыли файл v_res='||v_res,0)
+				else
+					pragma error('Ошибка открытия файла '||v_path||&libtc.defSlash||p_tab_docs(v_idx).doc_fname||': '||stdio.error_message(v_file));
+				end if;
+			end if;
+	
+			-- если все связанные исходящие документы, кроме обрабатываемого в состоянии "Отправлен", тогда блокируем входящий документ
+			&debug(TB$||TB$||'v_inFile='||v_inFile||' and v_inFile.[DOC_STATE]='||v_inFile.[DOC_STATE],0)
+			if v_inFile is not null and v_inFile.[DOC_STATE] = &libtc.stFormAnsw then
+				select x(count(x%id))
+					in		::[PSH_CUST_DOCS]  -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+					where	x%class = ::[PSH_CUST_DOCS_OU]%class and  -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+							x.[DOC_STATE] not in (&libtc.stSend, &libtc.stFinish) and 
+							x <> v_outFile and
+							x in (
+									with recursive rec(DOC_RESULT) as
+										(
+										select cl(	cl.[DOC_RESULT] : DOC_RESULT) 
+											in	::[PSH_CUST_LINK] all  -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+											where cl.[DOC_ORIGIN] = v_inFile
+										union all
+										select cl( cl.[DOC_RESULT] : DOC_RESULT)
+											in	::[PSH_CUST_LINK] -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+												join (rec : r) on r.DOC_RESULT = cl.[DOC_ORIGIN] all
+										)
+									select r(r.DOC_RESULT : res) in rec
+								)
+							into v_count;
+				&debug('v_count = ' || v_count,0)
+				if v_count = 0 then -- все отправлены
+					&libfun.addDoc(v_st_doc, v_inFile, &libtc.stSendAnsw);
+					v_inFile.[DOC_STATE] := &libtc.stSendAnsw;
+				end if;
+			end if;	
+	
+			&libfun.addDoc(v_st_doc, v_outFile, &libtc.stSend);
+			v_outFile.[DOC_STATE] := &libtc.stSend;
+			v_outFile.[FILE_CR_DATE] := v_c_date;
+			&debug('v_outFile.[DOC_STATE] = ' || v_outFile.[DOC_STATE],0)
+			&debug('v_outFile.[FILE_CR_DATE] = ' || v_outFile.[FILE_CR_DATE],0)
+		exception 
+			when others then
+				v_err := substr(utils.error_stack, 1, v_err%size);
+				&debug('exception v_err='||v_err,0)
+				::[MEMO_HOLDER].[L].set_memo(
+								  p_owner_class 	== ::[PSH_CUST_DOCS_OU]%class -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+								, p_owner_ID		== v_outFile
+								, p_attribute		== 'ERR_MESSAGE'
+								, p_memo 			== v_err
+							);
+				raise;		
+		
+		end;
+		
+		commit;
+		v_idx := p_tab_docs.next(v_idx);
+	end loop;
+
+	v_res := stdio.closedir(v_dir);
+		
+	if v_res < 0 then
+		pragma error('Ошибка открытия каталога ' || v_path || ': ' || stdio.error_message(v_res) );
+	end if;
+	dbms_lob.freetemporary(v_blob);
+	
+	::[HOOK].[PSB_CUST_CH_ST](v_st_doc);
+end;
+
+public procedure formPT2ExecErr(p_tab_docs T_Doc) is
+v_errors 	&libtc.t_errors;
+v_branch	ref [BRANCH];
+v_idx		pls_integer;
+v_docIn		ref [PSH_CUST_DOCS_IN]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+v_err		varchar2(4000);
+v_tab_up_docs T_Doc;
+v_st		::[PSH_CUST_DOCS].[DOC_STATE]%type; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+v_st_doc	&libfun.TFileStates;
+
+	procedure formDoc(p_doc ref [PSH_CUST_DOCS_IN], p_branch ref [BRANCH], p_errors in out nocopy &libtc.t_errors) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+	is
+	v_doc		&libtc.r_docOut;
+	v_docRef	ref [PSH_CUST_DOCS_OU]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+	begin
+		v_doc := &libfun.formPT2Finish(p_doc, p_branch, p_errors);
+		
+		v_docRef := ::[PSH_CUST_DOCS_OU].[PSH_NEW_AUTO]( -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+												P_FILE_NAME 	== v_doc.r_fileName			--Имя файла
+												,P_FILE_CONTENT	== v_doc.r_clob				--Содержимое файла
+												,P_FILE_CR_DATE == null						--Дата создания файла
+												,P_DOC_CR_DATE	== &libfun.curdate(&libfun.getBranch4Exch(p_branch))	--Дата создания документа
+												,P_VERSION		== null						--Версия формата
+												,P_DOC_TYPE		== v_doc.r_docType			--Тип документа
+												,P_BRANCH		== v_doc.r_branch			--Филиал
+												);						
+		linkDoc(p_doc, v_docRef, v_doc.r_link);
+	end;
+
+begin
+	&sp(p2#0)
+
+	v_idx := p_tab_docs.first;
+	
+	while v_idx is not null loop
+		v_branch := null;
+		
+		begin	
+			&sp(p2#1)
+			v_docIn := p_tab_docs(v_idx).doc;
+			
+			v_docIn%lock;
+			
+			if v_docIn is not null then
+				if v_docIn.[EXEC_ERRS]%size(1) > 0 then
+					
+					for x in v_docIn.[EXEC_ERRS] order by x.[ERR_BRANCH] loop
+						v_branch := nvl(v_branch, x.[ERR_BRANCH]); -- для первого раза
+								
+						if v_branch <> x.[ERR_BRANCH] then -- смена филиала
+							formDoc(v_docIn, v_branch, v_errors);
+							v_errors.delete;
+							v_branch := x.[ERR_BRANCH];
+						end if;
+						
+						v_errors(v_errors.count) := x.[ERROR];
+					end loop;
+				
+					formDoc(v_docIn, v_branch, v_errors);
+					v_errors.delete;
+					
+					if &libfun.checkApp('1B028090') is not null then
+						v_st := &libtc.stFormAnsw;
+					else
+						v_st := &libtc.stAnswXSD;
+					end if;
+				else
+					v_st := stateByOut(p_tab_docs(v_idx).doc);
+
+				end if;
+
+				for a in ::[PSH_CUST_LINK]  -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+					where a.[DOC_ORIGIN] = v_docIn and a.[DOC_RESULT].[DOC_STATE] = &libtc.stErrXSD
+					fetch 1
+				loop
+					v_st := &libtc.stAnswErr;
+				end loop;
+				
+				if v_st is not null then
+					v_tab_up_docs(v_idx).doc%id := p_tab_docs(v_idx).doc%id;
+					v_tab_up_docs(v_idx).doc_state := v_st;
+					
+					&libfun.addDoc(v_st_doc, v_tab_up_docs(v_idx).doc, v_st);
+				end if;
+			end if;			
+			
+		exception
+			when rtl.CANNOT_LOCK then
+				p_tab_docs.delete(v_idx);
+				v_idx := p_tab_docs.next(v_idx);		
+				continue;
+			when message.APP_EXCEPTION then
+				&set_error(p2#1, utils.error_stack, v_docIn)
+		end;	
+			
+		v_idx := p_tab_docs.next(v_idx);
+		&debug(TB$||'v_idx='||v_idx,0)
+	end loop;
+	
+	&setDocsState
+	
+	::[HOOK].[PSB_CUST_CH_ST](v_st_doc);
+	commit;
+	
+exception
+	when others then
+		&rb(p2#0)
+		raise;
+end;
+
+/*
+Операция установки блокировки для групповых операций.
+Если операция вызывается не из задания, тогда выдаётся ошибка
+Если блокировка установлена, тогда возвращается идентификатор блокировки
+Иначе пусто.
+*/
+public function setLock(p_lockName varchar2)
+return integer is
+v_lockId integer;
+begin
+	&debug('>> setLock',0)
+	&debug('p_lockName = ' || p_lockName,0)
+	v_lockId := null;
+	if p_lockName is not null then
+		v_lockId := -utils.hash_value(p_lockName);
+		&debug('v_lockId = ' || v_lockId,0)
+		if ::[SYSTEM].[LOCKINFO_FILIAL].Request(v_lockId, p_lockName, -1) is not Null then
+			if not app_security.check_job then
+				pragma error('Операция уже запущена...');
+			else
+			-- если запущено из задания, тогда молча возвращаем null
+				return null;
+			end if;
+		end if;
+	else
+		pragma error('Не задан идентификатор блокировки');
+	end if;
+	return v_lockId;
+end;
+/*
+Операция снятия блокировки для групповых операций.
+*/
+public procedure delLock(p_lockId integer) is
+begin
+	if p_lockId is not Null then
+		lock_info.del(p_lockId);
+	end if;
+end;
+end;

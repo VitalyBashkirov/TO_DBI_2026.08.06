@@ -1,0 +1,105 @@
+class HOOK_BANK;
+@import_plsql(true)
+
+@name('РЦ. Дополнительные действия при проводке документа')
+static method RC_PROV_DOC is
+pragma include ('APPAUX_CALLPOINT.COMPILE_LIB');
+pragma include(::[DOCUM_RC].[CACHE_MACRO]);
+
+RC_PROV_DOC (
+	@name('Ссылка на документ РЦ')                                      P_DOC_RC       in ref [DOCUM_RC],
+	@name('Признак последней попытки проводки')                         P_LAST_ATTEMPT in     [BOOLEAN],
+	@name('Режим вызова (0-перед проводкой, 1..9-в процессе проводки)') P_MODE         in     [STRING_5],
+	@name('Возвращаемое значение')                                      P_TO_RETURN    in     [BOOLEAN]
+) return [BOOLEAN] is
+
+execute is
+v_20	varchar2(1000);
+v_md	ref [MAIN_DOCUM];
+v_first_doc	ref [DOCUM_RC];
+v_sber	ref [CL_BANK_N];
+v_tranz	ref [AC_FIN];
+begin
+	v_md := P_DOC_RC.[MAIN_DOC];
+	v_first_doc := P_DOC_RC.[FIRST_REF];
+	
+	-->> PSB VRI 05/06/2025 CFT-1677 Справочник контрагентов для счета 40821
+	if v_md.[ACC_DT].[MAIN_V_ID] like '40821%' and coalesce(v_md.[KL_KT].[2].[1], v_md.[ACC_KT].[MAIN_V_ID]) like '40%' then
+		if not ::[PSH_KONTR_40821].[PSH_EDIT_AUTO].contr_exists(v_md.[KL_KT], v_md.[ACC_DT]) then
+	    	pragma error('Контроль счета 40821, получатель отсутствует в справочнике контрагентов!');
+	    	return false;
+	    end if;
+	elsif v_md.[ACC_KT].[MAIN_V_ID] like '40821%' and coalesce(v_md.[KL_DT].[2].[1], v_md.[ACC_DT].[MAIN_V_ID]) like '40%' then
+		if not ::[PSH_KONTR_40821].[PSH_EDIT_AUTO].contr_exists(v_md.[KL_DT], v_md.[ACC_KT]) then
+	    	pragma error('Контроль счета 40821, плательщик отсутствует в справочнике контрагентов!');
+	    	return false;
+	    end if;
+	end if;
+	--<< PSB VRI 05/06/2025 CFT-1677 Справочник контрагентов для счета 40821
+
+	-->> PSH VRI 27/01/2026 CFT-3470
+	if P_DOC_RC.[DOG_SD].[CLIENT].[CODE] like 'LK_SBANK%' and P_MODE = '9' and P_DOC_RC.[MAIN_DOC] is not null 
+		and v_first_doc.[TYPE_DOC] || '.' || v_first_doc.[SUB_TYPE] = '001.B'
+		and v_first_doc.[CRCLCODE] like 'LK_SBANK%'
+		and v_md.[ACC_DT].[MAIN_V_ID] like '301%'
+		and v_md.[NAZN] not like 'Комиссия третьего банка за перевод средств%'
+	then
+		v_md.[NAZN] := 'Перевод средств '
+							 		   || nvl(v_md.[VALUTA_PO].[CUR_SHORT], v_md.[VALUTA].[CUR_SHORT])
+							 		   || ' ' || trim(to_char(nvl(v_md.[SUM_PO], v_md.[SUM]), '9,999,999,999,990.99')) 
+									   || ' сумма (' || v_first_doc.[ISO] || ' ' || trim(to_char(v_first_doc.[SUMMA], '9,999,999,999,990.99')) 
+									   || '), МТ103 реф.' || replace(v_first_doc.[AUDIT].[UNICUM_CODE], '+') || ' от ' 
+									   || to_char(v_first_doc.[CRDATE], 'DDMMYYYY');
+
+		if P_DOC_RC.[ISO] <> 'RUB' then
+			v_sber := ::[CL_BANK_N]([BIC] = '044525225' and [BANK_STATE].[SHORT_NAME] = 'ДЕЙС');
+			v_tranz := ::[AC_FIN]([MAIN_V_ID] like '30220%' and [FINTOOL].[CUR_SHORT] = P_DOC_RC.[ISO] and [CLIENT_R] = v_sber);
+	
+			if v_md.[ACC_KT].[MAIN_V_ID] not like '30220%'
+				and v_sber is not null
+				and v_tranz is not null 
+			then
+				v_md.[EDIT_PROV](
+					P_DOC_RC.[DOG_SD].[ACCOUNT],				-- Счет Дебет
+					v_tranz,									-- Счет Кредит
+					v_md.[DATE_PROV]							-- Дата проводки
+				);
+			end if;
+		end if;
+		return true;
+	end if;
+	--<< PSH VRI 27/01/2026 CFT-3470
+	
+	-->> PSH VRI 08/12/2025 CFT-2643 Трансформация полученных МТ в MX (ISO 20022). Если исходный документ от SberFinLine от вчерашней даты  
+	if P_DOC_RC.[DOG_SD].[CLIENT].[CODE] like 'LK_SBANK%' and P_MODE = '9' and P_DOC_RC.[MAIN_DOC] is not null 
+		and v_first_doc.[TYPE_DOC] || '.' || v_first_doc.[SUB_TYPE] = '001.B'
+		and v_first_doc.[CRCLCODE] like 'LK_SBANK%'
+		and v_first_doc.[CRDATE] < ::[SYSTEM].[OP_DATE]
+		and v_md.[ACC_DT].[MAIN_V_ID] not like '30220%'
+		and P_DOC_RC.[DOG_RC].[ACCOUNT] is not null
+		and P_DOC_RC.[TYPE_DOC] = 'ISO'
+	then
+		for (select ac(ac obj)
+			  in ::[AC_FIN]
+			  where ac.[MAIN_V_ID] like '30220%'
+			  	and ac.[DATE_CLOSE] is null
+			  	and ac.[FINTOOL] = v_md.[VALUTA_PO]
+			  	and ac.[CLIENT_R] = v_md.[ACC_DT].[CLIENT_R]
+		)
+		loop
+			v_md.[EDIT_PROV](
+				ac.obj,											-- Счет Дебет
+				P_DOC_RC.[DOG_RC].[ACCOUNT],					-- Счет Кредит
+				v_md.[DATE_PROV],	-- Дата проводки
+				v_md.[NAZN],		-- Назначение платежа
+				v_md.[SUM_PO]		-- Сумма Дт
+			);
+			return true;
+		end loop;
+	end if;
+	--<< PSH VRI 08/12/2025 CFT-2643 Трансформация полученных МТ в MX (ISO 20022)
+	
+	return P_TO_RETURN;
+end;
+end;
+end;

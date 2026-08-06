@@ -1,0 +1,636 @@
+class PSH_CUST_DOCS;
+
+@import_plsql(true)
+@name('[ПСБ] TPO')
+@tag('COPIED')
+library PSH_DOC_TPO is
+
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB_TC]);
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB_FUN]);
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+
+type r_drp	is record (
+	  DocumentID		varchar2(36)		-- ID документа
+	, RefDocumentID		varchar2(36)		-- ID исходного документа
+	, DocType			varchar2(4)			-- Тип документа:
+											--     "РПО"  - Решение о приостановлении
+											--     "РОПО" - Решение об отмене приостановления
+	, DocDate			[DATE]				-- Дата Решения
+	, DocNumber			varchar2(50)		-- Номер Решения
+	, Custom			&libtc.r_custOffice	-- Таможенный орган
+	, AccountInfoPayer	&libtc.r_acc		-- Сведения о счете плательщика
+	, BankInfoPayer		&libtc.r_bank		-- Сведения о банке плательщика
+	, ParagraphNumber	varchar2(250)		-- Основание: пункт и часть статьи 77 Федерального закона 289-ФЗ от 03.08.2018г. (заполняется для TPO)
+	, DocTPO			&libtc.r_custDoc	-- Отменяемое Решение о приостановлении (заполняется для TOO)
+	, Summa				varchar2(18)		-- Сумма
+	, CurCode			varchar2(3)			-- Символьный код валюты
+	, Payer				&libtc.r_payer		-- Сведения о плательщике-владельце счета
+	, CustChief			&libtc.r_person	-- Подпись начальника таможенного органа
+	, CustExecutor		&libtc.r_person	-- Подпись исполнителя
+);
+
+procedure setError(p_errCodeNew varchar2(2), p_errNoteNew varchar2(512), p_errCode in out varchar2(2), p_errNote in out varchar2(512)) is
+	v_priorNew integer;
+	v_prior integer;
+begin
+	
+	v_priorNew := nvl(&libfun.get_err_prior(p_errCodeNew), 5);
+	v_prior := nvl(&libfun.get_err_prior(p_errCode), 6);
+	
+	if v_priorNew < v_prior then
+		p_errCode := p_errCodeNew;
+		p_errNote := p_errNoteNew;
+	end if;
+	
+end;
+
+-- формирование справки об остатках
+public function processAnswer(p_doc ref [PSH_CUST_DOCS_IN], p_requests &libtc.T_reqs) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+return pls_integer is
+	
+	type r_answer is record(  Bank			&libtc.r_bank		-- Банк плательщика
+							, Performer		&libtc.r_person		-- Исполнитель
+							, CustOffice	&libtc.r_custOffice	-- Таможенный орган
+							, CustDoc		&libtc.r_custDoc	-- Решение о приостановлении
+							, Payer			xmltype				-- Плательщик
+							, Acc			xmltype				-- Данные о счете
+							, Results		&libtc.t_errIC		-- Результаты по счету
+							, ToForm		boolean				-- Признак формирования справки
+							);
+	answer		r_answer;
+	
+	v_doc_Out	&libtc.R_docOut;
+	v_errorsPT2	&libtc.t_errors;
+	
+	xmldoc		xmltype;
+	
+	v_branch	ref [BRANCH];
+	v_branchEx	ref [BRANCH];
+	v_bankRegNum	varchar2(4);
+	v_performer		ref [USER];
+	
+	v_in_doc_type	ref [PSH_CUST_DOC_TYP]; -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+	v_file_name		::[PSH_CUST_DOCS].[FILE_NAME]%type;
+	v_pt1_name		::[PSH_CUST_DOCS].[FILE_NAME]%type;
+	
+	v_doc			&xml.DOMDocument;
+	v_node			&xml.DOMNode;
+	v_node1			&xml.DOMNode;
+	v_node2			&xml.DOMNode;
+	v_outClob		clob;
+	v_outDocRef	ref [PSH_CUST_DOCS_OU]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+	i 				pls_integer;
+	n				pls_integer;
+	v_count_reqs	pls_integer;
+	v_codeTmp		varchar2(2);
+	v_noteTmp		varchar2(512);
+	v_code			varchar2(2);
+	v_note			varchar2(512);
+	dummy			varchar2;
+	
+begin
+	&debug('>> processAnswer', 0)
+	select x(count(1)) in ::[PSH_CUST_REQS] where x in (select y(y.column_value) in p_requests) into v_count_reqs;		 -- updated CHANGE_QUALIFIER PSB_CUST_REQS->PSH_CUST_REQS 08/10/25
+	
+	&debug('	v_count_reqs = ' || v_count_reqs,0)
+
+	if v_count_reqs > 0 then
+		begin
+			select d(d.[DOC_TYPE], d.[FILE_NAME], d.[BRANCH])
+			in ::[PSH_CUST_DOCS_IN] -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+			where d = p_doc
+			into v_in_doc_type, v_file_name, v_branch;
+		
+		exception when no_data_found then
+			null;
+		end;
+		
+		v_branchEx := &libfun.getBranch4Exch(v_branch);
+		
+		if v_count_reqs > 0 then
+			
+			v_pt1_name := &libfun.GetPT1Name(p_doc);
+			
+			&debug('	 v_in_doc_type = ' ||  v_in_doc_type.[CODE], 0)
+			&debug('	 v_file_name = ' ||  v_file_name, 0)
+			&debug('	 v_pt1_name = ' || v_pt1_name, 0)
+			
+			answer.ToForm		:= false;
+			
+			n := p_requests.first;
+			while n is not null loop
+				
+				xmldoc := xmltype(p_requests(n).[CONTENT]);
+				if not xmldoc is null then
+					
+					if xmldoc.existsNode('/Ответ/РезПроверки') = 1 then
+						&debug('	Обнаружен /Ответ/РезПроверки', 0)
+						v_codeTmp := xmldoc.extract('/Ответ/РезПроверки/@КодРезПроверки').getStringVal();
+						v_noteTmp := &libfun.getErrorNote(xmldoc, '/Ответ/РезПроверки');
+						&debug('	 v_codeTmp = ' || v_codeTmp, 0)
+						&debug('	 v_noteTmp = ' || v_noteTmp, 0)
+						setError(v_codeTmp, v_noteTmp, v_code, v_note);
+					elsif v_in_doc_type = &libtc.typeTPO then
+						
+						&debug('	Обнаружен ответ для TPO без РезПроверки', 0)
+						answer.Payer := null;
+						answer.Acc := null;
+						
+						if xmldoc.existsNode('/Ответ/Payer') = 1 then
+							answer.Payer := xmldoc.extract('/Ответ/Payer');
+							&debug('	answer.Payer = ' || answer.Payer.getStringVal(), 0)
+						end if;
+						
+						if xmldoc.existsNode('/Ответ/AccountInformation') = 1 then
+							answer.Acc := xmldoc.extract('/Ответ/AccountInformation');
+							&debug('	answer.Acc = ' || answer.Acc.getStringVal(), 0)
+						end if;
+						
+						if answer.Acc is null or coalesce(length(answer.Acc.getStringVal()), 0) = 0
+							or answer.Payer is null or coalesce(length(answer.Payer.getStringVal()), 0) = 0
+						then
+							v_codeTmp := '31';
+							v_noteTmp := 'Неверный формат ответа от информационной компоненты';
+							setError(v_codeTmp, v_noteTmp, v_code, v_note);
+						else
+							answer.ToForm := true;
+							exit;
+						end if;
+						
+					elsif v_in_doc_type = &libtc.typeTOO then
+						
+						&debug('	Обнаружен ответ для TOO без РезПроверки', 0)
+						v_code := null;
+						exit;
+						
+					end if;
+					
+				end if;
+				n := p_requests.next(n);
+			end loop;
+			
+			
+			
+			i := 0;
+			
+			if answer.ToForm and v_in_doc_type = &libtc.typeTPO then -- формируем справку для TPO
+				
+				&debug('Формировать справку = ' || answer.ToForm, 0)
+				&debug('Филиал id = ' || v_branch, 0)
+				
+				&libfun.checkAppErr('1B028040'); -- проверка приложения сведений об остатках
+				
+				-- получаем данные для справки
+				xmldoc := xmltype(p_doc.[FILE_CONTENT]);
+				
+				if xmldoc.existsNode('/DecisionRevokePayments/DRP_Customs/Code') = 1 then
+					answer.CustOffice.Code := substr(xmldoc.extract('/DecisionRevokePayments/DRP_Customs/Code/text()').GetStringVal(), 1, answer.CustOffice.Code%size);
+				end if;
+				if xmldoc.existsNode('/DecisionRevokePayments/DRP_Customs/OfficeName') = 1 then
+					answer.CustOffice.Name := substr(xmldoc.extract('/DecisionRevokePayments/DRP_Customs/OfficeName/text()').GetStringVal(), 1, answer.CustOffice.Name%size);
+				end if;
+				
+				answer.CustDoc.Name := 'Решение о приостановлении операций по счетам плательщика (лица, несущего солидарную обязанность) в банке и переводов его электронных денежных средств';
+				if xmldoc.existsNode('/DecisionRevokePayments/NumberDecision') = 1 then
+					answer.CustDoc.DocNum := substr(xmldoc.extract('/DecisionRevokePayments/NumberDecision/text()').GetStringVal(), 1, answer.CustDoc.DocNum%size);
+				end if;
+				if xmldoc.existsNode('/DecisionRevokePayments/DateDecision') = 1 then
+					answer.CustDoc.DocDate := &str2date(xmldoc.extract('/DecisionRevokePayments/DateDecision/text()').GetStringVal());
+				end if;
+				
+				if v_branch.[BANK_REQ] is not null then
+					answer.Bank.FullName := v_branch.[BANK_REQ].[NAME];
+				else
+					answer.Bank.FullName := v_branch.[BANK].[NAME];
+				end if;
+				answer.Bank.BIC := ::[BRANCH].[SLIB].get_bic(v_branch);
+				answer.Bank.INN := ::[BRANCH].[SLIB].get_inn(v_branch);
+				::[BRANCH].[SLIB].get_reg_num_two_parts(v_branch, v_bankRegNum, dummy);
+				
+				v_performer%id := ::[FP_TUNE].[LIB].get_ref_value('CUST_PERFORMER', ::[FP_TUNE].[LIB].set_canons(::[BRANCH]%class, v_branch), '0')%id;
+				answer.Performer.FIO.Surname := stdlib.Fio(coalesce(v_performer.[CL_PRIV_REF].[NAME], v_performer.[NAME]), 'Ф');
+				answer.Performer.FIO.Name := stdlib.Fio(coalesce(v_performer.[CL_PRIV_REF].[NAME], v_performer.[NAME]), 'И');
+				answer.Performer.FIO.MiddleName := stdlib.Fio(coalesce(v_performer.[CL_PRIV_REF].[NAME], v_performer.[NAME]), 'О');
+				answer.Performer.Post := v_performer.[CASTA].[VALUE];
+				answer.Performer.Phone := substr(::[FP_TUNE].[LIB].get_str_value('CUST_PERFORMER_PHONE', ::[FP_TUNE].[LIB].set_canons(::[BRANCH]%class, v_branch), '0'), 1, answer.Performer.Phone%size);
+				
+				-- формируем справку об остатках
+				v_doc := &xml.newDomDocument;
+				v_node := &xml.makeNode(v_doc);
+		
+				v_node 	:= &libfun.addNode(v_doc, v_node, 'NoticeAccBalanceInfo');
+				v_node1 := &libfun.addNode(v_doc, v_node, '@xmlns:cat_ru', 'urn:customs.ru:CommonAggregateTypes:5.10.0', true );
+				v_node1 := &libfun.addNode(v_doc, v_node, '@xmlns', 'urn:customs.ru:Information:CommercialFinanceDocuments:NoticeAccBalanceInfo:5.18.0', true);	
+				v_node1 := &libfun.addNode(v_doc, v_node, '@DocumentModeID', '1002033E', true);
+				
+				v_node1 := &libfun.addNode(v_doc, v_node, 'cat_ru:DocumentID', &libfun.getGUI);
+				v_node1 := &libfun.addNode(v_doc, v_node, 'cat_ru:RefDocumentID', &libfun.getDocGUI(p_doc));
+				v_node1 := &libfun.addNode(v_doc, v_node, 'CustomsOffice');
+				v_node2 := &libfun.addNode(v_doc, v_node1, 'cat_ru:Code', answer.CustOffice.Code);
+				if answer.CustOffice.Name is not null then
+					v_node2 := &libfun.addNode(v_doc, v_node1, 'cat_ru:OfficeName', answer.CustOffice.Name);
+				end if;
+				
+				v_node1 := &libfun.addNode(v_doc, v_node, 'DocDate', &curdate_x(v_branch));
+				v_node1 := &libfun.addNode(v_doc, v_node, 'DocAppDate', &curdate_x(v_branchEx));
+				v_node1 := &libfun.addNode(v_doc, v_node, 'DocNumber', &libfun.GetNextInfoNumber(v_branch, 'CUST_BFN_COUNTER'));
+				
+				&libfun.copyNode(v_doc, v_node, answer.Acc);
+				
+				v_node1 := &libfun.addNode(v_doc, v_node, 'BankInformation');
+				v_node2 := &libfun.addNode(v_doc, v_node1, 'BankName', answer.Bank.FullName);
+				v_node2 := &libfun.addNode(v_doc, v_node1, 'BICID', answer.Bank.BIC);
+				if answer.Bank.INN is not null then
+					v_node2 := &libfun.addNode(v_doc, v_node1, 'BankINN', answer.Bank.INN);
+				end if;
+				v_node2 := &libfun.addNode(v_doc, v_node1, 'CodeBank', v_bankRegNum);
+				
+				v_node1 := &libfun.addNode(v_doc, v_node, 'DecisionSuspend');
+				v_node2 := &libfun.addNode(v_doc, v_node1, 'PrDocumentName', answer.CustDoc.Name);
+				v_node2 := &libfun.addNode(v_doc, v_node1, 'PrDocumentNumber', answer.CustDoc.DocNum);
+				v_node2 := &libfun.addNode(v_doc, v_node1, 'PrDocumentDate', &date2str(answer.CustDoc.DocDate));
+				
+				&libfun.copyNode(v_doc, v_node, answer.Payer);
+				
+				v_node1 := &libfun.addNode(v_doc, v_node, 'Performer');
+				v_node2 := &libfun.addNode(v_doc, v_node1, 'cat_ru:PersonSurname', answer.Performer.FIO.Surname);
+				v_node2 := &libfun.addNode(v_doc, v_node1, 'cat_ru:PersonName', answer.Performer.FIO.Name);
+				if answer.Performer.FIO.MiddleName is not null then
+					v_node2 := &libfun.addNode(v_doc, v_node1, 'cat_ru:PersonMiddleName', answer.Performer.FIO.MiddleName);
+				end if;
+				if answer.Performer.Post is not null then
+					v_node2 := &libfun.addNode(v_doc, v_node1, 'cat_ru:PersonPost', answer.Performer.Post);
+				end if;
+				if answer.Performer.Phone is not null then
+					v_node2 := &libfun.addNode(v_doc, v_node1, 'Phone', answer.Performer.Phone);
+				end if;
+				
+				dbms_lob.createtemporary(v_outClob, true);
+				&xml.writeToCLOB(v_doc, v_outClob);			
+				&debug('	v_outClob = ' || v_outClob, 0)
+				&xml.freedocument(v_doc);
+				
+				v_outDocRef := ::[PSH_CUST_DOCS_OU].[PSH_NEW_AUTO] -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+				(
+					 P_FILE_NAME 	== &libfun.formOutFileName
+										(
+											  p_doc
+											, &libtc.typeBFN
+											, v_branchEx
+										) 					--Имя файла
+					,P_FILE_CONTENT	== v_outClob			--Содержимое файла
+					,P_FILE_CR_DATE == null					--Дата создания файла
+					,P_DOC_CR_DATE	== &curdate_d(v_branch)	--Дата создания документа
+					,P_VERSION		== null					--Версия формата
+					,P_DOC_TYPE		== &libtc.typeBFN		--Тип документа
+					,P_BRANCH		== v_branch				--Филиал
+				);
+				i := 1;
+															
+				-- добавляем связи	
+				&lib.linkDoc(p_doc, v_outDocRef, &libtc.lnkAnswer);					
+			end if;
+			
+			&debug('v_code =  ' || v_code, 0)
+			
+			if v_code is not null then
+				&libfun.setErrorIC(answer.Results, v_code, null, 1, p_desc == v_note);
+			end if;
+			
+			-- формируем PT2
+			v_errorsPT2 := &libfun.normtErr(answer.Results);
+			if not answer.ToForm and v_code is not null then
+				v_doc_Out := &libfun.formPT2(p_doc, v_branch, v_errorsPT2);
+				if v_doc_Out.r_fileName is not null then
+				
+					v_outDocRef := ::[PSH_CUST_DOCS_OU].[PSH_NEW_AUTO]( -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+						 P_FILE_NAME 	== v_doc_Out.r_fileName	--Имя файла
+						,P_FILE_CONTENT	== v_doc_Out.r_clob		--Содержимое файла
+						,P_FILE_CR_DATE == null					--Дата создания файла
+						,P_DOC_CR_DATE	== &curdate_d(&libfun.getBranch4Exch(v_branch)) --Дата создания документа
+						,P_VERSION		== null					--Версия формата
+						,P_DOC_TYPE		== v_doc_Out.r_docType	--Тип документа
+						,P_BRANCH		== v_doc_Out.r_branch	--Филиал
+					);
+					-- добавляем связи	
+					&lib.linkDoc(p_doc, v_outDocRef, v_doc_Out.r_link);						
+				
+					i := i + 1;
+				
+					&debug('	Подтверждение:' || v_doc_Out.r_clob, 0)
+				end if;
+			end if;
+			v_errorsPT2.delete;
+		end if;
+		
+	end if;
+	
+	&debug('i = ' || i, 0)
+	return bool_num(i > 0, 1, 0);
+	
+end;
+
+public function convertMessage(p_inDoc in clob) return clob is
+v_clob	clob;
+begin
+	dbms_lob.createtemporary(v_clob, true);
+	v_clob := p_inDoc;
+	return v_clob;
+end;
+
+function checkCust(
+	p_node &xml.DOMNode,
+	p_errors in out &libtc.T_Errors,
+	p_xpath varchar(32767)
+) return &libtc.r_custOffice is
+	v_nodeList &xml.DOMNodeList;
+	v_childNode &xml.DOMNode;
+	v_cust &libtc.r_custOffice;
+	v_fullNameExists boolean := false;
+begin
+	
+	v_cust := &libfun.checkCust(p_node, p_errors, p_xpath);
+	
+	if not &xml.IsNull(p_node) then
+		v_nodeList := &xml.GetChildNodes(p_node);
+		if not &xml.IsNull(v_nodeList) then
+			for i in 0..&xml.GetLength(v_nodeList) loop
+				v_childNode := &xml.Item(v_nodeList, i);
+				case &xml.GetNodename(v_childNode) of
+					:'FullOfficeName':
+						v_fullNameExists := true;
+						v_cust.FullName := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'FullOfficeName', p_errors, true, 1, 250);
+				end;
+			end loop;
+		end if;
+	end if;
+	
+	if not v_fullNameExists then
+		&libfun.setError(p_errors, p_xpath||'/FullOfficeName: Отсутствует обязательный элемент','13');
+	end if;
+	
+	return v_cust;
+end;
+
+function checkAccountInfoPayer(
+	p_node &xml.DOMNode,
+	p_errors in out &libtc.T_Errors,
+	p_xpath varchar(32767)
+) return &libtc.r_acc is
+	v_nodeList &xml.DOMNodeList;
+	v_childNode &xml.DOMNode;
+	v_accInfo &libtc.r_acc;
+	v_accExists boolean := false;
+begin
+	if not &xml.IsNull(p_node) then
+		v_nodeList := &xml.GetChildNodes(p_node);
+		if not &xml.IsNull(v_nodeList) then
+			for i in 0..&xml.GetLength(v_nodeList) loop
+				v_childNode := &xml.Item(v_nodeList, i);
+				case &xml.GetNodename(v_childNode) of
+					:'BankAccount':
+						v_accExists := true;
+						v_accInfo.AccNum := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'BankAccount', p_errors, true, 20, 20, '^\d{20}$');
+					:'BankAccountDescription':
+						v_accInfo.AccType := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'BankAccountDescription', p_errors, false, 1, 250);
+					:'CurrencyA3Code':
+						v_accInfo.AccCurCode := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'CurrencyA3Code', p_errors, false, 3, 3);
+				end;
+			end loop;
+		end if;
+	end if;
+	
+	if not v_accExists then
+		&libfun.setError(p_errors, p_xpath||'/BankAccount: Отсутствует обязательный элемент','13');
+	end if;
+	
+	return v_accInfo;
+end;
+
+function checkBankInfoPayer(
+	p_node &xml.DOMNode,
+	p_errors in out &libtc.T_Errors,
+	p_xpath varchar(32767)
+) return &libtc.r_bank is
+	v_nodeList &xml.DOMNodeList;
+	v_childNode &xml.DOMNode;
+	v_bankInfo &libtc.r_bank;
+	v_exAttr &libtc.T_CheckXML;
+begin
+	if not &xml.IsNull(p_node) then
+		v_nodeList := &xml.GetChildNodes(p_node);
+		if not &xml.IsNull(v_nodeList) then
+			for i in 0..&xml.GetLength(v_nodeList) loop
+				v_childNode := &xml.Item(v_nodeList, i);
+				case &xml.GetNodename(v_childNode) of
+					:'OrganizationName':
+						v_exAttr('fullname') := '1';
+						v_bankInfo.FullName := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'OrganizationName', p_errors, true, 1, 160);
+					:'ShortName':
+						v_bankInfo.ShortName := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'ShortName', p_errors, false, 1, 120);
+					:'OrganizationLanguage':
+						v_bankInfo.Language := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'OrganizationLanguage', p_errors, false, 2, 2, '[A-Z]{2}');
+					:'INN':
+						v_bankInfo.INN := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'INN', p_errors, false, 10, 12, '^([0-9]{10}|[0-9]{12})$'); -- ИНН 10 или 12 символов
+					:'KPP':
+						v_bankInfo.KPP := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'KPP', p_errors, false, 9, 9, '([0-9]{1}[1-9]{1}|[1-9]{1}[0-9]{1})[0-9]{7}');
+					:'OGRN':
+						v_bankInfo.OGRN := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'OGRN', p_errors, false, 13, 15, '^[1-9]{1}([0-9]{14}|[0-9]{12})$'); -- ОГРНИП 15 символов, ОГРН 13 символов, не может начинаться с 0
+					:'OKPOID':
+						v_bankInfo.OKPOID := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'OKPOID', p_errors, false, 8, 10, '([0-9]{8}|[0-9]{10})');
+					:'OKATOCode':
+						v_bankInfo.OKATOCode := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'OKATOCode', p_errors, false, 5, 11, '^\d{5,11}$');
+					:'BICID':
+						v_exAttr('bic') := '1';
+						v_bankInfo.BIC := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'BICID', p_errors, true, 9, 9, '\d{9}');
+				end;
+			end loop;
+		end if;
+	end if;
+	
+	if not v_exAttr.exists('fullname') then
+		&libfun.setError(p_errors, p_xpath||'/OrganizationName: Отсутствует обязательный элемент','13');
+	end if;
+	if not v_exAttr.exists('bic') then
+		&libfun.setError(p_errors, p_xpath||'/BICID: Отсутствует обязательный элемент','13');
+	end if;
+	
+	return v_bankInfo;
+end;
+
+function checkPayerInfo(
+	p_node &xml.DOMNode,
+	p_errors in out &libtc.T_Errors,
+	p_xpath varchar(32767)
+) return &libtc.r_payer is
+	v_nodeList &xml.DOMNodeList;
+	v_childNode &xml.DOMNode;
+	v_payerInfo &libtc.r_payer;
+	v_exAttr &libtc.T_CheckXML;
+begin
+	if not &xml.IsNull(p_node) then
+		v_nodeList := &xml.GetChildNodes(p_node);
+		if not &xml.IsNull(v_nodeList) then
+			for i in 0..&xml.GetLength(v_nodeList) loop
+				v_childNode := &xml.Item(v_nodeList, i);
+				case &xml.GetNodename(v_childNode) of
+					:'OrganizationName':
+						v_exAttr('fullname') := '1';
+						v_payerInfo.FullName := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'OrganizationName', p_errors, true, 1, 160);
+					:'ShortName':
+						v_payerInfo.ShortName := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'ShortName', p_errors, false, 1, 120);
+					:'OrganizationLanguage':
+						v_payerInfo.Language := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'OrganizationLanguage', p_errors, false, 2, 2, '[A-Z]{2}');
+					:'INN':
+						v_exAttr('inn') := '1';
+						v_payerInfo.INN := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'INN', p_errors, true, 10, 12, '^([0-9]{10}|[0-9]{12})$'); -- организации 10 символов, ИП 12 символов
+					:'KPP':
+						v_payerInfo.KPP := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'KPP', p_errors, false, 9, 9, '([0-9]{1}[1-9]{1}|[1-9]{1}[0-9]{1})[0-9]{7}'); -- КПП 9 символов, не может начинаться с 00
+					:'OGRN':
+						v_payerInfo.OGRN := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'OGRN', p_errors, false, 13, 15, '^[1-9]{1}([0-9]{14}|[0-9]{12})$'); -- ОГРНИП 15 символов, ОГРН 13 символов, не может начинаться с 0
+				end;
+			end loop;
+		end if;
+	end if;
+	
+	if not v_exAttr.exists('fullname') then
+		&libfun.setError(p_errors, p_xpath||'/OrganizationName: Отсутствует обязательный элемент','13');
+	end if;
+	if not v_exAttr.exists('inn') then
+		&libfun.setError(p_errors, p_xpath||'/INN: Отсутствует обязательный элемент','13');
+	end if;
+	
+	return v_payerInfo;
+end;
+
+function getDoc(
+	p_doc &xml.DOMNode,
+	p_type_doc ::[PSH_CUST_DOCS].[DOC_TYPE]%type,
+	p_errors in out &libtc.T_Errors
+)
+return r_drp is
+	v_drp			r_drp;
+	v_rootName 		varchar2(128) := 'DecisionRevokePayments';
+	v_Xpath			varchar2(32767);	
+	v_checks		&libtc.T_CheckXML;
+	v_node1			&xml.DOMNode;
+	v_nodeListRoot	&xml.DOMNodeList;
+begin
+	&debug( '>> getDoc', 0)
+	&debug( 'root node: ' || &xml.getNodeName(p_doc), 0)
+	if upper(&xml.getNodeName(p_doc)) = upper(v_rootName) then
+		
+		v_Xpath := '//'||v_rootName;
+				
+		v_nodeListRoot := &xml.getChildNodes(p_doc);
+		
+		&libfun.setExist(v_checks, v_Xpath || '/DocumentID', false);
+		&libfun.setExist(v_checks, v_Xpath || '/DocType', false);
+		&libfun.setExist(v_checks, v_Xpath || '/DateDecision', false);
+		&libfun.setExist(v_checks, v_Xpath || '/NumberDecision', false);
+		&libfun.setExist(v_checks, v_Xpath || '/DRP_Customs', false);
+		&libfun.setExist(v_checks, v_Xpath || '/AccountInfoPayer', false);
+		&libfun.setExist(v_checks, v_Xpath || '/BankInfoPayer', false);
+		&libfun.setExist(v_checks, v_Xpath || '/Amount', false);
+		&libfun.setExist(v_checks, v_Xpath || '/CurrencyA3Code', false);
+		&libfun.setExist(v_checks, v_Xpath || '/PayerInfo', false);
+		&libfun.setExist(v_checks, v_Xpath || '/CustomsChief', false);
+		
+		case p_type_doc of
+			: &libtc.typeTPO : -- обязательные узлы для Решения о приостановлении
+				&libfun.setExist(v_checks, v_Xpath || '/ParagraphNumber', false);
+			: &libtc.typeTOO : -- обязательные узлы для Решения об отмене приостановления
+				&libfun.setExist(v_checks, v_Xpath || '/DRP_Doc', false);
+		end;
+		
+		&debug('v_nodeListRoot is null: ' || &xml.IsNull(v_nodeListRoot), 0)
+
+		if not &xml.IsNull(v_nodeListRoot) then
+			for i0 in 0..&xml.getLength(v_nodeListRoot)-1 loop
+				v_node1 := &xml.item(v_nodeListRoot, i0);
+				&debug('v_nodeListRoot('||i0||') Name  = '||&xml.GetNodeName(v_node1), 0)
+				&debug('v_nodeListRoot('||i0||') Value = '||&xml_getNodeValue(v_node1), 0)
+				
+				case &xml.GetNodename(v_node1) of
+					:'DocumentID':
+						v_drp.DocumentID := &libfun.checkStrValue(&xml_getNodeValue(v_node1), 'DocumentID', p_errors, true, 36, 36, '^[{(]?[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}[)}]?$');
+						&libfun.setExist(v_checks, v_Xpath || '/DocumentID');						
+					:'RefDocumentID':
+						v_drp.RefDocumentID := &libfun.checkStrValue(&xml_getNodeValue(v_node1), 'RefDocumentID', p_errors, false, 36, 36, '^[{(]?[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}[)}]?$');
+						&libfun.setExist(v_checks, v_Xpath || '/RefDocumentID');	
+					:'DocType':
+						case p_type_doc of
+							: &libtc.typeTPO : -- для Решения о приостановлении
+								v_drp.DocType := &libfun.checkStrValue(&xml_getNodeValue(v_node1), 'DocType', p_errors, true, null, null, null, 'РПО');
+							: &libtc.typeTOO : -- для Решения об отмене приостановления
+								v_drp.DocType := &libfun.checkStrValue(&xml_getNodeValue(v_node1), 'DocType', p_errors, true, null, null, null, 'РОПО');
+							else
+								&libfun.setError(p_errors, 'Формат файла не соответствует требованиям', '10');
+						end;
+						&libfun.setExist(v_checks, v_Xpath || '/DocType');
+					:'DateDecision':
+						v_drp.DocDate := &libfun.checkDateValue(&xml_getNodeValue(v_node1), 'DateDecision', p_errors, true);
+						&libfun.setExist(v_checks, v_Xpath || '/DateDecision');
+					:'NumberDecision':
+						v_drp.DocNumber := &libfun.checkStrValue(&xml_getNodeValue(v_node1), 'NumberDecision', p_errors, true, 1, 50);
+						&libfun.setExist(v_checks, v_Xpath || '/NumberDecision');
+					:'DRP_Customs':
+						v_drp.Custom := checkCust(v_node1, p_errors, v_Xpath || '/DRP_Customs');
+						&libfun.setExist(v_checks, v_Xpath || '/DRP_Customs');
+					:'AccountInfoPayer':
+						v_drp.AccountInfoPayer := checkAccountInfoPayer(v_node1, p_errors, v_Xpath || '/AccountInfoPayer');
+						&libfun.setExist(v_checks, v_Xpath || '/AccountInfoPayer');
+					:'BankInfoPayer':
+						v_drp.BankInfoPayer := checkBankInfoPayer(v_node1, p_errors, v_Xpath || '/BankInfoPayer');
+						&libfun.setExist(v_checks, v_Xpath || '/BankInfoPayer');
+					:'ParagraphNumber':
+						if p_type_doc = &libtc.typeTPO then
+							v_drp.ParagraphNumber := &libfun.checkStrValue(&xml_getNodeValue(v_node1), 'ParagraphNumber', p_errors, true, 1, 250);
+							&libfun.setExist(v_checks, v_Xpath || '/ParagraphNumber');
+						end if;
+					:'DRP_Doc':
+						if p_type_doc = &libtc.typeTOO then
+							v_drp.DocTPO := &libfun.checkCustDoc(v_node1, p_errors, 'DRP_DocNumber,DRP_DocDate', v_Xpath || '/DRP_Doc');
+							&libfun.setExist(v_checks, v_Xpath || '/DRP_Doc');
+						end if;
+					:'Amount':
+						v_drp.Summa := &libfun.checkStrValue(&xml_getNodeValue(v_node1), 'Amount', p_errors, true, 1, 18, '^\d{1,15}(\.\d{1,2}|)$');
+						&libfun.setExist(v_checks, v_Xpath || '/Amount');
+					:'CurrencyA3Code':
+						v_drp.CurCode := &libfun.checkStrValue(&xml_getNodeValue(v_node1), 'CurrencyA3Code', p_errors, true, 3, 3);
+						&libfun.setExist(v_checks, v_Xpath || '/CurrencyA3Code');
+					:'PayerInfo':
+						v_drp.Payer := checkPayerInfo(v_node1, p_errors, v_Xpath || '/PayerInfo');
+						&libfun.setExist(v_checks, v_Xpath || '/PayerInfo');
+					:'CustomsChief':
+						v_drp.CustChief := &libfun.checkPerson(v_node1, p_errors, 'PersonPost', v_Xpath || '/CustomsChief');
+						&libfun.setExist(v_checks, v_Xpath || '/CustomsChief');
+					:'Executor':
+						v_drp.CustExecutor := &libfun.checkPerson(v_node1, p_errors, 'PersonPost,IssueDate', v_Xpath || '/Executor');
+						&libfun.setExist(v_checks, v_Xpath || '/Executor');
+				end;
+			end loop;
+		end if;
+		&libfun.checkExists(v_checks, p_errors);
+	else
+		&libfun.setError(p_errors,'//'||v_rootName||': Отсутствует обязательный элемент','13');
+	end if;
+	&debug( '<< getDoc', 0)
+	return v_drp;
+end;
+
+public procedure checkDoc(
+	p_doc &xml.DOMNode,
+	p_error in out &libtc.T_Errors,
+	p_type_doc ::[PSH_CUST_DOCS].[DOC_TYPE]%type,
+	p_branch out ref [BRANCH]
+) is
+	v_drp r_drp;
+	
+begin
+	v_drp := getDoc(p_doc, p_type_doc, p_error);
+	
+	p_branch := &libfun.getBranch(v_drp.BankInfoPayer.BIC, v_drp.BankInfoPayer.FullName);
+	
+end;
+end;

@@ -1,0 +1,33 @@
+class PSH_ETO_C_OP;
+
+@name('[ПСБ] Добавить')
+@tag('CREATED')
+constructor PSH_NEW_AUTO is
+PSH_NEW_AUTO (
+	@name('Дата')           P_DT          in [DATE],
+	@name('Запрос CIT')     P_CIT_REQUEST in [CIT_IN_REQUE_REF],
+	@name('Папка платежей') P_FOLDER_PAY  in [FOLDER_PAY_REF]
+) return ref [PSH_ETO_C_OP] is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DT := this.[DT];
+	P_CIT_REQUEST := this.[CIT_REQUEST];
+	P_FOLDER_PAY := this.[FOLDER_PAY];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+begin
+	-- Установка значения реквизита "Дата"
+	[DT] := P_DT;
+	-- Установка значения реквизита "Запрос CIT"
+	[CIT_REQUEST] := P_CIT_REQUEST;
+	-- Установка значения реквизита "Папка платежей"
+	[FOLDER_PAY] := P_FOLDER_PAY;
+end;
+end;
+end;

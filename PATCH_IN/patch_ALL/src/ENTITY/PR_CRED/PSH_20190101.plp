@@ -1,0 +1,63 @@
+class PR_CRED;
+
+@name('[ПСБ] Журнал начисленых %%. Удалить записи после 31.12.18, добавить 01.01.19 с признаком капитализации, досчитать до даты ОД')
+method PSH_20190101 is
+dp number:=0;	--управление debug_pipe
+fmt string(10):='dd/mm/yyyy';
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+d31 [DATE]:=to_date('31/12/2018',fmt);
+d01 [DATE]:=to_date('01/01/2019',fmt);
+PSH_20190101 is
+
+execute is
+/*********************************************************************
+Назначение:
+
+bashkirov, последнее изменение 21 Май 2019 г.
+*********************************************************************/
+jPrcRec ref [STRING_CALC_PRC];
+flWasCapital boolean:=false;
+begin
+	debug_pipe('--- №'||this.[NUM_DOG]||' DATE_BEGIN='||to_char(this.[DATE_BEGIN],fmt)||' DATE_ENDING='||to_char(this.[DATE_ENDING],fmt),dp);
+	if not (this.[DATE_BEGIN]<=d31 and d31<=this.[DATE_ENDING]) then pragma error('Операция предназначена только для договоров, действующих до и после '||to_char(d31,fmt)); end if;
+	
+	for (select dca(dca.[JOURNAL_PRC] : C_JOURNAL_PRC) in this.[COMISS_ARR] where dca.[DEBT]=::[VID_DEBT]([CODE]='НЕУЧТЕН_ПРОЦЕНТЫ')) loop
+			for (select j(j%id : C_ID
+						 ,j.[DATE_BEG] : C_DATE_BEG
+						 ,j.[DATE_END] : C_DATE_END
+						 ) in dca.C_JOURNAL_PRC
+			where (j.[DATE_BEG]>d31)
+			order by j.[DATE_BEG] desc)
+			loop
+				jPrcRec:=j.C_ID;
+				debug_pipe('Удаляем строку журнала ID:'||jPrcRec%id||' '||to_char(jPrcRec.[DATE_BEG],fmt)||'-'||to_char(jPrcRec.[DATE_END],fmt),dp);
+				jPrcRec.DELETE#AUTO;
+			end loop;
+			
+			debug_pipe('Добавляем строку журнала с периодом '||to_char(d01,fmt)||'-'||to_char(d01,fmt),dp);
+			this.CALC_PRC(d01,d01,::[VID_DEBT]([CODE]='НЕУЧТЕН_ПРОЦЕНТЫ'));
+			
+			for (select j(j%id : C_ID
+						 ,j.[DATE_BEG] : C_DATE_BEG
+						 ,j.[DATE_END] : C_DATE_END
+						 ) in dca.C_JOURNAL_PRC
+			where (j.[DATE_BEG]=d01 and d01=j.[DATE_END]))
+			loop
+				jPrcRec:=j.C_ID;
+				jPrcRec.[WAS_CAPITAL]:=true;
+				debug_pipe('Строка журнала ID:'||jPrcRec%id||' '||to_char(jPrcRec.[DATE_BEG],fmt)||'-'||to_char(jPrcRec.[DATE_END],fmt)||' jPrcRec.[WAS_CAPITAL]='||jPrcRec.[WAS_CAPITAL],dp);
+				flWasCapital:=true;
+			end loop;
+			if not flWasCapital then pragma error('Ош.'); end if;
+			
+			debug_pipe('Добавляем строки журнала с периодом '||to_char(d01+1,fmt)||'-'||to_char([SYSTEM].[OP_DATE],fmt),dp);
+			this.CALC_PRC(d01+1,[SYSTEM].[OP_DATE],::[VID_DEBT]([CODE]='НЕУЧТЕН_ПРОЦЕНТЫ'));
+
+			exit;
+	end loop;
+end;
+end;
+end;

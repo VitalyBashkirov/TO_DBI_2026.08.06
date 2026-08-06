@@ -1,0 +1,98 @@
+class RKO;
+
+@import_plsql(true)
+@name('[ПСБ] Ввести кол-во операций во постановке, переоформлению и снятию с учета УНК')
+method PSH_VK_UNK_INP is
+
+public function Get_VK_RKO_Prop (rko ref [RKO], DateCalc [DATE] default [SYSTEM].[OP_DATE], kod	varchar2(100)) return integer is
+begin
+	for (select prop(prop.[NUM] pr_quan)
+			in rko.[PROPERTIES] 
+			where   prop.[DATE_BEG] = DateCalc
+				and prop.[GROUP_PROP].[CODE] = kod
+		)
+	loop
+		return prop.pr_quan;
+	end loop;
+	return null;
+end;
+
+public procedure Set_VK_RKO_Prop (rko ref [RKO], DateCalc [DATE] default [SYSTEM].[OP_DATE], kod varchar2(100), quan integer) is
+begin
+	rko.[PROPERTIES].[NEW#AUTO](
+		P_DATE_BEG == DateCalc,
+		P_DATE_END == null,
+		P_GROUP_PROP == ::[PROPERTY_GRP]([CODE] = kod),
+		P_NUM == quan
+		);
+end;
+PSH_VK_UNK_INP (
+	@name('Дата операций')                                             P_DATE   in [DATE],
+	@name('Кол-во операций по постановке УНК на учет')                 P_SET    in [NUMBER],
+	@name('Кол-во операций по переоформлению УНК')                     P_CH     in [NUMBER],
+	@name('Кол-во операций по снятию с учета УНК')                     P_REM    in [NUMBER],
+	@name('Кол-во операций по постановке кредитного договора на учет') P_SET_CR in [NUMBER],
+	@name('Кол-во операций по переоформлению кредитного договора')     P_CH_CR  in [NUMBER]
+) is
+
+validate is
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		P_DATE := ::[SYSTEM].[OP_DATE];
+		for (select com(com)
+			in this.[ARRAY_OPER_DOG]
+			where com.[DATE_CALC] = P_DATE
+				and com.[BO].[PATTERN_CODE] like 'PSB_VK%'
+			)
+		loop
+			pragma error('По данному договору уже сформированы комиссии за валютный контроль! Для изменения кол-во услуг необходимо сначала их удалить!');
+		end loop;
+
+		P_SET := Get_VK_RKO_Prop(this, P_DATE, 'PSB_VK_UNK_SET');
+		P_CH  := Get_VK_RKO_Prop(this, P_DATE, 'PSB_VK_UNK_CH');
+		P_REM := Get_VK_RKO_Prop(this, P_DATE, 'PSB_VK_UNK_REM');
+		P_SET_CR := Get_VK_RKO_Prop(this, P_DATE, 'PSB_VK_CRED_SET');
+		P_CH_CR  := Get_VK_RKO_Prop(this, P_DATE, 'PSB_VK_CRED_CH');
+	elsif P_MESSAGE = 'VALIDATE' then
+		if p_info = 'P_DATE' then
+			P_SET := Get_VK_RKO_Prop(this, P_DATE, 'PSB_VK_UNK_SET');
+			P_CH  := Get_VK_RKO_Prop(this, P_DATE, 'PSB_VK_UNK_CH');
+			P_REM := Get_VK_RKO_Prop(this, P_DATE, 'PSB_VK_UNK_REM');
+			P_SET_CR := Get_VK_RKO_Prop(this, P_DATE, 'PSB_VK_CRED_SET');
+			P_CH_CR  := Get_VK_RKO_Prop(this, P_DATE, 'PSB_VK_CRED_CH');
+		end if;		
+	end if;
+end;
+
+execute is
+begin
+	for pr in this.[PROPERTIES]
+		where pr.[DATE_BEG] = P_DATE
+			and pr.[GROUP_PROP]   in (::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_SET'),
+							   		  ::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_CH'),
+									  ::[PROPERTY_GRP]([CODE] = 'PSB_VK_UNK_REM'),
+									  ::[PROPERTY_GRP]([CODE] = 'PSB_VK_CRED_SET'),
+									  ::[PROPERTY_GRP]([CODE] = 'PSB_VK_CRED_CH')
+							  	     )
+	loop
+		pr.DELETE#AUTO;
+	end loop;
+
+	if coalesce(P_SET, 0) > 0 then
+		Set_VK_RKO_Prop(this, P_DATE, 'PSB_VK_UNK_SET', P_SET);
+	end if;
+	if coalesce(P_CH, 0) > 0 then
+		Set_VK_RKO_Prop(this, P_DATE, 'PSB_VK_UNK_CH', P_CH);
+	end if;
+	if coalesce(P_REM, 0) > 0 then	
+		Set_VK_RKO_Prop(this, P_DATE, 'PSB_VK_UNK_REM', P_REM);
+	end if;
+	if coalesce(P_SET_CR, 0) > 0 then		
+		Set_VK_RKO_Prop(this, P_DATE, 'PSB_VK_CRED_SET', P_SET_CR);
+	end if;
+	if coalesce(P_CH_CR, 0) > 0 then
+		Set_VK_RKO_Prop(this, P_DATE, 'PSB_VK_CRED_CH', P_CH_CR);
+	end if;
+end;
+end;
+end;

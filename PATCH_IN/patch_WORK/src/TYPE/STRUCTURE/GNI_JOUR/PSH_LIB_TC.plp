@@ -1,0 +1,33 @@
+class GNI_JOUR;
+
+@name('[ПСБ] Библиотека')
+@tag('COPIED')
+library PSH_LIB_TC is
+
+-- Библиотеки
+public pragma macro(sys, '::[SYSTEM].[VARIABLES]', substitute);
+public pragma macro(xml, '::[RUNTIME].[XML_DB]', substitute);
+public pragma macro(lob, '::[RUNTIME].[LOB_UTILS]', substitute);
+public pragma macro(ft, '::[FP_TUNE].[LIB]', substitute);
+public pragma macro(lf, '::[GNI_JOUR].[LIB_FUN]', substitute);
+public pragma macro(tc, '::[GNI_JOUR].[LIB_TC]', substitute);
+public pragma macro(lx, '::[GNI_JOUR].[LIB_XML]', substitute);
+public pragma macro(lr, '::[PSH_GNI_ERROR].[PSH_LIB]', substitute); --Замена нелицензированного
+public pragma macro(esi, '::[FIN_ACCOUNT_INT].[PRX_ESI]', substitute);
+
+-- Социальные фонды
+public FOND_FSS const ref [FOND_TYPE] := ::[FOND_TYPE]([CODE] = 'ФСС');
+public FOND_PFR const ref [FOND_TYPE] := ::[FOND_TYPE]([CODE] = 'ПФР');
+
+-- Состояния сообщений
+public stForm	const ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'IMNS_FORM');
+public stSend	const ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'IMNS_SEND');
+public stClose	const ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'IMNS_CLOSE');
+public stWait	const ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'IMNS_WAIT_REPLAY');
+public stError	const ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'IMNS_ERROR');
+public stReject const ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'IMNS_REJECT');
+public stLetter const ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'IMNS_LETTER');
+
+-- Макросы
+public pragma macro(date2str, 'to_char([1], ''dd/mm/yyyy hh24:mi:ss'')', substitute);
+end;

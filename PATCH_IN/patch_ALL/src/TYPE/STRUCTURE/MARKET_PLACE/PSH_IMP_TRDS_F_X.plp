@@ -1,0 +1,1546 @@
+class MARKET_PLACE;
+
+@calculate(false)
+@optimize(false)
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] FOREX Импорт сделок в формате ММВБ XML 1')
+@tag('COPIED')
+method PSH_IMP_TRDS_F_X is
+dp	integer:=0;	--управление debug_pipe --Башкиров В.Г. 01.10.2018
+
+PRAGMA include('[RUNTIME]::[DEBUG_MACRO]');
+PRAGMA include('[RUNTIME]::[MACRO_LIB]');
+pragma macro(safe_set, '[1] := substr([2], 1, [1]%size)', substitute);
+pragma macro (xml, '[XML_DOM]');
+
+M_DOC			varchar2 := 'MICEX_DOC';
+DOC_REQS		varchar2 := 'DOC_REQUISITES';
+CUX23			varchar2 := 'CUX23';
+SETTLE 			varchar2 := 'SETTLE';
+TRADEACC 			varchar2 := 'TRADEACC';
+CLEARPART 			varchar2 := 'CLEARPART';
+SESSION 		varchar2 := 'SESSION';--24.04.2012
+CURRPAIR		varchar2 := 'CURRPAIR';
+SECUR			varchar2 := 'SECURITY';
+SETTLEDATE		varchar2 := 'SETTLEDATE';--24.04.2012
+GROUP_			varchar2 := 'GROUP';
+MAINSEC			varchar2 := 'MAINSEC';--24.04.2012
+RECORDS			varchar2 := 'RECORDS';
+
+PrevFile		string(70);			-- Предыдущее имя файла
+f_name_log		string(50);
+ServerDir		string(250);
+g#file_log		integer;			-- used for file i/o
+
+xml_parser	&xml.Parser;
+xml_doc		&xml.DOMDocument;
+root_node	&xml.DOMNode;
+
+-- кодировка клиента, считается windows-1251
+function get_client_encoding return number is
+begin
+	return stdio.WINTEXT;
+end;
+-- кодировка на сервере, вычисляется из настроек системы
+function get_server_encoding return number is
+begin
+	case upper(substr(stdio.setting('DEF_TEXT'), 1, 1)) of
+		: 'W' : return stdio.WINTEXT;
+		: 'U' : return stdio.UNXTEXT;
+		: 'D' : return stdio.DOSTEXT;
+	else
+		return stdio.UNXTEXT;
+	end;
+end;
+
+--процедуры для работы с клобами
+function file2clob(p_filedir varchar2, p_filename varchar2) return CLOB is
+v_clob CLOB;
+v_fd integer;
+amount integer := 32767;
+offset integer := 1;
+buffer varchar2(32767);
+cnt integer;
+begin
+	dbms_lob.createtemporary(v_clob, true);
+	v_fd := stdio.f_open(p_filedir||'/'||p_filename, 'r');
+	begin
+	loop
+		cnt := stdio.read_str(v_fd, buffer, get_client_encoding/*stdio.WINTEXT*/, get_server_encoding/*stdio.UNXTEXT*/, amount);
+	exit when cnt <= 0;
+		if buffer is not null then
+			dbms_lob.write(v_clob, cnt, offset, buffer);
+			offset := offset + cnt;
+		end if;
+	end loop;
+	exception when others then null;
+	end;
+
+	cnt := stdio.f_close(v_fd);
+	return v_clob;
+end;
+
+function setCharSet(p_clob CLOB) return CLOB is
+pos 			integer;
+encoding 		varchar2;
+our_charset		varchar2;
+begin
+	if p_clob is not null and dbms_lob.getlength(p_clob) != 0 then
+		pos := instr(p_clob, '<?xml version="1.0" encoding="');
+		if pos = 0 then
+			pragma error ('Ошибка позиционирования в XML!');
+		else
+			pos := pos+length('<?xml version="1.0" encoding="');
+			encoding := substr(p_clob, pos, instr(p_clob, '"', pos)-pos);
+		end if;
+		case upper(encoding) of
+		:'WINDOWS-1251':
+			encoding := 'CL8MSWIN1251';
+		:'UTF-8':
+			encoding := 'AL32UTF8';
+		else
+			pragma error ('Недопустимая кодировка '||encoding);
+		end;
+		select a(a.value) in NLS_DATABASE_PARAMETERS%rowtype where a.PARAMETER = 'NLS_CHARACTERSET' into our_charset;
+		return convert(p_clob, encoding, our_charset);
+	end if;
+	return p_clob;
+exception when others then
+	pragma error ('Ошибка при обработке XML: '||[PRINTFUN].SQLERRM_inf);
+end;
+
+procedure makeXMLDoc(P_SOURCE [FILE$LOAD]) is
+	cl	[CLOB];
+begin
+	cl := setCharSet(file2clob(P_SOURCE.[DST_PATH], P_SOURCE.[DST_NAME]));
+	&xml.initialize;
+	xml_parser := &xml.newParser;
+ 	&xml.parseCLOB(xml_parser, cl); 	
+	xml_doc := &xml.getDocument(xml_parser);
+	root_node := &xml.makeNode(&xml.getDocumentElement(xml_doc));
+	dbms_lob.freetemporary(cl);
+end;
+-------------------------------------------------------------------------------------------------------------------
+function getVal(node	&xml.DOMNode) return string
+is
+res string(32767);
+begin
+
+	if &xml.IsNull(node) is null then
+		return null;
+	end if;
+	res := &xml.GetNodeValue(node);
+	&debug('Attribute name "'||&xml.getNodeName(node)||'" value "'||res||'"', 0)
+	if instr(res, '&') > 0 then
+		res := replace(res, '&quot;', '"');
+		res := replace(res, '&lt;', '<');
+		res := replace(res, '&gt;', '>');
+		res := replace(res, '&amp;', '&');
+		res := replace(res, '&apos;', '''');
+	end if;
+		
+	/*if  res is null then
+		pragma error(trim('Не задано значение обязательного элемента "' || &xml.GetNodeName(node) || '".'));
+	end if;
+	*/
+		
+	return res;
+
+end;
+
+-------------------------------------------------------------------------------------------------------------------
+function parseDate(stringDate string) return date is
+begin
+	if length(stringDate) <= 11 then
+		return to_date(stringDate, 'YYYY-MM-DD');
+	else
+		stringDate := substr(stringDate, 1, 10) || substr(stringDate, 12, 8);
+		return to_date(stringDate, 'YYYY-MM-DD HH24:MI:SS');
+	end if;
+	
+exception when OTHERS then
+	pragma error('Некорректный формат даты <' || stringDate || '>');
+end;
+
+-------------------------------------------------------------------------------------------------------------------
+procedure mess2pipe(mess string) is
+begin
+	debug_pipe(mess, 0);
+	stdio.put_line(g#file_log, replace(mess, chr(10), chr(13) || chr(10)) || chr(13), true, null, stdio.WINTEXT); -- вывод в файл протокола
+end;
+
+-------------------------------------------------------------------------------------------------------------------
+function file_processing(p_market ref [MARKET_PLACE], P_USPEH boolean, P_POVTOR boolean, P_MAKE_OPER boolean) return boolean is
+	TradeGroup		string(1); 			--Вид сделки: T - обычная сделка S - сделка своп B - сделка с Бивалютной корзиной	Да	Character	1
+	f_num				string(20);		-- 1	TradeNo				номер сделки
+	f_time				string(8);		-- 2	TradeTime			время заключения сделки в формате hh:mm:ss (это не оракловый шаблон)
+	f_order_num			string(12);		-- 3	OrderNo				номер заявки
+	f_cb_name			string(20);		-- 4	SecShortName		наименование ЦБ
+	f_rejim				string(50);		-- 5	SessionName			режим торгов
+	f_cb_code			string(20);		-- 6	SecurityId			торговый код бумаги
+	f_vid				string(1);		-- 7	BuySell				вид сделки ("B" - покупка, "S" - продажа)
+	f_contragent		string(20);		-- 9	SENDER_ID			контрагент
+	f_price				string(18);		-- 10	Price				цена (% -гос.бум., руб. - корпоративные) с точностью до 3 знаков после зап.
+	f_quantity			string(16);		-- 12	LotQuantity			количество
+	f_summa				string(18);		-- 13	Value				объем, руб
+	f_trader			string(20);		-- 15	UserId				код трейдера(пользователя)
+	f_investor			string(20);		-- 16	RECEIVER_ID			торговый код инвестора
+	f_note				string(30);		-- 17	BrokerRef			примечание
+	f_tip				string(5);		-- 19	TradeType			тип сделки
+	f_comis				string(18);		-- 20	SumComm
+	f_date				date;			-- 23	SettleDate			дата расчетов
+	f_commis_barg		string(20);		-- 24	ExchComm
+	f_commis_its			string(20);		-- 25	ITSComm
+	f_commis_clearing	string(20);		-- 26	ClrComm
+	f_TradeDeriv 		string(1);
+	f_ExtSettleCode		string(20);
+	
+	rec					[MT_TRADE_BUF];
+	ns_origin_ident		[NS_ORIGIN].[IDENT]%type;
+	section_ref			ref [MT_SECTIONS];
+	rej_s				ref [MT_REJIM_S];
+	vid_r				ref [NS_ORIGIN];
+	str4mess			string(4000);
+	v_deal_type			string(3);
+	v_oper_type			ref [TYPE_SALE];
+	v_pay_to_deal		ref [SALE_PAY_TO_DEAL];
+	v_cur_in			[CUR_SALE];
+	v_cur_out			[CUR_SALE];
+	v_client			ref [CLIENT];
+	v_errm				string(2000);
+	
+	cnt_all				integer := 0;
+	cnt_success			integer := 0;
+	cnt_repeat			integer := 0;
+	cnt_error			integer := 0;
+	
+	settle_cnt			integer;
+	tradeacc_cnt			integer;
+	clearpart_cnt			integer;
+	session_cnt			integer;--24.04.2012
+	curr_cnt			integer;
+	sec_cnt				integer;
+	SETTLEDATE_cnt		integer; --24.04.2012
+	GROUP_cnt			integer;
+	MAINSEC_cnt			integer;--24.04.2012
+	rec_cnt				integer;
+	
+	doc_type			string;
+	doc_date			date;
+	
+	node_map			&xml.DOMNamedNodeMap;
+	attr_node			&xml.DOMNode;
+	reqs_node			&xml.DOMNode;
+	cux23_node			&xml.DOMNode;
+	settle_node			&xml.DOMNode;
+	tradeacc_node			&xml.DOMNode;
+	clearpart_node			&xml.DOMNode;
+	session_node		&xml.DOMNode;--24.04.2012
+	curr_node			&xml.DOMNode;
+	secur_node			&xml.DOMNode;
+	SETTLEDATE_node		&xml.DOMNode; --24.04.2012
+	GROUP_node			&xml.DOMNode;
+	MAINSEC_node		&xml.DOMNode;--24.04.2012
+	rec_node			&xml.DOMNode;
+	
+	v_sect 				ref [MT_SECTIONS];
+	v_place 			ref [MARKET_PLACE];
+	ReportDate		date;
+begin
+	-- <DOC_REQUISITES DOC_DATE="2011-02-25" DOC_NO="000666673/CU" DOC_TYPE_ID="CUX23" SENDER_ID="MM0000100000" RECEIVER_ID="MB1111100000"/>
+	&debug('Root node '||&xml.getNodeName(root_node), 0)
+	
+	if not &xml.IsNull(root_node) and &xml.getNodeName(root_node) = M_DOC  and &xml.hasChildNodes(root_node) then
+		reqs_node := &xml.getFirstChild(root_node);
+		if &xml.getNodeType(reqs_node) = 3 then
+			reqs_node := &xml.getNextSibling(reqs_node);
+		end if;
+		if not &xml.IsNull(reqs_node) and &xml.getNodeName(reqs_node) = DOC_REQS then
+			node_map := &xml.getAttributes(reqs_node);	
+			for i in 0..&xml.getLength(node_map)-1 loop
+				attr_node := &xml.item(node_map, i);
+				--&debug('Attr name '||&xml.getNodeName(attr_node), 0)
+				case &xml.GetNodeName(attr_node) of
+					:'DOC_TYPE_ID'	: &safe_set(doc_type, getVal(attr_node));
+					:'DOC_DATE'		: doc_date := parseDate(getVal(attr_node));
+					:'SENDER_ID'	: &safe_set(f_contragent, getVal(attr_node));
+					:'RECEIVER_ID'	: &safe_set(f_investor, getVal(attr_node));
+				end;
+			end loop;	
+		end if;
+	end if;
+	&debug('doc_type ='||doc_type, 0)
+	
+	if doc_type <> 'CUX23' then --необязательный параметр, может быть не указан
+		pragma error('Файл не является Выпиской из реестра сделок (CUX23) ММВБ');
+	end if;
+	
+	--<CUX23
+	cux23_node := &xml.getNextSibling(reqs_node);
+	if &xml.getNodeType(cux23_node) = 3 then
+		cux23_node := &xml.getNextSibling(cux23_node);
+	end if;
+	&debug('cux23_node '||&xml.getNodeName(cux23_node), 0)
+	
+	if &xml.getNodeName(cux23_node) <> CUX23 then
+		pragma error('Файл не является Выпиской из реестра сделок (CUX23) ММВБ');
+	end if;
+
+	node_map := &xml.getAttributes(cux23_node);	
+	for i in 0..&xml.getLength(node_map)-1 loop
+		attr_node := &xml.item(node_map, i);
+		case &xml.GetNodeName(attr_node) of
+			:'ReportDate'	: ReportDate := parseDate(getVal(attr_node));
+		end;
+	end loop;	
+	mess2pipe('ИМПОРТ СДЕЛОК ЗА ' || to_char(ReportDate, 'DD.MM.RRRR'));
+	mess2pipe('Торговая площадка - ' || p_market.[NAME]);
+
+	--<CLEARPART
+	if not &xml.IsNull(cux23_node) and &xml.getNodeName(cux23_node) = CUX23 then
+		clearpart_node := &xml.getFirstChild(cux23_node);
+	end if;
+	clearpart_cnt := 1;
+	-- Цикл по тэгу CLEARPART
+	loop
+		--&debug('&xml.getNodeType(clearpart_node)='||&xml.getNodeType(clearpart_node)||' &xml.getNodeName(clearpart_node) = '||&xml.getNodeName(clearpart_node), 0)	
+		if &xml.getNodeType(clearpart_node) = 3 then
+			 clearpart_node:= &xml.getNextSibling(clearpart_node);
+		end if;
+					
+		exit when &xml.IsNull(clearpart_node) or &xml.getNodeName(clearpart_node) != CLEARPART;
+
+		&debug('clearpart node №'||clearpart_cnt||' name '||&xml.getNodeName(clearpart_node), 0)	
+
+		--<SETTLE ExtSettleCode="88888">
+		if not &xml.IsNull(clearpart_node) and &xml.getNodeName(clearpart_node) = CLEARPART then
+			settle_node := &xml.getFirstChild(clearpart_node);
+		end if;
+		settle_cnt := 1;
+		-- Цикл по тэгу SETTLE
+		loop
+			--&debug('&xml.getNodeType(settle_node)='||&xml.getNodeType(settle_node)||' &xml.getNodeName(settle_node) = '||&xml.getNodeName(settle_node), 0)	
+			if &xml.getNodeType(settle_node) = 3 then
+				 settle_node:= &xml.getNextSibling(settle_node);
+			end if;
+						
+			exit when &xml.IsNull(settle_node) or &xml.getNodeName(settle_node) != SETTLE;
+
+			f_ExtSettleCode := null;
+			
+			node_map := &xml.getAttributes(settle_node);	
+			for i in 0..&xml.getLength(node_map)-1 loop
+				attr_node := &xml.item(node_map, i);
+				case &xml.GetNodeName(attr_node) of
+					:'ExtSettleCode'		: &safe_set(f_ExtSettleCode, getVal(attr_node));
+				end;
+			end loop;
+
+
+			--<TRADEACC>
+			if not &xml.IsNull(settle_node) and &xml.getNodeName(settle_node) = SETTLE then
+				tradeacc_node := &xml.getFirstChild(settle_node);
+			end if;
+			tradeacc_cnt := 1;
+			-- Цикл по тэгу TRADEACC
+			loop
+				if &xml.getNodeType(tradeacc_node) = 3 then
+					 tradeacc_node:= &xml.getNextSibling(tradeacc_node);
+				end if;
+							
+				exit when &xml.IsNull(tradeacc_node) or &xml.getNodeName(tradeacc_node) != TRADEACC;
+
+	
+				--<SESSION >
+				session_cnt := 1;	
+				session_node := &xml.getFirstChild(tradeacc_node);
+				-- Цикл по тэгу SESSION
+				loop
+					if &xml.getNodeType(session_node) = 3 then
+						 session_node:= &xml.getNextSibling(session_node);
+					end if;
+								
+					exit when &xml.IsNull(session_node) or &xml.getNodeName(session_node) != SESSION;
+					
+					&debug('session node №'||session_cnt||' name '||&xml.getNodeName(session_node), 0)	
+					
+					f_rejim := null;
+					node_map := &xml.getAttributes(session_node);	
+					for i in 0..&xml.getLength(node_map)-1 loop
+						attr_node := &xml.item(node_map, i);
+						if &xml.GetNodeName(attr_node) =  'SessionName' then
+							&safe_set(f_rejim, getVal(attr_node));
+						end if;
+					end loop;
+					
+					
+					-- <CURRPAIR CurrencyId="USD" CurrencyName="Доллар США" CoCurrencyId="RUB" CoCurrencyName="Российский рубль">
+					curr_cnt := 1;	
+					curr_node := &xml.getFirstChild(session_node);
+					-- Цикл по тэгу CURRPAIR
+					loop
+						if &xml.getNodeType(curr_node) = 3 then
+							 curr_node:= &xml.getNextSibling(curr_node);
+						end if;
+						
+						exit when &xml.IsNull(curr_node) or &xml.getNodeName(curr_node) != CURRPAIR;
+						
+						&debug('currpair node №'||curr_cnt||' name '||&xml.getNodeName(curr_node), 0)	
+						
+						-- <SECURITY SecurityId="USD000UTSTOM" SecShortName="USDRUB_TOM" SettleDate="2011-02-28" FaceValue="1" LotSize="1000">
+						sec_cnt := 1;
+						secur_node:= &xml.getFirstChild(curr_node);
+						-- Цикл по тэгу SECURITY
+						loop
+						
+							if &xml.getNodeType(secur_node) = 3 then
+								 secur_node := &xml.getNextSibling(secur_node);
+							end if;
+							
+							exit when  &xml.IsNull(secur_node) or &xml.getNodeName(secur_node) != SECUR;
+							
+							&debug('security node №'||sec_cnt||' name '||&xml.getNodeName(secur_node), 0)	
+							f_cb_code := null;	
+							f_cb_name := null;
+							
+							node_map := &xml.getAttributes(secur_node);	
+							for i in 0..&xml.getLength(node_map)-1 loop
+								attr_node := &xml.item(node_map, i);
+								case &xml.GetNodeName(attr_node) of
+									:'SecurityId'	: &safe_set(f_cb_code, getVal(attr_node));
+									:'SecShortName'	: &safe_set(f_cb_name, getVal(attr_node));
+									--:'SettleDate'	: if doc_date is null then doc_date := parseDate(getVal(attr_node)); end if;
+								end;
+							end loop;	
+							
+							var v_str varchar2(500);
+							var err varchar2(500);
+							v_str := ::[FP_TUNE].[LIB].get_str_value('SALE_SWAP_CODES');
+							
+							for (
+								select	x(regexp_substr(v_str, '[^,]+', 1, level) : str)
+						      	in		dual%rowtype
+						      	connect by level <= regexp_count(v_str, '[^,]+')
+						     	)
+							loop
+								if substr(f_cb_name, -1 * length(x.str)) = x.str then
+									-- служебная запись по SWAP сделке
+									err := 'Служебная информация по SWAP (' || f_cb_code || ' ' || f_cb_name || ') пропущена.';
+									exit;
+								end if;
+							end loop;					
+							
+							if err is not null then
+								mess2pipe(err);
+								secur_node := &xml.getNextSibling(secur_node);
+								sec_cnt := sec_cnt + 1;						
+								continue;
+							end if;	
+		
+							--<SETTLEDATE>
+							SETTLEDATE_cnt := 1;
+							SETTLEDATE_node:= &xml.getFirstChild(secur_node);
+							-- Цикл по тэгу SETTLEDATE
+							loop
+								if &xml.getNodeType(SETTLEDATE_node) = 3 then
+									 SETTLEDATE_node := &xml.getNextSibling(SETTLEDATE_node);
+								end if;	
+			
+								exit when &xml.IsNull(SETTLEDATE_node) or &xml.getNodeName(SETTLEDATE_node) != SETTLEDATE;
+								&debug('SETTLEDATE node №'||SETTLEDATE_cnt||' name '||&xml.getNodeName(SETTLEDATE_node), 0)	
+		
+								node_map := &xml.getAttributes(SETTLEDATE_node);	
+								for i in 0..&xml.getLength(node_map)-1 loop
+									attr_node := &xml.item(node_map, i);
+									case &xml.GetNodeName(attr_node) of
+										:'SettleDate'	: f_date := parseDate(getVal(attr_node));
+									end;
+								end loop;	
+		
+								--<GROUP TradeGroup="T">
+								GROUP_cnt := 1;
+								GROUP_node:= &xml.getFirstChild(SETTLEDATE_node);
+								-- Цикл по тэгу GROUP
+								loop
+									if &xml.getNodeType(GROUP_node) = 3 then
+										 GROUP_node := &xml.getNextSibling(GROUP_node);
+									end if;	
+				
+									exit when &xml.IsNull(GROUP_node) or &xml.getNodeName(GROUP_node) != GROUP_;
+									&debug('GROUP node №'||GROUP_cnt||' name '||&xml.getNodeName(GROUP_node), 0)	
+									
+									f_num		:= null;
+				
+									node_map := &xml.getAttributes(GROUP_node);	
+									for i in 0..&xml.getLength(node_map)-1 loop
+										attr_node := &xml.item(node_map, i);
+										if &xml.GetNodeName(attr_node) = 'TradeGroup' then
+											&safe_set(TradeGroup, getVal(attr_node));
+										end if;
+									end loop;
+									
+									--<MAINSEC >
+									MAINSEC_cnt := 1;
+									MAINSEC_node:= &xml.getFirstChild(GROUP_node);
+									-- Цикл по тэгу MAINSEC
+									loop
+										if &xml.getNodeType(MAINSEC_node) = 3 then
+											 MAINSEC_node := &xml.getNextSibling(MAINSEC_node);
+										end if;	
+					
+										exit when &xml.IsNull(MAINSEC_node) or &xml.getNodeName(MAINSEC_node) != MAINSEC;
+										&debug('MAINSEC node №'||MAINSEC_cnt||' name '||&xml.getNodeName(MAINSEC_node), 0)
+									
+										-- <RECORDS TradeNo="48662" BuySell="S" OrderNo="10297841" AcceptNo="48662S" TradeTime="12:06:33" TradeType="T" Decimals="4" Price="28.923" LotQuantity="925" Value="26753775" Period="N" SettleCode="T1" UserId="MD1111100002" UserExchangeId="MICX"/>
+										-- TradeDeriv	Сделка с ПФИ (Y - Да, N - Нет)	Да	Character	1
+										rec_cnt := 1;
+										rec_node := &xml.getFirstChild(MAINSEC_node);
+										
+										-- Цикл по тэгу RECORDS
+										loop
+											if &xml.getNodeType(rec_node) = 3 then
+												 rec_node := &xml.getNextSibling(rec_node);
+											end if;	
+											
+											exit when &xml.IsNull(rec_node) or &xml.getNodeName(rec_node) != RECORDS;
+											&debug('rec node №'||rec_cnt||' name '||&xml.getNodeName(rec_node), 0)	
+											f_num		:= null;
+											f_vid		:= null;
+											f_order_num	:= null;
+											f_time		:= null;
+											f_price		:= null;
+											f_quantity	:= null;
+											f_summa		:= null;
+											f_trader	:= null;
+											f_note		:= null;
+											f_tip		:= null;
+											f_comis		:= null;
+											f_commis_barg		:= null;
+											f_commis_its		:= null;
+											f_commis_clearing	:= null;
+											f_TradeDeriv := null;
+											
+											node_map := &xml.getAttributes(rec_node);	
+											for i in 0..&xml.getLength(node_map)-1 loop
+												attr_node := &xml.item(node_map, i);
+												case &xml.GetNodeName(attr_node) of
+													:'TradeNo'		: &safe_set(f_num, getVal(attr_node));
+													:'BuySell'		: &safe_set(f_vid, getVal(attr_node));
+													:'OrderNo'		: &safe_set(f_order_num, getVal(attr_node));
+													:'TradeTime'	: &safe_set(f_time, getVal(attr_node));
+													:'Price'			: &safe_set(f_price, getVal(attr_node));
+													:'Quantity'		: &safe_set(f_quantity, getVal(attr_node));
+													:'Value'			: &safe_set(f_summa, getVal(attr_node));
+													:'UserId'			: &safe_set(f_trader, getVal(attr_node));
+													:'BrokerRef'	: &safe_set(f_note, getVal(attr_node));
+													:'TradeType'	: &safe_set(f_tip, getVal(attr_node));
+													:'ExchComm'		: &safe_set(f_commis_barg, getVal(attr_node));
+													:'ITSComm'		: &safe_set(f_commis_its, getVal(attr_node));
+													:'ClrComm'		: &safe_set(f_commis_clearing, getVal(attr_node));
+													:'SumComm'		: &safe_set(f_comis, getVal(attr_node));
+													:'TradeDeriv'	: &safe_set(f_TradeDeriv, getVal(attr_node));
+												end;
+											end loop;
+		
+											rec_node := &xml.getNextSibling(rec_node);
+											rec_cnt := rec_cnt + 1;
+											
+											if f_contragent is null then
+												-- BS00354505. Ищем секцию по режиму торгов
+												for (
+													select	s(s : ID,
+																s%parent : parent)
+													in		::[MT_SECTIONS], (::[MT_REJIM_S] collections : r) collections
+													where	s%parentclass = 'MARKET_PLACE' and
+															s.[REJIM_S] = r%collection and
+															r.[REJIM].[NAME] = f_rejim
+													)
+												loop
+													v_place%id := s.parent;
+													exit;
+												end loop;
+												
+												if v_place is null then
+													pragma error('Сделка № ' || f_num || '. Не найдена секция с режимом торгов "' || f_rejim || '"!');
+												end if;
+											else
+												-- BS00207449. определение контрагента	
+												begin
+													locate v_sect in ::[MT_SECTIONS] collections where v_sect%parentclass = 'MARKET_PLACE' and v_sect.[MARKET_CODE] = f_contragent;
+													
+													v_place%id := v_sect%parent;
+												exception
+													when NO_DATA_FOUND then
+														pragma error('Сделка № ' || f_num || '. Не найдена секция с кодом "' || f_contragent || '"!');
+												end;
+											end if;									
+											
+											rec%init(false, true);
+											
+											cnt_all := cnt_all + 1;
+						
+											str4mess := 'Сделка № ' || f_num || '.';
+											
+											if TradeGroup = 'B' then
+												mess2pipe(str4mess || ' не загружена, т.к. это сделка с бивалютной корзиной');
+												&inc(cnt_error)
+												continue;
+											end if;
+																
+											if f_vid = 'B' then
+												ns_origin_ident := 'BUY';
+											elsif f_vid = 'S' then
+												ns_origin_ident := 'SELL';
+											else
+												mess2pipe(str4mess || ' Неизвестный код вида сделки "' || f_vid || '". Импорт запрещен.');
+												&inc(cnt_error)
+												continue;
+											end if;
+						
+											begin
+												locate vid_r in ::[NS_ORIGIN] all where vid_r.[IDENT] = ns_origin_ident;
+											exception when NO_DATA_FOUND then
+												mess2pipe(str4mess || ' В справочнике "Тип изменения в портфеле ЦБ банка" отсутствует запись с идентификатором ' || ns_origin_ident || '. Импорт запрещен.');
+												&inc(cnt_error)
+												continue;
+											end;
+					
+											-- поиск в массиве буфера приема сделок
+											declare
+												tr	ref [MT_TRADE_BUF];
+											begin
+												pragma hint( 'index(a1 IDX_Z#MT_TRADE_BUF_COLL_N_V_D)');
+												
+												locate tr in p_market.[TRADE_BUF]
+													where tr.[NUM] = f_num
+													  and tr.[VID] = vid_r
+													  and ReportDate <= tr.[D]
+													  and tr.[D] < ReportDate + 1;
+												
+												cnt_repeat := cnt_repeat + 1;
+												
+												-- '2' - соощение о попытке повторного импорта сделки
+												if P_POVTOR then
+													mess2pipe(str4mess || ' Сделка с таким номером, видом и датой уже есть в массиве принятых сделок этой торговой площадки. Импорт запрещен.');
+												end if;
+												
+												continue;
+													
+											exception when NO_DATA_FOUND then
+												null;
+											end;
+					
+											-- цикл по секциям торговой площадки
+											for v_s in p_market.[SECTIONS] loop
+												begin
+													-- поиск в секции режима торгов совпадающего по наименованию с режимом в сделке из файла импорта
+													locate rej_s in v_s.[REJIM_S] where rej_s.[REJIM].[NAME] = f_rejim;
+													section_ref := v_s; -- запомним ссылку на секцию
+													
+													exit;
+												exception when NO_DATA_FOUND then
+													null;
+												end;
+											end loop;
+						
+											if section_ref is null then
+												mess2pipe(str4mess || ' Режим торгов "' || f_rejim || '" не найден ни в одной из секций этой торговой площадки. Импорт запрещен.');
+												&inc(cnt_error)
+												continue;
+											end if;
+					
+											rec.[NUM] := f_num;
+											rec.[PAYMENT_DATE] := f_date;
+											rec.[D] := to_date(to_char(ReportDate, 'dd/mm/yyyy') || ' ' || trim(f_time), 'dd/mm/yyyy hh24:mi:ss');
+											rec.[ORDER_NUM] := f_order_num;
+											rec.[CB_NAME] := f_cb_name;
+											rec.[REJIM] := f_rejim;
+											rec.[CB_CODE] := f_cb_code;
+											rec.[VID] := vid_r;
+											rec.[CONTRAGENT] := f_contragent;
+											rec.[COAG_ID] := v_place.[DOSSIER];
+											v_client := v_place.[DOSSIER];
+											rec.[PRICE] := to_number(replace(f_price, ',', '.'));
+											rec.[QUANTITY] := to_number(replace(f_quantity, ',', '.'));
+											rec.[SUMMA] := to_number(replace(f_summa, ',', '.'));
+											rec.[TRADER] := f_trader;
+											rec.[INVESTOR] := f_investor;
+											rec.[NOTE] := f_note;
+											rec.[REJIM_S] := rej_s;
+											rec.[TIP] := f_tip;
+											rec.[COMIS] := to_number(f_comis);
+											rec.[COMMIS_BARG] := to_number(f_commis_barg);
+											rec.[COMMIS_ITS] := to_number(f_commis_its);
+											rec.[COMMIS_CLEARING] := to_number(f_commis_clearing);
+											rec.[IS_PFI] := (nvl(f_TradeDeriv, 'N') = 'Y');
+											rec.[EXTSETTLECODE] := f_ExtSettleCode;
+											
+										  --v_errm := ::[MARKET_PLACE].[IMP_TRADES_FOREX].form_sale(rec, f_vid, v_cur_in, v_cur_out, v_deal_type, v_oper_type, v_pay_to_deal);
+										  --Башкиров В.Г. 26.12.2016 Появился новый инструмент TOMSPT
+											v_errm := ::[MARKET_PLACE].[PSH_IMP_TRDS_FRX].form_sale(rec, f_vid, v_cur_in, v_cur_out, v_deal_type, v_oper_type, v_pay_to_deal); -- updated CHANGE_SHORT_NAME PSB_IMP_TRDS_FRX->PSH_IMP_TRDS_FRX 15/10/25
+						
+											if v_errm is  not null then
+												mess2pipe(v_errm);
+												&inc(cnt_error)
+												continue;
+											end if;
+											-->> PSH VRI 02/03/2026 CFT-3709 Загрузка биржевых сделок в Модуль конверсия, биржевые валютные сделки GLDRUB (СВОП)
+											if  v_cur_in.[CURRENCY] = ::[FT_MONEY]([CUR_SHORT] = 'XAU') then 
+												v_cur_in.[CURRENCY] := ::[FT_MONEY]([CUR_SHORT] = 'RUB');
+											end if; 
+											if  v_cur_out.[CURRENCY] = ::[FT_MONEY]([CUR_SHORT] = 'XAU') then 
+												v_cur_out.[CURRENCY] := ::[FT_MONEY]([CUR_SHORT] = 'RUB');
+											end if;
+											--<< PSH VRI 02/03/2026 CFT-3709 Загрузка биржевых сделок в Модуль конверсия, биржевые валютные сделки GLDRUB (СВОП)
+											-- Поиск дубля в конверсионных операциях
+											declare
+												v_tmp_sale	ref [SALE];
+											begin
+												v_tmp_sale := ::[MARKET_PLACE].[IMP_TRADES_FOREX].check_sale(rec, v_client, v_cur_in, v_cur_out, v_pay_to_deal, p_market);
+					
+												if v_tmp_sale is not null then
+													cnt_repeat := cnt_repeat + 1;
+													
+													-- '2' - соощение о попытке повторного импорта сделки
+													if P_POVTOR then
+														mess2pipe(' Сделка с таким номером, торговой площадкой, видом, датой, контрагентом и валютами принято/выдано уже есть в продукте "Конверсионные операции". Импорт запрещен.');
+													end if;
+												
+													continue;
+												end if;
+											end;
+					
+											-- Занести сделку в массив "Приём сделок"
+											p_market.[TRADE_BUF]%insert(rec);
+					
+											-- Если выставлен флаг, то сразу создадим
+											if p_make_oper then
+												::[MARKET_PLACE].[IMP_TRADES_FOREX].new_sale(rec, v_client, v_cur_in, v_cur_out, v_deal_type, v_oper_type, v_pay_to_deal, section_ref, p_market);
+											end if;
+						
+											cnt_success := cnt_success + 1;
+											
+											if P_USPEH then
+												mess2pipe(str4mess || ' Импортирована.'); -- '1' - соощение об успешном импорте сделки
+					
+											end if;
+											---------------------------------------------------------------
+											
+											
+										end loop;--records
+										MAINSEC_node:= &xml.getNextSibling(MAINSEC_node);
+										MAINSEC_cnt := MAINSEC_cnt + 1;
+									end loop;--MAINSEC
+									GROUP_node:= &xml.getNextSibling(GROUP_node);
+									GROUP_cnt := GROUP_cnt + 1;
+								end loop;--group
+								settledate_node:= &xml.getNextSibling(settledate_node);
+								settledate_cnt := settledate_cnt + 1;
+							end loop;--settledate
+							secur_node := &xml.getNextSibling(secur_node);
+							sec_cnt := sec_cnt + 1;
+						end loop; --security
+						curr_node:= &xml.getNextSibling(curr_node);
+						curr_cnt := curr_cnt + 1;	
+					end loop; --curr
+					session_node:= &xml.getNextSibling(session_node);
+					session_cnt := session_cnt + 1;
+				end loop;--session	
+				tradeacc_node := &xml.getNextSibling(tradeacc_node);
+				tradeacc_cnt := tradeacc_cnt + 1;	
+			end loop; --tradeacc
+			settle_node := &xml.getNextSibling(settle_node);
+			settle_cnt := settle_cnt + 1;	
+		end loop; --settle
+		clearpart_node:= &xml.getNextSibling(clearpart_node);
+		clearpart_cnt := clearpart_cnt + 1;
+	end loop;--clearpart	
+	
+	mess2pipe('Всего сделок в файле - ' || to_char(cnt_all));
+	mess2pipe('  из них, успешно импортировано - ' || to_char(cnt_success));
+	
+	if cnt_repeat > 0 then
+		mess2pipe('  уже существуют в системе - ' || to_char(cnt_repeat));
+	end if;
+	
+	if cnt_error > 0 then
+		mess2pipe('  с ошибками - ' || to_char(cnt_error));
+	end if;
+	
+	if cnt_error > 0 then
+		return false;
+	else
+		return true;
+	end if;
+end;
+
+
+function file_processing_old(p_market ref [MARKET_PLACE], P_USPEH boolean, P_POVTOR boolean, P_MAKE_OPER boolean) return boolean is
+	TradeGroup		string(1); 			--Вид сделки: T - обычная сделка S - сделка своп B - сделка с Бивалютной корзиной	Да	Character	1
+	f_num				string(20);		-- 1	TradeNo				номер сделки
+	f_time				string(8);		-- 2	TradeTime			время заключения сделки в формате hh:mm:ss (это не оракловый шаблон)
+	f_order_num			string(12);		-- 3	OrderNo				номер заявки
+	f_cb_name			string(20);		-- 4	SecShortName		наименование ЦБ
+	f_rejim				string(50);		-- 5	SessionName			режим торгов
+	f_cb_code			string(20);		-- 6	SecurityId			торговый код бумаги
+	f_vid				string(1);		-- 7	BuySell				вид сделки ("B" - покупка, "S" - продажа)
+	f_contragent		string(20);		-- 9	SENDER_ID			контрагент
+	f_price				string(18);		-- 10	Price				цена (% -гос.бум., руб. - корпоративные) с точностью до 3 знаков после зап.
+	f_quantity			string(16);		-- 12	LotQuantity			количество
+	f_summa				string(18);		-- 13	Value				объем, руб
+	f_trader			string(20);		-- 15	UserId				код трейдера(пользователя)
+	f_investor			string(20);		-- 16	RECEIVER_ID			торговый код инвестора
+	f_note				string(30);		-- 17	BrokerRef			примечание
+	f_tip				string(5);		-- 19	TradeType			тип сделки
+	f_comis				string(18);		-- 20	SumComm
+	f_date				date;			-- 23	SettleDate			дата расчетов
+	f_commis_barg		string(20);		-- 24	ExchComm
+	f_commis_its			string(20);		-- 25	ITSComm
+	f_commis_clearing	string(20);		-- 26	ClrComm
+	f_TradeDeriv 		string(1);
+	f_ExtSettleCode		string(20);
+	
+	rec					[MT_TRADE_BUF];
+	ns_origin_ident		[NS_ORIGIN].[IDENT]%type;
+	section_ref			ref [MT_SECTIONS];
+	rej_s				ref [MT_REJIM_S];
+	vid_r				ref [NS_ORIGIN];
+	str4mess			string(4000);
+	v_deal_type			string(3);
+	v_oper_type			ref [TYPE_SALE];
+	v_pay_to_deal		ref [SALE_PAY_TO_DEAL];
+	v_cur_in			[CUR_SALE];
+	v_cur_out			[CUR_SALE];
+	v_client			ref [CLIENT];
+	v_errm				string(2000);
+	
+	cnt_all				integer := 0;
+	cnt_success			integer := 0;
+	cnt_repeat			integer := 0;
+	cnt_error			integer := 0;
+	
+	settle_cnt			integer;
+	clearpart_cnt			integer;
+	session_cnt			integer;--24.04.2012
+	curr_cnt			integer;
+	sec_cnt				integer;
+	SETTLEDATE_cnt		integer; --24.04.2012
+	GROUP_cnt			integer;
+	MAINSEC_cnt			integer;--24.04.2012
+	rec_cnt				integer;
+	
+	doc_type			string;
+	doc_date			date;
+	
+	node_map			&xml.DOMNamedNodeMap;
+	attr_node			&xml.DOMNode;
+	reqs_node			&xml.DOMNode;
+	cux23_node			&xml.DOMNode;
+	settle_node			&xml.DOMNode;
+	clearpart_node			&xml.DOMNode;
+	session_node		&xml.DOMNode;--24.04.2012
+	curr_node			&xml.DOMNode;
+	secur_node			&xml.DOMNode;
+	SETTLEDATE_node		&xml.DOMNode; --24.04.2012
+	GROUP_node			&xml.DOMNode;
+	MAINSEC_node		&xml.DOMNode;--24.04.2012
+	rec_node			&xml.DOMNode;
+	
+	v_sect 				ref [MT_SECTIONS];
+	v_place 			ref [MARKET_PLACE];
+	ReportDate		date;
+begin
+	-- <DOC_REQUISITES DOC_DATE="2011-02-25" DOC_NO="000666673/CU" DOC_TYPE_ID="CUX23" SENDER_ID="MM0000100000" RECEIVER_ID="MB1111100000"/>
+	&debug('Root node '||&xml.getNodeName(root_node), 0)
+	
+	if not &xml.IsNull(root_node) and &xml.getNodeName(root_node) = M_DOC  and &xml.hasChildNodes(root_node) then
+		reqs_node := &xml.getFirstChild(root_node);
+		if &xml.getNodeType(reqs_node) = 3 then
+			reqs_node := &xml.getNextSibling(reqs_node);
+		end if;
+		if not &xml.IsNull(reqs_node) and &xml.getNodeName(reqs_node) = DOC_REQS then
+			node_map := &xml.getAttributes(reqs_node);	
+			for i in 0..&xml.getLength(node_map)-1 loop
+				attr_node := &xml.item(node_map, i);
+				--&debug('Attr name '||&xml.getNodeName(attr_node), 0)
+				case &xml.GetNodeName(attr_node) of
+					:'DOC_TYPE_ID'	: &safe_set(doc_type, getVal(attr_node));
+					:'DOC_DATE'		: doc_date := parseDate(getVal(attr_node));
+					:'SENDER_ID'	: &safe_set(f_contragent, getVal(attr_node));
+					:'RECEIVER_ID'	: &safe_set(f_investor, getVal(attr_node));
+				end;
+			end loop;	
+		end if;
+	end if;
+	&debug('doc_type ='||doc_type, 0)
+	
+	if doc_type <> 'CUX23' then --необязательный параметр, может быть не указан
+		pragma error('Файл не является Выпиской из реестра сделок (CUX23) ММВБ');
+	end if;
+	
+	--<CUX23
+	cux23_node := &xml.getNextSibling(reqs_node);
+	if &xml.getNodeType(cux23_node) = 3 then
+		cux23_node := &xml.getNextSibling(cux23_node);
+	end if;
+	&debug('cux23_node '||&xml.getNodeName(cux23_node), 0)
+	
+	if &xml.getNodeName(cux23_node) <> CUX23 then
+		pragma error('Файл не является Выпиской из реестра сделок (CUX23) ММВБ');
+	end if;
+
+	node_map := &xml.getAttributes(cux23_node);	
+	for i in 0..&xml.getLength(node_map)-1 loop
+		attr_node := &xml.item(node_map, i);
+		case &xml.GetNodeName(attr_node) of
+			:'ReportDate'	: ReportDate := parseDate(getVal(attr_node));
+		end;
+	end loop;	
+	mess2pipe('ИМПОРТ СДЕЛОК ЗА ' || to_char(ReportDate, 'DD.MM.RRRR'));
+	mess2pipe('Торговая площадка - ' || p_market.[NAME]);
+
+	--<CLEARPART
+	if not &xml.IsNull(cux23_node) and &xml.getNodeName(cux23_node) = CUX23 then
+		clearpart_node := &xml.getFirstChild(cux23_node);
+	end if;
+	clearpart_cnt := 1;
+	-- Цикл по тэгу CLEARPART
+	loop
+		--&debug('&xml.getNodeType(clearpart_node)='||&xml.getNodeType(clearpart_node)||' &xml.getNodeName(clearpart_node) = '||&xml.getNodeName(clearpart_node), 0)	
+		if &xml.getNodeType(clearpart_node) = 3 then
+			 clearpart_node:= &xml.getNextSibling(clearpart_node);
+		end if;
+					
+		exit when &xml.IsNull(clearpart_node) or &xml.getNodeName(clearpart_node) != CLEARPART;
+
+		&debug('clearpart node №'||clearpart_cnt||' name '||&xml.getNodeName(clearpart_node), 0)	
+
+		--<SETTLE ExtSettleCode="88888">
+		if not &xml.IsNull(clearpart_node) and &xml.getNodeName(clearpart_node) = CLEARPART then
+			settle_node := &xml.getFirstChild(clearpart_node);
+		end if;
+		settle_cnt := 1;
+		-- Цикл по тэгу SETTLE
+		loop
+			--&debug('&xml.getNodeType(settle_node)='||&xml.getNodeType(settle_node)||' &xml.getNodeName(settle_node) = '||&xml.getNodeName(settle_node), 0)	
+			if &xml.getNodeType(settle_node) = 3 then
+				 settle_node:= &xml.getNextSibling(settle_node);
+			end if;
+						
+			exit when &xml.IsNull(settle_node) or &xml.getNodeName(settle_node) != SETTLE;
+
+			f_ExtSettleCode := null;
+			
+			node_map := &xml.getAttributes(settle_node);	
+			for i in 0..&xml.getLength(node_map)-1 loop
+				attr_node := &xml.item(node_map, i);
+				case &xml.GetNodeName(attr_node) of
+					:'ExtSettleCode'		: &safe_set(f_ExtSettleCode, getVal(attr_node));
+				end;
+			end loop;
+			
+			--<SESSION >
+			session_cnt := 1;	
+			session_node := &xml.getFirstChild(settle_node);
+			-- Цикл по тэгу SESSION
+			loop
+				if &xml.getNodeType(session_node) = 3 then
+					 session_node:= &xml.getNextSibling(session_node);
+				end if;
+							
+				exit when &xml.IsNull(session_node) or &xml.getNodeName(session_node) != SESSION;
+				
+				&debug('session node №'||session_cnt||' name '||&xml.getNodeName(session_node), 0)	
+				
+				f_rejim := null;
+				node_map := &xml.getAttributes(session_node);	
+				for i in 0..&xml.getLength(node_map)-1 loop
+					attr_node := &xml.item(node_map, i);
+					if &xml.GetNodeName(attr_node) =  'SessionName' then
+						&safe_set(f_rejim, getVal(attr_node));
+					end if;
+				end loop;
+				
+				
+				-- <CURRPAIR CurrencyId="USD" CurrencyName="Доллар США" CoCurrencyId="RUB" CoCurrencyName="Российский рубль">
+				curr_cnt := 1;	
+				curr_node := &xml.getFirstChild(session_node);
+				-- Цикл по тэгу CURRPAIR
+				loop
+					if &xml.getNodeType(curr_node) = 3 then
+						 curr_node:= &xml.getNextSibling(curr_node);
+					end if;
+					
+					exit when &xml.IsNull(curr_node) or &xml.getNodeName(curr_node) != CURRPAIR;
+					
+					&debug('currpair node №'||curr_cnt||' name '||&xml.getNodeName(curr_node), 0)	
+					
+					-- <SECURITY SecurityId="USD000UTSTOM" SecShortName="USDRUB_TOM" SettleDate="2011-02-28" FaceValue="1" LotSize="1000">
+					sec_cnt := 1;
+					secur_node:= &xml.getFirstChild(curr_node);
+					-- Цикл по тэгу SECURITY
+					loop
+					
+						if &xml.getNodeType(secur_node) = 3 then
+							 secur_node := &xml.getNextSibling(secur_node);
+						end if;
+						
+						exit when  &xml.IsNull(secur_node) or &xml.getNodeName(secur_node) != SECUR;
+						
+						&debug('security node №'||sec_cnt||' name '||&xml.getNodeName(secur_node), 0)	
+						f_cb_code := null;	
+						f_cb_name := null;
+						
+						node_map := &xml.getAttributes(secur_node);	
+						for i in 0..&xml.getLength(node_map)-1 loop
+							attr_node := &xml.item(node_map, i);
+							case &xml.GetNodeName(attr_node) of
+								:'SecurityId'	: &safe_set(f_cb_code, getVal(attr_node));
+								:'SecShortName'	: &safe_set(f_cb_name, getVal(attr_node));
+								--:'SettleDate'	: if doc_date is null then doc_date := parseDate(getVal(attr_node)); end if;
+							end;
+						end loop;	
+						
+						var v_str varchar2(500);
+						var err varchar2(500);
+						v_str := ::[FP_TUNE].[LIB].get_str_value('SALE_SWAP_CODES');
+						
+						for (
+							select	x(regexp_substr(v_str, '[^,]+', 1, level) : str)
+					      	in		dual%rowtype
+					      	connect by level <= regexp_count(v_str, '[^,]+')
+					     	)
+						loop
+							if substr(f_cb_name, -1 * length(x.str)) = x.str then
+								-- служебная запись по SWAP сделке
+								err := 'Служебная информация по SWAP (' || f_cb_code || ' ' || f_cb_name || ') пропущена.';
+								exit;
+							end if;
+						end loop;					
+						
+						if err is not null then
+							mess2pipe(err);
+							secur_node := &xml.getNextSibling(secur_node);
+							sec_cnt := sec_cnt + 1;						
+							continue;
+						end if;	
+	
+						--<SETTLEDATE>
+						SETTLEDATE_cnt := 1;
+						SETTLEDATE_node:= &xml.getFirstChild(secur_node);
+						-- Цикл по тэгу SETTLEDATE
+						loop
+							if &xml.getNodeType(SETTLEDATE_node) = 3 then
+								 SETTLEDATE_node := &xml.getNextSibling(SETTLEDATE_node);
+							end if;	
+		
+							exit when &xml.IsNull(SETTLEDATE_node) or &xml.getNodeName(SETTLEDATE_node) != SETTLEDATE;
+							&debug('SETTLEDATE node №'||SETTLEDATE_cnt||' name '||&xml.getNodeName(SETTLEDATE_node), 0)	
+	
+							node_map := &xml.getAttributes(SETTLEDATE_node);	
+							for i in 0..&xml.getLength(node_map)-1 loop
+								attr_node := &xml.item(node_map, i);
+								case &xml.GetNodeName(attr_node) of
+									:'SettleDate'	: f_date := parseDate(getVal(attr_node));
+								end;
+							end loop;	
+	
+							--<GROUP TradeGroup="T">
+							GROUP_cnt := 1;
+							GROUP_node:= &xml.getFirstChild(SETTLEDATE_node);
+							-- Цикл по тэгу GROUP
+							loop
+								if &xml.getNodeType(GROUP_node) = 3 then
+									 GROUP_node := &xml.getNextSibling(GROUP_node);
+								end if;	
+			
+								exit when &xml.IsNull(GROUP_node) or &xml.getNodeName(GROUP_node) != GROUP_;
+								&debug('GROUP node №'||GROUP_cnt||' name '||&xml.getNodeName(GROUP_node), 0)	
+								
+								f_num		:= null;
+			
+								node_map := &xml.getAttributes(GROUP_node);	
+								for i in 0..&xml.getLength(node_map)-1 loop
+									attr_node := &xml.item(node_map, i);
+									if &xml.GetNodeName(attr_node) = 'TradeGroup' then
+										&safe_set(TradeGroup, getVal(attr_node));
+									end if;
+								end loop;
+								
+								--<MAINSEC >
+								MAINSEC_cnt := 1;
+								MAINSEC_node:= &xml.getFirstChild(GROUP_node);
+								-- Цикл по тэгу MAINSEC
+								loop
+									if &xml.getNodeType(MAINSEC_node) = 3 then
+										 MAINSEC_node := &xml.getNextSibling(MAINSEC_node);
+									end if;	
+				
+									exit when &xml.IsNull(MAINSEC_node) or &xml.getNodeName(MAINSEC_node) != MAINSEC;
+									&debug('MAINSEC node №'||MAINSEC_cnt||' name '||&xml.getNodeName(MAINSEC_node), 0)
+								
+									-- <RECORDS TradeNo="48662" BuySell="S" OrderNo="10297841" AcceptNo="48662S" TradeTime="12:06:33" TradeType="T" Decimals="4" Price="28.923" LotQuantity="925" Value="26753775" Period="N" SettleCode="T1" UserId="MD1111100002" UserExchangeId="MICX"/>
+									-- TradeDeriv	Сделка с ПФИ (Y - Да, N - Нет)	Да	Character	1
+									rec_cnt := 1;
+									rec_node := &xml.getFirstChild(MAINSEC_node);
+									
+									-- Цикл по тэгу RECORDS
+									loop
+										if &xml.getNodeType(rec_node) = 3 then
+											 rec_node := &xml.getNextSibling(rec_node);
+										end if;	
+										
+										exit when &xml.IsNull(rec_node) or &xml.getNodeName(rec_node) != RECORDS;
+										&debug('rec node №'||rec_cnt||' name '||&xml.getNodeName(rec_node), 0)	
+										f_num		:= null;
+										f_vid		:= null;
+										f_order_num	:= null;
+										f_time		:= null;
+										f_price		:= null;
+										f_quantity	:= null;
+										f_summa		:= null;
+										f_trader	:= null;
+										f_note		:= null;
+										f_tip		:= null;
+										f_comis		:= null;
+										f_commis_barg		:= null;
+										f_commis_its		:= null;
+										f_commis_clearing	:= null;
+										f_TradeDeriv := null;
+										
+										node_map := &xml.getAttributes(rec_node);	
+										for i in 0..&xml.getLength(node_map)-1 loop
+											attr_node := &xml.item(node_map, i);
+											case &xml.GetNodeName(attr_node) of
+												:'TradeNo'		: &safe_set(f_num, getVal(attr_node));
+												:'BuySell'		: &safe_set(f_vid, getVal(attr_node));
+												:'OrderNo'		: &safe_set(f_order_num, getVal(attr_node));
+												:'TradeTime'	: &safe_set(f_time, getVal(attr_node));
+												:'Price'			: &safe_set(f_price, getVal(attr_node));
+												:'Quantity'		: &safe_set(f_quantity, getVal(attr_node));
+												:'Value'			: &safe_set(f_summa, getVal(attr_node));
+												:'UserId'			: &safe_set(f_trader, getVal(attr_node));
+												:'BrokerRef'	: &safe_set(f_note, getVal(attr_node));
+												:'TradeType'	: &safe_set(f_tip, getVal(attr_node));
+												:'ExchComm'		: &safe_set(f_commis_barg, getVal(attr_node));
+												:'ITSComm'		: &safe_set(f_commis_its, getVal(attr_node));
+												:'ClrComm'		: &safe_set(f_commis_clearing, getVal(attr_node));
+												:'SumComm'		: &safe_set(f_comis, getVal(attr_node));
+												:'TradeDeriv'	: &safe_set(f_TradeDeriv, getVal(attr_node));
+											end;
+										end loop;
+	
+										rec_node := &xml.getNextSibling(rec_node);
+										rec_cnt := rec_cnt + 1;
+										
+										if f_contragent is null then
+											-- BS00354505. Ищем секцию по режиму торгов
+											for (
+												select	s(s : ID,
+															s%parent : parent)
+												in		::[MT_SECTIONS], (::[MT_REJIM_S] collections : r) collections
+												where	s%parentclass = 'MARKET_PLACE' and
+														s.[REJIM_S] = r%collection and
+														r.[REJIM].[NAME] = f_rejim
+												)
+											loop
+												v_place%id := s.parent;
+												exit;
+											end loop;
+											
+											if v_place is null then
+												pragma error('Сделка № ' || f_num || '. Не найдена секция с режимом торгов "' || f_rejim || '"!');
+											end if;
+										else
+											-- BS00207449. определение контрагента	
+											begin
+												locate v_sect in ::[MT_SECTIONS] collections where v_sect%parentclass = 'MARKET_PLACE' and v_sect.[MARKET_CODE] = f_contragent;
+												
+												v_place%id := v_sect%parent;
+											exception
+												when NO_DATA_FOUND then
+													pragma error('Сделка № ' || f_num || '. Не найдена секция с кодом "' || f_contragent || '"!');
+											end;
+										end if;									
+										
+										rec%init(false, true);
+										
+										cnt_all := cnt_all + 1;
+					
+										str4mess := 'Сделка № ' || f_num || '.';
+										
+										if TradeGroup = 'B' then
+											mess2pipe(str4mess || ' не загружена, т.к. это сделка с бивалютной корзиной');
+											&inc(cnt_error)
+											continue;
+										end if;
+															
+										if f_vid = 'B' then
+											ns_origin_ident := 'BUY';
+										elsif f_vid = 'S' then
+											ns_origin_ident := 'SELL';
+										else
+											mess2pipe(str4mess || ' Неизвестный код вида сделки "' || f_vid || '". Импорт запрещен.');
+											&inc(cnt_error)
+											continue;
+										end if;
+					
+										begin
+											locate vid_r in ::[NS_ORIGIN] all where vid_r.[IDENT] = ns_origin_ident;
+										exception when NO_DATA_FOUND then
+											mess2pipe(str4mess || ' В справочнике "Тип изменения в портфеле ЦБ банка" отсутствует запись с идентификатором ' || ns_origin_ident || '. Импорт запрещен.');
+											&inc(cnt_error)
+											continue;
+										end;
+				
+										-- поиск в массиве буфера приема сделок
+										declare
+											tr	ref [MT_TRADE_BUF];
+										begin
+											pragma hint( 'index(a1 IDX_Z#MT_TRADE_BUF_COLL_N_V_D)');
+											
+											locate tr in p_market.[TRADE_BUF]
+												where tr.[NUM] = f_num
+												  and tr.[VID] = vid_r
+												  and ReportDate <= tr.[D]
+												  and tr.[D] < ReportDate + 1;
+											
+											cnt_repeat := cnt_repeat + 1;
+											
+											-- '2' - соощение о попытке повторного импорта сделки
+											if P_POVTOR then
+												mess2pipe(str4mess || ' Сделка с таким номером, видом и датой уже есть в массиве принятых сделок этой торговой площадки. Импорт запрещен.');
+											end if;
+											
+											continue;
+												
+										exception when NO_DATA_FOUND then
+											null;
+										end;
+				
+										-- цикл по секциям торговой площадки
+										for v_s in p_market.[SECTIONS] loop
+											begin
+												-- поиск в секции режима торгов совпадающего по наименованию с режимом в сделке из файла импорта
+												locate rej_s in v_s.[REJIM_S] where rej_s.[REJIM].[NAME] = f_rejim;
+												section_ref := v_s; -- запомним ссылку на секцию
+												
+												exit;
+											exception when NO_DATA_FOUND then
+												null;
+											end;
+										end loop;
+					
+										if section_ref is null then
+											mess2pipe(str4mess || ' Режим торгов "' || f_rejim || '" не найден ни в одной из секций этой торговой площадки. Импорт запрещен.');
+											&inc(cnt_error)
+											continue;
+										end if;
+				
+										rec.[NUM] := f_num;
+										rec.[PAYMENT_DATE] := f_date;
+										rec.[D] := to_date(to_char(ReportDate, 'dd/mm/yyyy') || ' ' || trim(f_time), 'dd/mm/yyyy hh24:mi:ss');
+										rec.[ORDER_NUM] := f_order_num;
+										rec.[CB_NAME] := f_cb_name;
+										rec.[REJIM] := f_rejim;
+										rec.[CB_CODE] := f_cb_code;
+										rec.[VID] := vid_r;
+										rec.[CONTRAGENT] := f_contragent;
+										rec.[COAG_ID] := v_place.[DOSSIER];
+										v_client := v_place.[DOSSIER];
+										rec.[PRICE] := to_number(replace(f_price, ',', '.'));
+										rec.[QUANTITY] := to_number(replace(f_quantity, ',', '.'));
+										rec.[SUMMA] := to_number(replace(f_summa, ',', '.'));
+										rec.[TRADER] := f_trader;
+										rec.[INVESTOR] := f_investor;
+										rec.[NOTE] := f_note;
+										rec.[REJIM_S] := rej_s;
+										rec.[TIP] := f_tip;
+										rec.[COMIS] := to_number(f_comis);
+										rec.[COMMIS_BARG] := to_number(f_commis_barg);
+										rec.[COMMIS_ITS] := to_number(f_commis_its);
+										rec.[COMMIS_CLEARING] := to_number(f_commis_clearing);
+										rec.[IS_PFI] := (nvl(f_TradeDeriv, 'N') = 'Y');
+										rec.[EXTSETTLECODE] := f_ExtSettleCode;
+										
+										v_errm := ::[MARKET_PLACE].[IMP_TRADES_FOREX].form_sale(rec, f_vid, v_cur_in, v_cur_out, v_deal_type, v_oper_type, v_pay_to_deal);
+										
+					rtl.debug_Pipe(v_cur_in.[ACCOUNT].[1].[2],0);
+										if v_errm is  not null then
+											mess2pipe(v_errm);
+											&inc(cnt_error)
+											continue;
+										end if;
+					
+										-- Поиск дубля в конверсионных операциях
+										declare
+											v_tmp_sale	ref [SALE];
+										begin
+											v_tmp_sale := ::[MARKET_PLACE].[IMP_TRADES_FOREX].check_sale(rec, v_client, v_cur_in, v_cur_out, v_pay_to_deal, p_market);
+				
+											if v_tmp_sale is not null then
+												cnt_repeat := cnt_repeat + 1;
+												
+												-- '2' - соощение о попытке повторного импорта сделки
+												if P_POVTOR then
+													mess2pipe(' Сделка с таким номером, торговой площадкой, видом, датой, контрагентом и валютами принято/выдано уже есть в продукте "Конверсионные операции". Импорт запрещен.');
+												end if;
+											
+												continue;
+											end if;
+										end;
+				
+										-- Занести сделку в массив "Приём сделок"
+										p_market.[TRADE_BUF]%insert(rec);
+				
+										-- Если выставлен флаг, то сразу создадим
+										if p_make_oper then
+											::[MARKET_PLACE].[IMP_TRADES_FOREX].new_sale(rec, v_client, v_cur_in, v_cur_out, v_deal_type, v_oper_type, v_pay_to_deal, section_ref, p_market);
+										end if;
+					
+										cnt_success := cnt_success + 1;
+										
+										if P_USPEH then
+											mess2pipe(str4mess || ' Импортирована.'); -- '1' - соощение об успешном импорте сделки
+				
+										end if;
+										---------------------------------------------------------------
+										
+										
+									end loop;--records
+									MAINSEC_node:= &xml.getNextSibling(MAINSEC_node);
+									MAINSEC_cnt := MAINSEC_cnt + 1;
+								end loop;--MAINSEC
+								GROUP_node:= &xml.getNextSibling(GROUP_node);
+								GROUP_cnt := GROUP_cnt + 1;
+							end loop;--group
+							settledate_node:= &xml.getNextSibling(settledate_node);
+							settledate_cnt := settledate_cnt + 1;
+						end loop;--settledate
+						secur_node := &xml.getNextSibling(secur_node);
+						sec_cnt := sec_cnt + 1;
+					end loop; --security
+					curr_node:= &xml.getNextSibling(curr_node);
+					curr_cnt := curr_cnt + 1;	
+				end loop; --curr
+				session_node:= &xml.getNextSibling(session_node);
+				session_cnt := session_cnt + 1;
+			end loop;--session	
+			settle_node := &xml.getNextSibling(settle_node);
+			settle_cnt := settle_cnt + 1;	
+		end loop; --settle
+		clearpart_node:= &xml.getNextSibling(clearpart_node);
+		clearpart_cnt := clearpart_cnt + 1;
+	end loop;--clearpart	
+	
+	mess2pipe('Всего сделок в файле - ' || to_char(cnt_all));
+	mess2pipe('  из них, успешно импортировано - ' || to_char(cnt_success));
+	
+	if cnt_repeat > 0 then
+		mess2pipe('  уже существуют в системе - ' || to_char(cnt_repeat));
+	end if;
+	
+	if cnt_error > 0 then
+		mess2pipe('  с ошибками - ' || to_char(cnt_error));
+	end if;
+	
+	if cnt_error > 0 then
+		return false;
+	else
+		return true;
+	end if;
+end;
+
+function file_processing_choose(p_market ref [MARKET_PLACE], P_USPEH boolean, P_POVTOR boolean, P_MAKE_OPER boolean) return boolean is
+	ReportDate		date;
+	node_map			&xml.DOMNamedNodeMap;
+	attr_node			&xml.DOMNode;
+	reqs_node			&xml.DOMNode;
+	cux23_node		&xml.DOMNode;
+begin
+	-- <DOC_REQUISITES DOC_DATE="2011-02-25" DOC_NO="000666673/CU" DOC_TYPE_ID="CUX23" SENDER_ID="MM0000100000" RECEIVER_ID="MB1111100000"/>
+	&debug('Root node '||&xml.getNodeName(root_node), 0)
+	
+	if not &xml.IsNull(root_node) and &xml.getNodeName(root_node) = M_DOC  and &xml.hasChildNodes(root_node) then
+		reqs_node := &xml.getFirstChild(root_node);
+		if &xml.getNodeType(reqs_node) = 3 then
+			reqs_node := &xml.getNextSibling(reqs_node);
+		end if;
+
+		cux23_node := &xml.getNextSibling(reqs_node);
+		if &xml.getNodeType(cux23_node) = 3 then
+			cux23_node := &xml.getNextSibling(cux23_node);
+		end if;
+		&debug('cux23_node '||&xml.getNodeName(cux23_node), 0)
+		
+		if &xml.getNodeName(cux23_node) <> CUX23 then
+			pragma error('Файл не является Выпиской из реестра сделок (CUX23) ММВБ');
+		end if;
+	
+		node_map := &xml.getAttributes(cux23_node);	
+		for i in 0..&xml.getLength(node_map)-1 loop
+			attr_node := &xml.item(node_map, i);
+			case &xml.GetNodeName(attr_node) of
+				:'ReportDate'	: ReportDate := parseDate(getVal(attr_node));
+			end;
+		end loop;	
+	end if;
+
+	if ReportDate is null then
+		return file_processing(p_market, P_USPEH, P_POVTOR, P_MAKE_OPER);
+	else
+		if ReportDate >= ::[FP_TUNE].[LIB].get_date_value('BEGIN_CUX23_FORMAT', null, '0') then
+			return file_processing(p_market, P_USPEH, P_POVTOR, P_MAKE_OPER);
+		else
+			return file_processing_old(p_market, P_USPEH, P_POVTOR, P_MAKE_OPER);
+		end if;
+	end if;
+end;
+PSH_IMP_TRDS_F_X (
+	@name('Торговая площадка')                              P_MARKET    in [MARKET_PLACE_REF],
+	@name('Сообщения: попытка повторного импорта')          P_POVTOR    in [BOOLEAN],
+	@name('Сообщения: успешный импорт')                     P_USPEH     in [BOOLEAN],
+	@name('Файл')                                           P_SOURCE    in [FILE$LOAD],
+	@name('Лог-файл')                                       P_LOG       in [FILE$LOAD],
+	@name('Автоматически создавать конверсионную операцию') P_MAKE_OPER in [BOOLEAN]
+) return [BOOLEAN] is
+
+validate is
+i			integer;
+begin
+	if p_message = 'DEFAULT' then
+		if PrevFile is not null then
+		  P_SOURCE.[SRC_NAME] := PrevFile; --Имя файла в директории на клиенте
+		end if;
+		
+		P_MARKET := this;
+		P_MAKE_OPER := nvl(::[DEFVALS].[SLIB].RestoreBool(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_MAKE_OPER'), false);
+
+		-- Подготовка структуры для работы с исходным файлом
+		ServerDir := [SYSTEM_PARAMS]::[GET]('PATH', Null); --Директория на сервере
+		
+		P_SOURCE.[SRC_PATH] := [FP_TUNE]::[LIB].get_str_value('SALE_PATH_IMP_TRADES'); --Директория на клиенте
+		P_SOURCE.[SRC_TYPE] := instr(upper(P_SOURCE.[SRC_PATH]),upper(ServerDir)) <> 0;
+		P_SOURCE.[DST_TYPE] := true;
+		P_SOURCE.[DST_PATH] := ServerDir; --Директория на сервере
+		P_SOURCE.[DST_NAME] := P_SOURCE.[SRC_NAME]; --Имя файла в директории на сервере
+		P_SOURCE.[DST_DELETE] := true; --Удалить файл на сервере после выполнения
+		
+		if P_SOURCE.[SRC_NAME] is not null then
+			i := instr(P_SOURCE.[SRC_NAME], '.');
+			
+			if i = 0 then -- нет '.' в имени файла
+				f_name_log := P_SOURCE.[SRC_NAME] || '_log';
+			else
+				f_name_log := substr(P_SOURCE.[SRC_NAME], 1, i - 1) || '_log.' || substr(P_SOURCE.[SRC_NAME], i + 1);
+			end if;
+		end if;
+		
+		-- Подготовка структуры для работы с лог-файлом
+		-- Лог-файл сначала открывается на сервере
+		P_LOG.[SRC_TYPE]  := true;
+		P_LOG.[SRC_PATH]  := ServerDir; 			--Директория на сервере
+		P_LOG.[SRC_NAME]  := f_name_log; 			--Имя файла в директории на сервере
+		P_LOG.[SRC_DELETE]:= True; 					--Удалить файл на сервере после выполнения
+		P_LOG.[DST_TYPE]  := P_SOURCE.[SRC_TYPE];
+		P_LOG.[DST_PATH]  := P_SOURCE.[SRC_PATH]; 	--Директория на клиенте
+		P_LOG.[DST_NAME]  := f_name_log; 			--Имя файла в директории на клиенте
+	
+	elsif p_message = 'VALIDATE' then
+		debug_pipe('p_info='||p_info,dp); --Башкиров В.Г. 01.10.2018
+		
+		--Башкиров В.Г. 01.10.2018
+		debug_pipe('(1) Тип источника (false-клиент,true-сервер)   P_LOG.[SRC_TYPE]  ='||P_LOG.[SRC_TYPE]  ,dp);
+		debug_pipe('(1) Директория на сервере                      P_LOG.[SRC_PATH]  ='||P_LOG.[SRC_PATH]  ,dp);
+		debug_pipe('(1) Имя файла в директории на сервере          P_LOG.[SRC_NAME]  ='||P_LOG.[SRC_NAME]  ,dp);
+		debug_pipe('(1) Удалить файл на источнике после выполнения P_LOG.[SRC_DELETE]='||P_LOG.[SRC_DELETE],dp);
+		debug_pipe('(1) Тип приемника (false-клиент,true-сервер)   P_LOG.[DST_TYPE]  ='||P_LOG.[DST_TYPE]  ,dp);
+		debug_pipe('(1) Директория на клиенте                      P_LOG.[DST_PATH]  ='||P_LOG.[DST_PATH]  ,dp);
+		debug_pipe('(1) Имя файла в директории на клиенте          P_LOG.[DST_NAME]  ='||P_LOG.[DST_NAME]  ,dp);
+		debug_pipe('(1) Удалить файл на приемнике после выполнения P_LOG.[DST_DELETE]='||P_LOG.[DST_DELETE],dp);
+		if p_info = 'OK' then
+			if instr(upper(P_SOURCE.[SRC_PATH]),upper(ServerDir))<>0 then
+				-- Файлы изначально находятся на сервере
+				debug_pipe('Файлы изначально находятся на сервере',dp);
+				
+				P_SOURCE.[SRC_TYPE] = P_LOG.[DST_TYPE] = P_SOURCE.[DST_TYPE] = P_LOG.[SRC_TYPE] := true;
+				P_LOG.[SRC_PATH] := P_SOURCE.[SRC_PATH];
+			else
+				-- Файлы изначально находятся на локальном устройстве
+				debug_pipe('Файлы изначально находятся на локальном устройстве',dp);
+				
+				P_SOURCE.[SRC_TYPE] = P_LOG.[DST_TYPE] := False;
+				P_SOURCE.[DST_PATH] = P_LOG.[SRC_PATH] := ServerDir;
+			end if;
+		  	P_SOURCE.[DST_NAME] := P_SOURCE.[SRC_NAME]; --Имя файла в директории на сервере
+
+			i := instr(P_SOURCE.[SRC_NAME], '.');
+			if i = 0 then -- нет '.' в имени файла
+				f_name_log := P_SOURCE.[SRC_NAME] || '_log';
+			else
+				f_name_log := substr(P_SOURCE.[SRC_NAME],1,i-1) || '_log.' || substr(P_SOURCE.[SRC_NAME],i+1);
+			end if;
+			P_LOG.[SRC_NAME] := f_name_log; --Имя файла в директории на сервере
+			P_LOG.[DST_NAME] := f_name_log; --Имя файла в директории на клиенте
+			
+			debug_pipe('Имя файла в директории на сервере '||P_LOG.[SRC_NAME],dp);
+			debug_pipe('Имя файла в директории на клиенте '||P_LOG.[DST_NAME],dp);
+		
+		
+		
+		elsif p_info like 'P_SOURCE.%' then
+			P_SOURCE.[SRC_TYPE] := instr(upper(P_SOURCE.[SRC_PATH]),upper(ServerDir))<>0;
+			if P_SOURCE.[SRC_TYPE] then
+				P_SOURCE.[DST_PATH] := P_SOURCE.[SRC_PATH];
+			else
+				P_SOURCE.[DST_PATH] := ServerDir;
+			end if;
+			P_LOG.[DST_PATH] := P_SOURCE.[SRC_PATH];
+		end if;
+
+		--Башкиров В.Г. 01.10.2018
+		debug_pipe('----------', dp);
+		debug_pipe('(2) Тип источника (false-клиент,true-сервер)   P_LOG.[SRC_TYPE]  ='||P_LOG.[SRC_TYPE]  ,dp);
+		debug_pipe('(2) Директория на сервере                      P_LOG.[SRC_PATH]  ='||P_LOG.[SRC_PATH]  ,dp);
+		debug_pipe('(2) Имя файла в директории на сервере          P_LOG.[SRC_NAME]  ='||P_LOG.[SRC_NAME]  ,dp);
+		debug_pipe('(2) Удалить файл на источнике после выполнения P_LOG.[SRC_DELETE]='||P_LOG.[SRC_DELETE],dp);
+		debug_pipe('(2) Тип приемника (false-клиент,true-сервер)   P_LOG.[DST_TYPE]  ='||P_LOG.[DST_TYPE]  ,dp);
+		debug_pipe('(2) Директория на клиенте                      P_LOG.[DST_PATH]  ='||P_LOG.[DST_PATH]  ,dp);
+		debug_pipe('(2) Имя файла в директории на клиенте          P_LOG.[DST_NAME]  ='||P_LOG.[DST_NAME]  ,dp);
+		debug_pipe('(2) Удалить файл на приемнике после выполнения P_LOG.[DST_DELETE]='||P_LOG.[DST_DELETE],dp);
+	end if;
+end;
+
+execute is
+res boolean;
+begin
+	if P_MARKET is null then
+		pragma error('Не задана торговая площадка');
+	end if;
+
+	g#file_log := stdio.open(P_LOG.[SRC_PATH], P_LOG.[SRC_NAME], 'a'); -- append
+
+	mess2pipe('Импорт файла - ' || P_SOURCE.[SRC_PATH] || P_SOURCE.[SRC_NAME]);
+
+	makeXMLDoc(P_SOURCE);
+	res := file_processing_choose(P_MARKET, P_USPEH, P_POVTOR, P_MAKE_OPER);
+	
+	mess2pipe('Импорт завершен');
+	mess2pipe(' ');
+
+	stdio.close(g#file_log);
+	
+	PrevFile := P_SOURCE.[DST_NAME];
+	::[DEFVALS].[SLIB].SaveBool(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_MAKE_OPER',P_MAKE_OPER);
+	
+	return res;
+exception when others then
+	if g#file_log is not null then
+		stdio.close(g#file_log);
+	end if;
+
+	raise;
+end;
+end;
+end;

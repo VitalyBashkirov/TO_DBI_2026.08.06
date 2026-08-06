@@ -1,0 +1,109 @@
+class RKO;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ]Печать комплекта документов')
+@tag('COPIED')
+method PSH_PRINT_COMPLC is
+
+@name('Виды комплектов документов')     public V_DOCUMS                  [DOC_TYPES];
+@name('Документы комплекта для печати') public V_DOCUM_COMPLECT table of [PSH_COMPLECT_DOC];
+@name('Клиент-скрипт')                  public V_VB                      [STRING_32000];
+procedure print_report(rep varchar2, v_code varchar2, variable varchar2) is
+begin
+    if variable is null then
+    	stdio.put_line_buf('<% PLPCALL %THIS%.'||rep||'(%PARAM%.P_BATCH=>''true'')%>');
+    else
+
+   		 stdio.put_line_buf('<% PLPCALL %THIS%.'||rep||'('||variable||'=>'''||::[SHABLON_DOC]([CODE] = v_code)||''', %PARAM%.P_BATCH=>''true'')%>');   
+    end if;
+end;
+PSH_PRINT_COMPLC (
+	@name('Подписант') P_PERSONS in [PERSONS_POS_REF]
+) is
+
+validate is
+v_doc     ref [PSH_DOCUM_TYPES]; -- updated CHANGE_QUALIFIER DOCUM_TYPES->PSH_DOCUM_TYPES 29/09/25
+v_str     varchar2(128);
+n         number :=0;
+n_temp    number :=0;
+v_idx integer;
+begin
+
+if p_message = 'DEFAULT' then
+	p_info := 'OK';
+	--select x(x%id) in ::[PSH_DOCUM_TYPES] where x.[CODE]='DOCS_OPEN_ACC' and rownum = 1 into V_DOCUMS;
+
+	P_PERSONS:=	nvl(::[DEFVALS].[SLIB].RestoreRef(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME, 'V_CASTA_1B'),P_PERSONS);
+elsif p_message = 'VALIDATE' then	   	
+	if p_info = 'OK' then
+	v_idx := V_DOCUM_COMPLECT.first;
+	
+	while v_idx is not null loop
+	--	debug_pipe('NAME = '||V_DOCUM_COMPLECT(v_idx).[PSH_NAME]||'; TITLE='||V_DOCUM_COMPLECT(v_idx).[PSH_TITLE], 0); -- updated CHANGE_QUALIFIER NAME->PSH_NAME 20/02/26 -- updated CHANGE_QUALIFIER TITLE->PSH_TITLE 20/02/26
+	if V_DOCUM_COMPLECT(v_idx).[PSH_CHECKING] then -- updated CHANGE_QUALIFIER CHECKING->PSH_CHECKING 20/02/26
+		print_report(V_DOCUM_COMPLECT(v_idx).[PSH_PRINT_CODE], V_DOCUM_COMPLECT(v_idx).[PSH_NAME], V_DOCUM_COMPLECT(v_idx).[PSH_VARIABLE]); -- updated CHANGE_QUALIFIER PRINT_CODE->PSH_PRINT_CODE 20/02/26 -- updated CHANGE_QUALIFIER NAME->PSH_NAME 20/02/26 -- updated CHANGE_QUALIFIER VARIABLE->PSH_VARIABLE 20/02/26
+	end if;
+    
+	v_idx := V_DOCUM_COMPLECT.next(v_idx);
+	end loop;
+
+	else
+		V_DOCUM_COMPLECT := null;
+		CSMD.COMMAND(V_VB, 'Grid3.text(1,2) = ""');
+  		CSMD.COMMAND(V_VB, 'Grid3.text(1,1) =false');
+  		CSMD.COMMAND(V_VB, 'Grid3.text(1,3) =""');
+  		CSMD.COMMAND(V_VB, 'Grid3.text(1,4) =""');
+   		for otch in V_DOCUMS.[PSH_COMPLECT_DOC] loop -- updated CHANGE_QUALIFIER COMPLECT_DOCUM->PSH_COMPLECT_DOC 20/02/26
+     	   n := n+1;
+  		 end loop;
+  	    	CSMD.COMMAND(V_VB, 'Grid3.AddRow');
+        	for otch in V_DOCUMS.[PSH_COMPLECT_DOC] loop  -- updated CHANGE_QUALIFIER COMPLECT_DOCUM->PSH_COMPLECT_DOC 20/02/26
+        	CSMD.COMMAND(V_VB, 'Grid3.text(1,2) = "'||otch.[PSH_NAME]||'"'); -- updated CHANGE_QUALIFIER NAME->PSH_NAME 20/02/26
+        	CSMD.COMMAND(V_VB, 'Grid3.text(1,3) = "'||otch.[PSH_VARIABLE]||'"'); -- updated CHANGE_QUALIFIER VARIABLE->PSH_VARIABLE 20/02/26
+        	CSMD.COMMAND(V_VB, 'Grid3.text(1,4) = "'||otch.[PSH_PRINT_CODE]||'"'); -- updated CHANGE_QUALIFIER PRINT_CODE->PSH_PRINT_CODE 20/02/26
+        	CSMD.COMMAND(V_VB, 'Grid3.text(1,5) = "'||otch.[PSH_TITLE]||'"'); -- updated CHANGE_QUALIFIER TITLE->PSH_TITLE 20/02/26
+        	CSMD.COMMAND(V_VB, 'Grid3.text(1,1) =true');
+        	n_temp:=n_temp + 1;
+       			 if n_temp < n then
+     				   CSMD.COMMAND(V_VB, 'Grid3.AddRow');
+      	 	 	 end if;   
+         end loop;
+	end if;		
+end if;	
+end;
+
+execute is
+
+begin
+
+--Печать заявления на открытие счета в представлении РКО
+--stdio.put_line_buf('<% PLPCALL %THIS%.[PRINT_WORD_XML_P](%PARAM%.P_SHABLON=>'''||::[SHABLON_DOC]([CODE] = 'Заявление на открытие счета ФЛ 20052024')||''')%>');
+                     
+--Печать ?Договор текущего счета физлица 20052024?: 
+--stdio.put_line_buf('<% PLPCALL %THIS%.[PRINT_WORD_XML_P](%PARAM%.P_SHABLON=>'''||::[SHABLON_DOC]([CODE] = 'Договор текущего счета физлица 20052024')||''')%>');
+--stdio.put_line_buf('<% PLPCALL %THIS%.[PRINT_WORD_XML_E](%PARAM%.P_SHABLON=>'''||::[SHABLON_DOC]([CODE] = 'Договор текущего счета физлица 20052024')||''')%>');
+
+--Печать Карточки образца подписи? 
+ -- stdio.put_line_buf('<% CALL CLIENT PSH_0401026_N_1P '||this.[CLIENT]%id||' %>');
+  -- stdio.put_line_buf('<% PLPCALL %THIS%.[CLIENT].[PSH_0401026_N](%PARAM%.P_BATCH=>''true'') %>');
+
+--Печатать ?Анкета ФЛ?
+-- stdio.put_line_buf('<% PLPCALL %THIS%.[CLIENT].[PSH_KLIENT_WORDP](%VAR%.V_FILE_NAME=>'''||::[SHABLON_DOC]([CODE] = 'Анкета ФЛ 29.03.2024')||''')%>');
+--stdio.put_line_buf('<% PLPCALL %THIS%.[CLIENT].[PSH_KLIENT_WORD](%VAR%.V_FILE_NAME=>'''||::[SHABLON_DOC]([CODE] = 'Анкета ФЛ 29.03.2024')||''', %PARAM%.P_BATCH=>''true'')%>');
+ 
+ --Печать ?Согласие на обработку персональных данных?
+-- stdio.put_line_buf('<% PLPCALL %THIS%.[CLIENT].[PSH_KLIENT_WORDP](%VAR%.V_FILE_NAME=>'''||::[SHABLON_DOC]([CODE] = '2023_согласие_перс_данных_ перУспенский')||''')%>');
+--  stdio.put_line_buf('<% PLPCALL %THIS%.[CLIENT].[PSH_KLIENT_WORD](%VAR%.V_FILE_NAME=>'''||::[SHABLON_DOC]([CODE] = '2023_согласие_перс_данных_ перУспенский')||''', %PARAM%.P_BATCH=>''true'')%>');
+ 
+ --Приложение ?Отметки Банка к анкетам?
+-- stdio.put_line_buf('<% PLPCALL %THIS%.[CLIENT].[PSH_WRD_FIZCLANK](%PARAM%.P_SHABLON=>'''||::[SHABLON_DOC]([CODE] = 'АНК_ФИЗЛИЦА_3')||''')%>');
+-- stdio.put_line_buf('<% PLPCALL %THIS%.[CLIENT].[PSH_WRD_FIZCLANK](%PARAM%.P_SHABLON=>'''||::[SHABLON_DOC]([CODE] = 'АНК_ФИЗЛИЦА_3')||''', %PARAM%.P_BATCH=>''true'')%>');
+
+
+ 
+ null;
+
+end;
+end;
+end;

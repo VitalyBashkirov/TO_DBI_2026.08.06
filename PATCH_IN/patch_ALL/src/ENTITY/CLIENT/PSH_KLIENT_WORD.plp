@@ -1,0 +1,997 @@
+class CLIENT;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Печать Word Клиенты')
+@tag('COPIED')
+method PSH_KLIENT_WORD is
+
+@name('Данные для вывода')               public V_DATA       [STRING_32000];
+@name('Исходный договор')                public V_DOG        [CLIENT_REF];
+@name('Шаблон документа')                public V_FILE_NAME  [SHABLON_DOC_REF];
+@name('Дата')                            public P_DATE       [DATE];
+@name('Массив должностных лиц (банк)')   public V_ALL_BOSS_B [PERSONS_POS_ARR];
+@name('Должность 1(банк)')               public V_CASTA_1B   [PERSONS_POS_REF];
+@name('Должность 2(банк)')               public V_CASTA_2B   [PERSONS_POS_REF];
+@name('Банк')                            public V_OUR_BANK   [CL_CORP_REF];
+@name('Массив должностных лиц (клиент)') public V_ALL_BOSS_C [PERSONS_POS_ARR];
+@name('Должность 1(клиент)')             public V_CASTA_1C   [PERSONS_POS_REF];
+@name('Должность 2(клиент)')             public V_CASTA_2C   [PERSONS_POS_REF];
+@name('№ договора')                      public V_NUM_DOG    [STRING_30];
+@name('Дата расторжения')                public P_DATE_TERM  [DATE];
+@name('Открываемый счет')                public V_OPEN_ACC   [AC_FIN_REF];
+@name('Клиент')                          public V_THIS       [CLIENT_REF];
+@name('Срок')                            public V_SROK       [ONE_FROM_4];
+@name('Строка')                          public V_DEST       [STRING_32000];
+@name('Договор РКО')                     public V_RKO        [RKO_REF];
+@name('Первый счет РКО')                 public V_ACC_FIRST  [AC_FIN_REF];
+
+dp integer:=null; --управление debug_pipe
+fmt string(10):='dd/mm/yyyy';
+
+ADR_BANK string(120):='127006, г.Москва, вн.тер.г. муниципальный округ Тверской, ул.Малая Дмитровка, д.14, стр.4.';
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+--csOperDay		const date				:= ::[SYSTEM].[OP_DATE];
+OnDate date;
+
+-- собссно заполнение инфой
+
+-- Шаблон адреса
+V_ADR_MASK		varchar2(100):= 'POST_CODE,REGION_NCT,DISTRICT,CITY,STREET,HOUSE,KORPUS,FLAT';
+-- Реквизиты клиента
+V_CITY_C		ref [NAMES_CITY];--"Населенный пункт"
+V_OKATO_C		[STRING_2000];--"ОКАТО_клиент"
+V_ADRESS_C		[STRING_2000];--"Адрес (клиент)"
+V_ADRESS_C_POST	[STRING_2000];--"Почтовый адрес (клиент)"
+V_ADRESS_C_FACT	[STRING_2000];--"Факт адрес (клиент)"
+
+V_DEF_1C		[STRING_2000];--"Основание подписи 1(клиент)"
+V_CASTA_C1_RP	[STRING_2000];--"Родительный падеж должности 1(клиент)"
+V_FIO_C1_RP		[STRING_2000];--"Родительный падеж ФИО 1(клиент)"
+V_F_IO_1C		[STRING_2000];--"Фамилия И.О. 1(клиент)"
+V_PHONE_1C		[STRING_2000];--"Телефон 1(клиент)"
+
+V_PHONE_11C		[STRING_2000];--"Телефон 1(Клиент 1)"
+V_PHONE_12C		[STRING_2000];--"Телефон 2(Клиент 1)"
+
+V_DEF_2C		[STRING_2000];--"Основание подписи 2(клиент)"
+V_CASTA_C2_RP	[STRING_2000];--"Родительный падеж должности 2(клиент)"
+V_FIO_C2_RP		[STRING_2000];--"Родительный падеж ФИО 2(клиент)"
+V_F_IO_2C		[STRING_2000];--"Фамилия И.О. 2(клиент)"
+V_PHONE_2C		[STRING_2000];--"Телефон 2(клиент)"
+-- Реквизиты банка
+V_CITY_B		ref [NAMES_CITY];--"Населенный пункт"
+
+V_BIC_B			[STRING_2000];--"Бик банк"
+V_NAME_RC			[STRING_2000];--Отделение РЦ наименование
+V_KS_B			[STRING_2000];--"Корр счет_банк"
+V_OKONH_B		[STRING_2000];--"ОКОНХ_банк"
+V_CONTACTS_B	[STRING_2000];--"Контакты_банк"
+V_OKATO_B		[STRING_2000];
+V_ADRESS_B		[STRING_2000];--"Адрес банк"
+V_ADRESS_B_POST	[STRING_2000];--"Почтовый адрес банк"
+
+V_DEF_1B		[STRING_2000];--"Основание подписи 1(банк)"
+V_CASTA_B1_RP	[STRING_2000];--"Родительный падеж должности 1(банк)")
+V_FIO_B1_RP		[STRING_2000];--"Родительный падеж ФИО 1(банк)"
+V_F_IO_1B		[STRING_2000];--"Фамилия И.О. 1(банк)"
+
+V_DEF_2B		[STRING_2000];--"Основание подписи 2(банк)"
+V_CASTA_B2_RP	[STRING_2000];--"Родительный падеж должности 2(банк)"
+V_FIO_B2_RP		[STRING_2000];--"Родительный падеж ФИО 2(банк)"
+V_F_IO_2B		[STRING_2000];--"Фамилия И.О. 2(банк)"
+
+V_PHONE_11B		[STRING_2000];--"Телефон 1(банк)"
+V_PHONE_12B		[STRING_2000];--"Телефон 2(банк)"
+--Лопухов добавил паспорт клиента - физ.лица
+V_PASSPORT      [STRING_2000];-- паспорт клиента
+V_DATE_DOG [DATE];
+rProp ref [PROPERTY_GRP];
+
+--Башкиров В.Г. 25.05.2017 Для расчета времени выполнения
+--Функция возвращает интервал между tEnd-tBeg (в сотых долях секунды)
+function GetTimeInterval(tEnd number, tBeg number) return number is
+tMax    number:= 2147483647;
+tMin    number:=-2147483648;
+nLength number:=tMax - tMin + 1;
+Minhalf number:=tMin/2;
+Maxhalf number:=(tMax+1)/2;
+begin
+	if    tBeg>Maxhalf and tEnd<Minhalf then return tEnd-tBeg+nLength;
+	elsif tBeg<Minhalf and tEnd>Maxhalf then return tEnd-tBeg-nLength;
+	end if;
+	return tEnd-tBeg;
+end;
+
+public function Mask(vStr string(32000), vMask string(100), PrefErrMsg string(100) default null) return string(32000) is
+LenMaskOnlyImportant integer;
+LenStrOnlyImportant integer;
+LenMask integer;
+LenStr integer;
+vMaskImportant string(100);
+vStrImportant string(32000);
+outStr string(32000);
+OneChrMask string(1);
+OneChrStr string(1);
+FlNext boolean:=true;
+j number:=0;
+begin
+	if vStr is null then return vStr; end if;
+	if vMask is null then return vStr; end if;
+	
+	vMaskImportant:=replace(vMask,'-');	--999-999-999 99
+	vMaskImportant:=replace(vMaskImportant,' ');
+	vMaskImportant:=replace(vMaskImportant,TB$);
+	LenMaskOnlyImportant:=length(vMaskImportant);
+	LenMask:=length(vMask);
+	
+	vStrImportant:=replace(vStr,'-');	--043-360-270 20
+	vStrImportant:=replace(vStrImportant,' ');
+	vStrImportant:=replace(vStrImportant,TB$);
+	LenStrOnlyImportant:=length(vStrImportant);
+	debug_pipe(substr(TB$||'.Mask vStr='||vStr||' vMask='||vMask||' vStrImportant='||vStrImportant||' vMaskImportant='||vMaskImportant,1,2000),dp);
+
+	if LenMaskOnlyImportant<>LenStrOnlyImportant then
+		goto nnn;
+	end if;
+	
+	for i in 1..LenMask loop
+		OneChrMask:=substr(vMask,i,1);
+		if OneChrMask in ('-',' ',TB$) then FlNext:=false;
+		else								FlNext:=true;
+		end if;
+		if FlNext then
+			j:=j+1;
+			OneChrStr :=substr(vStrImportant,j,1);
+		end if;
+		
+		if instr('9',OneChrMask)>0 then -- цифра маски
+			if instr('0123456789',OneChrStr)>0 then -- цифра в данных
+				outStr:=outStr||OneChrStr;
+			else
+				goto nnn;
+			end if;
+			debug_pipe(substr(TB$||'.Mask '||iif(FlNext,'T','F')||' ('||lpad(i,5)||','||lpad(j,5)||') "'||OneChrMask||'"->"'||OneChrStr||'" outStr='||OutStr,1,2000),dp);
+		elsif OneChrMask in ('-',' ',TB$) then
+			outStr:=outStr||OneChrMask;
+		  --outStr:=outStr||OneChrStr;
+			debug_pipe(substr(TB$||'.Mask '||iif(FlNext,'T','F')||' ('||lpad(i,5)||','||lpad(j,5)||') "'||OneChrMask||'">>"'||OneChrStr||'" outStr='||OutStr,1,2000),dp);
+			FlNext:=false;
+		end if;
+	end loop;
+	return outStr;
+	
+	<<nnn>>
+  --pragma error(substr(PrefErrMsg||vStr||' не раскладывается по маске '||vMask,1,2000));
+	stdio.put_line_buf(substr(PrefErrMsg||vStr||' не раскладывается по маске '||vMask,1,2000));
+	debug_pipe(TB$||'.Mask vStr='||vStr,dp);
+	return vStr;
+end;
+
+Procedure GetClientReq(IdClient ref [CLIENT], OnDate date) is
+Begin
+	V_CASTA_1C		:= null;
+	V_DEF_1C		:= null;
+	V_CASTA_C1_RP	:= null;
+	V_FIO_C1_RP		:= null;
+	V_F_IO_1C		:= null;
+	V_CASTA_2C		:= null;
+	V_DEF_2C		:= null;
+	V_CASTA_C2_RP	:= null;
+	V_FIO_C2_RP		:= null;
+	V_F_IO_2C		:= null;
+	V_PASSPORT      := null;
+
+	-- Адреса клиента
+	::[DEPN_INTERFACE].[PRX_CLIENT].GetAddressClient(IdClient
+												,V_ADR_MASK
+												,V_CITY_C												
+												,V_ADRESS_C
+												,V_ADRESS_C_POST
+												,V_OKATO_C);
+												
+	V_ADRESS_C_FACT:=::[RUNTIME].[VIEWFUN].GetAddress(IdClient, V_ADR_MASK, 'FACT');											
+
+	if IdClient%class in ('CL_ORG', 'CL_BANK', 'CL_BANK_N', 'CL_BANK_F', 'CL_PART') then
+		V_ALL_BOSS_C := coalesce(IdClient->(CL_ORG)[ALL_BOSS]
+								,IdClient->(CL_BANK_N)[ALL_BOSS]
+								,IdClient->(CL_BANK_F)[ALL_BOSS]
+								,IdClient->(CL_PART)[ALL_BOSS]
+								);
+		--debug_pipe(' V_ALL_BOSS_C  ' || V_ALL_BOSS_C,0);							
+		begin -- 1-ая подпись со стороны клиента
+			V_CASTA_1C := V_ALL_BOSS_C([CHIEF] and [SIGN_TODAY]); --Директор
+			
+			
+			::[DEPN_INTERFACE].[PRX_CLIENT].GetCastClient(IdClient
+													,V_CASTA_1C
+													,V_DEF_1C
+													,V_CASTA_C1_RP
+													,V_FIO_C1_RP
+													,V_F_IO_1C
+													,OnDate);
+													
+				--debug_pipe('V_CASTA_C1_RP ' || V_CASTA_C1_RP									,0);	
+		exception when others then
+			null;
+		end;
+		begin -- 2-ая подпись со стороны клиента
+			V_CASTA_2C := V_ALL_BOSS_C([GENERAL_ACC] and [SIGN_TODAY]); --Главный бухгалтер
+			::[DEPN_INTERFACE].[PRX_CLIENT].GetCastClient(IdClient
+													,V_CASTA_2C
+													,V_DEF_2C
+													,V_CASTA_C2_RP
+													,V_FIO_C2_RP
+													,V_F_IO_2C
+													,OnDate);
+		exception when others then
+			null;
+		end;
+	elsif IdClient%class = 'CL_PRIV' then
+		V_ALL_BOSS_C := null;
+		begin -- 1-ая подпись со стороны клиента
+			::[DEPN_INTERFACE].[PRX_CLIENT].GetCastClient(IdClient
+													,V_CASTA_1C
+													,V_DEF_1C
+													,V_CASTA_C1_RP
+													,V_FIO_C1_RP
+													,V_F_IO_1C
+													,OnDate);
+			V_PASSPORT:=[CLIENT_INTERFACE].[INT_CL_PRIV_001].Get_pasport(idClient); --Лопухов добавил паспорт физ.лица
+		exception when others then
+			null;
+		end;
+	end if;
+	-- Телефоны клиента
+	::[DEPN_INTERFACE].[PRX_CLIENT].GetPhoneClient(IdClient, V_PHONE_1C, V_PHONE_2C);
+end;
+
+Procedure GetBankReq(IdBank ref [CL_ORG], OnDate date) is
+Begin
+	V_ALL_BOSS_B := IdBank.[ALL_BOSS];
+	V_CASTA_1B = V_CASTA_2B := null;
+
+	::[DEPN_INTERFACE].[PRX_CLIENT].GetInfoBank(	IdBank
+											,V_BIC_B
+											,V_KS_B
+											,V_OKONH_B
+											,V_CONTACTS_B
+											,V_CITY_B
+											,V_ADR_MASK
+											,V_ADRESS_B
+											,V_ADRESS_B_POST
+											,V_OKATO_B
+											,V_CASTA_1B
+											,V_DEF_1B
+											,V_CASTA_B1_RP
+											,V_FIO_B1_RP
+											,V_F_IO_1B
+											,V_CASTA_2B
+											,V_DEF_2B
+											,V_CASTA_B2_RP
+											,V_FIO_B2_RP
+											,V_F_IO_2B
+											,P_DATE);
+ --debug_pipe('-------------',0);	
+ --debug_pipe(V_CASTA_1B.[FASE].[FAMILY_CL],0);										
+End;
+
+-->> PSB VRI 02/04/2025 CFT-1329 добавить шаблон справки об открытых счетах на английском языке
+Function GetAccInfo(P_DATE date, refClient ref [CLIENT], opt varchar2(10)) return varchar2(32000) is
+inf 	string(700);
+begin
+	for (
+		 select af(af obj)
+			in ::[AC_FIN]
+			where af.[CLIENT_V] = refClient and af.[DATE_OP] <= P_DATE
+				and (af.[DATE_CLOSE] is null or af.[DATE_CLOSE] > P_DATE)
+				and af.[TO_PRODUCT].[CODE] != 'RKO_CUR_LOCK'
+		 order by af%id
+		)
+	loop
+		if opt = 'number' then
+			inf := inf || af.obj.[MAIN_V_ID] || ' ' || CR$;
+		elsif opt = 'number1' then
+			inf := inf || af.obj.[MAIN_V_ID];			
+		elsif opt = 'type' then
+			inf := inf || '   ' || case when af.obj.[MAIN_V_ID] like '42%' then 'deposit'
+										else 'current'
+								   end  || '   ' || CR$;
+		elsif opt = 'type_ru' then
+			inf := inf || '   ' || case when af.obj.[MAIN_V_ID] like '42%' then 'депозитный'
+										else 'расчетный'
+								   end  || '   ' || CR$;
+		elsif opt = 'type_ru1' then
+			inf := inf || '   ' || case when af.obj.[MAIN_V_ID] like '42%' then 'депозитный'
+										else 'расчетный'
+								   end;
+		elsif opt = 'val' then
+			inf := inf || '  ' || af.obj.[FINTOOL].[CUR_SHORT] || '  ' || CR$;
+		elsif opt = 'val_ru' then
+			inf := inf || rpad(af.obj.[FINTOOL].[NAME], 25) || '   '  || CR$;
+		elsif opt = 'open' then
+			inf := inf || to_char(af.obj.[DATE_OP], 'dd.mm.yyyy') || ' ' || CR$;
+		-->> PSB VRI 02/04/2025 CFT-2148 добавление шаблона письма в ЦФТ
+		elsif opt = 'date_last' then
+			inf := inf || to_char(nvl(af.obj.[DATE_LAST], af.obj.[DATE_OP]), 'dd.mm.yyyy') || ' ' || CR$;
+		elsif opt = 'num_date_op' then
+		   for rko in ::[RKO] where rko.[CLIENT] = refClient and rko.[ACCOUNT] = af.obj
+	  		loop
+		    	inf := inf || '№ ' || rpad(to_char(rko.[NUM_DOG]), 15) || ' ' || to_char(rko.[DATE_BEGIN], 'dd.mm.yyyy') || ' '|| CR$;
+				exit;		    		
+	  		end loop;			
+		elsif opt = 'num_rko' then
+			for rko in ::[RKO] where rko.[CLIENT] = refClient and rko.[ACCOUNT] = af.obj
+	  		loop
+		    	inf := inf || '№ ' || rpad(to_char(rko.[NUM_DOG]), 15) || ' ' || CR$;
+				exit;		    		
+	  		end loop;
+		--<< PSB VRI 02/04/2025 CFT-2148 добавление шаблона письма в ЦФТ			
+		end if;
+	end loop;
+	-->> PSB VRI 18/06/2025 CFT-1781 новые формы документов в ЦФТ
+	for (
+		 select af(af obj)
+			in ::[AC_FIN]
+			where af.[CLIENT_V] = refClient and af.[DATE_CLOSE] = P_DATE
+		 order by af%id
+		)
+	loop
+		if opt = 'numb_close' then
+			inf := inf || af.obj.[MAIN_V_ID];			
+		elsif opt = 'type_close' then
+			inf := inf || '   ' || case when af.obj.[MAIN_V_ID] like '42%' then 'депозитный'
+										else 'расчетный'
+								   end;
+		end if;								  
+	end loop;
+	--<< PSB VRI 18/06/2025 CFT-1781 новые формы документов в ЦФТ
+
+	if inf is NULL and opt in ('number', 'numb_close') then inf := '____________________';
+	elsif inf is NULL and opt in ('type', 'type_close' ,'val' ,'open') then inf := '________';
+	end if;
+	return inf;
+end;
+--<< PSB VRI 02/04/2025 CFT-1329 добавить шаблон справки об открытых счетах на английском языке
+
+Function GetPrdInfo(p_info varchar2(100), refClient ref [CLIENT]) return varchar2(32000) is
+OutStr varchar2(32000);
+TmpStr varchar2(32000);
+ClPriv ref [CL_PRIV];
+oClPriv [CL_PRIV];
+oClient [CLIENT]:=refClient;
+cl_info ref	[CL_INFO_REQ];
+i integer := 0;
+cltel varchar2(128);
+Begin
+    if p_info like 'КОНТАКТ_Т%' or p_info like 'К_ТЕЛ%' then
+        cltel:=regexp_replace(to_char(::[PSH_LOCAL_JOB].[PSH_LIB].GetPhoneNumber(oClient.[CONTACTS])),'[^[[:digit:]]]*');    
+    end if;
+    if refClient%class='CL_PRIV' then ClPriv:=refClient%id; oClPriv:=ClPriv; end if;
+	-- шаблон
+	if p_info = 'REPORTFILE' then
+		OutStr := nvl(OutStr,V_FILE_NAME.[FILE_NAME]);
+	elsif p_info = 'REPORTPATH' then
+		OutStr :=  nvl(OutStr,::[SYSTEM_PARAMS].[GET]('PATH_PRINT_DOC', true));
+	elsif p_info like 'FULL_NAME_KLI%' then
+		if oClient%class ='CL_ORG' then OutStr := nvl(OutStr,refClient->(CL_ORG)[LONG_NAME]);
+		else OutStr := nvl(OutStr,oClient.[NAME]);
+		end if;
+	elsif p_info like 'NAME_CL%' then
+		if oClient%class ='CL_PRIV' then OutStr := nvl(OutStr,refClient->(CL_PRIV)[NAME_CL]);
+		elsif oClient%class ='CL_ORG' then OutStr := nvl(OutStr,refClient->(CL_ORG)[NAME]);
+		else OutStr := nvl(OutStr,'');
+		end if;		
+	-->> PSB VRI 02/04/2025 CFT-1329 добавить шаблон справки об открытых счетах на английском языке
+	elsif p_info like 'NAME_ENG_CL%' then
+		if oClient%class ='CL_PRIV' then OutStr := nvl(OutStr,refClient->(CL_PRIV)[I_NAME]);
+		elsif oClient%class ='CL_ORG' then OutStr := coalesce(OutStr,refClient->(CL_ORG)[SI_NAME],refClient->(CL_ORG)[I_NAME]);
+		else OutStr := nvl(OutStr,'');
+		end if;
+	--<< PSB VRI 02/04/2025 CFT-1329 добавить шаблон справки об открытых счетах на английском языке		
+	elsif p_info like 'SNAME_CL%' then
+		if oClient%class ='CL_PRIV' then OutStr := nvl(OutStr,refClient->(CL_PRIV)[SNAME_CL]);
+		else OutStr := nvl(OutStr,'');
+		end if;
+
+	-->> PSB VRI 15/04/2025 CFT-1426 добавить шаблон о репутации
+	elsif p_info like 'FIRST_ACC%' then -- Дата начала отношений с клиентом
+		cl_info := ::[CL_INFO_REQ].[LIB].getReqRefByClient(refClient);
+		if cl_info.[FIRST_ACC_DATE] is not null then OutStr := nvl(OutStr, to_char(cl_info.[FIRST_ACC_DATE], 'dd.mm.yyyy'));
+		else OutStr := nvl(OutStr,'');
+		end if;
+	--<< PSB VRI 15/04/2025 CFT-1426 добавить шаблон о репутации		
+
+	elsif p_info like 'ВыборОкончания%' then
+		if oClient%class ='CL_PRIV' then
+			OutStr := nvl(OutStr,case when refClient->(CL_PRIV)[SEX].[CODE]='Ж' then 'ая)' else 'ый' end);
+		else OutStr := nvl(OutStr,'');
+		end if;						
+	--cli_fio_ruk_dat:= ::[RUNTIME].[STDLIB].FIO([CASE_GRAM].[LIB].get_case(pers.[FASE].[DECL_FIO],::[CASE_GRAM]([CODE]='Д')));
+	elsif p_info like 'SIGN_DATE%' then
+		OutStr := nvl(OutStr,to_char(P_DATE,'DD.MM.YYYY'));
+	elsif p_info like 'DATE_TERM%' then		-->> PSB VRI 18/06/2025 CFT-1781 новые формы документов в ЦФТ
+		OutStr := nvl(OutStr,to_char(P_DATE_TERM,'DD.MM.YYYY'));
+	elsif p_info like 'NUM_DOG%' then
+		OutStr := nvl(OutStr,V_NUM_DOG);
+	elsif p_info like 'DATE_DOG%' then
+		OutStr := nvl(OutStr,to_char(V_DATE_DOG,'DD.MM.YYYY'));
+	elsif p_info like 'FIO_KLI%' then
+		OutStr := nvl(OutStr,::[RUNTIME].[STDLIB].FIO(oClient.[NAME]));
+	elsif p_info = 'ДОКУМЕНТ' then       --Лопухов ДОКУМЕНТ, удостоверяющий личность
+		OutStr := nvl(OutStr,V_PASSPORT);
+	
+	--12/07/2023 Башкиров В.Г.
+	elsif p_info like 'ДОКУМЕНТ_ВИД%'      then OutStr:=oClPriv.[DOC].[TYPE].[NAME];
+	elsif p_info like 'ДОКУМЕНТ_СЕРИЯ%'    then OutStr:=oClPriv.[DOC].[SER];
+	elsif p_info like 'ДОКУМЕНТ_НОМЕР%'    then OutStr:=oClPriv.[DOC].[NUM];
+	elsif p_info like 'ДОКУМЕНТ_Д_ВЫДАЧИ%' then OutStr:=to_char(oClPriv.[DOC].[DATE],fmt);
+	elsif p_info like 'ДОКУМЕНТ_ВЫДАН%'    then OutStr:=oClPriv.[DOC].[WHO];
+	elsif p_info like 'ДОКУМЕНТ_КОД_ПОДР%' then OutStr:=oClPriv.[DOC].[DEPART_CODE];
+	-->> PSH VRI 08/10/2025 CFT-2585 Анкета ФЛ
+	elsif p_info like 'ДАТА_РОЖД%' 			then OutStr:=to_char(oClPriv.[DATE_PERS],'DD.MM.YYYY');
+	elsif p_info like 'МЕСТО_РОЖД%' 		then OutStr:=oClPriv.[DOC].[BIRTH_PLACE];
+	elsif p_info like 'ГРАЖД%' 				then OutStr:=oClPriv.[COUNTRY].[NAME];
+	--<< PSH VRI 08/10/2025 CFT-2585 Анкета ФЛ
+	elsif p_info like 'ПОЧТ_АДРЕС%' and ClPriv is not null then OutStr := ::[CLIENT].[PSH_LIB_P].GetAddress(oClPriv.[ADDRESSES],'ALL','POST');
+	elsif p_info like 'РЕГ_АДРЕС%'  and ClPriv is not null then OutStr := ::[CLIENT].[PSH_LIB_P].GetAddress(oClPriv.[ADDRESSES],'ALL','REGISTRATION');
+	elsif p_info like 'ФАКТ_АДРЕС%' and ClPriv is not null then OutStr := ::[CLIENT].[PSH_LIB_P].GetAddress(oClPriv.[ADDRESSES],'ALL','REAL_LIVE');
+	elsif p_info like 'РЕГФАКТ_АДРЕС%' and ClPriv is not null then  OutStr := coalesce(::[CLIENT].[PSH_LIB_P].GetAddress(oClPriv.[ADDRESSES],'ALL','REGISTRATION'),::[CLIENT].[PSH_LIB_P].GetAddress(oClPriv.[ADDRESSES],'ALL','REAL_LIVE'));	
+	elsif p_info like 'ФАКТРЕГ_АДРЕС%'  and ClPriv is not null then OutStr := coalesce(::[CLIENT].[PSH_LIB_P].GetAddress(oClPriv.[ADDRESSES],'ALL','REAL_LIVE'),::[CLIENT].[PSH_LIB_P].GetAddress(oClPriv.[ADDRESSES],'ALL','REGISTRATION'));	
+	elsif p_info like 'ПОЧТ_АДРЕС%' and ClPriv is     null then OutStr := ::[CLIENT].[PSH_LIB_P].GetAddress(oClient.[ADDRESSES],'ALL','POST');
+	elsif p_info like 'РЕГ_АДРЕС%'  and ClPriv is     null then OutStr := ::[CLIENT].[PSH_LIB_P].GetAddress(oClient.[ADDRESSES],'ALL','CORP');
+	elsif p_info like 'ФАКТ_АДРЕС%' and ClPriv is     null then OutStr := ::[CLIENT].[PSH_LIB_P].GetAddress(oClient.[ADDRESSES],'ALL','FACT');
+	elsif p_info like 'СНИЛС%'      and ClPriv is not null then OutStr := Mask(ClPriv.[SNILS],'999-999-999 99','СНИЛС:');
+	elsif p_info like 'SNILS%'      and ClPriv is not null then OutStr := Mask(ClPriv.[SNILS],'999-999-999 99','СНИЛС:');
+	elsif p_info like 'ИНН%' or p_info like 'INN%' then
+		OutStr := oClient.[INN];
+		if OutStr is null and refClient%class='CL_ORG'    then OutStr:=refClient->(CL_ORG)[KIO]; end if;
+		if OutStr is null and refClient%class='CL_CORP'   then OutStr:=refClient->(CL_CORP)[KIO]; end if;
+		if OutStr is null and refClient%class='CL_BANK_N' then OutStr:=refClient->(CL_BANK_N)[KIO]; end if;
+		if OutStr is null and refClient%class='CL_BANK_F' then OutStr:=refClient->(CL_BANK_F)[KIO]; end if;
+		if OutStr is null and refClient%class='CL_PART'   then OutStr:=refClient->(CL_PART)[KIO]; end if;
+		if OutStr is null then OutStr:=' '; end if;
+	elsif p_info like 'НАИМ_КЛИЕНТА%' then
+		OutStr := oClient.[NAME];
+	elsif p_info like 'КОНТАКТ_ТЕЛ%' then
+		OutStr := coalesce(::[CLIENT].[PSH_LIB_P].GetContacts(oClient.[CONTACTS],'PHONE')
+						,  ::[CLIENT].[PSH_LIB_P].GetContacts(oClient.[CONTACTS],'MOBILEPHONE')
+						,  ::[CLIENT].[PSH_LIB_P].GetContacts(oClient.[CONTACTS],'FAX'));
+        OutStr := nvl(trim(OutStr), ' ');
+	elsif p_info like 'КОНТАКТ_Т%' then -- предыдущий, почему-то не работает в отчете
+		OutStr := cltel;
+        OutStr := nvl(trim(OutStr), ' ');
+	elsif p_info like 'К_ТЕЛ01%' then
+		OutStr := substr(cltel, 1, 1);
+        OutStr := nvl(trim(OutStr), ' ');
+    elsif p_info like 'К_ТЕЛ2%' then
+		OutStr := substr(cltel, 2, 1);
+        OutStr := nvl(trim(OutStr), ' ');
+    elsif p_info like 'К_ТЕЛ3%' then
+		OutStr := substr(cltel, 3, 1);
+        OutStr := nvl(trim(OutStr), ' ');
+    elsif p_info like 'К_ТЕЛ4%' then
+		OutStr := substr(cltel, 4, 1);
+        OutStr := nvl(trim(OutStr), ' ');
+    elsif p_info like 'К_ТЕЛ5%' then
+		OutStr := substr(cltel, 5, 1);
+        OutStr := nvl(trim(OutStr), ' ');
+    elsif p_info like 'К_ТЕЛ6%' then
+		OutStr := substr(cltel, 6, 1);
+        OutStr := nvl(trim(OutStr), ' ');
+    elsif p_info like 'К_ТЕЛ7%' then
+		OutStr := substr(cltel, 7, 1);
+        OutStr := nvl(trim(OutStr), ' ');
+    elsif p_info like 'К_ТЕЛ8%' then
+		OutStr := substr(cltel, 8, 1);
+        OutStr := nvl(trim(OutStr), ' ');
+    elsif p_info like 'К_ТЕЛ9%' then
+		OutStr := substr(cltel, 9, 1);
+        OutStr := nvl(trim(OutStr), ' ');
+    elsif p_info like 'К_ТЕЛ10%' then
+		OutStr := substr(cltel, 10, 1);
+        OutStr := nvl(trim(OutStr), ' ');
+    elsif p_info like 'К_ТЕЛ11%' then
+		OutStr := substr(cltel, 11, 1);
+        OutStr := nvl(trim(OutStr), ' ');
+	elsif p_info like 'КОНТАКТ_ИНФО%' then
+		OutStr := trim(OutStr||' '||::[CLIENT].[PSH_LIB_P].GetContacts(oClient.[CONTACTS],'PHONE'));
+		debug_pipe(TB$||'(1)OutStr='||OutStr,dp);
+
+		OutStr := trim(OutStr||' '||::[CLIENT].[PSH_LIB_P].GetContacts(oClient.[CONTACTS],'MOBILEPHONE'));
+		debug_pipe(TB$||'(2)OutStr='||OutStr,dp);
+
+		OutStr := trim(OutStr||' '||::[CLIENT].[PSH_LIB_P].GetContacts(oClient.[CONTACTS],'FAX'));
+		debug_pipe(TB$||'(3)OutStr='||OutStr,dp);
+
+		TmpStr := ::[CLIENT].[PSH_LIB_P].GetAddress(oClient.[ADDRESSES],'ALL','POST');
+		if TmpStr is not null then TmpStr:='Почтовый адрес:'||TmpStr; end if;
+		
+		OutStr := trim(OutStr||' '||TmpStr);
+		debug_pipe(TB$||'(4)OutStr='||OutStr,dp);
+
+		OutStr:=replace(OutStr,Chr(13),' ');
+		OutStr:=replace(OutStr,Chr(10),' ');
+		OutStr:=replace(OutStr,'  ',' ');
+		debug_pipe(TB$||'(5)OutStr='||OutStr,dp);
+	elsif p_info like 'PSH_PODR%' then -- Реквизиты подразделений
+			VAR PSH_PODR ref [PSH_SPRAV_PODR];
+			var	depart_sign_bank ref [DEPART];
+			begin
+				depart_sign_bank := null;
+				for users in ::[USER] where users.[CL_PRIV_REF]=V_CASTA_1B.[FASE]
+				loop
+				depart_sign_bank:=users.[DEPART];
+				end loop;
+				
+				select x (x) in ::[PSH_SPRAV_PODR]
+				where (x.[PSH_PODR_DEPART].[CODE]  = substr( depart_sign_bank.[CODE],1,instr(depart_sign_bank.[CODE],'-',1,2)-1)
+							or x.[PSH_PODR_DEPART]=depart_sign_bank)
+					and x.[PSH_PODR_PRINT] into PSH_PODR;
+			exception	when TOO_MANY_ROWS then OutStr := nvl(OutStr,null);
+				when NO_DATA_FOUND then OutStr := nvl(OutStr,null);
+			end;
+			if    p_info like 'PSH_PODR_ADRES%' then OutStr := nvl(OutStr,PSH_PODR.[PSH_PODR_ADRES]);
+			elsif p_info like 'PSH_PODR_GOROD%' then OutStr := nvl(OutStr,PSH_PODR.[PSH_PODR_GAROD]);
+			elsif p_info like 'PSH_PODR_RUKOV%' then OutStr := nvl(OutStr,PSH_PODR.[PSH_PODR_RUK].[NAME]);
+			elsif p_info like 'PSH_PODR_GLBUH%' then OutStr := nvl(OutStr,PSH_PODR.[PSH_PODR_BUH].[NAME]);
+			elsif p_info like 'PSH_PODR_TELEF%' then
+						VAR telef varchar2(170):=null;
+						for tel in PSH_PODR.[PSH_PODR_CONTAKT] where tel.[TYPE].[CODE]='PHONE' and tel.[ACTIV]
+						loop
+							telef := telef||tel.[NUMB]||'; ';
+						end loop;		
+						OutStr := nvl(OutStr,telef);
+			end if;
+	--IDA2507 CFT-2020 (Справка об открытии/Справка о закрытии)
+	elsif p_info like 'ACC_OPEN_NUM%' then
+		OutStr := V_OPEN_ACC.[MAIN_V_ID];
+	elsif p_info like 'ACC_OPEN_TYPE%' then
+		OutStr := case when V_OPEN_ACC.[MAIN_V_ID] like '42%' 
+					then 'депозитный' else 'расчетный' end;
+	elsif p_info like 'ACC_OPEN_VAL%' then
+		OutStr := V_OPEN_ACC.[FINTOOL].[NAME];
+	elsif p_info like 'ACC_OPEN_DOG_NUM%' then
+		for rko in ::[RKO] where rko.[CLIENT] = V_THIS and rko.[ACCOUNT] = V_OPEN_ACC
+  		loop
+	        OutStr:=rko.[NUM_DOG];
+  		end loop;
+	elsif p_info like 'ACC_OPEN_DOG_DATE%' then
+		for rko in ::[RKO] where rko.[CLIENT] = V_THIS and rko.[ACCOUNT] = V_OPEN_ACC
+  		loop
+            OutStr:=to_char(rko.[DATE_BEGIN], 'dd/mm/yyyy');
+  		end loop;
+  	elsif p_info like 'ACC_OPEN_DOG_F_DATE%' then
+		for rko in ::[RKO] where rko.[CLIENT] = V_THIS and rko.[ACCOUNT] = V_OPEN_ACC
+  		loop
+            OutStr:= ::[ZALOG_INTERFACE].[PRX_REPS].Date_Str(rko.[DATE_BEGIN], true, true);
+  		end loop;
+	elsif p_info like 'ACC_CLAIM_SALDO%' then
+		for rko in ::[RKO] where rko.[CLIENT] = V_THIS
+		loop
+			for (select dog(dog.[ACCOUNT_DOG].[1].[2] : ac) 
+			in rko.[ARRAY_DOG_ACC]
+			where dog.[ACCOUNT_DOG].[1].[2].[MAIN_V_ID] like '45812%'
+			)
+			loop
+				OutStr := abs(dog.ac.[SALDO]);
+			end loop;
+		end loop;
+	elsif p_info like 'ACC_CLAIM_W_SALDO%' then
+		for rko in ::[RKO] where rko.[CLIENT] = V_THIS
+		loop
+			for (select dog(dog.[ACCOUNT_DOG].[1].[2] : ac) 
+			in rko.[ARRAY_DOG_ACC]
+			where dog.[ACCOUNT_DOG].[1].[2].[MAIN_V_ID] like '45812%'
+			)
+			loop
+				OutStr := ::[RUNTIME].[STDLIB].N2Str(abs(dog.ac.[SALDO]), null, 0);
+			end loop;
+		end loop;
+  	--Справка о закрытии
+  	elsif p_info like 'ACC_CLOSE_NUM%' then
+  		for (select r(r.ac_mvd : r_mvd) in 
+  			(select ac(ac.[MAIN_V_ID] : ac_mvd, rownum : rn) in ::[AC_FIN] where ac.[CLIENT_V] = V_THIS and ac.[DATE_CLOSE] = P_DATE and ac.[TO_PRODUCT].[CODE] != 'RKO_CUR_LOCK' order by ac%id desc)
+	  		where r.rn = substr(p_info, -1))
+  		loop
+  			OutStr := r.r_mvd;
+  		end loop;
+
+  	elsif p_info like 'ACC_CLOSE_TYPE%' then
+  		for (select r(r.ac_mvd : r_mvd) in 
+  			(select ac(ac.[MAIN_V_ID] : ac_mvd, rownum : rn) in ::[AC_FIN] where ac.[CLIENT_V] = V_THIS and ac.[DATE_CLOSE] = P_DATE and ac.[TO_PRODUCT].[CODE] != 'RKO_CUR_LOCK' order by ac%id desc)
+	  		where r.rn = substr(p_info, -1))
+  		loop
+  			OutStr := case when r.r_mvd like '42%' 
+					then 'депозитный' else 'расчетный' end;
+  		end loop;	
+  	elsif p_info like 'ACC_CLOSE_DOG_NUM%' then
+  		for (select r(r.ac_id : r_id) in 
+  			(select ac(ac%id : ac_id, rownum : rn) in ::[AC_FIN] where ac.[CLIENT_V] = V_THIS and ac.[DATE_CLOSE] = P_DATE and ac.[TO_PRODUCT].[CODE] != 'RKO_CUR_LOCK' order by ac%id desc)
+	  		where r.rn = substr(p_info, -1))
+  		loop
+  			for rko in ::[RKO] where rko.[CLIENT] = V_THIS and rko.[ACCOUNT] = r.r_id
+	  		loop
+	            OutStr:=rko.[NUM_DOG];
+	  		end loop;
+  		end loop;
+  	elsif p_info like 'ACC_CLOSE_DOG_DATE%' then
+  		for (select r(r.ac_id : r_id) in 
+  			(select ac(ac%id : ac_id, rownum : rn) in ::[AC_FIN] where ac.[CLIENT_V] = V_THIS and ac.[DATE_CLOSE] = P_DATE and ac.[TO_PRODUCT].[CODE] != 'RKO_CUR_LOCK' order by ac%id desc)
+	  		where r.rn = substr(p_info, -1))
+  		loop
+  			for rko in ::[RKO] where rko.[CLIENT] = V_THIS and rko.[ACCOUNT] = r.r_id
+	  		loop
+	            OutStr:='от ' || to_char(rko.[DATE_BEGIN], 'dd.mm.yyyy');
+	  		end loop;
+  		end loop;
+  	elsif p_info like 'ACC_CLOSE_VAL%' then
+  		for (select r(r.ac_fin_name : r_fin_name) in 
+  			(select ac(ac.[FINTOOL].[NAME] : ac_fin_name, rownum : rn) in ::[AC_FIN] where ac.[CLIENT_V] = V_THIS and ac.[DATE_CLOSE] = P_DATE and ac.[TO_PRODUCT].[CODE] != 'RKO_CUR_LOCK' order by ac%id desc)
+	  		where r.rn = substr(p_info, -1))
+  		loop
+  			OutStr := r.r_fin_name;
+  		end loop;
+  	elsif p_info like 'ACC_CLOSE_DATE%' then
+  		for (select r(r.ac_close : r_close) in 
+  			(select ac(ac.[DATE_CLOSE] : ac_close, rownum : rn) in ::[AC_FIN] where ac.[CLIENT_V] = V_THIS and ac.[DATE_CLOSE] = P_DATE and ac.[TO_PRODUCT].[CODE] != 'RKO_CUR_LOCK' order by ac%id desc)
+	  		where r.rn = substr(p_info, -1))
+  		loop
+  			OutStr := to_char(r.r_close, 'dd.mm.yyyy');
+  		end loop;
+  	--IDA2507 CFT-2020 //
+	elsif p_info like 'ACC_INFO_OP%' then
+		begin
+		var inf 	string(700);
+		for (
+			select af(af.[MAIN_V_ID] : main_v_id, af.[FINTOOL].[NAME] : val) in ::[AC_FIN] where af.[CLIENT_V] = refClient and af.[DATE_OP] = P_DATE)
+		loop
+			inf := inf || '№ ' || af.main_v_id || ' в валюте ' || af.val || CR$;
+		end loop;
+		if inf is NULL then inf := '№ ____________________ в валюте ________________';
+		end if;
+		OutStr:=nvl(OutStr, inf);
+		end;
+	
+	-->> PSB VRI 02/04/2025 CFT-1329 добавить шаблон справки об открытых счетах на английском языке
+	elsif p_info like 'ACC_NUM_OP%' then
+		OutStr:=nvl(OutStr, GetAccInfo(P_DATE, refClient, 'number'));
+	elsif p_info like 'ACC_NUM_1OP%' then
+		OutStr:=nvl(OutStr, GetAccInfo(P_DATE, refClient, 'number1')); 		-->> PSB VRI 18/06/2025 CFT-1781 новые формы документов в ЦФТ
+	elsif p_info like 'ACC_VAL_OP%' then
+		OutStr:=nvl(OutStr, GetAccInfo(P_DATE, refClient, 'val'));
+	elsif p_info like 'ACC_VAL_RU%' then
+		OutStr:=nvl(OutStr, GetAccInfo(P_DATE, refClient, 'val_ru'));
+	elsif p_info like 'ACC_TYP_OP%' then
+		OutStr:=nvl(OutStr, GetAccInfo(P_DATE, refClient, 'type'));
+	elsif p_info like 'ACC_TYP_RU%' then
+		OutStr:=nvl(OutStr, GetAccInfo(P_DATE, refClient, 'type_ru'));
+	elsif p_info like 'ACC_TYP_1RU%' then
+		OutStr:=nvl(OutStr, GetAccInfo(P_DATE, refClient, 'type_ru1'));		-->> PSB VRI 18/06/2025 CFT-1781 новые формы документов в ЦФТ
+	elsif p_info like 'ACC_DATE_OP%' then
+		OutStr:=nvl(OutStr, GetAccInfo(P_DATE, refClient, 'open'));	
+	-----CFT1989
+	elsif p_info like 'NUM_DATE_OP%' then
+		OutStr:=nvl(OutStr, GetAccInfo(P_DATE, refClient, 'num_date_op'));		
+	elsif p_info like 'ACC_NUM_CLOSE%' then
+		OutStr:=nvl(OutStr, GetAccInfo(P_DATE, refClient, 'numb_close'));	-->> PSB VRI 18/06/2025 CFT-1781 новые формы документов в ЦФТ
+	elsif p_info like 'ACC_TYP_CLOSE%' then
+		OutStr:=nvl(OutStr, GetAccInfo(P_DATE, refClient, 'type_close'));	-->> PSB VRI 18/06/2025 CFT-1781 новые формы документов в ЦФТ
+	--<< PSB VRI 02/04/2025 CFT-1329 добавить шаблон справки об открытых счетах на английском языке
+	
+	-->> PSB VRI 02/04/2025 CFT-2148 добавление шаблона письма в ЦФТ
+	elsif p_info like 'ACC_DATE_LAST%' then
+		OutStr:=nvl(OutStr, GetAccInfo(P_DATE, refClient, 'date_last')); 
+			
+	elsif p_info like 'ACC_NUM_RKO%' then
+		OutStr:=nvl(OutStr, GetAccInfo(P_DATE, refClient, 'num_rko'));	
+
+  	elsif p_info like 'RKO_OPEN_ACC%' then
+  		for (select r(r.ac_mvd : r_mvd) in 
+  			(select ac(ac.[ACCOUNT].[MAIN_V_ID] : ac_mvd, rownum : rn) in ::[RKO] all where ac.[CLIENT] = V_THIS and ac.[DATE_CLOSE] is null order by ac.[ACCOUNT]%id desc)
+	  		where r.rn = substr(p_info, -1))
+  		loop
+  			OutStr := r.r_mvd;
+  		end loop;
+
+  	elsif p_info like 'RKO_OPEN_VAL%' then
+  		for (select r(r.ac_fin_name : r_fin_name) in 
+  			(select ac(ac.[ACCOUNT].[FINTOOL].[NAME] : ac_fin_name, rownum : rn) in ::[RKO] all where ac.[CLIENT] = V_THIS and ac.[DATE_CLOSE] is null order by ac.[ACCOUNT]%id desc)
+	  		where r.rn = substr(p_info, -1))
+  		loop
+  			OutStr := r.r_fin_name;
+  		end loop;
+
+  	elsif p_info like 'RKO_OPEN_NUM%' then
+  		for (select r(r.rko_num_dog : r_rko_num_dog) in 
+  			(select ac(ac.[NUM_DOG] : rko_num_dog, rownum : rn) in ::[RKO] all where ac.[CLIENT] = V_THIS and ac.[DATE_CLOSE] is null order by ac.[ACCOUNT]%id desc)
+	  		where r.rn = substr(p_info, -1))
+  		loop
+  			OutStr := r.r_rko_num_dog;
+  		end loop;
+
+  	elsif p_info like 'RKO_OPEN_DATE_OP%' then
+  		for (select r(r.date_open : r_date_op) in 
+  			(select ac(ac.[ACCOUNT].[DATE_OP] : date_open, rownum : rn) in ::[RKO] all where ac.[CLIENT] = V_THIS and ac.[DATE_CLOSE] is null order by ac.[ACCOUNT]%id desc)
+	  		where r.rn = substr(p_info, -1))
+  		loop
+  			OutStr := to_char(r.r_date_op, 'dd.mm.yyyy');
+  		end loop;
+
+  	elsif p_info like 'RKO_OPEN_DATE_LAST%' then
+  		for (select r(r.date_last : r_date_last) in 
+  			(select ac(coalesce(ac.[ACCOUNT].[DATE_LAST], ac.[ACCOUNT].[DATE_OP]) : date_last, rownum : rn) in ::[RKO] all where ac.[CLIENT] = V_THIS and ac.[DATE_CLOSE] is null order by ac.[ACCOUNT]%id desc)
+	  		where r.rn = substr(p_info, -1))
+  		loop
+  			OutStr := to_char(r.r_date_last, 'dd.mm.yyyy');
+  		end loop;
+	--<< PSB VRI 02/04/2025 CFT-2148 добавление шаблона письма в ЦФТ
+	
+	elsif p_info like 'ACC_INFO_CLOSE%' then
+		begin
+		var inf 	string(700);
+		for (
+			select af(af.[MAIN_V_ID] : main_v_id, af.[FINTOOL].[NAME] : val) in ::[AC_FIN] where af.[CLIENT_V] = refClient and af.[DATE_CLOSE] = P_DATE)
+		loop
+			inf := inf || '№ ' || af.main_v_id || ' в валюте ' || af.val || CR$;
+		end loop;
+		if inf is NULL then inf := '№ ____________________ в валюте ________________';
+		end if;
+		OutStr:=nvl(OutStr, inf);
+		end;
+	elsif p_info like 'ACC_DATE%' then OutStr:=nvl(OutStr, to_char(P_DATE, 'dd.mm.yyyy'));	
+	elsif p_info like 'PSH_SING_PROP_MON%' then OutStr := nvl(OutStr,to_char(P_DATE,'DD')||' '||::[USER].[PSH_KAV].kav_data_propis(P_DATE,'M')||' '||to_char(P_DATE,'YYYY'));
+	elsif p_info like 'PODP_SOT_NAM_R%' then OutStr := nvl(OutStr,V_FIO_B1_RP);
+	elsif p_info like 'PODP_SOT_DOL_R%' then OutStr := nvl(OutStr,V_CASTA_B1_RP);
+	elsif p_info like 'PODP_SOT_DOL_I%' then OutStr := nvl(OutStr,V_CASTA_1B.[RANGE].[VALUE]);
+	-->> PSB VRI 02/04/2025 CFT-1329 добавить шаблон справки об открытых счетах на английском языке
+	elsif p_info like 'PODP_SOT_FIO_SOKR' then OutStr := coalesce(OutStr, ::[RUNTIME].[STDLIB].fio(V_CASTA_1B.[FASE].[NAME], 'Ф И.О.'));
+	elsif p_info like 'PODP_SOT_DOL_ENG' then OutStr := coalesce(OutStr, V_CASTA_1B.[RANGE].[I_NAME], V_CASTA_1B.[RANGE].[VALUE]);
+	elsif p_info like 'PODP_SOT_FIO_ENG' then OutStr := coalesce(OutStr, ::[RUNTIME].[STDLIB].fio(V_CASTA_1B.[FASE].[I_NAME], 'Ф И.О.'), ::[RUNTIME].[STDLIB].fio(V_CASTA_1B.[FASE].[NAME], 'Ф И.О.'));
+	--<< PSB VRI 02/04/2025 CFT-1329 добавить шаблон справки об открытых счетах на английском языке
+	
+	-->> PSB VRI 02/04/2025 CFT-2148 добавление шаблона письма в ЦФТ
+	elsif p_info like 'PODP_SOT_2FIO_SOKR' then OutStr := coalesce(OutStr, ::[RUNTIME].[STDLIB].fio(V_CASTA_2B.[FASE].[NAME], 'Ф И.О.'));
+	elsif p_info like 'PODP_SOT_2DOL_RUS%' then OutStr := nvl(OutStr,V_CASTA_2B.[RANGE].[VALUE]);
+	elsif p_info like 'PODP_SOT_2DOL_ENG' then OutStr := coalesce(OutStr, V_CASTA_1B.[RANGE].[I_NAME], V_CASTA_2B.[RANGE].[VALUE]);
+	elsif p_info like 'PODP_SOT_2FIO_ENG' then OutStr := coalesce(OutStr, ::[RUNTIME].[STDLIB].fio(V_CASTA_2B.[FASE].[I_NAME], 'Ф И.О.'), ::[RUNTIME].[STDLIB].fio(V_CASTA_2B.[FASE].[NAME], 'Ф И.О.'));
+	--<< PSB VRI 02/04/2025 CFT-2148 добавление шаблона письма в ЦФТ
+	
+	elsif p_info like 'PODP_SOT_OSN_R%' then OutStr := nvl(OutStr,V_DEF_1B);
+	elsif p_info like 'PODP_SOT_FIO%' then OutStr := nvl(OutStr,V_F_IO_1B);
+	elsif p_info like 'PODP_KLI_NAM_R%' then OutStr := nvl(OutStr,V_FIO_C1_RP);
+	elsif p_info like 'PODP_KLI_DOL_R%' then OutStr := nvl(OutStr,V_CASTA_C1_RP);
+	elsif p_info like 'PODP_KLI_OSN_R%' then 	OutStr := nvl(V_DEF_1C,'Устава');
+	elsif p_info like 'PODP_KLI_ADR%' then 	OutStr := nvl(OutStr,replace(replace(V_ADRESS_C,Chr(13),' '),Chr(10),' ') ); -- Юридический
+	elsif p_info like 'PODP_F_KLI_ADR%' then OutStr := nvl(OutStr,V_ADRESS_C_FACT); -- Фактический
+	elsif p_info like 'PODP_KLI_INN%' then OutStr := nvl(OutStr,oClient.[INN]);
+	elsif p_info like 'PODP_KLI_TEL1%' then OutStr := nvl(OutStr,V_PHONE_1C);
+	elsif p_info like 'PODP_KLI_TEL2%' then OutStr := nvl(OutStr,V_PHONE_2C);
+	
+	elsif p_info like 'PODP_KLI_KPP%' then OutStr := nvl(OutStr,oClient.[KPP]); --but
+	elsif p_info like 'PODP_KLI_DOL_I%' then OutStr := nvl(OutStr,V_CASTA_1C.[RANGE].[VALUE]);
+	elsif p_info like 'PODP_KLI_FIO%' then OutStr := nvl(OutStr,V_F_IO_1C);
+	elsif p_info like 'PODP_BANK_FUL_NAM%' then OutStr := nvl(OutStr,V_OUR_BANK.[LONG_NAME]);
+	elsif p_info like 'PODP_BANK_ADR%' then OutStr := coalesce(ADR_BANK,OutStr,V_ADRESS_B);
+	elsif p_info like 'PODP_BANK_INN%' then OutStr := nvl(OutStr,V_OUR_BANK.[INN]);
+	elsif p_info like 'PODP_BANK_KPP%' then OutStr := nvl(OutStr,V_OUR_BANK.[KPP]);
+	elsif p_info like 'PODP_BANK_BIC%' then OutStr := nvl(OutStr,V_BIC_B);
+	elsif p_info like 'PODP_BANK_KS_ACC%' then OutStr := nvl(OutStr,V_KS_B);
+	elsif p_info like 'PODP_BANK_KS_OTD%' then
+	 for rc_otd in ::[CL_BANK_N] where rc_otd.[ACTIVE] and rc_otd.[BIC]=V_OUR_BANK->(CL_BANK_N)[BIC_MASTER]
+	 loop
+		V_NAME_RC:=replace(upper(rc_otd.[NAME]),'ОТДЕЛЕНИЕ','отделении');
+	 end loop;
+	 OutStr := nvl(OutStr,INITCAP(V_NAME_RC));
+	elsif p_info = 'СРОК_АРЕНДЫ_ФАКТ' then -- значение дополнительного свойства
+		begin
+			begin
+				locate rProp in ::[PROPERTY_GRP] all where trim(rProp.[CODE]) = 'CL_ANK_SROK_FACT';
+				exception
+					when NO_DATA_FOUND then	OutStr := nvl(OutStr,(''));
+				end;
+			
+				for arr_fuck in oClient.[ADD_PROP] where arr_fuck.[GROUP_PROP].[CODE]  = 'CL_ANK_SROK_FACT' loop
+					if trunc(arr_fuck.[DATE_END])=to_date('31.12.9999','DD.MM.YYYY') then OutStr := nvl(OutStr,'Бессрочно');
+					else OutStr := nvl(OutStr,::[USER].[PSH_KAV].kav_data_propis(arr_fuck.[DATE_END],'DMONYYYY'));
+					end if;
+				end loop;
+				OutStr := nvl(OutStr,to_char(::[CLIENT_INTERFACE].[PRX_CRED_SRV].GetStr( oClient.[ADD_PROP], rProp, P_DATE))); -- заглушка
+			end;
+	elsif p_info = 'СРОК_АРЕНДЫ_ЮР' then -- значение дополнительного свойства
+		begin
+			begin
+				locate rProp in ::[PROPERTY_GRP] all where trim(rProp.[CODE]) = 'CL_ANK_SROK_REG';
+				exception
+					when NO_DATA_FOUND then	OutStr := nvl(OutStr,(''));
+				end;
+				for arr_fuck in oClient.[ADD_PROP] where arr_fuck.[GROUP_PROP].[CODE]  = 'CL_ANK_SROK_REG' loop
+					if trunc(arr_fuck.[DATE_END])=to_date('31.12.9999','DD.MM.YYYY') then OutStr := nvl(OutStr,'Бессрочно');
+					else OutStr := nvl(OutStr,::[USER].[PSH_KAV].kav_data_propis(arr_fuck.[DATE_END],'DMONYYYY'));
+					end if;
+				end loop;
+				OutStr := nvl(OutStr,to_char(::[CLIENT_INTERFACE].[PRX_CRED_SRV].GetStr( oClient.[ADD_PROP], rProp, P_DATE)));
+			end;
+	end if;
+	return OutStr;
+End;
+PSH_KLIENT_WORD (
+	@name('Пакетная печать') P_BATCH in [BOOLEAN]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATE := [SYSTEM]::[OP_DATE];
+	P_DATE_TERM := [SYSTEM]::[OP_DATE];
+	V_THIS := this;
+	for ac in ::[AC_FIN] where ac.[CLIENT_V] = this
+	and ac.[DATE_CLOSE] is null
+	and (ac.[COM_STATUS] is null
+		or ac.[COM_STATUS] not in (
+			::[COM_STATUS_PRD]([CODE] = 'FREEZED'),
+			::[COM_STATUS_PRD]([CODE] = 'FREEZED_CT'),
+			::[COM_STATUS_PRD]([CODE] = 'FREEZED_DT'),
+			::[COM_STATUS_PRD]([CODE] = 'TO_OPEN')
+			)
+		)
+	order by ac.[DATE_OP] desc
+	loop
+		V_OPEN_ACC := ac;
+		exit;
+	end loop;
+end if;
+-- End initialization of parameters and variables
+declare
+timeStart number;	 --Башкиров В.Г. 25.05.2017 Для расчета времени выполнения HOOKa
+Begin
+	if p_message = 'DEFAULT' or p_info = '%PLPCALL%' then
+	    if P_BATCH then
+    	[CSMD].command(V_DEST,'Form1.ScriptPostEvent OK, "CLICK"');
+    else
+		V_FILE_NAME:=	::[DEFVALS].[SLIB].RestoreRef(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME, 'V_FILE_NAME');
+    end if;
+
+		V_DOG := this;
+
+		V_OUR_BANK := THIS.[FILIAL].[BANK];
+		GetBankReq(V_OUR_BANK, P_DATE);
+		GetClientReq(this, P_DATE);	
+
+		for rko in ::[RKO] where rko.[CLIENT] = this
+  		loop
+	        V_NUM_DOG:=rko.[NUM_DOG];
+            V_DATE_DOG:=rko.[DATE_BEGIN];
+  		end loop;
+
+		for (select rko(rko obj) 
+			in ::[RKO] all 
+				where rko.[CLIENT] = this
+					and rko.[CONTRACT_CUR] = ::[SYSTEM].[SYS_MAIN_VAL]
+					and rko.[DATE_CLOSE] is null
+				order by rko.[DATE_BEGIN]
+				fetch 1
+			)
+  		loop
+			V_RKO := rko.obj;
+			V_ACC_FIRST := V_RKO.[ACCOUNT];
+  		end loop;
+
+		::[DEPN_INTERFACE].[PRX_CLIENT].GetCastAndPhoneClient(V_OUR_BANK
+													,V_CASTA_1B
+													,V_DEF_1B
+													,V_CASTA_B1_RP
+													,V_FIO_B1_RP
+													,V_F_IO_1B
+													,P_DATE
+													,V_PHONE_11B
+													,V_PHONE_12B);
+      
+		V_CASTA_1B:=	nvl(::[DEFVALS].[SLIB].RestoreRef(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME, 'V_CASTA_1B'),V_CASTA_1B);		
+		::[DEPN_INTERFACE].[PRX_CLIENT].GetCastAndPhoneClient(V_OUR_BANK
+												,V_CASTA_1B
+												,V_DEF_1B
+												,V_CASTA_B1_RP
+												,V_FIO_B1_RP
+												,V_F_IO_1B
+												,P_DATE
+												,V_PHONE_11B
+												,V_PHONE_12B);
+       
+	elsif p_message = 'VALIDATE' then
+		timeStart:=utils.get_time; 
+		V_DATA:=null;
+		if p_info = '%VAR%.V_OUR_BANK' then
+				if V_OUR_BANK is null then
+					pragma error('Укажите банк для печати.');
+				else 	GetBankReq(V_OUR_BANK, P_DATE);	
+				end if;	
+		elsif p_info = '%VAR%.V_CASTA_1B' then
+			if V_CASTA_1B is null then
+					pragma error('Укажите 1ю подпись банка');
+			end if;
+			--debug_pipe('Проверка смены должности банка',0);
+			::[DEPN_INTERFACE].[PRX_CLIENT].GetCastAndPhoneClient(V_OUR_BANK
+													,V_CASTA_1B
+													,V_DEF_1B
+													,V_CASTA_B1_RP
+													,V_FIO_B1_RP
+													,V_F_IO_1B
+													,P_DATE
+													,V_PHONE_11B
+													,V_PHONE_12B);
+			
+		elsif p_info = '%VAR%.V_CASTA_1C' then
+			--debug_pipe('Проверка смены должности клиента',0);
+			::[DEPN_INTERFACE].[PRX_CLIENT].GetCastAndPhoneClient(this
+													,V_CASTA_1C
+													,V_DEF_1C
+													,V_CASTA_C1_RP
+													,V_FIO_C1_RP
+													,V_F_IO_1C
+													,P_DATE
+													,V_PHONE_11C
+													,V_PHONE_12C);
+		elsif p_info = 'REGISTR_NUM' then
+			V_DATA:= this.[REGISTR_NUM];	
+		elsif p_info = 'F_IO_1C' then -- ФИО первого лица
+			V_DATA:=V_F_IO_1C;
+		elsif p_info = 'FIOBOSSCL_1' then -- должность первого лица
+			V_DATA:=V_CASTA_1C.[FASE].[NAME];
+		elsif p_info = 'CASTA_1C' then -- должность первого лица
+			V_DATA:=V_CASTA_1C.[RANGE].[VALUE];
+		elsif p_info = 'Срок_полномочий' then -- значение дополнительного свойства
+			V_DATA:=to_char(V_CASTA_1C.[WORK_BEGIN])||' - '||to_char(V_CASTA_1C.[WORK_END]);
+		elsif p_info = 'DOGCLNUM' then -- значение дополнительного свойства
+			var str varchar2(170):= null;
+			for rko in ::[RKO] where rko.[CLIENT] = this loop
+				str:= str||rko.[NUM_DOG]||' от '||to_char(rko.[DATE_BEGIN])||', валюта '||rko.[CONTRACT_CUR].[CUR_ISO].[INT_CUR_SHORT]||'; ';
+			end loop;
+			V_DATA:=str;
+		elsif p_info = 'DOGCL_ACC' then
+			str:= null;
+			for rko in ::[RKO] where rko.[CLIENT] = this loop
+				str:= str||rko.[ACCOUNT].[MAIN_V_ID]||'; ';
+			end loop;
+			V_DATA:=str;
+		elsif p_info in ('%VAR%.V_DATA','OK') then null;
+		elsif p_info like ('ТекстовоеПоле%') then null;
+		
+		elsif p_info = 'SROK' then
+			 if V_SROK.[0] = 1 then	V_DATA := '2 (двух) лет';
+			 elsif V_SROK.[0] = 2 then	V_DATA := '6 (шести) месяцев';
+			 end if;
+		elsif p_info like 'НОМДОГ%' then
+			V_DATA := V_RKO.[NUM_DOG];
+		elsif p_info like 'ДАТАДОГ%' then
+			V_DATA := to_char(V_RKO.[DATE_BEGIN], 'dd.mm.yyyy');
+		elsif p_info like 'ВАЛДОГ%' then
+			V_DATA := V_RKO.[CONTRACT_CUR].[NAME];
+		elsif p_info like 'ПЕРВЫЙСЧЕТ%' then
+			V_DATA := V_ACC_FIRST.[MAIN_V_ID];
+		else
+			V_DATA := trim(GetPrdInfo(p_info, V_DOG));
+			V_DATA := replace(V_DATA,'Отсутствует');
+		end if;
+
+		V_DATA:= nvl(V_DATA,'');
+		debug_pipe(rpad(p_info,25)||'('||GetTimeInterval(utils.get_time,timeStart)||')<'||V_DATA,dp);
+	end if;
+End;
+end;
+
+execute is
+begin
+
+	::[DEFVALS].[SLIB].SaveRef(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME, 'V_FILE_NAME', V_FILE_NAME, 'SHABLON_DOC');
+	::[DEFVALS].[SLIB].SaveRef(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME, 'V_CASTA_1B', V_CASTA_1B, 'PERSONS_POS');		
+	--::[DEFVALS].[SLIB].SaveRef(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME, 'V_CASTA_2B', V_CASTA_2B, 'PERSONS_POS');
+	
+
+end;
+end;
+end;

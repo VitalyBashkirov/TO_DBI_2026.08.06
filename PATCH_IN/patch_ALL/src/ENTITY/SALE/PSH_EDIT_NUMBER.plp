@@ -1,0 +1,32 @@
+class SALE;
+
+@this(create_on_start:=true)
+@name('[ПСБ] Изменить номер сделки')
+method PSH_EDIT_NUMBER is
+PSH_EDIT_NUMBER (
+	@name('Номер') P_NUMBER in [STRING_20]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_NUMBER := this.[NUMBER];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+/*********************************************************************
+Назначение:
+
+kokorin, последнее изменение 8 Июнь 2015 г.
+*********************************************************************/
+old_number string;
+begin
+	old_number := [NUMBER];
+	[NUMBER] := P_NUMBER;
+	[WHY_DEFECTIVE] := [WHY_DEFECTIVE]||'; NUMBER '||old_number||'->'||P_NUMBER||' '||to_char(sysdate,'DD/MM/YYYY HH24:MM:SS')||' '||rtl.user||'.';
+end;
+end;
+end;

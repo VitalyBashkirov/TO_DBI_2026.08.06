@@ -1,0 +1,205 @@
+class AC_FIN;
+
+@import_plsql(true)
+@name('[ПСБ] Отчет для куратора')
+@tag('COPIED')
+static method PSH_REP_OST is
+PSH_REP_OST (
+	@name('На дату') P_DATE in [DATE]
+) is
+
+validate is
+begin
+	if p_message = 'DEFAULT' then
+		p_date := ::[SYSTEM].[OP_DATE];		
+	end if;
+end;
+
+execute is
+pragma macro(xl,'[OOXML]::[API_XL]');
+pragma macro(lib_ooxml,'::[SHABLON_DOC].[LIB_OOXML]');
+pragma macro(width, '[OOXML]::[API_XL].set_column_width([1], iCol, iCol); iCol:=iCol+1;', substitute);
+
+type NumsType is table of number index by string(300);
+
+iRow		integer;
+iCol		integer;
+sDate		string := to_char(P_DATE, 'dd.mm.yyyy');
+amounts		NumsType;
+cnt1		integer;
+cnt2		integer;
+pcz			integer := 3; -- точность округления. знаков после запятой
+det			NumsType;
+name		string(300);
+fmt			string := 'dd.mm.yyyy';
+kol5		integer:=0;
+kol6		integer:=0;
+sum7 		number:=0;
+sum8 		number:=0;
+sum9 		number:=0;
+koll0		integer:=0;
+koll1		integer:=0;
+sum12 		number:=0;
+sum13 		number:=0;
+sum_t 		number:=0;
+StyleCell integer;
+TypeCell string;
+
+
+begin
+	&lib_ooxml.xl_init('PSB_REP_OST');
+	
+	-- Лист 1
+	iRow := 5;
+	&xl.Put	( iRow, 2, 'Остаток наличных денежных средств в кассе на утро '||sDate||' (до открытия кассы)'); iRow:=iRow+1;
+	amounts('RUB')=amounts('EUR')=amounts('USD')=amounts('Z'):=0;
+	for(
+		select x(
+			a.[MAIN_V_ID] 											: num,
+			a.[FINTOOL].[CUR_SHORT]									: valuta,
+			abs(f.a_saldo_short(P_DATE, a, 'С', p_in_nat==false)) 	: saldo,
+			abs(f.a_saldo_short(P_DATE, a, 'С', p_in_nat==true)) 	: saldo_nat
+		) 
+		in ::[KASSES], (::[AC_FIN]: a)
+		where x.[3] = a
+	)loop
+		if x.valuta in ('RUB','USD','EUR') then
+			amounts(x.valuta) := amounts(x.valuta) + x.saldo;
+		else
+			amounts('Z') := amounts('Z') + x.saldo_nat;
+		end if;
+	end loop;
+	--> Лист 1
+
+	--< Лист 2
+	cnt1=cnt2:=0;
+		&xl.Open_Sheet(2);
+		&xl.Put(1, 1, 'ФИО');
+		&xl.Put(1, 2, 'Остаток');
+		&xl.Put(1, 3, 'Снято');
+		&xl.Put(1, 4, 'Можно');
+		&xl.Put(1, 5, 'Дата открытия');
+		/*&xl.Put(1, 4, 'EUR: '||::[DOCUMENT].[LIB_CUR].Get_Rate(::[FT_MONEY](CUR_SHORT='EUR'), P_DATE));
+		&xl.Put(1, 5, 'USD: '||::[DOCUMENT].[LIB_CUR].Get_Rate(::[FT_MONEY](CUR_SHORT='USD'), P_DATE));
+		&xl.Put(1, 6, 'cl_name');
+		&xl.Put(1, 7, 'acc_kt');
+		&xl.Put(1, 8, 'acc_kt_code');
+		&xl.Put(1, 9, 'acc_kt_num');
+		
+		&xl.Put(1, 10, 'ffff');--*/
+		
+		iRow := 2;
+	
+	for(
+		select a(
+			a.[CLIENT_V]: c_name			
+			,min(a.[DATE_OP]): c_date_op
+			,sum(::[DOCUMENT].[LIB_CUR].Cur2Cur( abs(f.a_saldo_short(P_DATE,a,'С',p_in_nat==false)), a.[FINTOOL], ::[FT_MONEY](CUR_SHORT='USD'), P_DATE)) : saldo
+		--	,sum(::[DOCUMENT].[LIB_CUR].Cur2Cur( abs(f.a_turn_short(to_date('09.03.22','dd.mm.yy'),P_DATE,a,false,false)), a.[FINTOOL], ::[FT_MONEY](CUR_SHORT='USD'), P_DATE)) : deb
+									
+		)
+		in ::[AC_FIN]
+		where (substr(a.[MAIN_V_ID],1,3) in ('423', '426')
+		  			or
+		  	   substr(a.[MAIN_V_ID],1,5) in ('40817', '40820'))
+		  and a.[FINTOOL] != ::[SYSTEM].[VARIABLES].NatCur
+		  and (a.[DATE_CLOSE] is null or a.[DATE_CLOSE] >= P_DATE)
+		group by a.[CLIENT_V]
+		order by 3 desc
+	)loop
+		 if a.saldo=0 then continue; end if;
+		 
+				&xl.Put	( iRow, 1, a.c_name.[NAME]);
+				&xl.Put	( iRow, 2, a.saldo);				
+				&xl.Put	( iRow, 3, 0);				
+				-- =ЕСЛИ(C3>9999;0;МИН(10000-C3;B3))
+				--&xl.Formula(iRow, 3, '=IF(C'||to_char(iRow)||'>9999;0;MIN(10000-C'||to_char(iRow)||';B'||to_char(iRow)||'))');				
+				if a.saldo>9999.99 then
+					&xl.Put( iRow, 4, 10000);
+					koll1:=koll1+1;
+					sum13:=sum13+a.saldo;
+				else 
+					koll0:=koll0+1;
+					sum12:=sum12+a.saldo;
+					&xl.Put( iRow, 4, a.saldo);
+				end if; 
+                if a.c_date_op>to_date('09.03.2022','dd.mm.yyyy') then
+				   &xl.Put	( iRow, 5,  to_char(a.c_date_op,'dd.mm.yy'));
+				   &xl.Put( iRow, 4, 0);
+                end if;   
+				
+	-----------------------------------<
+	for(
+		select md(
+			md.[ACC_DT]	: c_acc_dt
+			,sum(md.SUM) : c_SUM
+	--		,a.[ACC_KT].[MAIN_V_ID] 		: acc_kt
+	--		,a.[ACC_KT].[MAIN_USV].[CODE]	: acc_kt_code
+	--		,a.[ACC_KT].[MAIN_USV].[NUM]	: acc_kt_num
+	---		,a.[CURR_OPER].[CODE]			: cur_c
+		) in ::[MAIN_DOCUM]
+	--	all
+		where md.[DATE_EXEC]>= to_date('09.03.2022','dd.mm.yyyy')
+		  and md.[VID_DOC] =::[NAME_PAYDOC](CODE='КАСС_РАСХОД_ОРД')
+		 -- and md.[ACC_DT].[MAIN_USV].[NUM] not in ('202','474','603') --md.[ACC_KT].[MAIN_USV].[NUM] like '202%' --
+		  and substr(md.[ACC_DT].[MAIN_V_ID],1,3 )not in ('202','474','603') 
+		  --and md.[VALUTA].[CODE_ISO]='840'
+		  and md.[ACC_DT].[CLIENT_V]%id=a.c_name
+		  and md.[ACC_DT].[FINTOOL]!= ::[FT_MONEY](CUR_SHORT='RUB')
+	--	  and a.[FINTOOL] != ::[SYSTEM].[VARIABLES].NatCur
+		 -- and (md.[ACC_KT].[DATE_CLOSE] is null or md.[ACC_KT].[DATE_CLOSE] >= P_DATE)
+		group by md.[ACC_DT]
+	--	order by 1
+	)loop
+		
+				&xl.Put	( iRow, 3, md.c_SUM);
+				  if 10000-md.c_SUM>a.saldo then
+				    &xl.Put( iRow, 4, a.saldo);
+				  else
+				  &xl.Put( iRow, 4, 10000-md.c_SUM);
+				  end if; 
+				  
+				if md.c_acc_dt.[DATE_OP]>to_date('09.03.2022','dd.mm.yyyy') then
+				  &xl.Put	( iRow, 5, to_char(md.c_acc_dt.[DATE_OP],'dd.mm.yy'));				  
+				end if;  
+				  
+		--		&xl.Put	( iRow, 8, a.acc_kt_code);
+		--		&xl.Put	( iRow, 9, a.acc_kt_num);
+		--		&xl.Put	( iRow, 10, 'ff'||a.cur_c);
+				--iRow:=iRow+1;
+	end loop;
+	------------------------------------>	    
+	    sum_t:= to_number(nvl(&xl.getSheetRowColVal(iRow,4,2,TypeCell,StyleCell),0));
+	    sum9:=sum9+sum_t;
+	    
+		if nvl(&xl.getSheetRowColVal(iRow,2,2,TypeCell,StyleCell),0)>9999.99 then
+		   if sum_t>0 then
+       			kol6:=kol6+1;
+	   			sum8:=sum8+sum_t;
+		   end if;		
+		else
+		   if sum_t>0 then
+				kol5:=kol5+1;
+				sum7:=sum7+sum_t;
+		   end if;						
+ 		end if;				
+		iRow:=iRow+1;
+	end loop;
+	--> Лист 2
+	&xl.Open_Sheet(1);
+
+	&xl.Put(13, 4, kol5);
+	&xl.Put(13, 6, kol6);
+	&xl.Put(13, 8, sum7/1000000);
+	&xl.Put(13, 10, sum8/1000000);
+    &xl.Put(13, 12, sum9/1000000);
+
+	&xl.Put(13, 13, koll0);
+	&xl.Put(13, 15, koll1);
+	&xl.Put(13, 17, sum12/1000000);
+	&xl.Put(13, 19, sum13/1000000);
+	
+	&lib_ooxml.xl_finish(p_description == &METHOD$NAME||' '||sDate);
+end;
+end;
+end;

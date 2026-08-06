@@ -1,0 +1,1176 @@
+class DEPN;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@optimize(declarations:=true,this:=false,code:=true,descriptions:=true)
+@name('[ПСБ] МСФО. Корректировка стоимости')
+@tag('COPIED')
+method PSH_ADJUST_TO_AC is
+
+@name('Сумма %% по договору')             public V_SUMM_PRC_DOG    [SUMMA];
+@name('Сумма %% по МСФО')                 public V_SUMM_PRC_IFRS   [SUMMA];
+@name('Сумма корректировки')              public V_SUMM_ADJUSTMENT [SUMMA];
+@name('Сумма корректировки операционная') public V_SUMM_ADJ_OPER   [SUMMA];
+
+/*
+ * Дата	    Автор       RP			Описание
+ * -------- ----------- ----------- -----------------------------------------------------------------------------
+ * 10.12.18	poljakova	RP0598744	Вызов функции сдвига даты ShiftDate осуществляется даже если нам передана дата P_DATE.
+ * 25.12.18	poljakova	RP0600668	МСФО. Эффект при корректировке.
+ * 29.01.19 mgavrilenko RP0602607	КОрректировка при непроведенных документах
+ * 30.01.19 mgavrilenko	RP0603440 	В процедуре CalcSumms изменено определение даты начала получения %% для переходящих договоров
+ * 01.02.19	mgavrilenko	RP0603452	Изменено определение условие получения ХФИ (выполняется, если корректировка не была запущена из модификации)
+ * 12.04.19 mgavrilenko RP0606790 	В процедуре CalcSumms вызов функции GetPrcJournal_CASH заменен на GetPrcJournal
+ * 02.04.19	akhmadiev	RP0599977	Сумма корректировки вычисляется и в валюте договора, и в нац. покрытии
+ * 04.06.19 mgavrilenko	RP0608157	Добавлена проверка на выполнение модификации на дату запуска корректировки
+ * 05.06.19 mgavrilenko	RP0595537 	Добавлена передача параметра P_MERGE_PERIOD в операцию CALC_PRC_IFRS
+ * 18.07.19 mgavrilenko	RP0610752	Добавлена  обработка свойства prop_type_ifrs_delay_adj_to_ac со значением 0	
+ * 25.07.19 brikin		RP0610111	Добавлена переменная V_Bus_Process, добавлено условия для определения бизнес-процесса
+ * 26.07.19 mgavrilenko	RP0606995	В процедуре CalcSumms удалено условие на пролонгацию
+ * 24.12.19 brikin		RP0617448	В строку доп параметров v_Adds передан тег IS_CRASH.
+ * 04.03.20 mgavrilenko	RP0619600	Изменена логика функции GetMinDateBeg
+ * 16.06.20 mgavrilenko	RP0623802	Изменена логика выполнненяи корректировки и расчета %% МСФО для ОК в последний рабочий день месяца != дате окончания
+ * 29.06.20 mgavrilenko	RP0624604	в процедуре CalcSumms изменено определение vDateBeginCalc ( для ФИ без модификации и перехода)   	
+ */
+
+pragma include(::[DEPN].[LIB_MACRO]);
+pragma include(::[RUNTIME].[MACRO_LIB]);
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma include(::[DEPN].[DEBUG_MACRO]);
+
+pragma macro(fN,'LPAD([1],[2])||[3]',substitute);
+pragma macro(fD,'to_char([1], ''dd.mm.yyyy'')||[2]',substitute);
+
+public cn_sum_cor_proc_in		const ref [SUM_GUIDE] := ::[SUM_GUIDE]([COD] = 'DEP_КОР_ПРОЦ_ВХ');
+public cn_sum_sum_ac			const ref [SUM_GUIDE] := ::[SUM_GUIDE]([COD] = 'DEP_СУММ_АС');
+public cn_sum_cor_proc_reval	const ref [SUM_GUIDE] := ::[SUM_GUIDE]([COD] = 'DEP_КОР_ПРОЦ_ДООЦ');
+
+public cn_sum_cor_oper_in		const ref [SUM_GUIDE] := ::[SUM_GUIDE]([COD] = 'DEP_КОР_ОПЕР_ВХ');
+public cn_sum_cor_ss_pp			const ref [SUM_GUIDE] := ::[SUM_GUIDE]([COD] = 'DEP_КОР_СС_ПП');
+public cn_sum_cor_ac_ef			const ref [SUM_GUIDE] := ::[SUM_GUIDE]([COD] = 'DEP_СУММ_АС_ЭФ');
+public cn_sum_cor_oper_reval	const ref [SUM_GUIDE] := ::[SUM_GUIDE]([COD] = 'DEP_КОР_ОПЕР_ДООЦ');
+public cn_sum_cor_oper_np_reval	const ref [SUM_GUIDE] := ::[SUM_GUIDE]([COD] = 'DEP_КОР_ОПЕР_ВН_ДООЦ');
+
+cn_property_indicators		const ref [PROPERTY_TYPE] := ::[PROPERTY_TYPE]([CODE] = 'IS_CALC_IFRS_INDICATORS');
+
+summ_adjustment_dog		[SUMMA];
+sum_adj_oper_dog		[SUMMA];
+
+function GetMinDateBeg ( p_depn			ref [DEPN]
+						,p_OnDate		DATE
+						,p_adds			varchar2(32000) default null
+) return DATE is
+	RetDate			DATE;
+	dBegPeriod		DATE;
+begin
+	&debug('>--------GetMinDateBeg-------------',0)
+	RetDate := ::[DEPN].[LIB_IFRS].GetDateBegAdjToAC(p_depn,p_OnDate);
+	&debug('.GetMinDateBeg RetDate='||&d2cf(RetDate),1)
+	--дата начала периода может быть передана из операции модификации
+	dBegPeriod := [STR].get_date_par( p_adds, 'ADJ_PERIOD_BEG');
+	&debug('.GetMinDateBeg dBegPeriod='||&d2cf(dBegPeriod),1)
+	if dBegPeriod is not null then RetDate := least(dBegPeriod,RetDate); end if; 	
+	&debug('<--------GetMinDateBeg------------- return '||&d2cf(RetDate),0)
+	return RetDate;
+end;
+
+public procedure CalcSumms ( p_depn					ref [DEPN]
+					, p_date					[DATE]
+					, p_AddPar					varchar2(32000) default null
+					, pOut_summ_prc_dog			OUT [SUMMA]
+					, pOut_summ_prc_ifrs		OUT [SUMMA]
+					, pOut_summ_adjustment		OUT [SUMMA]
+					, pOut_summ_adjustment_dog	OUT [SUMMA]
+					/*	Сумма корретировки в валюте ФИ	*/
+					, pOut_sum_adj_oper			OUT [SUMMA]
+					, pOut_sum_adj_oper_dog		OUT [SUMMA]
+					/*	Сумма операционной корректировки в валюте	*/
+					
+) is
+	v_SumCostAfter		[SUMMA];
+	v_CB_COURCE			[SUMMA_16_6];
+	v_DepAdjAC			[SUMMA];
+	v_DepAdjOper		[SUMMA];
+	recSum				::[DEPN_INTERFACE].[PRX_DEPN_TO_IFRS].tSumsRec;
+	v_sum_prc_oper		[SUMMA];
+	vDateBeginCalc		[DATE]; --Дата с которой получаем сумму %% по журналам
+	
+	course_date			date;
+begin
+	&Cash_Depn(p_depn)
+	&debug('.CalcSumms p_depn='||p_depn||' p_date='||&d2cf(p_date),0)
+	&debug('.CalcSumms p_AddPar='||p_AddPar,0)
+	&debug('.CalcSumms &Depn.JOUR_CALC_PRC = ' || &Depn.JOUR_CALC_PRC, 0)
+	&debug('.CalcSumms &Depn.JOUR_PENALTY = ' || &Depn.JOUR_PENALTY, 0)
+	
+	course_date := coalesce(to_date([STR].get_str_par( p_AddPar, 'COURSE_DATE'), 'DD.MM.YYYY'), p_date);
+	&debug('.CalcSumms course_date: ' || to_char(course_date), 0)
+	
+	if [STR].get_bool_par( p_AddPar, 'IsModification' )
+		and [STR].get_str_par( p_AddPar, 'OLD_IS_EIR' ) = false
+		and	[STR].get_bool_par( p_AddPar, 'NEW_IS_EIR' ) = true
+	then
+		&debug('.CalcSumms Существенная модификация с изменением учета ФИ: ЛМ - ЭПС',0)
+		vDateBeginCalc := p_date+1;
+	else
+		--проверим была ли существенная модификация по ДД до даты расчета
+		--если да, то рассчитываем от даты модификации
+		for (select prop (prop%id 			: id_
+						,prop.[NUM_VALUE]	:num_value_						
+						,prop.[DATE_BEGIN]	:date_beg_)
+				in	::[PROPERTY] all
+				where prop%collection = &depn.[PROPERTY_ARR]
+				and prop.[PROPERTY_TYPE] = &L.prop_type_ifrs_modification
+				and prop.[NUM_VALUE] = 3
+				and prop.[DATE_BEGIN] <= P_DATE
+				order by prop.[DATE_BEGIN] desc		
+			)
+		loop
+			&debug('.CalcSumms выполнена модификация '||&d2cf(prop.date_beg_),3)
+			--новые условия действию только для существенной модификации
+			vDateBeginCalc := prop.date_beg_ + 1;
+			exit;
+		end loop;
+		&debug('.CalcSumms vDateBeginCalc='||&d2cf(vDateBeginCalc),0)
+		--если это не модификации определим дату начала действия ФИ, аэто дата постановки на учет +1 день
+		-- с этой даты будем считать %% для корректировки (важно! для переходящих ДД с постановкой с даты последней пролонгации)
+		-- если договор был открыт в последний рабочий день месяца и это не последний день месяца и выполнен сдвиг даты валютирования назад, то мы теряем ФО перво корректировки (за выходные),
+		-- т.о. не нужно корректрировать дату начала с которой будем выполнять дальнейшие расчеты и дата начал а должна быть равна дата постновки на учет
+		-- например 29.05 - пт, открыли договор, 31.05 выполнили корректировку стоимости, и с учетом сдвига документы проведены 29 числа, то брать дату начала учета как 30 - не корректно, задваиваются %
+		if vDateBeginCalc is null then
+			for (select prop (prop%id 			: id_
+							,prop.[NUM_VALUE]	:num_value_						
+							,prop.[DATE_BEGIN]	:date_beg_)
+					in	::[PROPERTY] all
+					where prop%collection = &depn.[PROPERTY_ARR]
+					  and prop.[PROPERTY_TYPE] = cn_property_indicators	
+					fetch 1
+				)
+			loop
+				&debug('.CalcSumms дата начала учета ДД на по МСФО: '||prop.date_beg_,0)
+				vDateBeginCalc :=prop.date_beg_;
+			end loop;
+		end if;
+		&debug('.CalcSumms vDateBeginCalc='||&d2cf(vDateBeginCalc),0)
+		vDateBeginCalc :=nvl(vDateBeginCalc,&Depn.[DATE_BEGINING]);
+	end if;
+	
+	&debug('.CalcSumms vDateBeginCalc='||&d2cf(vDateBeginCalc),0)
+	
+	--Cумма процентов по договору																
+	pOut_summ_prc_dog := ::[DEPN].[LIB_DEBT].GetPrcJournal(  J_Prc 	 		== &Depn.JOUR_CALC_PRC
+															, J_Pen			== null
+															, J_Tax			== null	
+															, Since_Date		== vDateBeginCalc
+															, On_Date	 		== p_date									 			
+															, calcFintoolDepn	== true
+															, rDepn				== &Depn.ID
+																);	
+																
+	--Cумма процентов по МСФО
+	::[DEPN_INTERFACE].[PRX_DEPN_TO_IFRS].getJournalPrcRecSums(   p_iPN 			== &Depn.[CLIENT].[PN]
+																, p_nObjRef 		== &Depn.ID
+																, p_rObjClass 		== &Depn.CLASS_ID
+																, p_dFToolDateBeg 	== vDateBeginCalc
+																, p_dDate 			== p_date
+																, p_oSums		 	== recSum
+																, p_tJournal 		== null 				-- из БД
+																, p_bGenErr 		== false
+																, p_dWithDate		== null
+																);
+																
+	&debug('.CalcSumms recSum.nSumCostAfter='||recSum.nSumCostAfter||' recSum.nSumPrc='||recSum.nSumPrc||' recSum.nSumOperPrc='||recSum.nSumOperPrc||' recSum.nSumOperCorr='||recSum.nSumOperCorr,3)																
+	-- АС после потоков
+	v_SumCostAfter 		:= nvl( recSum.nSumCostAfter, 0 );
+	--Сумма %% по ЭПС
+	pOut_summ_prc_ifrs 	:= nvl( recSum.nSumPrc, 0 );
+	--Сумма %% по ЭПС(операционная)
+	v_sum_prc_oper  	:= nvl( recSum.nSumOperPrc, 0 );
+	--Cумма операционной корректировки (по журналу)
+	pOut_sum_adj_oper	:= nvl( recSum.nSumOperCorr, 0 );
+	
+	--Cумма всех выполненных корректировок по АС
+	v_DepAdjAC := ::[DEPN].[LIB_DEBT].GetSummDebt(
+						IdDep 		== &Depn.ID
+						,VidDebt 	==  ::[VID_DEBT]([CODE] = 'КОР_БС_АС')
+						,OnDate		== p_Date
+						,WithDate	== vDateBeginCalc);
+	
+	v_DepAdjOper := ::[DEPN].[LIB_DEBT].GetSummDebt(
+						IdDep		==	&Depn.ID
+						,VidDebt	== ::[VID_DEBT]([CODE] = 'КОР_БС_ОПЕР')
+						,OnDate		== p_Date
+						,WithDate	== vDateBeginCalc);
+	
+	v_CB_COURCE := [HOOK]::[DEPN_COURCE]( &Depn.ID, course_date, &Depn.[FINTOOL], ::[SYSTEM].[SYS_MAIN_VAL], true);													
+	
+	&debug('.CalcSumms pOut_summ_prc_ifrs = ' || pOut_summ_prc_ifrs, 0)
+	&debug('.CalcSumms pOut_summ_prc_dog = ' || pOut_summ_prc_dog, 0)
+	&debug('.CalcSumms pOut_sum_adj_oper = '||pOut_sum_adj_oper,0)
+	&debug('.CalcSumms v_sum_prc_oper = ' || v_sum_prc_oper, 0)
+	&debug('.CalcSumms v_DepAdjAC = ' || v_DepAdjAC||' v_DepAdjOper='||v_DepAdjOper, 0)
+	&debug('.CalcSumms Курс: ' || v_CB_COURCE, 0)
+	
+	--	pOut_summ_prc_ifrs, pOut_summ_prc_dog и v_DepAdjAC все типа SUMMA, поэтому при такой операции ничего не потеряем
+	pOut_summ_adjustment_dog := pOut_summ_prc_ifrs - pOut_summ_prc_dog - v_DepAdjAC;
+	
+	pOut_summ_adjustment := pOut_summ_adjustment_dog * v_CB_COURCE;
+	
+	pOut_sum_adj_oper_dog := pOUt_sum_adj_oper - v_DepAdjOper;
+	
+	pOUt_sum_adj_oper	:= pOut_sum_adj_oper_dog * v_CB_COURCE;
+	
+	&debug('.CalcSumms pOut_summ_adjustment_dog = ' || pOut_summ_adjustment_dog, 0)
+	&debug('.CalcSumms pOut_summ_adjustment = ' || pOut_summ_adjustment, 0)
+	&debug('.CalcSumms pOut_sum_adj_oper_dog = ' || pOut_sum_adj_oper_dog, 0)
+	&debug('.CalcSumms pOut_sum_adj_oper = ' || pOut_sum_adj_oper, 0)
+	&Del_Depn
+end;
+
+
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+--------- СТРУКТУРЫ И ПРОЦЕДУРЫ, НЕОБХОДИМЫЕ ДЛЯ РАСЧЕТА ДООЦЕНОК И ПОСТРОЕНИЯ ОТЧЕТА О РАСЧЕТЕ КОРРЕКТИРОВОК ---------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------
+public function is_proc_correction
+/*	Функция, определяющая, относится ли вид операции к процентной корректировке */
+(
+	i_vid_oper	ref [VID_OPER_DOG]
+	/*	Вид операции */
+) return boolean
+/*	true - относится, false - не относится */
+is
+	result boolean;
+begin
+	result := false;
+	if i_vid_oper in (::[DEPN].[L].op_ac_plus, ::[DEPN].[L].op_ac_minus) then
+		result := true;
+	end if;
+	return result;
+end;	--	end is_proc_correction
+
+public function is_oper_correction
+/*	Функция, определяющая, относится ли вид операции к операционной корректировке */
+(
+	i_vid_oper	ref [VID_OPER_DOG]
+	/*	Вид операции */
+) return boolean
+/*	true - относится, false - не относится */
+is
+	result boolean;
+begin
+	result := false;
+	if i_vid_oper in (::[DEPN].[L].op_bs_ss_plus, ::[DEPN].[L].op_bs_ss_minus, ::[DEPN].[L].op_bs_oper_plus, ::[DEPN].[L].op_bs_oper_minus) then
+		result := true;
+	end if;
+	return result;
+end;	--	end is_oper_correction
+
+type t_fo_info is record
+/*	Структура, необходимая для хранения информации о фактических операциях */
+(
+	fo_sum		number
+	/*	Сумма фактической операции	*/
+	,fo_date	date
+	/*	Дата фактической операции */
+	,vid_oper	ref [VID_OPER_DOG]
+	/*	Ссылка на вид фактической операции */
+	,doc		ref [DOCUMENT]
+	/*	Ссылка на документ */
+	,cor_type	varchar(1)
+	/*	Вид корректировки: P - процентная, O - операционная */
+);	--	end t_fo_info
+
+type t_fo_info_table is table of t_fo_info;
+
+
+public type t_sum_dog is record
+/*	Структура для хранения информации о видах сумм */
+(
+	code	::[SUM_DOG].[NAME]%type
+	/*	Код суммы */
+	,value	::[SUM_DOG].[SUM]%type
+	/*	Значение суммы */
+);	--	end t_sum_dog
+
+public type t_sum_dog_table is table of t_sum_dog;
+/*	Таблица для хранения содержимого массива сумм */
+
+
+public procedure get_summs
+/*	Продедура для получения информации о массиве сумм папки/фин. распоряжения */
+(
+	i_folder	ref [FOLDER_PAY]
+	/*	Папка платежей */
+	,io_sums	in out t_sum_dog_table
+	/*	Содержимое массива сумм */
+)
+is
+	idx	integer;
+	
+	folder_sums		[SUM_DOG_ARR];
+	fin_order_sums	[SUM_DOG_ARR];
+	
+begin
+	io_sums.delete;
+	idx := 1;
+	
+	for (	select x(
+						x.[ARRAY_SUM_DOG]	:	C_ARRAY_SUM_DOG
+					)
+			in ::[DOCUMENT] all
+			where x%id = i_folder
+	) loop
+		folder_sums := x.C_ARRAY_SUM_DOG;
+	end loop;
+	
+	for (	select x(	 x.[ARRAY_SUM_DOG]	:	C_ARRAY_SUM_DOG
+					)
+			in ::[DOCUMENT] all
+			where x.[IN_FOLDER] = i_folder
+			  and x%class = 'FIN_ORDER'
+			fetch 1
+	) loop
+		fin_order_sums := x.C_ARRAY_SUM_DOG;
+	end loop;
+	
+	for (
+		select x(
+			 x.[NAME]	:	C_CODE
+			,x.[SUM]	:	C_SUM
+		) in ::[SUM_DOG] all
+		where x%collection = coalesce(fin_order_sums, folder_sums)
+	) loop
+		io_sums(idx).code := x.C_CODE;
+		io_sums(idx).value := x.C_SUM;
+		idx := idx + 1;
+	end loop;
+end;	--	end get_summs
+
+type t_revaluation_sums is record
+/*	Тип для хранения информации о дооценке корректировки	*/
+(
+	cor_sum_in		number
+	/*	Входящее значение корректировки	*/
+	,reval_sum		number
+	/*	Сумма дооценки	*/
+);	--	end t_revaluation_sums
+
+type t_revaluation_info is record
+/*	Тип для хранения информации о процентной и операционной корректировках	*/
+(
+	proc_reval		t_revaluation_sums
+	/*	Информация о дооценке процентной корректировки	*/
+	,oper_reval		t_revaluation_sums
+	/*	Информация о дооценке операционной корректировки	*/
+);	--	end t_revaluation_sums
+
+
+--	Далее размещены типы и процедуры для расчета задолженностей нарастающим итогом при нормализации
+type t_integer_vector is varray(3) of pls_integer;
+/*	Тип для храннеия знака влияния на задолженность:
+ *	первый элемент - на задолженность КОР_БС_АС
+ *	второй элемент - на задолженность КОР_БС_СС
+ *	третий элемент - на задолженность КОР_БС_ОПЕР
+ */
+
+type t_take_in_debt is table of t_integer_vector index by varchar2(40);
+/*	Тип для хранения информации о влиянии на задолженность определенным видом операции
+ *	В качестве индекса данной таблицы выступает id вида операции
+ */
+
+take_in_debt_cache	t_take_in_debt;
+
+function is_take_in_debt_cached
+/*	Функция для проверки, закешировано ли участие в задолженносити */
+return boolean
+is
+begin
+	return case when (take_in_debt_cache.first is not null) then true else false end;
+end;
+
+procedure cache_take_in_debt
+/*	Процедура кэширования участия в задолженности */
+is
+	procedure cache_single_debt
+	/*	Процедура для кэширования участия вида операций в определенной задолженности */
+	(
+		i_debt	ref [VID_DEBT]
+		/*	Вид задолженности */
+		,i_idx	integer
+		/*	Номер столбца в кэше для хранения информации об участии
+		 *	вида операции в задолженности
+		 */
+	)
+	is
+	begin
+		for (
+			select x(
+				case
+					when (x.[DT] = true) then -1
+					else 1
+				end				:	C_SIGN
+				,vid_oper%id	:	C_VID_OPER_ID
+			) in ::[TAKE_IN_DEBT]
+			, (::[VID_OPER_DOG] all : vid_oper) all
+			where x.[DEBT] = i_debt
+				and x%collection = vid_oper.[TAKE_DEBT]
+		) loop
+			if not take_in_debt_cache.exists(x.C_VID_OPER_ID) then
+				take_in_debt_cache(x.C_VID_OPER_ID)%init;
+				take_in_debt_cache(x.C_VID_OPER_ID).extend(3);
+			end if;
+			take_in_debt_cache(x.C_VID_OPER_ID)(i_idx) := x.C_SIGN;
+		end loop;
+	end;
+	
+	tmp_idx	varchar2(40);
+begin
+	take_in_debt_cache.delete;
+	
+	cache_single_debt(	 i_debt	==	::[VID_DEBT]([CODE] = 'КОР_БС_АС')
+						,i_idx	==	1);
+	cache_single_debt(	 i_debt	==	::[VID_DEBT]([CODE] = 'КОР_БС_СС')
+						,i_idx	==	2);
+	cache_single_debt(	 i_debt	==	::[VID_DEBT]([CODE] = 'КОР_БС_ОПЕР')
+						,i_idx	==	3);
+	if take_in_debt_cache.last is not null then	
+		tmp_idx := take_in_debt_cache.first;
+		while tmp_idx is not null loop
+			for i in 1 .. 3 loop
+				take_in_debt_cache(tmp_idx)(i) := coalesce(take_in_debt_cache(tmp_idx)(i), 0);
+			end loop;
+			tmp_idx := take_in_debt_cache.next(tmp_idx);
+		end loop;
+	end if;
+end;
+
+
+
+procedure calc_debts
+/* Процедура для расчета трех задолженностей
+ * КОР_БС_АС
+ * КОР_БС_СС
+ * КОР_БС_ОПЕР
+ */
+(
+	 i_fo_sum		number
+	/*	Сумма фактической операции */
+	,i_vid_oper		ref [VID_OPER_DOG]
+	/*	Вид фактической операции */
+	,i_cor_bs_ac	in out number
+	/*	Сумма задолженности КОР_БС_АС */
+	,i_cor_bs_ss	in out number
+	/*	Сумма задолженности КОР_БС_СС */
+	,i_cor_bs_oper	in out number
+	/*	Сумма задолженности КОР_БС_ОПЕР */
+)
+is
+	
+begin
+	if take_in_debt_cache.exists(i_vid_oper%id) then
+		i_cor_bs_ac := i_cor_bs_ac + i_fo_sum * take_in_debt_cache(i_vid_oper%id)(1);
+		i_cor_bs_ss := i_cor_bs_ss + i_fo_sum * take_in_debt_cache(i_vid_oper%id)(2);
+		i_cor_bs_oper := i_cor_bs_oper + i_fo_sum *  take_in_debt_cache(i_vid_oper%id)(3);
+	end if;
+end;
+
+
+function calc_revaluation
+/*	Процедура для расчета дооценок корректировок */
+(
+	i_deposit	ref [DEPN]
+	/*	Ссылка на депозитный договор	*/
+	,i_date		date
+	/*	Дата, на которую необходимо считать корректировку	*/
+) return t_revaluation_info
+/*	Информация о процентной и операционной корректировках	*/
+is
+	result t_revaluation_info;
+	
+	last_oper_cor_date	date;	--	дата операционной корректировки
+	last_proc_cor_date	date;	--	дата процентной корректировки
+	
+	cor_bs_oper		number;	--	входящее значение корректировки (значение последней корректировки)
+	old_course		number;	--	курс на дату последней корректировки
+	current_course	number;	--	курс на дату дооценки
+	revaluation		number;	--	значение дооценки
+	
+	need_to_norm	boolean;	--	признак нормализации
+	fo_info_tbl		t_fo_info_table;	--	таблица с основной информацией по фактически операциям
+	fo_idx			integer;	--	индекс для работы с таблицей fo_info_tbl
+	is_proc_cor		boolean;
+	is_oper_cor		boolean;
+begin
+	&Cash_Depn(i_deposit)
+	&debug('Расчет дооценки на дату ' || to_char(i_date), 0)
+	
+	result.proc_reval.reval_sum := 0;
+	result.proc_reval.cor_sum_in := 0;
+		
+	result.oper_reval.reval_sum := 0;
+	result.oper_reval.cor_sum_in := 0;
+
+	if &Depn.FINTOOL != ::[SYSTEM].[SYS_MAIN_VAL] then
+	
+		--	Для начала проверим, а были ли дооценки. Для этого необходимо проверить последнюю операцию корректировки
+		--	на наличие определенных суммы на папке/фин. распоряжении
+		fo_idx := 1;
+		for (
+			select x(
+				trunc(x.[DATE])		:	C_DATE
+				,x.[SUMMA]			:	C_SUM
+				,x.[OPER]			:	C_VID_OPER
+				,x.[DOC]			:	C_DOC
+			) in ::[FACT_OPER] all
+			where	x%collection = &Depn.LIST_PAY
+				and	x.[DATE] >= to_date('01.01.2006', 'DD.MM.YYYY')
+				and x.[DATE] <= i_date
+			order by x.[DATE], x%id	--	сортировка по аналогии с кэшированием
+		) loop
+			is_proc_cor := is_proc_correction(i_vid_oper == x.C_VID_OPER);
+			is_oper_cor := is_oper_correction(i_vid_oper == x.C_VID_OPER);
+			if is_proc_cor or is_oper_cor then
+				fo_info_tbl(fo_idx).fo_date := x.C_DATE;
+				fo_info_tbl(fo_idx).fo_sum := x.C_SUM;
+				fo_info_tbl(fo_idx).vid_oper := x.C_VID_OPER;
+				fo_info_tbl(fo_idx).doc := x.C_DOC;
+				fo_info_tbl(fo_idx).cor_type := case when (is_proc_cor = true) then 'P' else 'O' end;
+				fo_idx := fo_idx + 1;
+			end if;
+		end loop;
+		
+		need_to_norm := true;
+		if fo_info_tbl.count > 0 then
+			declare
+				sums	t_sum_dog_table;
+			begin
+				for i in reverse 1 .. fo_info_tbl.count loop
+					 get_summs(	i_folder	==	fo_info_tbl(i).doc.[IN_FOLDER]
+								,io_sums	==	sums
+							  );
+					if sums.count > 0 then
+						for j in 1 .. sums.count loop
+							if sums(j).code in ( cn_sum_cor_proc_in
+												,cn_sum_cor_proc_reval
+												,cn_sum_cor_oper_in
+												,cn_sum_cor_oper_np_reval
+												,cn_sum_cor_oper_reval
+											   )
+							then
+								need_to_norm := false;
+								exit;
+							end if;
+						end loop;
+					else
+						need_to_norm := false;
+					end if;
+					exit;
+				end loop;
+			end;
+		else
+			need_to_norm := false;
+		end if;
+		
+		&debug('Признак необходимости нормализации: ' || bool_char(need_to_norm), 0)
+		
+		if need_to_norm then
+			--	проблема. для каждой фактической операции дергать задолженности вообще не камильфо
+			declare
+				oper_revaluation		number;
+				proc_revaluation		number;
+				
+				sum_cor_bs_ac_new		number;
+				sum_cor_bs_ss_new		number;
+				sum_cor_bs_oper_new		number;
+				
+				sum_cor_bs_ac_old		number;
+				sum_cor_bs_ss_old		number;
+				sum_cor_bs_oper_old		number;
+			begin
+				if not is_take_in_debt_cached() then
+					cache_take_in_debt();
+				end if;
+				
+				oper_revaluation := 0;
+				proc_revaluation := 0;
+				
+				sum_cor_bs_ac_new := 0;
+				sum_cor_bs_ss_new := 0;
+				sum_cor_bs_oper_new := 0;
+				
+				sum_cor_bs_ac_old := 0;
+				sum_cor_bs_ss_old := 0;
+				sum_cor_bs_oper_old := 0;
+				&debug(rpad('Дата', 10, ' ') || ' | ' || rpad('КОР_БС_АС', 12, ' ') || ' | ' || rpad('КОР_БС_CС', 12, ' ') || ' | ' || rpad('КОР_БС_ОПЕР', 12, ' ') || ' |', 0)
+				for i in 1 .. fo_info_tbl.count loop
+					calc_debts(	 i_fo_sum		==	fo_info_tbl(i).fo_sum
+								,i_vid_oper		==	fo_info_tbl(i).vid_oper
+								,i_cor_bs_ac	==	sum_cor_bs_ac_new
+								,i_cor_bs_ss	==	sum_cor_bs_ss_new
+								,i_cor_bs_oper	==	sum_cor_bs_oper_new
+							  );
+					
+					current_course := ::[HOOK].[DEPN_COURCE]( &Depn.ID, fo_info_tbl(i).fo_date, &Depn.FINTOOL, ::[SYSTEM].[SYS_MAIN_VAL], true);
+					&debug('Курс: ' || current_course, 0)		
+					if last_proc_cor_date is not null then
+						old_course := ::[HOOK].[DEPN_COURCE]( &Depn.ID, last_proc_cor_date, &Depn.[FINTOOL], ::[SYSTEM].[SYS_MAIN_VAL], true);
+						&debug('Процентная корректировка: ' || round(sum_cor_bs_ac_old * (current_course - old_course), 2), 0)
+						proc_revaluation := proc_revaluation + round(sum_cor_bs_ac_old * (current_course - old_course), 2);
+					end if;
+					
+					if last_oper_cor_date is not null then
+						last_oper_cor_date := greatest(last_oper_cor_date, coalesce(last_proc_cor_date, last_oper_cor_date));
+						old_course := ::[HOOK].[DEPN_COURCE]( &Depn.ID, last_oper_cor_date, &Depn.[FINTOOL], ::[SYSTEM].[SYS_MAIN_VAL], true);
+						&debug('Операционная корректировка: ' || round((sum_cor_bs_ss_old + sum_cor_bs_oper_old) * (current_course - old_course), 2), 0)
+						oper_revaluation := oper_revaluation + round((sum_cor_bs_ss_old + sum_cor_bs_oper_old) * (current_course - old_course), 2);
+					end if;
+					
+					if sum_cor_bs_ac_new != sum_cor_bs_ac_old then
+						last_proc_cor_date := fo_info_tbl(i).fo_date;
+					end if;
+					if (sum_cor_bs_ss_new != sum_cor_bs_ss_old) or (sum_cor_bs_oper_new != sum_cor_bs_oper_old) then
+						last_oper_cor_date := fo_info_tbl(i).fo_date;
+					end if;
+					
+					
+					&debug(to_char(fo_info_tbl(i).fo_date, 'DD.MM.YYYY') || ' | ' || rpad(sum_cor_bs_ac_new, 12, ' ') || ' | ' || rpad(sum_cor_bs_ss_new, 12, ' ') || ' | ' || rpad(sum_cor_bs_oper_new, 12, ' ') || ' |', 0)
+					sum_cor_bs_ac_old := sum_cor_bs_ac_new;
+					sum_cor_bs_ss_old := sum_cor_bs_ss_new;
+					sum_cor_bs_oper_old := sum_cor_bs_oper_new;
+				end loop;
+				
+				result.proc_reval.reval_sum := proc_revaluation;
+				&debug('Сумма проц. дооценки за прошлые периоды: ' || result.proc_reval.reval_sum, 0)
+				result.oper_reval.reval_sum := oper_revaluation;
+				&debug('Сумма опер. дооценки за прошлые периоды: ' || result.oper_reval.reval_sum, 0)
+			end;
+		end if;
+		--	поиск последней корректироровки производит по предрассчитанным задолженностям
+		--	для начала считаем операционную дооценку
+		current_course := ::[HOOK].[DEPN_COURCE]( &Depn.ID, i_date, &Depn.FINTOOL, ::[SYSTEM].[SYS_MAIN_VAL], true);
+		&debug('Курс на дату переоценки: ' || current_course, 0)
+		
+		
+		--	определим дату последней корректировки до АС
+		for (
+				select x(
+							x.[DATE_UPD]	:	C_LAST_COR_DATE
+						)
+				in ::[DEBT_SUM] all
+				where x.[DEPOSIT]		=	i_deposit
+				  and x.[VID_DEBT]	=	::[VID_DEBT]([CODE] = 'КОР_БС_АС')
+				fetch 1
+			)
+		loop
+			last_proc_cor_date := x.C_LAST_COR_DATE;
+		end loop;
+		
+		if last_proc_cor_date is not null then
+			&debug('Дата последней процентной корректировки: ' || to_char(last_proc_cor_date), 0)
+			old_course := ::[HOOK].[DEPN_COURCE]( &Depn.ID, last_proc_cor_date, &Depn.[FINTOOL], ::[SYSTEM].[SYS_MAIN_VAL], true);
+			&debug('Курс на дату последней процентной корректировки: ' || old_course, 0)
+			
+			cor_bs_oper := ::[DEPN].[LIB_DEBT].GetSummDebt(&Depn.ID, ::[VID_DEBT]([CODE] = 'КОР_БС_АС'), i_date);
+			revaluation := round(cor_bs_oper * (current_course - old_course), 2);
+			result.proc_reval.reval_sum := result.proc_reval.reval_sum + revaluation;
+			result.proc_reval.cor_sum_in := cor_bs_oper;
+		end if;
+		&debug('Сумма процентной корректировоки: ' || result.proc_reval.cor_sum_in, 0)
+		&debug('Сумма дооценки: ' || result.proc_reval.reval_sum, 0)
+		
+		
+		--	проверим, была ли корркстировка до СС по задолженностям КОР_БС_СС и КОР_БС_ОПЕР
+		--	это необходимо для того, чтобы понять, нужно считать операционную корректировку
+		for (
+				select x(
+							greatest(x.[DATE_UPD])	:	C_LAST_COR_DATE
+						)
+				in ::[DEBT_SUM] all
+				where	x.[DEPOSIT]		=	i_deposit
+					and	x.[VID_DEBT]	in	(::[VID_DEBT]([CODE] = 'КОР_БС_СС'), ::[VID_DEBT]([CODE] = 'КОР_БС_ОПЕР'))
+			)
+		loop
+			last_oper_cor_date := x.C_LAST_COR_DATE;
+		end loop;
+		&debug('Дата последней корректировки до СС: ' || to_char(last_oper_cor_date), 0)
+		
+		--	если была корректировка до СС, то попытаемся сделать дооценку операциоюнной корректировки
+		if last_oper_cor_date is not null then
+			--	для начала определим дату последней дооценки, они будет совпадать с датой послденей дооценки процентной корректировки
+			--	за исключением первого выполнения корректировки. При первом выполнении корректировки дата последней операцинной корректировки
+			--	будет равна дате корректировки до СС
+			
+			last_oper_cor_date := greatest(last_oper_cor_date, coalesce(last_proc_cor_date, last_oper_cor_date));
+			&debug('Дата последней операционной корректировки: ' || to_char(last_oper_cor_date), 0)
+			old_course := ::[HOOK].[DEPN_COURCE]( &Depn.ID, last_oper_cor_date, &Depn.[FINTOOL], ::[SYSTEM].[SYS_MAIN_VAL], true);
+			&debug('Курс на дату последней операционной корректировки: ' || old_course, 0)
+			
+			cor_bs_oper := ::[DEPN].[LIB_DEBT].GetSummDebt(&Depn.ID, ::[VID_DEBT]([CODE] = 'КОР_БС_ОПЕР'), i_date) + ::[DEPN].[LIB_DEBT].GetSummDebt(&Depn.ID, ::[VID_DEBT]([CODE] = 'КОР_БС_СС'), i_date);
+			revaluation := round(cor_bs_oper * (current_course - old_course), 2);
+			result.oper_reval.reval_sum := result.oper_reval.reval_sum + revaluation;
+			result.oper_reval.cor_sum_in := cor_bs_oper;
+		end if;
+		&debug('Сумма операционной корректировоки: ' || result.oper_reval.cor_sum_in, 0)
+		&debug('Сумма дооценки: ' || result.oper_reval.reval_sum, 0)
+			
+	end if;	--	&Depn.FINTOOL != ::[SYSTEM].[SYS_MAIN_VAL]
+	
+	&Del_Depn
+	
+	return result;
+exception
+	when others then
+		&Del_Depn
+		raise;
+end;	--	end calc_revaluation
+PSH_ADJUST_TO_AC (
+	@name('Дата')                                        P_DATE          in [DATE],
+	@name('Дата валютирования')                          P_DATE_VAL      in [DATE]         default null,
+	@name('Провести документы')                          P_PROV_DOCS     in [BOOLEAN]      default null,
+	@name('Доп. параметры')                              P_ADDS          in [STRING_32000] default null,
+	@name('Выполнить списание корректировок')            P_RET_ADJ_TO_AC in [BOOLEAN]      default null,
+	@name('Выполнить расчет операционных корректировок') P_CALC_OPER_PRC in [BOOLEAN]      default null
+) return [FOLDER_PAY_REF] is
+
+validate is
+Begin
+	if p_message = 'DEFAULT' then
+		::[DEPN].[LIB_APPLICATION].check_application_extra('1B400085', true );		
+		
+		&Cash_Depn(this)
+		
+		if &DEPN.[COM_STATUS] not in (&L.ComStatus_Work, &L.ComStatus_Prol, &L.ComStatus_TO_CLOSE) then
+			pragma error('Операция не обрабатывает договоры в состояниях отличных от "Работает", "Пролонгирован" или "Помечен к закрытию"!');
+		end if;
+		
+		if &Depn.CLASS_ID = 'DEPOSIT_MULT' then
+			pragma error('Операция не обрабатывает мультивалютные депозитные договоры!');
+		end if;
+
+		if &Depn.[DATE_ENDING] is null then
+			pragma error('Расчет %% по МСФО для бессрочных договоров невозможен!');
+		end if;
+
+		P_PROV_DOCS := false;
+		P_DATE 		:= ::[SYSTEM].[VARIABLES].Br2OpDate( &DEPN.[FILIAL] );
+		if trunc(P_DATE) != trunc(&DEPN.[DATE_ENDING]) then
+			P_DATE := ::[DEPN].[LIB_01].ShiftDate( &DEPN.ID, trunc(P_DATE), 'DEPN_ADJ_AC_END');
+		end if;
+		P_DATE_VAL	:= ::[DEPN].[LIB_01].ShiftDate( &DEPN.ID, trunc(P_DATE), 'DEPN_ADJ_AC');
+		
+		[STR].set_par( P_ADDS, 'COURSE_DATE', to_char(P_DATE_VAL, 'DD.MM.YYYY'));
+		CalcSumms( p_depn					== &DEPN.ID
+				 , p_date					== P_DATE
+				 , p_AddPar					== P_ADDS
+				 , pOut_summ_prc_dog		== V_SUMM_PRC_DOG
+				 , pOut_summ_prc_ifrs		== V_SUMM_PRC_IFRS
+				 , pOut_summ_adjustment		== V_SUMM_ADJUSTMENT
+				 , pOut_summ_adjustment_dog	== summ_adjustment_dog
+				 , pOUt_sum_adj_oper		== V_SUMM_ADJ_OPER
+				 , pOUt_sum_adj_oper_dog	== sum_adj_oper_dog
+				 );
+		&Del_Depn
+	elsif p_message = 'VALIDATE' and p_info = 'P_DATE' then
+		
+		::[DEPN].[LIB_IFRS].checkIFRSApplDate( p_date == P_DATE, p_gen_err == true );
+		
+		if trunc(P_DATE) != trunc(this.[DATE_ENDING]) then
+			P_DATE := ::[DEPN].[LIB_01].ShiftDate( this, trunc(P_DATE), 'DEPN_ADJ_AC_END');
+		end if;
+		P_DATE_VAL	:= ::[DEPN].[LIB_01].ShiftDate(this, trunc(P_DATE), 'DEPN_ADJ_AC');
+		
+		&debug('После всех сдвигов P_DATE = ' || &d2cf(P_DATE) || ', P_DATE_VAL = ' || &d2cf(P_DATE_VAL), 0)
+		[STR].set_par( P_ADDS, 'COURSE_DATE', to_char(P_DATE_VAL, 'DD.MM.YYYY'));
+		CalcSumms( p_depn					== this
+				 , p_date					== P_DATE
+				 , p_AddPar					== P_ADDS
+				 , pOut_summ_prc_dog		== V_SUMM_PRC_DOG
+				 , pOut_summ_prc_ifrs		== V_SUMM_PRC_IFRS
+				 , pOut_summ_adjustment		== V_SUMM_ADJUSTMENT
+				 , pOut_summ_adjustment_dog	== summ_adjustment_dog
+				 , pOUt_sum_adj_oper		== V_SUMM_ADJ_OPER
+				 , pOUt_sum_adj_oper_dog	== sum_adj_oper_dog
+				 );
+
+	end if;
+Exception when others then
+	&Del_Depn
+	raise;
+End;
+
+execute is
+	v_FormOrder				[BOOLEAN];
+	rBO						ref [PATTERN_DOC];
+	rFolder					ref [FOLDER_PAY];
+	rFolderRetAdj			ref [FOLDER_PAY];
+	rFinOrder				ref [FIN_ORDER];
+	recBo 					[PATTERN_DOC];
+	arrAcc					[HOZ_OP_ACC_ARR];
+	arrSum					[SUM_DOG_ARR];
+	arrHist					[HISTORY_STAT_ARR];	
+	v_DateBeg				[DATE];
+	v_Adds					varchar2(3200);
+	folders_tbl				::[DEPN].[L].folder_pay_table_type; -- Массив папок для объединения
+	FromGroup				boolean;
+	o_ind					[IFRS_INDICATORS];
+	rProperty				ref [PROPERTY];
+	
+	V_ADDS_ADJ 				varchar2(32000);
+	v_pref					varchar2(10) := [STR].get_str_par(P_ADDS,'DOC_UNO_PREF');
+	
+	&Var_Sum_Dog
+	V_Bus_Process 			[BUS_PROCESS]::[CODE]%type;
+
+	dOperDate				[DATE];--дата изначального запуска операции
+	bNeed2CalcPrc			[BOOLEAN] := false; --нужно досчитать журнал до даты сдвига
+	bMergePeriod			[boolean];	
+Begin
+	if ::[DEPN].[LIB_IFRS].checkIFRSApplDate( p_date == P_DATE, p_gen_err == true ) then
+		&debug('+++++++++++++МСФО. Корректировка стоимости депозита до АС+++++++++++++', 0)
+		&debug('DEPN ' || this, 0)
+		&debug('P_DATE ' || &d2cf(P_DATE), 0)
+		&debug('P_ADDS:	'||P_ADDS, 0)
+		&debug('P_PROV_DOCS:	'||P_PROV_DOCS, 0)
+		&debug('P_CALC_OPER_PRC: '||P_CALC_OPER_PRC,0)
+		
+		&debug('BODY',0)
+		
+		-- Кешируем
+		&Cash_Depn(this)
+		&Cash_pattern_doc
+		&Cash_Sum_Dog_(&Depn.ARRAY_SUM_DOG)
+		FromGroup := &GET_BOOL(FROM_GROUP, &DEPN.ID, null, null);
+		
+		if &Depn.[COM_STATUS] not in (&L.ComStatus_Work, &L.ComStatus_Prol, &L.ComStatus_TO_CLOSE) then
+			if FromGroup then
+				&Del_Sum_Dog
+				&Del_Pattern_Doc
+				&Del_Depn
+				return null;
+			else
+				pragma error('Операция не обрабатывает договоры в состояниях отличных от "Работает", "Пролонгирован" или "Помечен к закрытию"!');
+			end if;
+		end if;
+		
+		if &Depn.CLASS_ID = 'DEPOSIT_MULT' then
+			if FromGroup then
+				&Del_Sum_Dog
+				&Del_Pattern_Doc
+				&Del_Depn
+				return null;
+			else
+				pragma error('Операция не обрабатывает мультивалютные депозитные договоры!');
+			end if;
+		end if;
+
+		if &Depn.[DATE_ENDING] is null then
+			if FromGroup then
+				&Del_Sum_Dog
+				&Del_Pattern_Doc
+				&Del_Depn
+				return null;
+			else
+				pragma error('Корректировка стоимости депозита до АС для бессрочных договоров невозможна!');
+			end if;
+		end if;
+		
+
+		&nvl(P_PROV_DOCS, false)
+		&nvl(P_CALC_OPER_PRC,false)				
+		&nvl(P_DATE,&Br2OpDate(&DEPN.[FILIAL]))
+		bMergePeriod := nvl([STR].get_bool_par(P_ADDS,'MERGE_PERIOD'),false);		
+		
+		--если по на эту дату была выполнена модификация, то корректировку не запускаем, т.к. она уже выполнена и повторный запуск приведен к некорректному пересчету % МСФО
+		for (
+			select prop(1)
+			in ::[PROPERTY] all
+			where prop%collection = &depn.property_arr
+				and prop.[PROPERTY_TYPE] = &L.prop_type_ifrs_modification
+				and prop.[DATE_BEGIN] = p_date			
+			)
+		loop
+			if FromGroup then
+				&Del_Sum_Dog
+				&Del_Pattern_Doc
+				&Del_Depn
+				return null;
+			else
+				pragma error('Корректировка стоимости депозита выполнена ранее при модификации ФИ!');
+			end if;
+		end loop;		
+		
+		dOperDate := P_date;
+				
+		--если корректировку запустили не в дату окончания или не в режиме ОК, то сдвигаем согласно настройкам
+		--если последний рабочий день месяца не совпадает с датой окончания месяца, то ранее выполнялся сдвиг на следующий месяц
+		--а для ОК в последний рабочий день месяца, она должна быть отражена датой выполнения операции, т..е. этим днем
+		--важное замечание: при выполнении процесса корректировок при внеплановых /плановых операциях, учет %% и призщнание затрат тожде сдвигается на 1 рабочий день следующего месяца
+		--поэтому рассчитать %% МСФО только по дату самой операции не корректно, нужно на дату операции выполнить расчет в режиме ОК и досчитать журнал до конца месяца
+		
+		if trunc(P_DATE) != trunc(&DEPN.[DATE_ENDING]) then
+			P_DATE := ::[DEPN].[LIB_01].ShiftDate( &DEPN.ID, P_DATE, 'DEPN_ADJ_AC_END');
+		end if;
+		--нужно досчитать журнал до даты сдвига
+		bNeed2CalcPrc := (P_CALC_OPER_PRC and dOPerDate!= P_date);
+		&debug('dOperDate='||&d2cf(dOperDate)||' P_date='||&d2cf(p_Date)||' bNeed2CalcPrc='||bNeed2CalcPrc,3)
+
+		P_DATE_VAL	:= coalesce( P_DATE_VAL, ::[DEPN].[LIB_01].ShiftDate( &DEPN.ID, trunc(P_DATE), 'DEPN_ADJ_AC') );
+
+		&debug('После всех сдвигов P_DATE = ' || &d2cf(P_DATE) || ', P_DATE_VAL = ' || &d2cf(P_DATE_VAL), 0)
+			
+		--ВАЖНО! если Корректировка стоимости запущена как самостоятельный процесс, то необходимо получение ХФИ на дату, если же это подпроцесс Модификации (то корректировка выполняется по ХФИ старого ФИ)
+		if FromGroup and nvl([STR].get_bool_par(P_ADDS,'IsModification'),false) = false then
+			::[DEPN_INTERFACE].[PRX_DEPN_TO_IFRS].Get_Indicators( P_OBJ_REF			== &Depn.ID					-- экземпляр финансового инструмента
+				 												, P_OBJ_CLASS		== &Depn.CLASS_ID			-- Класс ТБП экземпляра финансового инструмента
+														 		, P_IND_DATE		== P_DATE					-- Дата, на которую производится определение характеристик
+														 		, P_PN				== &Depn.[CLIENT].[PN]		-- Номер раздела: значение поля PN с клиента
+														 	    , P_DATE_BEGIN		== &Depn.[DATE_BEGINING]	-- Дата начала действия ФИ: параметр необходим для уменьшения количества просматриваемых секций при поиске существующих характеристик
+														 		, p_oIndicators		== o_ind					-- Значения характеристик МСФО
+														 		);
+			
+			if coalesce( o_ind.[IS_EIR_METHOD], false ) = false then
+				&Del_Sum_Dog
+				&Del_Pattern_Doc
+				&Del_Depn
+				return null;
+			end if;
+			if o_ind.[FAIR_COST] is null then
+				pragma error('Корректировка стоимости депозита до АС невозможна, т.к. по договору не определена справедливая стоимость при первоначальном признании!');
+			end if;
+		end if;
+		
+		v_DateBeg := GetMinDateBeg (  p_depn	== &DEPN.ID
+									, p_OnDate	== P_DATE
+									, p_adds	== P_ADDS
+									);
+		&debug('v_DateBeg='||&d2cf(v_DateBeg),3)
+
+		[STR].set_par( P_ADDS, 'CALC_EIR_OPER_PRC', P_CALC_OPER_PRC );
+		
+		[STR].set_par( P_ADDS, 'COURSE_DATE', to_char(P_DATE_VAL, 'DD.MM.YYYY'));
+		--если передан параметр ADJUSTMENT_WITHOUT_CALC_PRC_IFRS, то расчет журнала не заускаем
+		if nvl([STR].get_bool_par(P_ADDS,'ADJUSTMENT_WITHOUT_CALC_PRC_IFRS'),false) then
+			null;
+		else
+			--Необходимо осуществить расчет журнала %% МСФО
+			if bNeed2CalcPrc then
+				--сначала расчиатем журнал %% МСФО на дату ОК
+				--this.[CALC_PRC_IFRS]( P_DATE_END	== trunc(dOperDate)		--По дату
+				this.[PSH_CALC_PRC_IFR]( P_DATE_END	== trunc(dOperDate)		--По дату -- updated CHANGE_SHORT_NAME PSB_CALC_PRC_IFR->PSH_CALC_PRC_IFR 15/10/25
+								, P_ADDS			== P_ADDS
+								, P_MERGE_PERIOD 	== bMergePeriod
+								);				
+			end if;			
+			--this.[CALC_PRC_IFRS]( P_DATE_END	== trunc(P_DATE)		--По дату
+			this.[PSH_CALC_PRC_IFR]( P_DATE_END	== trunc(P_DATE)		--По дату -- updated CHANGE_SHORT_NAME PSB_CALC_PRC_IFR->PSH_CALC_PRC_IFR 15/10/25
+							, P_ADDS			== P_ADDS
+							, P_MERGE_PERIOD 	== bMergePeriod
+							);
+
+		end if;
+		CalcSumms( p_depn					== &DEPN.ID
+				 , p_date					== P_DATE
+				 , p_AddPar					== P_ADDS
+				 , pOut_summ_prc_dog		== V_SUMM_PRC_DOG
+				 , pOut_summ_prc_ifrs		== V_SUMM_PRC_IFRS
+				 , pOut_summ_adjustment		== V_SUMM_ADJUSTMENT
+				 , pOut_summ_adjustment_dog	== summ_adjustment_dog
+				 , pOUt_sum_adj_oper		== V_SUMM_ADJ_OPER
+				 , pOUt_sum_adj_oper_dog	== sum_adj_oper_dog
+				 );
+		&debug('Сумма корректировки: ' || V_SUMM_ADJUSTMENT, 0)
+		&debug('Сумма корректировки (операционная): ' || V_SUMM_ADJ_OPER, 0)
+		
+		if abs( V_SUMM_ADJUSTMENT ) > 0 then
+			
+			v_FormOrder := coalesce( this.[GET_BOOL_TUNE](::[PRODUCT].[TUNE_CODES].CODE_FORM_FIN_ORD), false );
+	
+			rBO 	:= &Get_Pattern_Doc('DEP_ADJ_AC');
+			recBO	:= rBO;
+			rFolder := ::[DEPN_INTERFACE].[PRX_DOCUMENT].FOLDER_CREATE(	P_DOCUMENT_DATE	== P_DATE_VAL
+																	  , P_PROD_FOLD		== &DEPN.ID
+																	  , P_BUSINESS_OP	== rBO								
+																	  , P_DO_PROV_ALL	== recBO.[PROV_ALL]
+																	  , P_PROV_ONE		== recBO.[PROV_ONE]										
+																	  , P_CAN_OUT_DT_KT	== recBO.[CAN_OUT_DT_KT]										
+																	  );
+			&debug('rFolder='||rFolder%id,0)
+		
+			--Определим Бизнес-процесс
+			if [STR].get_bool_par(P_ADDS,'IS_CRASH') = true then
+			-- Тег IS_CRASH определяется в операции CANC_TERM
+				V_Bus_Process := 'DEPN_CRASH';
+				[STR].set_par(v_Adds, 'IS_CRASH', true);
+			else
+				V_Bus_Process := 'DEPN_ADJ_AC';
+			end if;
+			&debug('V_Bus_Process =' || V_Bus_Process,0)
+			--добавляем в историю состояний папки бизнес-процесс
+			::[DEPN_INTERFACE].[PRX_DOCUMENT].NewHistoryState( p_ArrHist	==	rFolder.[HISTORY_STATE]
+															 , p_State		==	::[BUS_PROCESS]%class
+															 , p_AddInfo	==	V_Bus_Process
+															 );
+			if v_FormOrder then
+				&debug('Создаем фин. распоряжение', 0)
+				rFinOrder := ::[DEPN_INTERFACE].[PRX_FIN_ORDER].NewFinOrder(  P_DOCUMENT_NUM 	== null				-- Номер
+																			, P_DOCUMENT_DATE 	== P_DATE_VAL		-- Дата создания
+																			, P_TEXT 			== null				-- Текст распоряжения
+																			, P_REASON 			== null				-- Основание для распоряжения
+																			, P_DOCUMENT 		== rFolder			-- Документ
+																			, P_PRODUCT 		== &depn.id			-- Продукт
+																			, P_PATTERN_DOC_REF == rBO				-- Исполняющая бизнес операция
+																			, P_PRINT 			== false			-- Печать ордера
+																			);			
+			end if;
+	
+			-- [Определяем массивы сумм]
+			select DocArrs( DocArrs.[ARRAY_SUM_DOG] )
+			in ::[DOCUMENT] all
+			where DocArrs%ID = nvl(rFinOrder%id, rFolder%id)
+			into arrSum;
+			&debug('arrSum = '||arrSum, 0)
+			--добавляем сумму корректировки
+			&Add_Sum_Dog(::[SUM_GUIDE](COD = 'DEP_СУММ_АС'), V_SUMM_ADJUSTMENT)
+			arrSum.[NEW#AUTO](::[SUM_GUIDE]([COD] = 'DEP_СУММ_АС'), V_SUMM_ADJUSTMENT);
+			&debug('Добавляем DEP_СУММ_АС с суммой = ' || V_SUMM_ADJUSTMENT, 0)
+			
+			--добавляем сумму корректировки в валюте договора
+			&Add_Sum_Dog(::[SUM_GUIDE](COD = 'DEP_СУММ_АС_DOG'), summ_adjustment_dog)
+			arrSum.[NEW#AUTO](::[SUM_GUIDE]([COD] = 'DEP_СУММ_АС_DOG'), summ_adjustment_dog);
+			&debug('Добавляем DEP_СУММ_АС_DOG с суммой = ' || summ_adjustment_dog, 0)
+			--добавляем сумму эффекта от операционной корректировки
+			&Add_Sum_Dog(::[SUM_GUIDE](COD = 'DEP_СУММ_АС_ЭФ'), V_SUMM_ADJ_OPER)
+			arrSum.[NEW#AUTO](::[SUM_GUIDE]([COD] = 'DEP_СУММ_АС_ЭФ'), V_SUMM_ADJ_OPER);
+			&debug('Добавляем DEP_СУММ_АС_ЭФ с суммой = ' || V_SUMM_ADJ_OPER, 0)
+			
+			--добавляем сумму эффекта от операционной корректировки в валюте договора
+			&Add_Sum_Dog(::[SUM_GUIDE](COD = 'DEP_СУММ_АС_ЭФ_DOG'), sum_adj_oper_dog)
+			arrSum.[NEW#AUTO](::[SUM_GUIDE]([COD] = 'DEP_СУММ_АС_ЭФ_DOG'), sum_adj_oper_dog);
+			&debug('Добавляем DEP_СУММ_АС_ЭФ_DOG с суммой = ' || sum_adj_oper_dog, 0)
+			
+			
+			--	произведем дооценку корректировки
+			declare
+				revaluation		t_revaluation_info;
+				dep_cor_oper_vn	number;
+				dep_cor_oper	number;
+			begin
+				revaluation := calc_revaluation( i_deposit	==	this
+												,i_date		==	P_DATE_VAL);
+												
+				&Add_Sum_Dog(::[SUM_GUIDE](COD = 'DEP_КОР_ПРОЦ_ВХ'), revaluation.proc_reval.cor_sum_in)
+				arrSum.[NEW#AUTO](::[SUM_GUIDE]([COD] = 'DEP_КОР_ПРОЦ_ВХ'), revaluation.proc_reval.cor_sum_in);
+				&debug('Добавляем DEP_КОР_ПРОЦ_ВХ с суммой = ' || revaluation.proc_reval.cor_sum_in, 0)
+				
+				&Add_Sum_Dog(::[SUM_GUIDE](COD = 'DEP_КОР_ПРОЦ_ДООЦ'), revaluation.proc_reval.reval_sum)
+				arrSum.[NEW#AUTO](::[SUM_GUIDE]([COD] = 'DEP_КОР_ПРОЦ_ДООЦ'), revaluation.proc_reval.reval_sum);
+				&debug('Добавляем DEP_КОР_ПРОЦ_ДООЦ с суммой = ' || revaluation.proc_reval.reval_sum, 0)
+				
+				&Add_Sum_Dog(::[SUM_GUIDE](COD = 'DEP_КОР_ОПЕР_ВХ'), revaluation.oper_reval.cor_sum_in)
+				arrSum.[NEW#AUTO](::[SUM_GUIDE]([COD] = 'DEP_КОР_ОПЕР_ВХ'), revaluation.oper_reval.cor_sum_in);
+				&debug('Добавляем DEP_КОР_ОПЕР_ВХ с суммой = ' || revaluation.oper_reval.cor_sum_in, 0)
+				
+				if abs(V_SUMM_ADJ_OPER) > 0 then
+					dep_cor_oper_vn := revaluation.oper_reval.reval_sum;
+					dep_cor_oper := 0;
+				else
+					dep_cor_oper_vn := 0;
+					dep_cor_oper := revaluation.oper_reval.reval_sum;
+				end if;
+				
+				&Add_Sum_Dog(::[SUM_GUIDE](COD = 'DEP_КОР_ОПЕР_ВН_ДООЦ'), dep_cor_oper_vn)
+				arrSum.[NEW#AUTO](::[SUM_GUIDE]([COD] = 'DEP_КОР_ОПЕР_ВН_ДООЦ'), dep_cor_oper_vn);
+				&debug('Добавляем DEP_КОР_ОПЕР_ВН_ДООЦ с суммой = ' || dep_cor_oper_vn, 0)
+				
+				&Add_Sum_Dog(::[SUM_GUIDE](COD = 'DEP_КОР_ОПЕР_ДООЦ'), dep_cor_oper)
+				arrSum.[NEW#AUTO](::[SUM_GUIDE]([COD] = 'DEP_КОР_ОПЕР_ДООЦ'), dep_cor_oper);
+				&debug('Добавляем DEP_КОР_ОПЕР_ДООЦ с суммой = ' || dep_cor_oper, 0)
+			end;
+			
+			
+			&debug('rFinOrder = ' || rFinOrder, 0)
+			&debug('rFinOrder.PRODUCT = ' || rFinOrder.PRODUCT, 0)
+
+			--Добавим в историю состояний папки период корректировки до АС
+			::[DEPN].[LIB_IFRS].AddAdjToACPeriodOnFolder( p_depn		== &DEPN.ID			--Депозит
+														, p_folder		== rFolder			--Папка
+														, p_date_beg	== v_DateBeg		--Дата начала периода
+														, p_date_end	== P_DATE			--Дата окончания периода
+														);
+			
+			if v_pref is not null then
+				[STR].set_par(V_ADDS_ADJ, 'DOC_UNO_PREF', v_pref);
+			end if;
+			::[DEPN].[LIB_01].ExecuteFolder(  IdFolder 	== rFolder
+											, OnDate   	== P_DATE_VAL
+											, ProvDocs 	== P_PROV_DOCS				 		-- проводить
+											, PrintCash	== false							-- не печатаем
+											, IdBo		== '#'||rBO%id||'#'
+											, Adds		== V_ADDS_ADJ
+											);
+			
+			&debug('+++++++++++++МСФО. КОНЕЦ Корректировка стоимости депозита до АС+++++++++++++', 0)
+			
+		end if;
+
+		if P_RET_ADJ_TO_AC then
+			if P_PROV_DOCS = false or rFolder%state != 'PROV' then
+				[STR].set_par( v_Adds, 'DEP_СУММ_АС', V_SUMM_ADJUSTMENT );
+			end if;
+			if v_pref is not null then
+				[STR].set_par(v_Adds, 'DOC_UNO_PREF', v_pref);
+			end if;
+			rFolderRetAdj := this.[RET_ADJ_TO_AC]( P_DATE		== P_DATE_VAL		--Дата
+												 , P_PROV_DOCS	== P_PROV_DOCS		--Провести документы
+												 , P_ADDS		== v_Adds			--Доп. параметры
+												 );
+		end if;
+		
+		-- [Объединение папок]
+		if rFolder is not null then
+			folders_tbl(1)	:= rFolder;
+		end if;
+		if rFolderRetAdj is not null then
+			folders_tbl(folders_tbl.count+1) := rFolderRetAdj;
+		end if;
+		
+		if folders_tbl.count = 1 then
+			-- Если папка всего одна, то ее и вернем
+			rFolder := folders_tbl(1);
+		elsif folders_tbl.count > 1 then
+			-- Если папок больше одной, то объединим их
+			rFolder := ::[DEPN].[L].folder_unite(folders_tbl);
+		end if;
+		
+		--если на ДД было установлено свойство отложенного расчета журнала % МСФО, удалим его
+		for (select prop (prop%id	: id_
+						,prop.str_value : value_)
+			in	::[PROPERTY] all
+			where prop%collection = &depn.[PROPERTY_ARR]
+			and prop.[PROPERTY_TYPE]= &L.prop_type_ifrs_delay_adj_to_ac
+			and trunc(prop.[DATE_BEGIN]) <= trunc(p_Date))			
+		loop
+			if prop.value_ = '0' then
+				rProperty := prop.id_;
+				rProperty.[DELETE#AUTO];
+			end if;
+		end loop;
+		
+		&Del_Sum_Dog
+		&Del_Pattern_Doc
+		&Del_Depn
+		
+		return rFolder;
+	end if;
+exception when others then
+	&Del_Sum_Dog
+	&Del_Pattern_Doc
+	&Del_Depn
+	raise;
+End;
+end;
+end;

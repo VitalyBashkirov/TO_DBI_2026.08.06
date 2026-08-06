@@ -1,0 +1,123 @@
+class HOOK_BANK;
+
+@name('РЦ. Проверки правильности заполнения реквизитов (продолжение) [CACHE Version]')
+@tag('COPIED')
+method RC_ACHK_2 is
+
+pragma INCLUDE(::[DOCUM_RC].[CACHE_MACRO]);
+pragma include(::[DEBUG_TRIGGER].MACRO_LIB);
+pragma include(::[RUNTIME].[MACRO_LIB]);
+
+
+RC_ACHK_2 (
+	@name('Документ РЦ')                      P_DOC      in     [DOCUM_RC_REF],
+	@name('Код проверки')                     P_CHK_ID   in     [STRING_20],
+	@name('Сообщение о результатах проверки') P_MESS_STR in out [STRING_250],
+	@name('Дополнительные условия')           P_ADD      in     [STRING_250]   default null
+) return [REJECT_REF] is
+
+execute is
+reject  ref [REJECT];
+name	string(1000);
+rIso_msg	ref [ISO_MSG];
+rIso_fin	ref [ISO_FIN];
+begin
+	&CHECK_CACHE_PTR(P_DOC);	
+	-- Проверки наименования получателя --------------------
+	if      &DOC.[DOG_SD].[TYPE_DOG] = ::[CONTRACT_TYPE]([IDENT]='N')	-- Договор участника-отправителя
+		and &DOC.[DOG_RC].[TYPE_DOG] = ::[CONTRACT_TYPE]([IDENT]='L')	-- Договор участника-получателя
+	then
+		if &DOC.[RECEIVER].[NAME] is null then
+			P_MESS_STR := 'Не указано наименование получателя';
+			return ::[REJECT]([CODE] = '609' and [ERR_CLASS] = 'E');
+		elsif not ::[DOCUM_RC].[COMP_LIB].equal_client(&DOC.[DOG_RC].[ACCOUNT].[CLIENT_V], &DOC.[RECEIVER].[NAME], ::[SYSTEM].[SYS_MAIN_VAL]) then
+			--debug_pipe('&DOC.[DOG_RC].[ACCOUNT].[CLIENT_V] = '||&DOC.[DOG_RC].[ACCOUNT].[CLIENT_V].[NAME]||'   -    '||  &DOC.[RECEIVER].[NAME],0);
+
+			P_MESS_STR := 'Не верно наименование получателя';
+			::[DOCUM_RC].[CHK_LIB].it_error_state(&DOC%id, 'S_6', P_CHK_ID || '_01', P_MESS_STR);
+			--P_DOC.[CHK] := P_DOC.[CHK] || 'CR_MAIN_NAK';   Закомментарил, чтобы не возникала: ошибка "Ошибка при автообработке: 27, максимальное: 20)"  из-за длины реквизита [CHK]
+			
+			-->> PSH VRI 23/01/2025 CFT-3186 допустимые наименования клиента
+			if STDLIB.User_Id.[USERNAME] <> 'TRC' then
+				if &DOC.[TYPE_DOC]  = 'ISO' then
+	 				rIso_msg := ::[ISO_MSG].[LIB].GetIsoMsgByDocRc(&DOC%id);
+					if rIso_msg%class = ::[ISO_FIN]%class then
+						rIso_fin := rIso_msg;
+	 					name := coalesce(rIso_fin.[CDTR_PI].[NAME], rIso_fin.[CDTR_FI].[NAME]);
+	 				end if;
+				else
+	 				if ::[DOCUM_RC].[LIB_VIEW].get_type_doc_sform(&DOC%id) like '103%' and &DOC.[RECEIVER].[OPTION_CL] = 'F' then
+	 					name := ::[DOCUM_RC].[DC_MAIN].get_rec_name(&DOC.[RECEIVER].[NAME]);
+	 				else  
+	 					name := &DOC.[RECEIVER].[NAME];
+	 				end if;
+	 			end if;
+				if trim(name) is not NULL then
+			 		-- Запомним подтвержденное наименование клиента в списке альтернативных наименований
+		 			name := SUBSTR(name, 1, 160);
+					name := ::[DOCUM_RC].[COMP_LIB].norm_str(name);
+					for (select n(n.[NAME] : n_name)
+						in &DOC.[DOG_RC].[ACCOUNT].[CLIENT_V].[NAMES]
+						)
+					loop
+						if n.n_name = name then
+							return ::[REJECT]([CODE] = '609' and [ERR_CLASS] = 'E');
+						end if;
+					end loop;
+					&DOC.[DOG_RC].[ACCOUNT].[CLIENT_V].[ADD_ALT_NAME](name);
+				end if;
+			end if;
+			--<< PSH VRI 23/01/2025 CFT-3186 допустимые наименования клиента
+			return ::[REJECT]([CODE] = '609' and [ERR_CLASS] = 'E');
+		end if;
+	end if;	
+
+	-->> PSB VRI 16/05/2025 CFT-1625 конверсия, настройка, этап 2
+	/*if &DOC.[AUDIT].[FROM_ROUT] then -- Проверка по входящим документам РЦ
+		&debug('IN', 0)
+		if true then
+			P_MESS_STR := 'ПСБ. Требуется утверждение для входящего сообщения';
+			::[DOCUM_RC].[CHK_LIB].it_error_state(&DOCREF, 'S_5', P_CHK_ID||'_06', P_MESS_STR);
+			if P_MESS_STR is not null then
+				return null;
+			end if;
+		end if;*/
+	if not(nvl(&DOC.[AUDIT].[FROM_ROUT], false)) then  -- Проверка по исходящим документам РЦ
+		&debug('OUT', 0)
+		if &DOC.[MAIN_DOC]->([MAIN_DOCUM])[ACC_DT].[TO_PRODUCT] in (::[ACC_PRODUCT]([CODE] = 'SALE')) then
+			P_MESS_STR := 'ПСБ. Требуется утверждение для исходящего сообщения по конверсионным операциям';
+			::[DOCUM_RC].[CHK_LIB].it_error_state(P_DOC, 'S_5', P_CHK_ID, P_MESS_STR);
+		end if;
+	--<< PSB VRI 16/05/2025 CFT-1625 конверсия, настройка, этап 2
+		
+		-->> PSB VRI 16/05/2025 CFT-1636 ЦФТ-банк: Максимальная сумма платежа для сервиса несрочного перевода.
+		-- Перевод документа РЦ в вид отправки в "срочно" для документов в 5 статусе
+		if nvl(&DOC.[ORIGINAL].[TYPE_DOC], &DOC.[TYPE_DOC]) in ('001', '005') and &DOC.[CONNTYPE] = '3' and &DOC%state = 'S_5' then
+			if &DOC.[SUMMA] > ::[TRC].[LIB_NEW].attr_val_num(&DOC.[DOG_RC], ::[ATTR]([CODE] = 'EL_DOC_MAX_SUM')) and not ::[DOCUM_RC].[UFEBS_LIB_REG].is_registry(&DOC) then
+				-- 595-П Распоряжение, сумма которого превышает 100 миллионов рублей, при переводе денежных средств участниками платежной системы,
+				-- которым предоставлен сервис срочного перевода и в сервиса отношении которых не установлено ограничение предоставления срочного перевода
+				-- (за исключением подразделения Банка России, Федерального казначейства или его территориального органа), направляется данными участниками
+				-- в Банк России для исполнения с использованием сервиса срочного перевода.
+				if nvl(::[SYSTEM].[VARIABLES].OurBank.[URRS], ::[SYSTEM].[VARIABLES].OpDate+1) > ::[SYSTEM].[VARIABLES].OpDate
+				 and &DOC.[RECEIVER].[BANK_REF]->(CL_BANK_N)[BANK_TYPE] <> ::[BANK_TYPES]([CODE] = '40') then
+					if ::[TRC].[GET_FLAG]('UFEBS_URGENT') and ::[TRC].[GET_FLAG]('EL2BESP_AUTO', &DOC.[DOG_RC], &DOCREF) then
+						P_DOC.[OPER_MSG] := ::[DOCUMENT].[ADD_MEMO](sysdate, 'Вид платежа изменен на "Срочно" в связи с превышением максимальной суммы для сервиса несрочного перевода', P_DOC.[OPER_MSG]);	
+						P_DOC.[CONNTYPE] := '4';
+						P_DOC.[CONTYPE_REF] := ::[VID_SEND_DOCUM]([COD] = '4');
+						P_DOC.[MAIN_DOC]->([MAIN_DOCUM])[DOC_SEND_REF] := P_DOC.[CONTYPE_REF];
+						P_DOC.[HOWLONG] := '1';
+					else
+						P_MESS_STR := 'Сумма распоряжения превышает значение ('|| ::[TRC].[LIB_NEW].attr_val_num(&DOC.[DOG_RC], ::[ATTR]([CODE] = 'EL_DOC_MAX_SUM')) ||'), допустимое для сервиса несрочного перевода';
+						::[DOCUM_RC].[CHK_LIB].it_error_state(P_DOC, 'S_6', P_CHK_ID || '_30', P_MESS_STR);
+						return ::[REJECT]([CODE] = '600' and [ERR_CLASS] = 'E');
+					end if;
+				end if; 
+			end if;				
+		 end if;	
+		--<< PSB VRI 16/05/2025 CFT-1636 ЦФТ-банк: Максимальная сумма платежа для сервиса несрочного перевода.		
+	end if;
+
+	return NULL;
+end;
+end;
+end;

@@ -1,0 +1,124 @@
+class PSH_SCRIPTS;
+
+@name('[ПСБ] Обновить информацию об ошибочных вкладчиках ФЛ')
+static method PSH_REFRESH_FIX1 is
+PSH_REFRESH_FIX1 (
+	@name('Реестр') P_REGISTRY in [U1417_REESTR_REF]
+) is
+
+execute is
+p_mess string := 'VALIDATE';
+p_inf string := 'REFRESH';
+
+begin
+	for (select x(x :cl_id,
+				x.[CLIENT_NUMBER] : c_client_number,
+				x.[CLIENT] : c_client,
+				x.[SURNAME] : c_surname,
+				x.[NAME] : c_name,
+				x.[PATRONYMIC] : c_patronymic,
+				x.[DOCUMENT_REQS] : c_document_reqs,
+				x.[DOCUMENT_TYPE] : c_document_num,
+				x.[BIRTH_DATE] : c_birth_date,
+				x.[SNILS] :	c_snils,
+				x.[INN] : c_inn,
+				x.[EMAIL] :	c_email,
+				x.[PHONE] :	c_phone,
+				x.[SMS_PHONE] :	c_sms_phone,
+				x.[REG_ADDRESS] : c_reg_address,
+				x.[POST_ADDRESS] : c_post_address,
+				--
+				x.[BRANCH] : C_BRANCH,
+				x.[EXTERNAL_SYSTEM] : C_EXTERNAL_SYSTEM,
+				x.[INTERNAL_NUMBER] : C_INTERNAL_NUMBER,
+				x.[REGISTRY] : C_REGISTRY,
+				x.[CLIENT_TYPE] : C_CLIENT_TYPE,
+				x.[OGRNIP] : C_OGRNIP,
+				x.[AGENTS] : C_AGENTS,
+				x.[FILE_LINE] : C_FILE_LINE
+				--
+		)
+	in ::[RBL_CLIENTS_PRIV]
+	where (x.[REGISTRY] = P_REGISTRY or x.[REGISTRY].[HL_REESTR] = P_REGISTRY)
+--	and x.[CLIENT_NUMBER] = '1474'
+	and exists(select err(err) in ::[U1417_IMPORT_ERR]
+		where (err.[REESTR] = P_REGISTRY or err.[REESTR].[HL_REESTR] = P_REGISTRY)
+		and err.[ERROR_REF].[CODE] in ('101','117')
+		and err.[FILE_NAME] = 'INV1.TXT'
+		and err.[CLIENT].[CLIENT] = x.[CLIENT])
+	)
+	loop
+		debug_pipe(x.c_client_number, 0);
+/*		::[RBL_CLIENTS_PRIV].[NEW_AUTO].update_client(	
+							i_client			==	x.c_client
+							,o_surname			==	x.c_surname
+							,o_name				==	x.c_name
+							,o_patronymic		==	x.c_patronymic
+							,o_document_reqs	==	x.c_document_reqs
+							,o_document_num		==	x.c_document_num
+							,o_birth_date		==	x.c_birth_date
+							,o_snils			==	x.c_snils
+							,o_inn				==	x.c_inn
+							,o_email			==	x.c_email
+							,o_phone			==	x.c_phone
+							,o_sms_phone		==	x.c_sms_phone
+							,o_reg_addr			==	x.c_reg_address
+							,o_post_addr		==	x.c_post_address);
+		::[RBL_CLIENTS_PRIV].[EDIT_AUTO](P_CLIENT == x.c_client);
+*/		
+		x.cl_id => [EDIT_AUTO](p_message == p_mess,
+								p_info == p_inf,
+								P_BRANCH == x.C_BRANCH,
+								P_CLIENT == x.c_client,
+								P_EXTERNAL_SYSTEM == x.C_EXTERNAL_SYSTEM,
+								P_REGISTRY == x.C_REGISTRY,
+								P_CLIENT_NUMBER == x.c_client_number,
+								P_INTERNAL_NUMBER == x.C_INTERNAL_NUMBER,
+								P_CLIENT_TYPE == x.C_CLIENT_TYPE,
+								P_INN == x.c_inn,
+								P_EMAIL == x.c_email,
+								P_PHONE == x.c_phone,
+								P_SMS_PHONE == x.c_sms_phone,
+								P_REG_ADDRESS == x.c_reg_address,
+								P_POST_ADDRESS == x.c_post_address,
+								P_BIRTH_DATE == x.c_birth_date,
+								P_DOCUMENT_NUM == x.c_document_num,
+								P_SNILS == x.c_snils,
+								P_OGRNIP == x.C_OGRNIP,
+								P_SURNAME == x.c_surname,
+								P_NAME == x.c_name,
+								P_PATRONYMIC == x.c_patronymic,
+								P_DOCUMENT_REQS == x.c_document_reqs,
+								P_AGENTS == x.C_AGENTS,
+								P_FILE_LINE == x.C_FILE_LINE
+								);
+								
+		x.cl_id.[EDIT_AUTO](P_BRANCH == x.C_BRANCH,
+							P_CLIENT == x.c_client,
+							P_EXTERNAL_SYSTEM == x.C_EXTERNAL_SYSTEM,
+							P_REGISTRY == x.C_REGISTRY,
+							P_CLIENT_NUMBER == x.c_client_number,
+							P_INTERNAL_NUMBER == x.C_INTERNAL_NUMBER,
+							P_CLIENT_TYPE == x.C_CLIENT_TYPE,
+							P_INN == x.c_inn,
+							P_EMAIL == x.c_email,
+							P_PHONE == x.c_phone,
+							P_SMS_PHONE == x.c_sms_phone,
+							P_REG_ADDRESS == x.c_reg_address,
+							P_POST_ADDRESS == x.c_post_address,
+							P_BIRTH_DATE == x.c_birth_date,
+							P_DOCUMENT_NUM == x.c_document_num,
+							P_SNILS == x.c_snils,
+							P_OGRNIP == x.C_OGRNIP,
+							P_SURNAME == x.c_surname,
+							P_NAME == x.c_name,
+							P_PATRONYMIC == x.c_patronymic,
+							P_DOCUMENT_REQS == x.c_document_reqs,
+							P_AGENTS == x.C_AGENTS,
+							P_FILE_LINE == x.C_FILE_LINE
+							);
+							
+	end loop;
+end;
+end;
+end;

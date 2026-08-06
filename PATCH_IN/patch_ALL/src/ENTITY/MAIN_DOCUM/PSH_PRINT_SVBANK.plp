@@ -1,0 +1,1039 @@
+class MAIN_DOCUM;
+
+@this(create_on_start:=true)
+@name('ПСХ. Печать многострочного банковског ордера')
+@tag('COPIED')
+batch method PSH_PRINT_SVBANK is
+
+@name('Печатать назначение платежа каждого документа') public V_NAZN_EVERY_DOC [BOOLEAN];
+@name('Пользовательский тип')                          public V_USER_TYPE      [USER_TYPE_REF];
+public type rec is record ( p1 natural, p2 natural, yes boolean, gr natural);  -- составной тип
+public type tbl_t is table of rec;  -- табличный тип
+public tab_num  tbl_t;
+
+public type tbl_doc is table of ref [MAIN_DOCUM];  -- табличный тип
+public docs tbl_doc; -- массив документов
+
+public num number;
+function Dif(tab docs%type, sort_dt_kt natural, k natural, par string(2), Last_Group natural) return boolean
+is
+	dif boolean := true;
+	kol natural := tab.last;
+begin
+	if k > 1 then
+		if par='DT' then
+			dif := (tab(k).[NUM_DT]/*.[ACC_DT].[MAIN_V_ID]*/ != tab(k-1).[NUM_DT]/*.[ACC_DT].[MAIN_V_ID]*/);
+		else
+			dif := (tab(k).[NUM_KT]/*.[ACC_KT].[MAIN_V_ID]*/ != tab(k-1).[NUM_KT]/*.[ACC_KT].[MAIN_V_ID]*/);
+		end if;
+	end if;
+
+	if par='DT' and not dif and Last_Group not in (1,0) then
+		dif := true;
+	elsif par='KT' and not dif and Last_Group not in (2,0) then
+		dif := true;
+	end if;
+
+	if k < kol then
+		if par='DT' then
+			dif := dif and (tab(k).[NUM_DT]/*.[ACC_DT].[MAIN_V_ID]*/ != tab(k+1).[NUM_DT]/*.[ACC_DT].[MAIN_V_ID]*/);
+		else
+			dif := dif and (tab(k).[NUM_KT]/*.[ACC_KT].[MAIN_V_ID]*/ != tab(k+1).[NUM_KT]/*.[ACC_KT].[MAIN_V_ID]*/);
+		end if;
+	end if;
+
+	-- можно ли на самом деле добавить в 1-ю/2-ю группу, при пересечении -  исключение
+	if k < kol-1 then
+		if tab(k).[NUM_DT]/*.[ACC_DT].[MAIN_V_ID]*/||tab(k).[NUM_KT]/*.[ACC_KT].[MAIN_V_ID]*/<>tab(k+1).[NUM_DT]/*.[ACC_DT].[MAIN_V_ID]*/||tab(k+1).[NUM_KT]/*.[ACC_KT].[MAIN_V_ID]*/ then
+		if sort_dt_kt = 1 then
+			if tab(k+1).[NUM_DT]||tab(k).[NUM_KT]=tab(k+2).[NUM_DT]||tab(k+1).[NUM_KT] then
+				dif := true;
+			end if;
+			
+			null;
+		else
+			if tab(k).[NUM_DT]/*.[ACC_DT].[MAIN_V_ID]*/||tab(k+1).[NUM_KT]/*.[ACC_KT].[MAIN_V_ID]*/=tab(k+1).[NUM_DT]/*.[ACC_DT].[MAIN_V_ID]*/||tab(k+2).[NUM_KT]/*.[ACC_KT].[MAIN_V_ID]*/ then
+				dif := true;
+			end if;
+		end if;
+		end if;
+	end if;
+
+	return dif;
+end;
+
+-- Запись в шаблон
+procedure set_shab(
+	P_PATT_SV in ref [PATT_SV],
+	P_USER in [USER_REF],
+	P_OTV_DT in [USER_REF],
+	P_OTV_KT in [USER_REF],
+	P_NAZN in [MEMO],
+	P_KOD_NAZN_PAY in [KOD_N_PAY_REF],
+	P_VID in [STRING],
+	P_PRIORITET in [STRING],
+	P_PRINT in [CASE_BETWEEN_TWO],
+	P_COND_CORR in [STRING_1000],
+	P_COND_GROUP in [STRING_1000],
+	P_ONLY_RUR in [STRING_1000],
+	P_ONLY_CUR in [STRING_1000],
+	P_SORT in [ONE_FROM_5],
+	P_ONLY_PROV in [BOOLEAN],
+	P_CUR_GROUP in [BOOLEAN],
+	P_PRIOR_GROUP in [BOOLEAN],
+	P_NUM in [NUMBER],
+	P_PGSIZE in [DIG_9],
+	P_COND_USER_TYPE in [STRING_1000])
+is
+begin
+	if P_NAZN is not null then
+		begin
+			locate P_PATT_SV in ::[PATT_SV] where P_PATT_SV.[NAZN]=P_NAZN;
+			P_PATT_SV.[EDIT#AUTO](
+						P_USER,
+						P_OTV_DT,
+						P_OTV_KT,
+						P_NAZN,
+						P_KOD_NAZN_PAY,
+						P_VID,
+						P_PRIORITET,
+						P_PRINT,
+						P_COND_CORR,
+						P_COND_GROUP,
+						P_ONLY_RUR,
+						P_ONLY_CUR,
+						P_SORT,
+						P_ONLY_PROV,
+						P_CUR_GROUP,
+						P_PRIOR_GROUP,
+						P_NUM,
+						P_PGSIZE,
+						P_COND_USER_TYPE);
+		exception when NO_DATA_FOUND then
+			::[PATT_SV].[NEW#AUTO](
+						P_USER,
+						P_OTV_DT,
+						P_OTV_KT,
+						P_NAZN,
+						P_KOD_NAZN_PAY,
+						P_VID,
+						P_PRIORITET,
+						P_PRINT,
+						P_COND_CORR,
+						P_COND_GROUP,
+						P_ONLY_RUR,
+						P_ONLY_CUR,
+						P_SORT,
+						P_ONLY_PROV,
+						P_CUR_GROUP,
+						P_PRIOR_GROUP,
+						P_NUM,
+						P_PGSIZE,
+						P_COND_USER_TYPE);
+		end;
+	else
+		pragma error('Назначение платежа не должно быть пустым !');
+	end if;
+end;
+
+-- Чтение из шаблона
+procedure get_shab(
+	P_PATT_SV in out ref [PATT_SV],
+	P_USER out [USER_REF],
+	P_OTV_DT out [USER_REF],
+	P_OTV_KT out [USER_REF],
+	P_NAZN out [MEMO],
+	P_KOD_NAZN_PAY out [KOD_N_PAY_REF],
+	P_VID out [STRING],
+	P_PRIORITET out [STRING],
+	P_PRINT out [CASE_BETWEEN_TWO],
+	P_COND_CORR out [STRING_1000],
+	P_COND_GROUP out [STRING_1000],
+	P_ONLY_RUR out [STRING_1000],
+	P_ONLY_CUR out [STRING_1000],
+	P_SORT out [ONE_FROM_5],
+	P_ONLY_PROV out [BOOLEAN],
+	P_CUR_GROUP out [BOOLEAN],
+	P_PRIOR_GROUP out [BOOLEAN],
+	P_NUM out [NUMBER],
+	P_PGSIZE out [DIG_9],
+	P_COND_USER_TYPE out [STRING_1000])
+is
+	l_patt_sv [PATT_SV] := P_PATT_SV;
+begin
+	P_USER := l_patt_sv.[USER];
+	P_OTV_DT := l_patt_sv.[OTV_DT];
+	P_OTV_KT := l_patt_sv.[OTV_KT];
+	P_NAZN := l_patt_sv.[NAZN];
+	P_KOD_NAZN_PAY := l_patt_sv.[KOD_NAZN_PAY];
+	P_VID := l_patt_sv.[VID];
+	P_PRIORITET := l_patt_sv.[PRIORITET];
+	P_PRINT := l_patt_sv.[PRINT];
+	P_COND_CORR := l_patt_sv.[COND_CORR];
+	P_COND_GROUP := l_patt_sv.[COND_GROUP];
+	P_ONLY_RUR := l_patt_sv.[ONLY_RUR];
+	P_ONLY_CUR := l_patt_sv.[ONLY_CUR];
+	P_SORT.[0] := l_patt_sv.[SORT].[0];
+	P_ONLY_PROV := l_patt_sv.[ONLY_PROV];
+	P_CUR_GROUP := l_patt_sv.[CUR_GROUP];
+	P_PRIOR_GROUP := l_patt_sv.[PRIOR_GROUP];
+	P_NUM := l_patt_sv.[NUM];
+	P_PGSIZE := l_patt_sv.[PGSIZE];
+	P_COND_USER_TYPE := l_patt_sv.[COND_USER_TYPE];
+	P_PATT_SV := null; -- это нужно обязательно для повторного выбора, т.к. валидатор отрабатывает только при изменении значения
+end;
+
+-- Автовыбор метода сортировки
+function sort_auto(patt_dt varchar2, patt_kt varchar2) return natural
+is
+	sort_dt_kt natural := 1;
+begin
+	if length(patt_dt)<=1 and length(patt_kt)>1 then
+		sort_dt_kt := 2;
+	else
+		sort_dt_kt := 1;
+	end if;
+
+	return sort_dt_kt;
+end;
+
+-- Получение следующего метода сортировки по номеру предыдущего документа
+procedure sort_get(numb_change in out natural, numb_change_str in out string(32000), sort_dt_kt in out natural, sort_dt_kt_str in out string(32000))
+is
+begin
+	numb_change := nvl(to_number(substr(numb_change_str, 1, instr(numb_change_str,',')-1)), 0);
+	numb_change_str := substr(numb_change_str, instr(numb_change_str,',')+1);
+	sort_dt_kt := nvl(to_number(substr(sort_dt_kt_str, 1, instr(sort_dt_kt_str,',')-1)), 0);
+	sort_dt_kt_str := substr(sort_dt_kt_str, instr(sort_dt_kt_str,',')+1);
+end;
+
+-- Удаление из выделенного списка документов сложной проводки и вставка порожденных документов, если их нет в списке
+procedure del_smart_prov(ds in out tbl_doc,kol_doc in out natural)
+is
+i natural;
+j natural;
+main_smart ref [DOCUMENT];
+fl_is_tabl [BOOLEAN];
+ds_temp in out tbl_doc;
+begin
+	i := ds.first;
+	if i is not null then
+		while i is not null loop
+			if ::[MAIN_DOCUM].[MD_FUN_ADD].is_main_smart_prov(ds(i)) then
+				main_smart := ds(i);
+				for (select d(d.[SUBDOC_REF] : p_doc)  in main_smart.[SUBDOCUMENTS]) loop
+					j := ds.first;
+					fl_is_tabl := false;
+					if j is not null then
+						while j is not null loop
+							if ds(j) = d.p_doc then
+								fl_is_tabl := true;	
+								exit;
+							end if;	
+							j := ds.next(j);
+						end loop;
+					end if;	
+					if not fl_is_tabl then
+						j := ds.last;
+						ds(j+1) := d.p_doc;	
+					end if;
+				end loop;
+				ds.delete(i);
+			end if;
+			i := ds.next(i);
+		end loop;
+	end if;
+	ds_temp := ds;
+	ds.delete;
+	j := 0;
+	i := ds_temp.first;
+	if i is not null then
+		while i is not null loop
+			j := j + 1;
+			ds(j) := ds_temp(i);
+			i := ds_temp.next(i);
+		end loop;
+	end if;	
+	kol_doc := j;
+end;
+PSH_PRINT_SVBANK (
+	@name('Дата проводки')                                P_DATE_PROV      in     [DATE],
+	@name('Создано пользователем')                        P_USER           in     [USER_REF],
+	@name('Ответственный по счету дебета')                P_OTV_DT         in     [USER_REF],
+	@name('Ответственный по счету кредита')               P_OTV_KT         in     [USER_REF],
+	@name('Назначение платежа')                           P_NAZN           in     [MEMO],
+	@name('Код назначения платежа')                       P_KOD_NAZN_PAY   in     [KOD_N_PAY_REF],
+	@name('Вид оп.')                                      P_VID            in     [STRING],
+	@name('Очередность платежа')                          P_PRIOR          in     [STRING],
+	@name('Печатать счета')                               P_PRINT          in     [CASE_BETWEEN_TWO],
+	@name('Предопределенные режимы поиска и группировки') P_CASE           in     [ONE_FROM_9],
+	@name('Условие на корреспонденцию')                   P_COND_CORR      in     [STRING_1000],
+	@name('Условие на группировку')                       P_COND_GROUP     in     [STRING_1000],
+	@name('Только рублевые счета')                        P_ONLY_RUR       in     [STRING_1000],
+	@name('Только валютные счета')                        P_ONLY_CUR       in     [STRING_1000],
+	@name('Упорядочить по дебету / кредиту')              P_SORT           in     [ONE_FROM_5],
+	@name('Только проведенные')                           P_ONLY_PROV      in     [BOOLEAN],
+	@name('Группировать по валютам')                      P_CUR_GROUP      in     [BOOLEAN],
+	@name('Группировать по очер.плат.')                   P_PRIOR_GROUP    in     [BOOLEAN],
+	@name('Номер первого ордера')                         P_NUM            in     [NUMBER],
+	@name('Кол-во проводок на странице')                  P_PGSIZE         in out [DIG_9],
+	@name('Шаблон')                                       P_PATT_SV        in     [PATT_SV_REF],
+	@name('Условие на пользовательский тип')              P_COND_USER_TYPE in     [STRING_1000],
+	@name('Филиал')                                       P_FILIAL         in     [BRANCH_REF]       default null
+) is
+
+validate is
+-----------------------------------------------
+procedure FirstCase
+is
+begin
+	P_COND_CORR := '%  |  %';
+	P_ONLY_PROV := true;
+	P_SORT.[0]  := 3;
+end;
+-----------------------------------------------
+
+begin	
+ 	if p_message = 'DEFAULT' then
+		-- Инициализируем переменные данными с пользователя
+		P_DATE_PROV := [SYSTEM]::[OP_DATE];
+		P_FILIAL	:= [SYSTEM].[VARIABLES].OurBranch;
+		P_PRINT.[0] := 1;
+		P_VID       := '09';
+		P_NUM       := 1;
+ 		P_CASE.[0]  := 8;
+ 		P_PGSIZE    := 75;
+ 		FirstCase;
+ 		p_info := 'P_PATT_SV,+';
+	elsif p_message = 'VALIDATE' then
+		if substr(p_info,1,6)='P_CASE' then
+			P_COND_CORR    := null;
+			P_COND_GROUP   := null;
+			P_ONLY_RUR     := null;
+			P_ONLY_CUR     := null;
+			P_KOD_NAZN_PAY := null;
+			P_NAZN         := null;
+			P_ONLY_PROV    := null;
+			P_PRIOR_GROUP  := null;
+			P_CUR_GROUP    := null;
+			P_SORT.[0]     := 1;
+
+			if P_CASE.[0]=1 then -- незавершенные расчеты
+				P_COND_CORR   := '30223%  |  30102%';
+				P_NAZN        := 'Перечисление в ЕРКЦ';
+				P_ONLY_PROV   := true;
+				P_PRIOR_GROUP := true;
+			elsif P_CASE.[0]=2 then -- незавершенные расчеты
+				P_COND_CORR  := '30102%  |  30223%';
+				P_NAZN := 'Платежи в адрес клиентов';
+				P_ONLY_PROV   := true;
+				P_PRIOR_GROUP := true;
+			elsif P_CASE.[0]=3 then
+				P_COND_CORR  := '61406%  |  %,  %  |  61306%, 9999%  |  %,  %  |  9999%';
+				P_COND_GROUP := null;--'202%, 408%, 423%, 426%';
+				P_NAZN := 'Переоценка остатков на счетах в иностранной валюте';
+				P_ONLY_PROV := true;
+				P_CUR_GROUP := true;
+				P_KOD_NAZN_PAY := ::[KOD_N_PAY]([KOD_NAZN]='RECONT');
+				P_SORT.[0]  := 3;
+			elsif P_CASE.[0]=4 then
+				P_COND_CORR  := '47502%  |  47411%';
+				P_NAZN := 'Начисленные проценты';
+			elsif P_CASE.[0]=5 then
+				P_COND_CORR  := '47411%  |  423%, 47411%  |  426%';
+				P_ONLY_CUR   := '423%';
+				P_NAZN := 'Причисленные проценты';
+			elsif P_CASE.[0]=6 then -- урегулирование парных счетов
+				P_NAZN := 'Урегулирование счетов';
+				P_ONLY_PROV := true;
+			elsif P_CASE.[0]=7 then -- по выделенным документам
+				P_NAZN := 'Выделенные документы';
+			elsif P_CASE.[0]=8 then -- простой фильтр
+				P_COND_CORR := '%  |  %';
+				P_ONLY_PROV := true;
+				P_SORT.[0]  := 3;
+			end if;
+		elsif p_info='P_PATT_SV' then
+			get_shab(
+				P_PATT_SV,
+				P_USER,
+				P_OTV_DT,
+				P_OTV_KT,
+				P_NAZN,
+				P_KOD_NAZN_PAY,
+				P_VID,
+				P_PRIOR,
+				P_PRINT,
+				P_COND_CORR,
+				P_COND_GROUP,
+				P_ONLY_RUR,
+				P_ONLY_CUR,
+				P_SORT,
+				P_ONLY_PROV,
+				P_CUR_GROUP,
+				P_PRIOR_GROUP,
+				P_NUM,
+				P_PGSIZE,
+				P_COND_USER_TYPE);
+		elsif p_info='+' then
+			set_shab(
+				P_PATT_SV,
+				P_USER,
+				P_OTV_DT,
+				P_OTV_KT,
+				P_NAZN,
+				P_KOD_NAZN_PAY,
+				P_VID,
+				P_PRIOR,
+				P_PRINT,
+				P_COND_CORR,
+				P_COND_GROUP,
+				P_ONLY_RUR,
+				P_ONLY_CUR,
+				P_SORT,
+				P_ONLY_PROV,
+				P_CUR_GROUP,
+				P_PRIOR_GROUP,
+				P_NUM,
+				P_PGSIZE,
+				P_COND_USER_TYPE);
+		elsif p_info = '%VAR%.V_USER_TYPE' then
+			if P_COND_USER_TYPE is null then
+				P_COND_USER_TYPE := V_USER_TYPE.[CODE];
+			else
+				P_COND_USER_TYPE := P_COND_USER_TYPE || ',' || V_USER_TYPE.[CODE];
+			end if;
+		end if;
+
+		-- Переключение метода упорядочивания
+		declare
+			patt_corr_all varchar2;
+			patt_first varchar2;
+			patt_next varchar2;
+		begin
+			patt_corr_all  := replace(replace(replace(replace(replace(P_COND_CORR,' '),','),'.'),'|'),'-');
+			patt_first    := substr(patt_corr_all, 1, instr(patt_corr_all,'%'));
+			patt_corr_all := substr(patt_corr_all, instr(patt_corr_all,'%')+1);
+			patt_next     := substr(patt_corr_all, 1, instr(patt_corr_all,'%'));
+
+			if length(patt_first)<=1 and length(patt_next)>1 and P_SORT.[0]=1 then
+				P_SORT.[0] := 3;
+			elsif length(patt_first)>1 and length(patt_next)<=1 and P_SORT.[0]=2 then
+				P_SORT.[0] := 3;
+			end if;
+		end;
+	end if;
+end;
+
+execute is
+-- E.Rahmanov 04/01/2003
+kol natural := 0;
+i natural := 0;
+k natural := 0;
+n natural := 0;
+kol_shab natural := 0;
+
+tab docs%type;
+tab_recont docs%type;
+type small is record ( md ref [MAIN_DOCUM], yes boolean);  -- составной тип
+type tbl_small is table of small;  -- табличный тип
+tab_rec_tmp tbl_small;
+
+tmp_arr1 [MAIN_DOCUM_ARR];
+md ref [MAIN_DOCUM];
+md1 ref [MAIN_DOCUM];
+dd natural := 0;
+dd1 natural := 0;
+num_beg natural := 0;
+patt_dt [ACCNUM];
+patt_kt [ACCNUM];
+patt_corr_all varchar2;
+patt_corr_save varchar2;
+patt_group_all varchar2;
+patt_group_save varchar2;
+patt_corr_dt varchar2;
+patt_corr_kt varchar2;
+patt_first varchar2;
+patt_next varchar2;
+patt_rur_all varchar2;
+patt_cur_all varchar2;
+patt_rur_save varchar2;
+patt_cur_save varchar2;
+patt_rur varchar2;
+patt_cur varchar2;
+bRUR boolean;
+bCUR boolean;
+new_page boolean;
+nt_curr ref [FT_MONEY] := [SYSTEM]::[SYS_MAIN_VAL];
+
+type tbl_doc is table of ref [MAIN_DOCUM];
+tbl_doc1 tbl_doc;
+tbl_doc2 tbl_doc;
+tbl_doc3 tbl_doc;
+
+type tbl_cut_gr is table of natural;
+cut_gr tbl_cut_gr;
+
+dif_dt  boolean;
+dif_kt  boolean;
+numb_gr natural;
+
+numb_change natural;
+numb_shablon natural := 0;
+numb_change_str string(32000);
+sort_dt_kt natural := 1;
+sort_dt_kt_str string(32000);
+
+Last_Group natural;
+counter_doc integer;
+
+
+code_pay varchar2 := nvl(P_KOD_NAZN_PAY.[KOD_NAZN], '%');
+
+----------------------------
+time_work number;
+time1 date;
+time2  date;
+All_time number;
+
+beg_third_Group [BOOLEAN];
+----------------------------
+
+procedure do_loop(md ref [MAIN_DOCUM]) is
+begin
+	kol_shab := kol_shab + 1;
+	--debug_pipe('Обработано документов по шаблону: '||kol_shab,0);
+	bRUR := true;
+	if patt_rur_save is not null then
+		if md.[ACC_DT].[FINTOOL]!=nt_curr or md.[ACC_KT].[FINTOOL]!=nt_curr then
+			patt_rur_all := patt_rur_save;
+			patt_rur     := substr(patt_rur_all, 1, instr(patt_rur_all,'%'));
+			while length(patt_rur)>0 loop
+				-- Dale 18.10.2006 - попытка оптимизации с учетом мапирования колонок номера счета для проводки				
+				if md.[NUM_DT] like patt_rur or md.[NUM_KT] like patt_rur then
+					bRUR := false;
+					--debug_pipe('Не вошел документ из-за руб. шаблона '||patt_cur,0);
+					exit;
+				end if;
+				patt_rur_all := substr(patt_rur_all, instr(patt_rur_all,'%')+1);
+				patt_rur     := substr(patt_rur_all, 1, instr(patt_rur_all,'%'));
+			end loop;
+		end if;
+	end if;
+
+	bCUR := true;
+	if patt_cur_save is not null then
+		if md.[ACC_DT].[FINTOOL]=nt_curr or md.[ACC_KT].[FINTOOL]=nt_curr then
+			patt_cur_all := patt_cur_save;
+			patt_cur     := substr(patt_cur_all, 1, instr(patt_cur_all,'%'));
+			while length(patt_cur)>0 loop
+				-- Dale 18.10.2006 - попытка оптимизации с учетом мапирования колонок номера счета для проводки				
+				if md.[NUM_DT] like patt_rur or md.[NUM_KT] like patt_rur then
+				
+					bCUR := false;
+					--debug_pipe('Не вошел документ из-за вал. шаблона '||patt_cur,0);
+					exit;
+				end if;
+				patt_cur_all := substr(patt_cur_all, instr(patt_cur_all,'%')+1);
+				patt_cur     := substr(patt_cur_all, 1, instr(patt_cur_all,'%'));
+			end loop;
+		end if;
+	end if;
+
+	if bRUR and bCUR then
+		kol := kol + 1;
+		docs(kol) := md;
+	end if;
+
+end;
+
+procedure Get_docs(PROV [BOOLEAN],patt_dt [ACCNUM], patt_kt [ACCNUM],P_DATE_PROV date, P_USER ref [USER], P_OTV_DT  ref [USER], P_OTV_KT ref [USER], code_pay varchar2, P_FILIAL ref [BRANCH])
+is
+begin
+	i := 0;
+	if PROV then -- выборка по проведенным
+		if patt_dt = '%' and patt_kt <> '%' then	
+			pragma hint ('index (a1 idx_z#MAIN_DOCUM_ACCKT_DATEPR)');
+			for md in ::[MAIN_DOCUM] where
+  				md%state = 'PROV' and
+				md.[ACC_KT]->(false)[MAIN_V_ID] like PATT_KT and
+				md.[DATE_PROV] >= trunc(P_DATE_PROV) and
+				md.[DATE_PROV] < trunc(P_DATE_PROV) + 1 and
+				md.[ACC_DT]->(false)[MAIN_V_ID] like PATT_DT and
+				md.[KOD_NAZN_PAY]->(true)[KOD_NAZN]||'%' like code_pay||'%' and
+				(md.[DOCUMENT_USER] = P_USER or P_USER is null) and
+				(md.[ACC_DT]->(false)[OTV] = P_OTV_DT or P_OTV_DT is null) and
+				(md.[ACC_KT]->(false)[OTV] = P_OTV_KT or P_OTV_KT is null) and
+				md.[FILIAL] = P_FILIAL and
+				(P_COND_USER_TYPE is null or exists (select x (1) in md.[USER_TYPE] where instr(P_COND_USER_TYPE, ',' ||x.[CODE] || ',')>0))
+			loop
+				do_loop(md);
+			end loop;
+		elsif patt_dt = '%' and patt_kt = '%' then
+			pragma hint ('index (a1 idx_z#MAIN_DOCUM_DATE_PROV)');
+			for md in ::[MAIN_DOCUM] where
+  				md%state = 'PROV' and
+				md.[NUM_DT] like PATT_DT and
+				md.[DATE_PROV] >= trunc(P_DATE_PROV) and
+				md.[DATE_PROV] < trunc(P_DATE_PROV) + 1 and
+				md.[NUM_KT] like PATT_KT and
+				md.[KOD_NAZN_PAY]->(true)[KOD_NAZN]||'%' like code_pay||'%' and
+				(md.[DOCUMENT_USER] = P_USER or P_USER is null) and
+				(md.[ACC_DT].[OTV] = P_OTV_DT or P_OTV_DT is null) and
+				(md.[ACC_KT].[OTV] = P_OTV_KT or P_OTV_KT is null) and
+				md.[FILIAL] = P_FILIAL and
+				(P_COND_USER_TYPE is null or exists (select x (1) in md.[USER_TYPE] where instr(P_COND_USER_TYPE, ',' ||x.[CODE] || ',')>0))
+			loop
+				do_loop(md);
+			end loop;
+		else
+			pragma hint ('index (a1 idx_z#MAIN_DOCUM_ACCDT_DATEPR)');
+		--debug_pipe('patt_dt <> % and patt_kt = %   PROV',0);
+		--debug_pipe('Число документов docs = '||docs.count,0);
+			for md in ::[MAIN_DOCUM] where
+  				md%state = 'PROV' and
+				md.[ACC_DT]->(false)[MAIN_V_ID] like PATT_DT and
+				md.[DATE_PROV] >= trunc(P_DATE_PROV) and
+				md.[DATE_PROV] < trunc(P_DATE_PROV) + 1 and
+				md.[ACC_KT]->(false)[MAIN_V_ID] like PATT_KT and
+				md.[KOD_NAZN_PAY]->(true)[KOD_NAZN]||'%' like code_pay||'%' and
+				(md.[DOCUMENT_USER] = P_USER or P_USER is null) and
+				(md.[ACC_DT]->(false)[OTV] = P_OTV_DT or P_OTV_DT is null) and
+				(md.[ACC_KT]->(false)[OTV] = P_OTV_KT or P_OTV_KT is null) and
+				md.[FILIAL] = P_FILIAL and
+				(P_COND_USER_TYPE is null or exists (select x (1) in md.[USER_TYPE] where instr(P_COND_USER_TYPE, ',' ||x.[CODE] || ',')>0))
+			loop
+				do_loop(md);
+			end loop;
+		--debug_pipe('Число документов docs = '||docs.count,0);
+		end if;
+	else -- выборка по всем
+		if patt_dt = '%' and patt_kt <> '%' then	
+			pragma hint ('index (a1 IDX_Z#MAIN_DOCUM_ACCKT_DATE)');
+			for md in ::[MAIN_DOCUM] where
+				md.[ACC_KT]->(false)[MAIN_V_ID] like PATT_KT and
+				md.[DATE_DOC] >= trunc(P_DATE_PROV) and
+				md.[DATE_DOC] < trunc(P_DATE_PROV) + 1 and
+				md.[ACC_DT]->(false)[MAIN_V_ID] like PATT_DT and
+				md->(true)[KOD_NAZN_PAY]->(true)[KOD_NAZN]||'%' like code_pay||'%' and
+				(md.[DOCUMENT_USER] = P_USER or P_USER is null) and
+				(md.[ACC_DT]->(false)[OTV] = P_OTV_DT or P_OTV_DT is null) and
+				(md.[ACC_KT]->(false)[OTV] = P_OTV_KT or P_OTV_KT is null) and
+				upper(md.[FILIAL]) = P_FILIAL and
+				(P_COND_USER_TYPE is null or exists (select x (1) in md.[USER_TYPE] where instr(P_COND_USER_TYPE, ',' ||x.[CODE] || ',')>0))
+			loop
+				do_loop(md);
+			end loop;
+		elsif patt_dt = '%' and patt_kt = '%' then
+			pragma hint ('index (a1 IDX_Z#MAIN_DOCUM_DATE_DOC)');
+			for md in ::[MAIN_DOCUM] where
+				md.[NUM_DT] like PATT_DT and
+				md.[DATE_DOC] >= trunc(P_DATE_PROV) and
+				md.[DATE_DOC] < trunc(P_DATE_PROV) + 1 and
+				md.[NUM_KT] like PATT_KT and
+				md->(true)[KOD_NAZN_PAY]->(true)[KOD_NAZN]||'%' like code_pay||'%' and
+				(md.[DOCUMENT_USER] = P_USER or P_USER is null) and
+				(md.[ACC_DT].[OTV] = P_OTV_DT or P_OTV_DT is null) and
+				(md.[ACC_KT].[OTV] = P_OTV_KT or P_OTV_KT is null) and
+				upper(md.[FILIAL]) = P_FILIAL and
+				(P_COND_USER_TYPE is null or exists (select x (1) in md.[USER_TYPE] where instr(P_COND_USER_TYPE, ',' ||x.[CODE] || ',')>0))
+			loop
+				do_loop(md);
+			end loop;
+		else
+			pragma hint ('index (a1 IDX_Z#MAIN_DOCUM_ACCDT_DATE)');
+		--debug_pipe('patt_dt <> % and patt_kt = %',0);
+			for md in ::[MAIN_DOCUM] where
+				md.[ACC_DT]->(false)[MAIN_V_ID] like PATT_DT and
+				md.[DATE_DOC] >= trunc(P_DATE_PROV) and
+				md.[DATE_DOC] < trunc(P_DATE_PROV) + 1 and
+				md.[ACC_KT]->(false)[MAIN_V_ID] like PATT_KT and
+				md->(true)[KOD_NAZN_PAY]->(true)[KOD_NAZN]||'%' like code_pay||'%' and
+				(md.[DOCUMENT_USER] = P_USER or P_USER is null) and
+				(md.[ACC_DT]->(false)[OTV] = P_OTV_DT or P_OTV_DT is null) and
+				(md.[ACC_KT]->(false)[OTV] = P_OTV_KT or P_OTV_KT is null) and
+				upper(md.[FILIAL]) = P_FILIAL and
+				(P_COND_USER_TYPE is null or exists (select x (1) in md.[USER_TYPE] where instr(P_COND_USER_TYPE, ',' ||x.[CODE] || ',')>0))
+			loop
+				do_loop(md);
+			end loop;
+		end if;
+	end if;
+end;
+
+
+
+begin
+	if P_DATE_PROV is null then
+		pragma error ('Не указана дата для сводного мемордера');
+	end if;
+	
+	if P_COND_USER_TYPE is not null then
+		P_COND_USER_TYPE := ',' || P_COND_USER_TYPE || ',';
+	end if;
+	
+	-- Условия на корреспонденцию и группировку
+	patt_corr_save  := replace(replace(replace(replace(replace(P_COND_CORR,' '),','),'.'),'|'),'-');
+	patt_group_save := replace(replace(replace(replace(replace(P_COND_GROUP,' '),','),'.'),'|'),'-');
+
+	-- Только рубли, валюта
+	patt_rur_save := replace(replace(replace(replace(replace(P_ONLY_RUR,' '),','),'.'),'|'),'-');
+	patt_cur_save := replace(replace(replace(replace(replace(P_ONLY_CUR,' '),','),'.'),'|'),'-');
+
+	num := nvl(P_NUM,1);
+	tab_num.delete;
+	docs.delete;
+	::[MAIN_DOCUM].[PSH_PRINT_SV].V_NAZNS := P_NAZN;
+	::[MAIN_DOCUM].[PSH_PRINT_SV].V_VIDS := P_VID;
+	::[MAIN_DOCUM].[PSH_PRINT_SV].V_TYPES := to_char(P_PRINT.[0]);
+
+	patt_corr_all := patt_corr_save;
+	patt_first    := substr(patt_corr_all, 1, instr(patt_corr_all,'%'));
+	patt_corr_all := substr(patt_corr_all, instr(patt_corr_all,'%')+1);
+	patt_next     := substr(patt_corr_all, 1, instr(patt_corr_all,'%'));
+
+	All_time := 0;
+	if P_CASE.[0] in (1,2,3,4,5,8) then -- незавершенка,переоценка,начисленные/причисленные %%
+		while length(patt_next)>0 loop
+			numb_shablon := numb_shablon + 1;
+
+			patt_dt := patt_first;
+			patt_kt := patt_next;
+			patt_corr_dt := patt_corr_dt||patt_dt;
+			patt_corr_kt := patt_corr_kt||patt_kt;
+			sort_dt_kt := sort_auto(patt_dt, patt_kt);
+
+			--debug_pipe('Обработка шаблонов: '||patt_dt ||' | '|| patt_kt, 0);
+			kol_shab := 0;
+
+			--time1 := sysdate;
+
+				Get_docs(P_ONLY_PROV,
+						patt_dt,
+						patt_kt,
+						P_DATE_PROV,
+						P_USER,
+						P_OTV_DT,
+						P_OTV_KT,
+						code_pay,
+						P_FILIAL);
+
+			--time2 := sysdate;		
+			--time_work := (time2 - time1)*24.0*3600.0;
+			--All_time := All_time + time_work;
+			--debug_pipe('запрос время: '||time_work,0);
+
+
+			-- следующие два шаблона (дебет-кредит)
+			patt_corr_all := substr(patt_corr_all, instr(patt_corr_all,'%')+1);
+			patt_first    := substr(patt_corr_all, 1, instr(patt_corr_all,'%'));
+			patt_corr_all := substr(patt_corr_all, instr(patt_corr_all,'%')+1);
+			patt_next     := substr(patt_corr_all, 1, instr(patt_corr_all,'%'));
+
+			-- номера документов на которых произошла смена шаблона запишем в строку
+			if kol_shab>0 then
+				--debug_pipe('Смена шаблона после док-та №'||to_char(kol,'999')||': '||docs(kol).[ACC_DT].[MAIN_V_ID]||'    '||docs(kol).[ACC_KT].[MAIN_V_ID],0);
+				numb_change_str := numb_change_str||ltrim(to_char(kol))||',';
+				sort_dt_kt_str  := sort_dt_kt_str||ltrim(to_char(sort_dt_kt))||',';
+			end if;
+		end loop;
+		--debug_pipe('Время общее: '||All_time,0);
+		--debug_pipe('Число документов docs = '||docs.count,0);
+		--debug_pipe('Смена шаблона после док-тов: '||numb_change_str,0);
+		--debug_pipe('Методы сортировки: '||sort_dt_kt_str,0);
+	elsif P_CASE.[0]=6 then -- урегулирование парных счетов
+		for md in ::[MAIN_DOCUM] where
+			md.[KOD_NAZN_PAY] = ::[KOD_N_PAY]([KOD_NAZN]='САЛЬДИРОВАНИЕ') and
+			(P_DATE_PROV is null or (md.[DATE_PROV]>=P_DATE_PROV and md.[DATE_PROV]<P_DATE_PROV+1)) and
+			(P_USER is null or md.[DOCUMENT_USER] = P_USER) and
+		    (P_OTV_DT is null or md.[ACC_DT].[OTV] = P_OTV_DT) and
+		    (P_OTV_KT is null or md.[ACC_KT].[OTV] = P_OTV_KT) and		
+			 md%state = 'PROV' and
+			 upper(md.[FILIAL]) = P_FILIAL
+		order by md.[ACC_DT].[FINTOOL]
+		loop
+			kol := kol + 1;
+			docs(kol) := md;
+		end loop;
+	elsif P_CASE.[0]=7 then -- по выделенным
+		docs := this;
+		kol := docs.count;
+	end if;
+	del_smart_prov(docs,kol); -- обработаем документы сложной проводки
+
+	-- работаем с массивом - отсортируем и сгруппируем
+	--debug_pipe('BEGIN Сортировка',0);
+	tab := docs;
+
+	if kol > 1 then
+		-- отсортируем по счету
+		k := 0;
+		-- временный массив документов
+		tmp_arr1 := next_value('SEQ_ID'); -- временный массив документов
+		for i in 1..kol loop
+			insert tab(i) into tmp_arr1;
+		end loop;
+
+		tab.delete;
+
+		-- отсортируем по счету
+		if P_SORT.[0]=1 then
+			for doc in tmp_arr1 order by doc.[NUM_DT], doc.[NUM_KT], doc.[PRIORITET] loop
+				k := k + 1;
+				tab(k) := doc;
+			end loop;
+		else
+			dif_dt := true; dif_kt := true;
+			for doc in tmp_arr1 order by doc.[NUM_KT], doc.[NUM_DT], doc.[PRIORITET] loop
+				k := k + 1;
+				tab(k) := doc;
+			end loop;
+		end if;
+		
+		tmp_arr1%delete;	-- Больше этот массив не нужен, использовали его только для сортировки списка документов
+
+		-- группируем
+		if P_SORT.[0]=3 then
+			sort_get(numb_change, numb_change_str, sort_dt_kt, sort_dt_kt_str);
+		end if;
+		Last_Group := 0;
+		for k in 1..kol loop
+			-- автопереключение сортировки по дебету/кредиту
+			if P_SORT.[0]=3 then
+				if k > numb_change then
+					sort_get(numb_change, numb_change_str, sort_dt_kt, sort_dt_kt_str);
+				end if;
+			else
+				sort_dt_kt := P_SORT.[0];
+			end if;
+
+			dif_dt := Dif(tab, sort_dt_kt, k, 'DT', Last_Group);
+			dif_kt := Dif(tab, sort_dt_kt, k, 'KT', Last_Group);
+
+			if not dif_dt and not dif_kt then
+				if sort_dt_kt=1 then -- плат. один., пол. разн.
+					tbl_doc1(k) := tab(k);
+					Last_Group := 1;
+					--debug_pipe('Гр.1:'||tab(k).[ACC_DT].[MAIN_V_ID]||'    '||tab(k).[ACC_KT].[MAIN_V_ID],0);
+					--debug_pipe('плат. один., пол. разн. - Гр.1_1:'||tab(k).[ACC_DT].[MAIN_V_ID]||'    '||tab(k).[ACC_KT].[MAIN_V_ID],0);
+				else -- плат. разн, пол. один.
+					tbl_doc2(k) := tab(k);
+					Last_Group := 2;
+					--debug_pipe('Гр.2:'||tab(k).[ACC_DT].[MAIN_V_ID]||'    '||tab(k).[ACC_KT].[MAIN_V_ID],0);
+					--debug_pipe('плат. разн., пол. один. - Гр.1_2:'||tab(k).[ACC_DT].[MAIN_V_ID]||'    '||tab(k).[ACC_KT].[MAIN_V_ID],0);
+				end if;
+			elsif not dif_dt and dif_kt then -- плат. один., пол. разн.
+				tbl_doc1(k) := tab(k);
+				Last_Group := 1;
+				--debug_pipe('Гр.1:'||tab(k).[ACC_DT].[MAIN_V_ID]||'    '||tab(k).[ACC_KT].[MAIN_V_ID],0);
+				--debug_pipe('плат. один., пол. разн. Гр.2_1:'||tab(k).[ACC_DT].[MAIN_V_ID]||'    '||tab(k).[ACC_KT].[MAIN_V_ID],0);
+			elsif dif_dt and not dif_kt then -- плат. разн., пол. один.
+				tbl_doc2(k) := tab(k);
+				Last_Group := 2;
+				--debug_pipe('Гр.2:'||tab(k).[ACC_DT].[MAIN_V_ID]||'    '||tab(k).[ACC_KT].[MAIN_V_ID],0);
+				--debug_pipe('плат. разн., пол. один. Гр.3_1:'||tab(k).[ACC_DT].[MAIN_V_ID]||'    '||tab(k).[ACC_KT].[MAIN_V_ID],0);
+			elsif dif_dt and dif_kt then -- плат. разн., пол. разн.
+				tbl_doc3(k) := tab(k);
+				Last_Group := 3;
+				--debug_pipe('Гр.3:'||tab(k).[ACC_DT].[MAIN_V_ID]||'    '||tab(k).[ACC_KT].[MAIN_V_ID],0);
+				--debug_pipe('плат. разн., пол. разн. Гр.4_1:'||tab(k).[ACC_DT].[MAIN_V_ID]||'    '||tab(k).[ACC_KT].[MAIN_V_ID],0);
+			end if;
+		end loop;
+
+		-- сливаем группа1 + группа2 + группа3
+		--debug_pipe('ГРУППИРУЕМ',0);
+		counter_doc := 0;
+		k := 0;
+		i := tbl_doc1.first;
+		if i is not null then
+			cut_gr(k+1) := 1;
+		end if;
+
+		while i is not null loop
+			k := k + 1;
+			tab(k) := tbl_doc1(i);
+			i := tbl_doc1.next(i);
+			counter_doc := counter_doc + 1;
+
+			-- разделяем по счету дебета
+			if k > 1 then
+				if tab(k).[NUM_DT] != tab(k-1).[NUM_DT] then
+					--debug_pipe(k-1,0);
+					cut_gr(k-1) := 0;
+				end if;
+			end if;
+		end loop;
+
+		--debug_pipe('в первой группе '|| to_char(counter_doc),0);
+counter_doc := 0;
+		i := tbl_doc2.first;
+		if i is not null then
+			cut_gr(k) := 0; -- разделяем группы
+			cut_gr(k+1) := 2;
+		end if;
+		while i is not null loop
+			k := k + 1;
+			tab(k) := tbl_doc2(i);
+			i := tbl_doc2.next(i);
+			counter_doc := counter_doc + 1;
+
+			-- разделяем по счету кредита
+			if k > 1 then
+				if tab(k).[NUM_KT] != tab(k-1).[NUM_KT] then
+					--debug_pipe(k-1,0);
+					cut_gr(k-1) := 0; -- разделяем группы
+				end if;
+			end if;
+		end loop;
+
+	--debug_pipe('во второй группе '|| to_char(counter_doc),0);
+		counter_doc := 0;
+		
+		i := tbl_doc3.first;
+		if i is not null then
+			cut_gr(k) := 0; -- разделяем группы
+			cut_gr(k+1) := 3;
+		end if;
+		while i is not null loop
+			k := k + 1;
+			tab(k) := tbl_doc3(i);
+			i := tbl_doc3.next(i);
+			counter_doc := counter_doc + 1;
+		end loop;
+
+	--debug_pipe('в третьей группе '|| to_char(counter_doc),0);
+
+		-- почистим
+		docs.delete;
+		docs := tab;
+		utils.free_memory;
+	end if;
+	--debug_pipe('END Сортировка',0);
+
+	--debug_pipe('Число документов = '||kol,0);
+
+	k := 1;
+	-- основной цикл печати
+	dd := 0;
+	counter_doc := 1;
+	num_beg := 1;-- начальный номер
+	beg_third_Group := false;
+	for i in 1..kol loop
+		md := tab(i);
+		dd := dd + 1;
+		if i < kol then
+			md1 := tab(i+1);
+		else
+			md1 := null;
+		end if;
+
+		/*
+		if k>=1 then
+			debug_pipe('№'||to_char(i,'999')||': '||md.[ACC_DT].[MAIN_V_ID]||'    '||md.[ACC_KT].[MAIN_V_ID],0);
+		end if;
+		--*/
+
+		new_page := false;
+
+		-- группируем по условию группировки
+		if P_SORT.[0]=1 then
+			patt_group_all := patt_group_save||patt_corr_dt;
+		else
+			patt_group_all := patt_group_save||patt_corr_kt;
+		end if;
+		patt_next := substr(patt_group_all, 1, instr(patt_group_all,'%'));
+		while length(patt_next)>0 and not new_page loop
+			if P_SORT.[0]=1 and
+				  ( (md.[NUM_DT] like patt_next and
+					 md1.[NUM_DT] not like patt_next and md1 is not null) or
+					(md.[NUM_DT] not like patt_next and
+					 md1.[NUM_DT] like patt_next and md1 is not null) ) or
+				P_SORT.[0]=2 and
+				  ( (md.[NUM_KT] like patt_next and
+					 md1.[NUM_KT] not like patt_next and md1 is not null) or
+					(md.[NUM_KT] not like patt_next and
+					 md1.[NUM_KT] like patt_next and md1 is not null) )
+			then
+				new_page := true;
+				--debug_pipe('Сменилась группа'||patt_next,0);
+			end if;
+			patt_group_all := substr(patt_group_all, instr(patt_group_all,'%')+1);
+			patt_next := substr(patt_group_all, 1, instr(patt_group_all,'%'));
+		end loop;
+
+
+		n := cut_gr.first;
+		if n is not null and not beg_third_Group then
+			while n is not null loop
+				if i=n then
+					if cut_gr(n) = 3 or i = kol then
+						beg_third_Group := true;
+					end if;
+				end if;
+				n := cut_gr.next(n);
+			end loop;
+		end if;
+
+
+		-- группируем по валютам
+		if nvl(P_CUR_GROUP,false) or beg_third_Group  then
+			if (md.[ACC_DT].[FINTOOL]!=md1.[ACC_DT].[FINTOOL] and md1 is not null) or
+			   (md.[ACC_KT].[FINTOOL]!=md1.[ACC_KT].[FINTOOL] and md1 is not null)
+			then
+				new_page := true;
+				--debug_pipe('Сменилась валюта',0);
+			end if;
+		end if;
+	
+
+	
+		-- группируем по приоритетам
+		if nvl(P_PRIOR_GROUP,false) then
+			if (md.[PRIORITET] != md1.[PRIORITET] and md1 is not null) then
+				new_page := true;
+				--debug_pipe('Сменился приоритет с '||md.[PRIORITET]||' на '||md1.[PRIORITET],0);
+			end if;
+		end if;
+
+		-- разбиение на группы (1,2,3)
+		n := cut_gr.first;
+		if n is not null then
+			while n is not null loop
+				if i=n then
+					if cut_gr(n)=0 then
+						new_page := true;
+						exit;
+					else
+						numb_gr := cut_gr(n);
+					end if;
+				end if;
+				n := cut_gr.next(n);
+			end loop;
+		else
+			numb_gr := null;
+		end if;
+
+		-- формируем таблицу запусков
+		if mod(dd,P_PGSIZE)=0 or new_page or i = kol then
+			dd1 := dd1 + 1;
+			tab_num(dd1).p1  := num_beg; -- начальный номер
+			tab_num(dd1).p2  := i; -- конечный номер
+			tab_num(dd1).gr  := numb_gr; -- номер группы
+			if md is null then
+				tab_num(dd1).yes := true; -- был учтен
+			else
+				tab_num(dd1).yes := false; -- был учтен
+			end if;
+			num_beg := i + 1;
+			dd := 0;
+
+			stdio.put_line_buf('<% CALL MAIN_DOCUM PSH_PRINT_SV '||md||' %>');
+		end if;
+	end loop;
+
+	if kol=0 then
+		pragma error('Нет документов, удовлетворяющих выбранным условиям');
+	end if;
+end;
+end;
+end;

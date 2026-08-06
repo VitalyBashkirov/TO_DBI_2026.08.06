@@ -1,0 +1,518 @@
+class TMC_DOCUM;
+
+@optimize(false)
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Обработать амортизацию')
+@tag('COPIED')
+method PSH_WORK_DEPR is
+num number;
+fmt string(10):='dd/mm/yyyy';
+
+pragma include(::[TMC_DOCUM].[MACRO_LIB]);
+pragma include(::[RUNTIME].[MACRO_LIB]);
+pragma include([APP_ERROR].[LIB]);
+pragma include (::[TMC_IMPORT].[SLIB]);
+
+tbl_DEPART TYPE_NUMBER_TABLE := TYPE_NUMBER_TABLE();
+
+-- время между опросами расчетных процессов
+vPauseBeforeJobQuest  constant pls_integer := 2;
+procedure Make_depr(p_tmc in ref [AC_MAT], p_doc in ref [TMC_DOCUM], p_doc_beg_date date, p_doc_end_date date, p_date_work in date, p_list in ref [TMC_LIST] default null)
+is
+	v_arr ::[AC_MAT].[CALC_AMO_LIB].V_AMO_ARR%type; -- Массив для расчета
+begin
+	::[AC_MAT].[CALC_AMO_LIB].get_all_amo_sum(p_tmc,p_doc_beg_date,p_doc_end_date,v_arr);
+	::[AC_MAT].[CALC_AMO_LIB].insert_buh_amo_moves(V_ARR,p_doc,P_DATE_WORK,p_list);-- вставка движений
+	v_arr.delete;
+end;
+
+--public procedure startCalcProcess(pDoc ref [TMC_DOCUM], pGroup ref [TMC_GRUP], pHDpt ref [DEPART], pDateWork date, pJobId number, p_sign_no_in_out in boolean)
+public procedure startCalcProcess(pDoc ref [TMC_DOCUM], pGroup ref [TMC_GRUP], pHDpt ref [DEPART], pDateWork date, p_sign_no_in_out in boolean)
+is
+    vErrMsg varchar2(4000);
+    vBegDate date;
+    vEndDate date;
+
+	fmt string:='dd/mm/yyyy';
+begin
+	::[AC_MAT].[CALC_AMO_LIB].init_calc_tunes;-- Инициализация настроек --
+	[TMC_DOCUM]::[WORK_DOCUM].[V#SUM_DEPR] := 0;
+
+	for (select d(d.[BEG_DATE] : BEG_DATE
+				, d.[END_DATE] : END_DATE)
+			 in ::[TMC_DOCUM] all
+		  where d = pDoc)
+	loop
+		vBegDate := d.BEG_DATE;
+		vEndDate := d.END_DATE;
+		exit;
+	end loop;
+	
+	debug_pipe('.startCalcProcess -- vBegDate='||to_char(vBegDate,fmt)||' vEndDate='||to_char(vEndDate,fmt),0);
+	
+	For (
+		select tmc(
+			  tmc 						: id
+			, tmc.[ACC_MAT] 			: acc_mat
+			, tmc.[NAME] 				: name
+			--------------------------------------
+			, nvl(tmc.[QUANT_IN], 0) 	: quant_in
+			, nvl(tmc.[SUMMA_IN], 0) 	: summa_in
+			, nvl(tmc.[QUANT_OUT], 0) 	: quant_out
+			, nvl(tmc.[SUMMA_OUT], 0) 	: summa_out
+			, tmc.[BLOCK_DOC] 			: block_doc
+		) In [AC_MAT]
+		Where tmc.[GRUPPA] = pGroup
+			and tmc.[LAST_MOVE].[ACC_SUMMA] > 0
+			And tmc.[BEG_DEPR] <= pDateWork	-- Дата начала амортизации
+			And (tmc.[SIGN_ALL_DEPR] Is Null Or Not tmc.[SIGN_ALL_DEPR]) -- признак не используется или-- не полная амортизация с учетом переоценки
+			and (pHDpt is null or tmc.[DEPART] in (select d(d.column_value : id_) in cast(tbl_DEPART,type_number_table)))
+	) loop
+		if p_sign_no_in_out and (tmc.block_doc is not null or tmc.quant_in > 0 or tmc.summa_in > 0 or tmc.quant_out > 0 or tmc.summa_out > 0) Then
+			debug_pipe('Мат.счет '||tmc.acc_mat||' "'||tmc.name||'" присутствует в списке другого документа!',0);
+		else
+			debug_pipe(TB$||'Расчет и проведение движений tmc.id='||tmc.id||' pDoc='||pDoc%class||'.'||pDoc%id||' vBegDate/vEndDate/pDateWork='||to_char(vBegDate,fmt)||'/'||to_char(vEndDate,fmt)||'/'||to_char(pDateWork,fmt),0);
+			Make_Depr(tmc.id, pDoc, vBegDate, vEndDate, pDateWork);-- Расчет и проведение движений
+		end if;
+	end loop;
+--- exception when others then
+---       rollback;
+---       vErrMsg:= SQLERRM || CHR(13) || DBMS_UTILITY.format_error_backtrace();
+---       ::[TMC_AMO_CALC_ERR].[NEW#AUTO](
+--- 					   pJobId/*P_JOB_ID*/		--ID процесса
+--- 					  ,vErrMsg/*P_ERR_MSG*/		--Сообщение об ошибке
+--- 					);
+---       pragma error(vErrMsg);
+	
+	debug_pipe('.startCalcProcess -- End',0);
+end;
+
+procedure startCalcJob(pDoc ref [TMC_DOCUM], pGroup ref [TMC_GRUP], pHDpt ref [DEPART],/*pFinProv boolean,*/ pDateWork date, pJobIds in out rtl.number_table, p_sign_no_in_out in boolean)
+is
+   vJobObj 		[TEXT_JOBS];
+   vJobRef 		ref [TEXT_JOBS];
+   vErrStr		varchar2(4000);
+	V_LOG_DIR varchar2(300) := [FP_TUNE]::[LIB].get_str_value('EOD_LOG_DIR',0);	
+begin
+	::[RUNTIME].[SP_CACHE_MGR].cache_flush;
+	vJobObj%id 				:= next_value('SEQ_ID');
+	vJobObj.[PLPLUS] 		:=' PRAGMA INCLUDE ([RUNTIME].[MACRO_LIB]);'||LF$
+							||' declare'||LF$
+							||'		vJob ref [TEXT_JOBS];'||LF$
+							||' begin'||LF$
+							||'		vJob := '|| vJobObj%id||';'||LF$
+							||'		set_debug_file('''||V_LOG_DIR||to_char(sysdate,'yymmdd')||'_'||replace(pGroup.[CODE], ' ', '_') || '.log'');'||LF$
+							||'		::[TMC_DOCUM].[PSH_WORK_DEPR].startCalcProcess(' -- updated CHANGE_SHORT_NAME PSB_WORK_DEPR->PSH_WORK_DEPR 15/10/25
+							||'			 '||pDoc%id||LF$
+							||'			,'||pGroup%id||LF$
+							||'			,'||nvl( to_char( pHDpt%id ), 'null' )||LF$
+							||'			,'||' to_date('''||to_char(pDateWork, 'dd/mm/yyyy')||''', ''dd/mm/yyyy'')'||LF$
+							||'			,'||vJobObj%id||LF$
+							||'			,'''||bool_char(p_sign_no_in_out) || ''''||LF$
+							||'		);'||LF$
+							||' exception when others all then '||LF$
+							||'null;' || LF$
+							||' end;'||LF$;
+	------------------------------------------------------------
+	::[RUNTIME].[SP_CACHE_MGR].cache_flush;
+	vJobObj.[NAME] 			:= 'Расчет амортизации по группе ТМЦ с кодом "' || pGroup.[code] || '" для документа '||pDoc%id||' дата обработки '||to_char(pDateWork, 'DD/MM/YY');
+	vJobObj.[METHOD_CLASS] 	:= 'TMC_DOCUM';
+	vJobObj.[SHORT_NAME] 	:= 'c_' || rtl.next_value('SEQ_ID');
+	vJobObj.[FIRST_TIME]	:= null;	
+	vJobObj.[STATUS] 		:= [TEXT_JOBS]::[EDIT_AUTO].parse_plplus(vJobObj.[PLPLUS], vErrStr, vJobObj.[PLSQL]);
+	::[RUNTIME].[SP_CACHE_MGR].cache_flush;
+	if vJobObj.[STATUS]='PROCESSED' then
+		vJobObj.[STATUS] 	:= [TEXT_JOBS]::[EDIT_AUTO].parse_plsql(vJobObj.[PLSQL], vErrStr);
+	else
+		pragma error('Ошибка генерации исполняемого кода: ' || vErrStr ||  nl$ || 'Текст plplus: ' || nl$ ||  vJobObj.[PLPLUS]);
+	end if;
+	::[RUNTIME].[SP_CACHE_MGR].cache_flush;
+	
+	
+	if vJobObj.[STATUS]!='VALID' then
+   		pragma error('Ошибка генерации исполняемого кода: ' || vErrStr ||  nl$ || 'Текст pl/sql: ' || nl$ ||  vJobObj.[PLSQL]);
+	end if;
+	vJobObj%id 				:= ::[TEXT_JOBS]%insert(vJobObj, vJobObj%id);
+	rules.set_object_rights(::[TEXT_JOBS]%class, vJobObj%id, 'NEW');
+	vJobRef 				:= vJobObj%id;
+	vJobRef.[ADD_JOB];
+	vJobRef.[SUBMIT_JOB](null, null,null,null);
+	
+	debug_pipe('.startCalcJob -- vJobRef%id='||vJobRef%id||' vJobObj%id='||vJobObj%id||' '||vJobObj.[NAME],0);
+	commit;
+	pJobIds(pJobIds.count + 1) := vJobRef%id;
+end;
+
+procedure checkJobErrors(
+  pJobIds in rtl.number_table
+)
+is
+  vErrMsg varchar2(4000);
+begin
+    for i in 1..pJobIds.count loop
+    	begin
+    		select d(d.[ERR_MSG])
+    		in ::[TMC_AMO_CALC_ERR]
+    		where d.[JOB_ID] = pJobIds(i)
+    		into vErrMsg;
+    		pragma error(vErrMsg);
+    	exception when no_data_found then
+			null;
+    	end;
+    end loop;
+end;
+
+procedure set_error (pTmc ref [AC_MAT], pErr varchar2)
+is
+begin
+	null;
+end;
+
+-- Поиск даты последней амортизации
+-- acc - мат.счет, для которого ведется поиск
+-- doc - откатываемый мат.документ
+function get_date_last_depr(	p_acc ref [AC_MAT],
+								p_doc ref [TMC_DOCUM],
+								p_doc_oper_code ::[TMC_OP_NAME].[CODE]%type default null,
+								p_sign_depr boolean default null) return date is
+ret		date := null;
+doc_oper_code ::[TMC_OP_NAME].[CODE]%type;
+move_oper_code ::[TMC_OP_NAME].[CODE]%type;
+sign_depr boolean;
+tune_last_depr_before_conv DATE;
+begin
+	if p_acc is null then
+		return ret;
+	end if;
+	tune_last_depr_before_conv := ::[TMC_IMPORT].[TUNE_PRODUCT].get_last_depr_before_conv;
+	doc_oper_code := nvl(p_doc_oper_code, p_doc.[DOC_NAME_REF].[OPER].[CODE]);
+	sign_depr := nvl(p_sign_depr, nvl(p_Doc.[DOC_NAME_REF].[DEPR], false));
+
+	for move in p_acc.[TAB_MOVE]
+	 where p_doc is null or move.[TMC_DOCUM_REF] <> p_doc
+	 order by move.[NUM_ORD] desc
+	loop
+		move_oper_code := move.[TMC_DOCUM_REF].[DOC_NAME_REF].[OPER].[CODE];
+	    if doc_oper_code='АМОРТИЗАЦИЯ' And nvl(move.[PER_DEPR],0) != 0 Then
+	        ret := move.[AMO_MONTH_DATE];
+	        exit;
+		end if;
+		if move.[NUM_ORD] = 1 and ret is null and
+		   move_oper_code = 'КОНВЕРТАЦИЯ' And
+	       (doc_oper_code='АМОРТИЗАЦИЯ' Or sign_depr) Then
+			ret := nvl(p_acc.[LAST_CONV], tune_last_depr_before_conv);
+			exit;
+		end if;
+    end loop;
+
+	return ret;
+end;
+
+procedure undo_calc_amo (pDoc ref [TMC_DOCUM])
+is
+	V_OPER_CODE varchar2 (100);
+	v_TMC ref [AC_MAT];
+	V_PREV_DEPR DATE;
+begin
+	V_OPER_CODE := 'АМОРТИЗАЦИЯ';
+		-- Перебираем все элементы массива движений порожденные откатываемым документом
+	For V_LAST In TMC_MOVE all
+	 Where V_LAST.[TMC_DOCUM_REF] = pDoc
+	 order by V_LAST.[NUM_ORD] desc
+	loop
+		-- Определяем родительский материальный счет
+		V_TMC := V_LAST%Parent;
+		-- Проверяем не останется ли у нас меньше чем затребовано
+		If (V_TMC.[LAST_MOVE].[KIND_MOL]='ПРИХОД' Or V_TMC.[LAST_MOVE].[KIND_DEPART]='ПРИХОД')
+		 And V_TMC.[LAST_MOVE].[QUANT]-V_TMC.[LAST_MOVE].[MOVE]<V_TMC.[QUANT_OUT]
+		 And SubStr(V_OPER_CODE,1,11) != 'АМОРТИЗАЦИЯ' Then
+			set_error(V_TMC,'Затребовано больше чем останется после отката');
+		End If;
+		-- Если откатывается документ начислявший амортизацию
+		If nvl(V_LAST.[PER_DEPR], 0) != 0
+			Or nvl(V_LAST.[NAL_PER_DEPR], 0) != 0
+			Or SubStr(V_OPER_CODE,1,11)='АМОРТИЗАЦИЯ'
+		Then
+			If V_LAST.[PER_DEPR] != 0 Or V_OPER_CODE = 'АМОРТИЗАЦИЯ' Then
+				V_PREV_DEPR := Get_Date_Last_Depr(V_TMC, pDoc, 'АМОРТИЗАЦИЯ');
+				V_TMC.[LAST_DEPR] := Nvl(V_PREV_DEPR, V_TMC.[LAST_CONV]);
+			End If;
+		End If;
+
+		V_TMC.[LAST_MOVE] := Null; -- Забываем последнее движение
+		If V_TMC.[FIRST_MOVE]=V_LAST Then V_TMC.[FIRST_MOVE]:=Null; End If;
+					
+		if V_LAST.[TMC_LIST] is not null then
+			::[TMC_PARAM].[LIB].del_(	V_LAST.[TMC_LIST].[TAB_PARAM],
+										::[TMC_ATTRIBUTES].[VARS].SUM_ESTIM_DOHOD
+									);
+									
+			::[TMC_PARAM].[LIB].del_(	V_LAST.[TMC_LIST].[TAB_PARAM],
+										::[TMC_ATTRIBUTES].[VARS].SUM_ESTIM_RASHOD
+									);										
+		end if;
+
+		V_LAST.[DELETE#AUTO];      -- Удаляем элемент массива движений
+		
+		/* Стало -- Проставим предыдущие движения и последнее движение */
+		For V#MOVE In V_TMC.[TAB_MOVE] Order By V#MOVE.[NUM_ORD]
+		Loop
+			V#MOVE.[PREV_MOVE] := V_TMC.[LAST_MOVE]; -- Предыдущее движение
+			V_TMC.[LAST_MOVE]  := V#MOVE;            -- Запомним предыдущее в последнем движении
+		End Loop;
+		V_TMC.[LAST_MOVE].[END_DATE] := Null;        -- Почистим дату окончания
+	End Loop;
+end;
+PSH_WORK_DEPR (
+	@name('Дата обработки')                P_DATE_WORK in [DATE],
+	@name('Экземпляр списка')              P_LIST_TMC  in [TMC_LIST_REF],
+	@name('Материальный счет')             P_ACC_MAT   in [TMC_ACC_MAT_REF],
+	@name('Материальный документ')         P_TMC_DOCUM in [TMC_DOCUM_REF],
+	@name('Порождать финансовые проводки') P_FIN_PROVE in [BOOLEAN]
+) is
+
+execute is
+/*********************************************************************
+Назначение: Расчет амортизации
+*********************************************************************/
+/*
+*     Дата        Автор     BFS            	Описание
+* ----------   	-----------	-----------		---------------------------------------------------
+* 22.01.2014	akuzmin		RP0173349		Подразделение передается из документа
+* 30.07.2019	nikaev		RP0610595		Выполнена оптимизация кода операции: убраны лишние интерфейсные запросы, подзапросы по подразделению ускорены за счет использования таблицы tbl_DEPART.
+*/
+pragma macro(Jobs,'
+	dbms_lock.sleep(vPauseBeforeJobQuest);
+	checkJobErrors(vJobIds);-- Проверяем ошибки job_ов
+	-- Проверяем оставшиеся job_ы
+	vJobIds2.delete;
+	for i in 1..vJobIds.count loop
+		begin
+			select d(d, d.[FAILURES],d.[INFO], d.[Success])
+			in ::[TEXT_JOBS]
+			where d = vJobIds(i)
+			into vJobRef, vFailures, vErrInfo, vSuccess;
+		    if (vFailures!= ''0'') then
+		    	pragma error(vErrInfo);
+		    end if;
+		    if vSuccess > 0 then
+		    	::[TEXT_JOBS].[APP_LIB].del_job(vJobRef);
+		    else
+				vJobIds2(vJobIds2.count + 1) := vJobRef;
+			end if;
+		exception when no_data_found then
+			null;
+		end;
+	end loop;
+	vJobIds := vJobIds2;
+', substitute );
+-------------------------------------------------------------------------------
+V_DOC_DEPR		[SUMMA];      -- Сумма начисленной амортизации по документу
+V_QUANT			pls_integer;
+vHDpt 			ref [DEPART] ;	-- Самое вышестоящее подразделение пользователя (для многофилиальности)
+v_gruppa_sup 	ref [TMC_GRUP]; -- Группа, по которой будет рассчитана амортизация
+vTmcGroupFilter ref [AMORT_FILTER];
+vTmcGroups 		rtl.reference_table;
+vJobIds 		rtl.number_table;
+vJobIds2 		rtl.number_table;
+vMaxJobCount 	pls_integer;
+vJobRef 		ref [TEXT_JOBS];
+V_TMC_DOCUM		[TMC_DOCUM];
+V_DOC_NAME_REF	[TMC_DOC_NAME];
+v_sign_no_in_out boolean;	-- Признак пропуска затребованных, поступающих и заблокированных
+tune_448_p boolean := ::[FP_TUNE].[LIB].get_bool_value('VHO_448_P');
+tune_spis_rise boolean := nvl(::[FP_TUNE].[LIB].get_bool_value('VHO_KIND_RISE_SPIS'), false);
+Begin
+	debug_pipe(&METHOD$||' Вызов [PSH_WORK_DEPR]',0); -- updated CHANGE_SHORT_NAME PSB_WORK_DEPR->PSH_WORK_DEPR 15/10/25
+	V_TMC_DOCUM := P_TMC_DOCUM;
+	V_DOC_NAME_REF := V_TMC_DOCUM.[DOC_NAME_REF];
+	&null_error(V_TMC_DOCUM.[BEG_DATE], 'В документе не указано начало периода обработки!')
+	&null_error(V_TMC_DOCUM.[END_DATE], 'В документе не указано окончание периода обработки!')
+	If V_TMC_DOCUM.[BEG_DATE] >= V_TMC_DOCUM.[END_DATE] then
+		pragma error('В документе начало периода обработки больше чем окончание периода обработки!');
+	End If;
+	If last_day(V_TMC_DOCUM.[END_DATE])!=last_day(P_DATE_WORK) then
+		pragma error('Дата окончания периода не попадает в месяц обработки!');
+	end if;
+	
+	vMaxJobCount := ::[FP_TUNE].[LIB].get_num_value('AMO_CALC_MAX_JOB_CNT', null, '0');	--непосредственный вызов сервиса пя 25/10/11 (nmatveeva)
+	vMaxJobCount := nvl(vMaxJobCount, 2); -- если настройка не задана, то будем считать в 2 процесса
+	debug_pipe('vMaxJobCount='||vMaxJobCount,0);
+	
+	if (vMaxJobCount <= 0 ) then
+		vMaxJobCount := 1;
+	end if;
+	
+	tbl_DEPART.delete;
+	if not nvl(::[TMC_IMPORT].[TUNE_PRODUCT].get_multidivisional, false) then
+		vHDpt := null;
+	Else
+		vHDpt := ::[DEPART].[LIB].get_high(V_TMC_DOCUM.[DEPART]);
+		for (select d(d : id_)
+				 in ::[DEPART] all
+			connect by d.[HIGH] = prior d start d = vHDpt)
+		loop
+			tbl_DEPART.extend(1);
+			tbl_DEPART(tbl_DEPART.last) := d.id_;
+		end loop;
+	end if;
+	v_sign_no_in_out := nvl(V_DOC_NAME_REF.[SIGN_NO_IN_OUT], false);
+	
+	select a(count(a)) in V_TMC_DOCUM.[LIST_TMC] where rownum = 1 into num;
+	debug_pipe('num='||num,0);
+	if num > 0 then	-- Расчет по списку в документе
+		debug_pipe('Расчет по списку в документе',0);
+		::[AC_MAT].[CALC_AMO_LIB].init_calc_tunes;
+		for (
+			select v_list(v_list : id, v_list.[ACC_MAT_SUP] : acc, nvl(v_list.[ACC_MAT_SUP].[LAST_MOVE].[GRUPPA].[SIGN_MONTH], false) : sign_month, nvl(v_list.[ACC_MAT_SUP].[LAST_MOVE].[GRUPPA].[SIGN_SPIS], false) : sign_spis)
+			in V_TMC_DOCUM.[LIST_TMC]
+		 	where v_list.[ACC_MAT_SUP] is not null
+		) loop
+			--проверка начисления амортизации на закрытые матсчета
+			if ::[AC_MAT].[CALC_AMO_LIB].tune_calc_amo_close_acc and ::[AC_MAT].[CALC_AMO_LIB].is_acc_closed_by_move(v_list.acc) Then
+				debug_pipe('Мат. счет '||v_list.acc.[ACC_MAT]||' был закрыт в ходе передачи!',0);
+			else
+				if tune_448_p = true and v_list.sign_month = false and v_list.sign_spis = false  then
+					::[TMC_AMO_CALC_TAB].[LIB].calc_buh_amo(v_list.acc, V_TMC_DOCUM.[BEG_DATE], V_TMC_DOCUM.[END_DATE], P_TMC_DOCUM, P_DATE_WORK, v_list.id);
+				else	
+					Make_Depr(v_list.acc, P_TMC_DOCUM, V_TMC_DOCUM.[BEG_DATE], V_TMC_DOCUM.[END_DATE], P_DATE_WORK, v_list.id);-- Расчет и проведение движений
+				end if;	
+			End If;
+			
+			v_list.id.[UNDO_DECL](true);-- Откат заявки --
+		end loop;
+	else
+		-- Расчет по всем мат.счетам с ограничением из документа
+		-- Вытащим группу поставщика из документа
+		v_gruppa_sup := ::[TMC_SAVE_VALUE].[LIB].get_value(V_DOC_NAME_REF.[SAVE_VALUES], ::[DEPART].[LIB].get_high(V_TMC_DOCUM.[DEPART]), 'TMC_GRUP', 'SUP');
+		vTmcGroupFilter := ::[AMORT_FILTER].[LIB].findFilter(V_TMC_DOCUM.[DOC_NAME_REF]);
+		debug_pipe('Расчет по всем мат.счетам с ограничением из документа v_gruppa_sup='||v_gruppa_sup||' vTmcGroupFilter='||vTmcGroupFilter||' tune_448_p='||tune_448_p,0);
+
+		if tune_448_p = true then
+			For tmc in ::[AC_MAT] where tmc.[LAST_MOVE].[GRUPPA] in (select d(d%id) In [TMC_GRUP] all
+																		Where d.[TYPE].[CODE] in ('ОС', 'НМА')
+																			and (v_gruppa_sup is null or d = v_gruppa_sup)
+																			and (V_DOC_NAME_REF.[TYPE_SUP]  Is Null or d.[TYPE] = V_DOC_NAME_REF.[TYPE_SUP])
+																			and (V_DOC_NAME_REF.[KIND_EXPL] Is Null Or d.[KIND_USER] = V_DOC_NAME_REF.[KIND_EXPL])
+																			and nvl(d.[UN_SYSTEM], false) = false	--исключим из обработки внесистемный учет
+																			and (vTmcGroupFilter is null or (vTmcGroupFilter is not null and d in (select g(g.[tmc_group]) in vTmcGroupFilter.[TMC_GROUPS])))
+																			and nvl(d.[SIGN_MONTH], false) = false
+																			and nvl(d.[SIGN_SPIS], false) = false
+																			)
+							
+							And tmc.[BEG_DEPR] <= P_DATE_WORK
+							and (vHDpt is null or tmc.[DEPART] in (select d(d.column_value : id_) in cast(tbl_DEPART,type_number_table)))
+							and (nvl(tmc.[LAST_MOVE].[ACC_SUMMA], 0) - nvl(tmc.[LAST_MOVE].[ALL_DEPR], 0)) > 0
+							and (tmc.[LAST_MOVE].[GRUPPA].[KIND_USER].[CODE] <> 'ВНОД' or tmc.[LAST_MOVE].[GRUPPA].[MODEL].[0] = 1)
+							and (tmc.[LAST_MOVE].[GRUPPA].[KIND_USER].[CODE] <> 'ДАПП')
+							and (tmc.[LAST_MOVE].[END_DEPR] >= V_TMC_DOCUM.[BEG_DATE] or tune_spis_rise)
+			Loop
+				debug_pipe(TB$||'tmc='||tmc%class||'.'||tmc%id,0);
+	          	::[TMC_AMO_CALC_TAB].[LIB].calc_buh_amo(tmc, V_TMC_DOCUM.[BEG_DATE], V_TMC_DOCUM.[END_DATE], P_TMC_DOCUM, P_DATE_WORK);
+			End Loop;
+		end if;
+					
+		-- Выбираем группы
+		For d--(
+		    In [TMC_GRUP]
+			Where d.[TYPE].[CODE] in ('ОС', 'НМА')
+				and (v_gruppa_sup is null or d = v_gruppa_sup)
+				and (V_DOC_NAME_REF.[TYPE_SUP]  Is Null or d.[TYPE] = V_DOC_NAME_REF.[TYPE_SUP])
+				and (V_DOC_NAME_REF.[KIND_EXPL] Is Null Or d.[KIND_USER] = V_DOC_NAME_REF.[KIND_EXPL])
+				and nvl(d.[UN_SYSTEM], false) = false	--исключим из обработки внесистемный учет
+				and (vTmcGroupFilter is null or (vTmcGroupFilter is not null and d in (select g(g.[tmc_group]) in vTmcGroupFilter.[TMC_GROUPS])))
+				and ((tune_448_p = true and (nvl(d.[SIGN_MONTH], false) = true or nvl(d.[SIGN_SPIS], false) = true)) or tune_448_p = false)
+		Loop
+	      vTmcGroups(vTmcGroups.count + 1) := d;
+	      debug_pipe(TB$||TB$||'('||vTmcGroups.count||') d.[TYPE].[CODE]='||d.[TYPE].[CODE],0);
+		End Loop;
+		
+		-- собственно сам расчет
+		/** /
+		var vFailures pls_integer;
+		var vErrInfo varchar2(4000);
+		var vSuccess integer;
+		begin
+			for n in 1..vTmcGroups.count loop
+				if (vJobIds.count != vMaxJobCount) then
+	            	  startCalcJob(this, vTmcGroups(n), vHDpt, P_DATE_WORK, vJobIds, v_sign_no_in_out);
+				else
+					while(vJobIds.count = vMaxJobCount) loop
+						&Jobs
+	                end loop;
+	             	-- текущий надо тоже стартануть
+	            	startCalcJob(this, vTmcGroups(n), vHDpt, P_DATE_WORK, vJobIds, v_sign_no_in_out);
+				end if;
+			end loop;
+			-- вышли из цикла. Ждем когда все job'ы завершаться
+			while(vJobIds.count != 0) loop
+				&Jobs
+	       	end loop;
+		exception when others all then
+	      for i in 1..vJobIds.count loop
+	    		vJobRef := vJobIds(i);
+	    		delete d
+	    		in ::[TMC_AMO_CALC_ERR]
+	    		where d.[JOB_ID] = vJobRef;
+	    		::[TEXT_JOBS].[APP_LIB].del_job(vJobRef);
+	      end loop;
+	
+	      undo_calc_amo (this);
+	      commit;
+	
+	      pragma error(sqlerrm || chr(13) || DBMS_UTILITY.format_error_backtrace());
+	    end;
+	    /**/
+	    debug_pipe(&METHOD$||' собственно сам расчет vTmcGroups='||vTmcGroups.count,0);
+		var vFailures pls_integer;
+		var vErrInfo varchar2(4000);
+		var vSuccess integer;
+		for n in 1..vTmcGroups.count loop
+			debug_pipe(&METHOD$||' n='||n,0);
+			if (vJobIds.count != vMaxJobCount) then
+            	startCalcProcess(this, vTmcGroups(n), vHDpt, P_DATE_WORK, v_sign_no_in_out);
+			else
+             	-- текущий надо тоже стартануть
+            	startCalcProcess(this, vTmcGroups(n), vHDpt, P_DATE_WORK, v_sign_no_in_out);
+			end if;
+		end loop;
+	end if;
+
+    --КОЛИЧЕСТВО И СУММУ БУДЕМ СЧИТАТЬ ПО ДВИЖЕНИЯМ (т.к. амортизация считается job'ами)----------------------------------------------------------------------
+    debug_pipe(&METHOD$||' КОЛИЧЕСТВО И СУММУ БУДЕМ СЧИТАТЬ ПО ДВИЖЕНИЯМ',0);
+
+    select d( count(distinct d), sum(m.[PER_DEPR]))
+    in ::[AC_MAT], (::[TMC_MOVE] all : m)
+    where m.[TMC_DOCUM_REF] = this
+    and m%collection = d.[TAB_MOVE]
+    into V_QUANT, V_DOC_DEPR;
+
+	debug_pipe(&METHOD$||'Обработано материальных счетов:' || V_QUANT,0);
+	debug_pipe(&METHOD$||'Начисленная амортизация:' || V_DOC_DEPR,0);
+	
+	Stdio.Put_Line_Buf('Обработано материальных счетов:' || V_QUANT);
+	Stdio.Put_Line_Buf('Начисленная амортизация:' || V_DOC_DEPR);
+    ---------------------------------------------
+	P_TMC_DOCUM.[SUM_DEPR] := V_DOC_DEPR;
+
+	---------обработка БО----------------------
+	debug_pipe(&METHOD$||'P_FIN_PROVE:' || P_FIN_PROVE,0);
+	If P_FIN_PROVE Then
+		-- Если рассчитали амортизацию, то оставим её.
+		commit;
+		&sp (BEGIN_PROV)
+		begin
+			debug_pipe(&METHOD$||'Вызываем WORK_DEPR_PROV  V_DOC_NAME_REF.[BUSS]='||V_DOC_NAME_REF.[BUSS].[PATTERN_NAME]||'  '||to_char(P_DATE_WORK,fmt),0);
+			This.WORK_DEPR_PROV(V_DOC_NAME_REF.[BUSS], P_DATE_WORK);
+		exception when others all then
+			debug_pipe(&METHOD$||sqlerrm,0);
+       	  stdio.put_line_buf (sqlerrm || chr(13) || DBMS_UTILITY.format_error_backtrace());
+       	  stdio.put_line_buf ('Проводки не созданы. Исправьте ошибку и сформируйте проводки, например, с помощью операции "Сформировать проводки по документу амортизации"');
+       	  &rb (BEGIN_PROV)
+		end;
+	End If;
+	tbl_DEPART.delete;
+End;
+end;
+end;

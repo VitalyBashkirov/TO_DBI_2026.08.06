@@ -1,0 +1,200 @@
+class DOCUM_RC;
+
+@import_plsql(true)
+@name('[ПСБ] Транслитерация')
+static method PSH_TRANSLATE is
+-- Транслитерация с учетом русско-английского текста ГОСТ 7.79-2000
+public function GOST_7_79_2000(
+	 P_STR string(32000) 		-- Транслитерируемая строка
+	,P_REV boolean 				-- Признак обратной транслитерации, т.е. EN -> RU
+) return string(32000) is 
+begin
+	if P_STR is null then
+		return null;
+	end if;
+	if P_REV then
+		-- LAT -> RUS
+		P_STR := replace(P_STR, 'shh', 'щ');
+		P_STR := replace(P_STR, 'Shh', 'Щ');
+		P_STR := replace(P_STR, 'SHH', 'Щ');
+
+		P_STR := replace(P_STR, 'ya', 'я');
+		P_STR := replace(P_STR, 'Ya', 'Я');
+		P_STR := replace(P_STR, 'YA', 'Я');
+
+		P_STR := replace(P_STR, 'yo', 'ё');
+		P_STR := replace(P_STR, 'Yo', 'Ё');
+		P_STR := replace(P_STR, 'YO', 'Ё');
+
+		P_STR := replace(P_STR, 'yu', 'ю');
+		P_STR := replace(P_STR, 'Yu', 'Ю');
+		P_STR := replace(P_STR, 'YU', 'Ю');
+
+		P_STR := replace(P_STR, 'zh', 'ж');
+		P_STR := replace(P_STR, 'Zh', 'Ж');
+		P_STR := replace(P_STR, 'ZH', 'Ж');
+
+		P_STR := replace(P_STR, 'ch', 'ч');
+		P_STR := replace(P_STR, 'Ch', 'Ч');
+		P_STR := replace(P_STR, 'CH', 'Ч');
+
+		P_STR := replace(P_STR, 'sh', 'ш');
+		P_STR := replace(P_STR, 'Sh', 'Ш');
+		P_STR := replace(P_STR, 'SH', 'Ш');
+
+		P_STR := replace(P_STR, 'kh', 'х');
+		P_STR := replace(P_STR, 'Kh', 'Х');
+		P_STR := replace(P_STR, 'KH', 'Х');
+
+		P_STR := replace(P_STR, 'e`', 'э');
+		P_STR := replace(P_STR, 'E`', 'Э');
+
+		P_STR := replace(P_STR, '``', 'ъ');
+
+		P_STR := replace(P_STR, 'cz', 'ц');
+		P_STR := replace(P_STR, 'Cz', 'Ц');
+		P_STR := replace(P_STR, 'CZ', 'Ц');
+
+		P_STR := translate(P_STR,
+			'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ',
+			'абцдефгхийклмнопщрстувыхызАБЦДЕФГХИЙКЛМНОПЩРСТУВЫХЫЗ');			
+	else
+		-- RUS -> LAT
+		P_STR := replace(P_STR, 'ё', 'yo');
+		P_STR := replace(P_STR, 'Ё', 'Yo');
+		P_STR := replace(P_STR, 'ж', 'zh');
+		P_STR := replace(P_STR, 'Ж', 'Zh');
+		P_STR := replace(P_STR, 'ч', 'ch');
+		P_STR := replace(P_STR, 'Ч', 'Ch');
+		P_STR := replace(P_STR, 'ш', 'sh');
+		P_STR := replace(P_STR, 'Ш', 'Sh');
+		P_STR := replace(P_STR, 'щ', 'shh');
+		P_STR := replace(P_STR, 'Щ', 'Shh');
+		P_STR := replace(P_STR, 'ъ', '``');
+		P_STR := replace(P_STR, 'Ъ', '``');
+		P_STR := replace(P_STR, 'ы', 'y`');
+		P_STR := replace(P_STR, 'Ы', 'Y`');
+		P_STR := replace(P_STR, 'ь', '`');
+		P_STR := replace(P_STR, 'Ь', '`');		
+		P_STR := replace(P_STR, 'э', 'e`');
+		P_STR := replace(P_STR, 'Э', 'E`');
+		P_STR := replace(P_STR, 'ю', 'yu');
+		P_STR := replace(P_STR, 'Ю', 'Yu');
+		P_STR := replace(P_STR, 'я', 'ya');
+		P_STR := replace(P_STR, 'Я', 'Ya');
+		P_STR := translate(P_STR,
+			'абвгдезийклмнопрстуфхцАБВГДЕЗИЙКЛМНОПРСТУФХЦ №',
+			'abvgdezijklmnoprstufxcABVGDEZIJKLMNOPRSTUFXC #');
+	end if;
+
+	return P_STR;
+end;
+
+
+
+
+
+-- Транслитерация с учетом русско-английского текста  Приказ МИД России от 29.03.2016 N 4271 (ред. от 25.01.2017)
+public function MID_4271_2016 (
+	 P_STR string(32000) 		-- Транслитерируемая строка
+	,P_REV boolean 				-- Признак обратной транслитерации, т.е. EN -> RU
+) return string(32000) is 
+begin
+	if P_STR is null then
+		return null;
+	end if;
+	
+	if P_REV then
+		-- LAT -> RUS
+		P_STR := replace(P_STR, 'shch', 'щ');
+		P_STR := replace(P_STR, 'Shch', 'Щ');
+		P_STR := replace(P_STR, 'SHCH', 'Щ');
+
+		P_STR := replace(P_STR, 'ia', 'я');
+		P_STR := replace(P_STR, 'Ia', 'Я');
+		P_STR := replace(P_STR, 'IA', 'Я');
+
+		P_STR := replace(P_STR, 'iu', 'ю');
+		P_STR := replace(P_STR, 'Iu', 'Ю');
+		P_STR := replace(P_STR, 'IU', 'Ю');
+
+		P_STR := replace(P_STR, 'zh', 'ж');
+		P_STR := replace(P_STR, 'Zh', 'Ж');
+		P_STR := replace(P_STR, 'ZH', 'Ж');
+
+		P_STR := replace(P_STR, 'ch', 'ч');
+		P_STR := replace(P_STR, 'Ch', 'Ч');
+		P_STR := replace(P_STR, 'CH', 'Ч');
+
+		P_STR := replace(P_STR, 'sh', 'ш');
+		P_STR := replace(P_STR, 'Sh', 'Ш');
+		P_STR := replace(P_STR, 'SH', 'Ш');
+
+		P_STR := replace(P_STR, 'kh', 'х');
+		P_STR := replace(P_STR, 'Kh', 'Х');
+		P_STR := replace(P_STR, 'KH', 'Х');
+
+		P_STR := replace(P_STR, 'ie', 'ъ');
+		P_STR := replace(P_STR, 'Ie', 'Ъ');
+		P_STR := replace(P_STR, 'IE', 'Ъ');
+
+		P_STR := replace(P_STR, 'ts', 'ц');
+		P_STR := replace(P_STR, 'Ts', 'Ц');
+		P_STR := replace(P_STR, 'TS', 'Ц');
+
+		P_STR := translate(P_STR,
+			'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ',
+			'абцдефгхийклмнопщрстувыхызАБЦДЕФГХИЙКЛМНОПЩРСТУВЫХЫЗ');
+	else
+		-- RUS -> LAT
+		P_STR := replace(P_STR, 'ж', 'zh');
+		P_STR := replace(P_STR, 'Ж', 'Zh');
+		P_STR := replace(P_STR, 'х', 'kh');
+		P_STR := replace(P_STR, 'Х', 'Kh');
+		P_STR := replace(P_STR, 'ц', 'ts');
+		P_STR := replace(P_STR, 'Ц', 'Ts');
+		P_STR := replace(P_STR, 'ч', 'ch');
+		P_STR := replace(P_STR, 'Ч', 'Ch');
+		P_STR := replace(P_STR, 'ш', 'sh');
+		P_STR := replace(P_STR, 'Ш', 'Sh');
+		P_STR := replace(P_STR, 'щ', 'shch');
+		P_STR := replace(P_STR, 'Щ', 'Shch');
+		P_STR := replace(P_STR, 'ъ', 'ie');
+		P_STR := replace(P_STR, 'Ъ', 'IE');
+		P_STR := replace(P_STR, 'ь', '');
+		P_STR := replace(P_STR, 'Ь', '');
+		P_STR := replace(P_STR, 'ю', 'iu');
+		P_STR := replace(P_STR, 'Ю', 'Iu');
+		P_STR := replace(P_STR, 'я', 'ia');
+		P_STR := replace(P_STR, 'Я', 'Ia');
+		P_STR := translate(P_STR,
+			'абвгдеёзийклмнопрстуфыэАБВГДЕЁЗИЙКЛМНОПРСТУФЫЭ №',
+			'abvgdeeziiklmnoprstufyeABVGDEEZIIKLMNOPRSTUFYE #');
+	end if;
+	
+	return P_STR;
+end;
+PSH_TRANSLATE (
+	@name('Версия формата')            P_FORMAT in [SIXTH_CHOICE],
+	@name('Обратная транслитерация')   P_REV    in [BOOLEAN],
+	@name('Исходный текст')            P_IN     in [STRING_4000],
+	@name('Транслитерированный текст') P_OUT    in [STRING_4000]
+) is
+
+validate is
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		P_FORMAT.[0] := 2;
+		P_REV := FALSE;
+	elsif P_MESSAGE = 'VALIDATE' then
+		if P_FORMAT.[0] = '5' then
+			P_OUT := GOST_7_79_2000(P_IN, P_REV);
+		elsif P_FORMAT.[0] = '6' then
+			P_OUT := MID_4271_2016(P_IN, P_REV);
+		else
+			P_OUT := ::[DOCUM_RC].[SWIFT_RUR].TRANSLETERATE(P_IN, P_FORMAT.[0] + 2, P_REV);
+		end if;
+	end if;
+end;
+end;
+end;

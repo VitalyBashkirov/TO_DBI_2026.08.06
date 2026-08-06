@@ -1,0 +1,148 @@
+class AC_FIN;
+
+@import_plsql(true)
+@this(assert_null:=false)
+@name('[ПСБ] Ведомость остатков по лицевым счетам')
+static method PSH_ACC_LEFT is
+type acc_arr_type is varray(0) of varchar2(50);
+
+function split(
+	str		string(100)
+)
+return	acc_arr_type
+is
+	aa		acc_arr_type;
+	i		integer;
+begin
+	aa.init;
+	i := 1;
+	while instr(str, ',') > 0
+	loop
+		aa.extend(1);
+		aa(i) := substr(str,1,instr(str, ',') - 1)||'%';
+		str := trim(substr(str,instr(str, ',') + 1));
+		
+		i := i + 1;
+	end loop;
+	if length(str) > 0 then
+		aa.extend(1);
+		aa(i) := substr(str,1)||'%';
+	end if;
+	return aa;
+end;
+PSH_ACC_LEFT (
+	@name('Дата')               P_DATE     in [DATE],
+	@name('Шаблон счета')       P_MASK     in [ACCNUM],
+	@name('Расширенный шаблон') P_EXT_MASK in [STRING_100]
+) is
+
+validate is
+begin
+	if P_MESSAGE = 'DEFAULT' then	    
+		P_DATE:= ::[SYSTEM].[OP_DATE]-1;
+	end if;
+
+	if P_MESSAGE = 'VALIDATE' then
+		if P_INFO = 'OK' then
+	  		null;
+		end if;
+	end if;
+End;
+
+execute is
+--pragma macro(turn, '::[AC_FIN].[ACC_TURN_LS].turn(ac.[ARC_MOVE], [1], u.C_D1, u.C_D2)', substitute);
+pragma macro(turn, '::[AC_FIN].[ACC_TURN_LS].turn(ac.[ARC_MOVE], [1], P_DATE, P_DATE)', substitute);
+pragma macro (xl,'::[OOXML].[API_XL]');
+xl_tmpl 		blob := empty_blob();
+row				integer;
+iBorder			integer;
+summa			number := 0;
+mask_arr		acc_arr_type;
+
+
+begin
+	::[SHABLON_DOC].[LIB_OOXML].load_blob('ACC_LEFT', xl_tmpl, null, null, null, null);
+	if xl_tmpl is null then pragma error('Не найден шаблон отчета'); end if;		
+	if not &xl.open_file(xl_tmpl) then pragma error('Ошибка при открытии печатной формы шаблона');	end if;	
+
+	&xl.Open_Sheet(1);
+	row := 8;
+	if P_EXT_MASK is null then
+		P_EXT_MASK := '%';
+	end if;
+	mask_arr := split(P_EXT_MASK);
+	
+	for ( select ac(ac%id : ac_id,
+					ac.[VID].[CODE] : ac_vid,
+					ac.[MAIN_USV].[NUM] : ac_bal,
+					ac.[MAIN_V_ID] : ac_main_v_id,
+					ac.[NAME] : ac_name,
+					ac.[CLIENT_V].[NAME] : ac_client,
+					(case ac.[CLIENT_V]%class
+					when'CL_PRIV' then (select ph(to_char(ph.[DATE_PERS], 'dd.MM.yyyy')) in ::[CL_PRIV] where ph%id = ac.[CLIENT_V])
+					else null
+					end): ac_birthday,
+					(case ac.[CLIENT_V]%class
+					when'CL_PRIV' then (select ph(decode(ph.[DOC].[TYPE]->(true, [CERTIFIC_TYPE])[NAME], null, null, ph.[DOC].[TYPE]->(true, [CERTIFIC_TYPE])[NAME]||decode(ph.[DOC].[SER],null,null,' серия '||ph.[DOC].[SER])||' №'||ph.[DOC].[NUM]||' выдан '|| ph.[DOC].[WHO]||' '||to_char(ph.[DOC].[DATE], 'dd.mm.yyyy'))) in ::[CL_PRIV] where ph%id = ac.[CLIENT_V])
+					else null
+					end): ac_passport,
+					ac.[CLIENT_V].[INN] : ac_inn,
+					--ac.[CLIENT_V].[REGISTR_NUM] : ac_ogrn,
+					::[TURN_DATA].[PSH_CLC_ACC_001].GetRegNum(ac.[CLIENT_V]) : ac_ogrn, -- updated CHANGE_SHORT_NAME PSB_CLC_ACC_001->PSH_CLC_ACC_001 15/10/25
+			/*		(case ac.[CLIENT_V]%class
+					--when 'CL_PRIV' then to_char(ac.[CLIENT_V].[REGISTR_NUM])
+					when 'CL_BANK_N' then (select u(to_char(u.[REGISTER].[NUM_REESTR])) in ::[CL_ORG] where u%id = ac.[CLIENT_V])
+					when 'CL_BANK_F' then (select u(to_char(u.[REGISTER].[NUM_REESTR])) in ::[CL_ORG] where u%id = ac.[CLIENT_V])
+					when 'CL_PART' then (select u(to_char(u.[REGISTER].[NUM_REESTR])) in ::[CL_ORG] where u%id = ac.[CLIENT_V])
+					when 'CL_ORG' then (select u(to_char(u.[REGISTER].[NUM_REESTR])) in ::[CL_ORG] where u%id = ac.[CLIENT_V])
+					else null
+					end): ac_ogrn,
+			*/		ac.[FINTOOL].[CUR_SHORT] : ac_val,
+					&turn('ИН') : C_SALDO_OUT_NT,
+					&turn('ИВ') : C_SALDO_OUT
+					)
+				in ::[AC_FIN]
+				where ac.[MAIN_V_ID] not like '9%'
+				and ac.[MAIN_V_ID] like P_MASK || '%'
+				and exists(select ma(ma) in mask_arr where ac.[MAIN_V_ID] like ma.[COLUMN_VALUE])
+				and &turn('ИН') != 0
+				and ac.[DATE_OP] <= P_DATE
+				and nvl(ac.[DATE_CLOSE], P_DATE) >= P_DATE
+				order by ac.[MAIN_V_ID]
+			/*	where ac.[DATE_OP] < u.C_D2_1
+				and	coalesce(a.[DATE_CLOSE], u.C_D1) >= u.C_D1
+				and ac.[DATE_CLOSE] is null
+			*/
+	)
+	loop
+		&xl.put(row,1, ac.ac_id);
+		&xl.put(row,2, ac.ac_vid);
+		&xl.put(row,3, ac.ac_bal);
+		&xl.put(row,4, ac.ac_main_v_id);
+		&xl.put(row,5, ac.ac_name);
+		&xl.put(row,6, ac.ac_client);
+		&xl.put(row,7, ac.ac_birthday);
+		&xl.put(row,8, ac.ac_passport);
+		&xl.put(row,9, ac.ac_inn);
+		&xl.put(row,10, ac.ac_ogrn);
+		&xl.put(row,11, ac.ac_val);
+		&xl.put(row,12, abs(ac.C_SALDO_OUT_NT));
+		&xl.put(row,13, abs(ac.C_SALDO_OUT));
+		
+		row := row + 1;
+		
+		summa:= summa + abs(ac.C_SALDO_OUT_NT);
+	end loop;
+	
+	&xl.put(4,1, 'за '|| to_char(P_DATE, 'dd.MM.yyyy'));
+	iBorder := &xl.get_border(p_top==&xl.xl_b_thin, p_bottom==&xl.xl_b_thin, p_left==&xl.xl_b_thin, p_right==&xl.xl_b_thin);
+	&xl.Set_Format_Range(8, 1, row-1, 13, p_borderId == iBorder);
+	
+	&xl.put(row,11,'Итого: ');
+	&xl.put(row,12,summa);
+	
+	&xl.finish(xl_tmpl);
+	[OOXML]::[API_ORSA].putReport2RunExtProc(xl_tmpl,'xlsx','Ведомость остатков по лицевым счетам');
+end;
+end;
+end;

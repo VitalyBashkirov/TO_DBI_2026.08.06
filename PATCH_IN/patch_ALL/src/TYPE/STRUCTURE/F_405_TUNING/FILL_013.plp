@@ -1,0 +1,187 @@
+class F_405_TUNING;
+
+@name('Стандартное заполнение справочника (7047-У)')
+library FILL_013
+is
+
+pragma include(::[REPS_DEBUG].[LIB]);
+
+pragma macro(rt,	'::[REPS_TUNING].[LIB_PARAM]');
+pragma macro(fill,	'::[REPS_TUNING].[LIB_FILL]');
+pragma macro(lc,	'::[REPS_TUNING].[LIB_CONV]');
+pragma macro(acts,	'::[REPS_CB_ACTS].[LIB]');
+
+-- Код указания
+lcvCbActCode	const		varchar2(50)			:= '7047';
+-- Ссылка на отчет
+lcrRep			const	ref	[REPS]					:= ::[REPS].[SLIB].rp('F_405');
+-- Счетчик для сортировки настроек
+liOrder						integer;
+
+
+-- Функция возвращает параметры СЗ
+public function GetFillInfo
+	return &fill.recFill
+is
+	recProfInfo &fill.recFill;
+begin
+	recProfInfo	:= &acts.GetFillInfo(lcrRep, lcvCbActCode);
+	&fill.SetFillInfo(recProfInfo);
+	return recProfInfo;
+end;
+
+
+-- создание настройки
+procedure tn	(
+					P_LEVEL			integer
+				,	P_CODE			::[REPS_TUNING].[CODE]%type
+				,	P_NAME			::[REPS_TUNING].[NAME]%type
+				,	P_F_CODE		::[REPS_TUNING].[F_CODE]%type
+				,	P_FORMULA		::[REPS_TUNING].[FORMULA]%type	default null
+				,	P_RAZD_COMP		integer							default null
+				,	P_NOT_EDITABLE	boolean							default false
+				,	P_PURPOSE		varchar2(512)					default null
+				,	P_CALC			::[REPS_TUNING].[CALC]%type		default false
+				,	P_ACCUR			boolean							default null
+				,	P_ARC_VAL_VAR	varchar2(128)					default null
+				,	P_OUTPUT_MASK	varchar2(32767)					default null
+				)
+is
+	rNewTun ref [REPS_TUNING];
+begin
+	liOrder := liOrder + 10;
+	rNewTun := &rt.tn	(
+							P_LEVEL
+						,	P_CODE
+						,	P_NAME
+						,	P_ORDER			==	liOrder
+						,	P_ACCUR			==	P_ACCUR
+						,	P_F_CODE		==	P_F_CODE
+						,	P_FORMULA		==	P_FORMULA
+						,	P_RAZD_COMP		==	P_RAZD_COMP
+						,	P_NOT_EDITABLE	==	P_NOT_EDITABLE
+						,	P_PURPOSE		==	P_PURPOSE
+						,	P_CALC			==	P_CALC
+						,	P_ARC_VAL_VAR	==	P_ARC_VAL_VAR
+						,	P_OUTPUT_MASK	==	P_OUTPUT_MASK
+						);
+end;
+
+
+-- создание АП и шаблона основного типа фильтра
+procedure GenSet	(
+						P_PATT_PROD_CODE	varchar2(32)
+					,	P_PATT				[STRING_32000]
+					,	P_PATT_CORR			[STRING_32000]								default null
+					,	P_CODE				varchar2(100)								default null
+					,	P_NUMBER_VALUE		::[ANALYTIC_CODE].[NUMBER_VALUE]%type		default false
+					,	P_ARCV_TYPE_1_DATE	::[ANALYTIC_CODE].[ARCV_TYPE_1_DATE]%type	default false
+					,	P_PURPOSE			varchar2(512)								default null
+					,	P_NEED_PATT			boolean										default false
+					)
+is
+begin
+	&rt.GenSet	(
+					P_PATT				==	P_PATT
+				,	P_PATT_PROD			==	(
+												case
+													when P_NUMBER_VALUE then
+														null
+													else
+														&lc.GetProduct(P_PATT_PROD_CODE)
+												end
+											)
+				,	P_PATT_CORR			==	P_PATT_CORR
+				,	P_CODE				==	P_CODE
+				,	P_NUMBER_VALUE		==	P_NUMBER_VALUE
+				,	P_ARCV_TYPE_1_DATE	==	P_ARCV_TYPE_1_DATE
+				,	P_PURPOSE			==	P_PURPOSE
+				,	P_NEED_PATT			==	P_NEED_PATT
+				);
+end;
+
+-- Изменение настроек
+procedure Fill
+is
+begin
+	tn(1, '1', 'Раздел 1. Сведения об операциях с ценными бумагами, долями, недвижимым имуществом, паями, вкладами в имущество и цифровыми финансовыми активами, совершенных между резидентами и нерезидентами', '1');
+		tn(2, '1.1', 'Подраздел 1.1. Операции по выпуску ценных бумаг, цифровых финансовых активов, покупке и продаже ценных бумаг, долей, недвижимого имущества, паев, цифровых финансовых активов, внесению вкладов в имущество, а также операции по договорам с обратной продажей (репо)', '1_1');
+		tn(2, '1.2', 'Подраздел 1.2. Операции по погашению основного долга (корпуса), выплатам дивидендов по акциям, процентов (купонов) по облигациям и иным ценным бумагам, цифровым финансовым активам, выкупу долей, паев, выплате распределенной части прибыли', '1_2');
+	tn(1, '2', 'Раздел 2. Сведения об операциях между резидентами с иностранными ценными бумагами, недвижимым имуществом за рубежом, долями, паями и вкладами в имущество иностранных компаний', '2');
+		tn(2, '2.1', 'Подраздел 2.1. Операции, осуществляемые в собственных интересах кредитной организации', '2_1');
+		tn(2, '2.2', 'Подраздел 2.2. Операции, выгодоприобретателями по которым являются клиенты - резиденты кредитной организации', '2_2');
+	tn(1, 'SHARE_PREF', 'Акции привилегированные', 'SHARE_PREF', P_CALC == true);
+		GenSet('SHARE_KIND',	'6');
+	tn(1, 'CR_ORG_290FZ', 'Юридические лица, признаваемые резидентами для целей отчетности', 'CR_ORG_290FZ', P_CALC == true);
+		GenSet('REPS_CLIENTS',	'FOREIGN_INSURANCE_ORG_BR,INTERNATIONAL_COMP_SAR,INTERNATIONAL_FOND_SAR');
+	tn(1, 'FOREIGN_ORG_BR_NAME', 'Филиалы иностранных компаний', 'FOREIGN_ORG_BR_NAME', P_CALC == true);
+		GenSet('REPS_CLIENTS',	'FOREIGN_INSURANCE_ORG_BR');
+
+end;
+
+
+-- Запуск заполнения профиля стандартным заполнением
+public function run(
+						P_PROF	ref	[REPS_PROF_TUN]
+					,	P_STR		varchar2(32000)
+					)
+	return	ref	[REPS_PROF_TUN]
+is
+	-- Ссылка на итоговый профиль
+	rProf		ref	[REPS_PROF_TUN];
+	vProfCode		varchar2(50);
+	rCbAct		ref	[REPS_CB_ACTS];
+begin
+	&debug_output('Выполняется операция "' || &METHOD$NAME || '" (' || &METHOD$SNAME || ').', 0);
+
+	rProf := P_PROF;
+
+	rCbAct := rProf.[CB_ACT];
+
+	-- если данные по нормативному акту еще не добавлены в тип "ОП Нормативные акты ЦБ"
+	if rCbAct is null then
+		-- заполнение структуры указаний
+		&debug_output('Выполняется стандартное заполнение структуры "' || ::[REPS_CB_ACTS]%class || '" для отчета с кодом [F_405].', 0);
+
+		::[REPS_CB_ACTS].[FILL_ACTS_F_405]();
+
+		&debug_output('Завершено стандартное заполнение структуры "' || ::[REPS_CB_ACTS]%class || '" для отчета с кодом [F_405].', 0);
+	else
+		&debug_output('В структуре "' || ::[REPS_CB_ACTS]%class || '" существует запись с кодом [' || lcvCbActCode || '] для отчета с кодом [F_405]. Заполнение справочника не требуется.', 0);
+	end if;
+
+	if rCbAct is null then
+		-- Установить связь профиля с номером нормативного акта
+		rProf.[CB_ACT]			:= &acts.GetRepCbAct(lcrRep, lcvCbActCode);
+		-- Указать для данного профиля шаблон печати из нормативного акта
+		rProf.[REP_TEMPLATE]	:= rProf.[CB_ACT].[REP_TEMPLATE];
+	end if;
+
+	-- Инициализация профиля P_PROF
+	&rt.InitProf(rProf, lcrRep);
+	if rProf is null then
+		&debug_output('Не определен профиль настроек!', 0);
+		return null;
+	end if;
+
+	liOrder		:= 0;
+	vProfCode	:= rProf.[CODE];
+
+	-- Заполнение профиля настройками
+	&debug_output('Заполнение профиля [' || vProfCode || '] стандартными настройками', 0);
+	-- Запуск конвертации настроек
+	Fill;
+	&debug_output('Выполнено заполнение профиля [' || vProfCode || '] стандартными настройками', 0);
+
+	&debug_output('Нормализация настроек профиля [' || vProfCode || ']', 0);
+	::[ANALYTIC_CODE].[ANALYTIC_NORMAL](P_PROF == rProf);
+	&debug_output('Выполнена нормализация настроек профиля [' || vProfCode || ']', 0);
+
+	&debug_output('Сохранение истории изменения настроек профиля [' || vProfCode || ']', 0);
+	::[REPS_TUN_HIST].[LIB].SaveProf(rProf);
+	&debug_output('Выполнено сохранение истории изменения настроек профиля [' || vProfCode || ']', 0);
+
+	return rProf;
+end;
+
+end;

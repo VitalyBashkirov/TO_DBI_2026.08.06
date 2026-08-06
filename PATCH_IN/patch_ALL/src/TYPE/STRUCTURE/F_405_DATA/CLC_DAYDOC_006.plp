@@ -1,0 +1,662 @@
+class F_405_DATA;
+
+@generate_ansi_joins(true)
+@import_plsql(true)
+@name('Обработка документов дня по эмиссионным ЦБ (7047-У)')
+library CLC_DAYDOC_006 is
+pragma include(::[REPS_DEBUG].[LIB]);
+
+pragma macro(lc,	'::[REPS_DATA].[LIB_CLIENT]');
+pragma macro(lib,	'::[F_405_DATA].[LIB_FUNC_005]');
+pragma macro(slib,	'::[F_405_DATA].[SLIB]');
+
+lcvCorever const varchar2(10) := '11:';
+
+/**
+ * Получение ядра конфигурации операции
+ * 
+ * @return:	Строка с версией ядра конфигурации операции
+ */
+public function GetCoreVer
+	return varchar2(10)
+is
+begin
+	return lcvCorever;
+end;
+
+type rec_SaveData is record
+	(	recF405			[F_405_DATA]
+	,	mSumFragment	&lib.map_SumFragment
+	);
+type arr_SaveData is table of rec_SaveData index by binary_integer;
+
+-- Виды сделок: Собственная сделка
+lcrDilDeal				const	ref [KIND_DEAL]		:= ::[KIND_DEAL]([CODE] = 'DIL_DEAL');
+-- Тип операции: "Документы дня. Бухгалтерские (гашение)"
+lcrTypeOperDDFinGash	const	ref [TYPE_OPER_NS]	:= ::[TYPE_OPER_NS]([CODE] = 'DD_FIN_GASH');
+-- Тип счета F_PKD по справочнику "ФПЭ Справочник учетных счетов ЦБ и ЦФА"
+lcrTypeAccFPKD			const	ref [REG_PATT_ACC]		:=::[REG_PATT_ACC]([TIP_ACC]=::[TIP_ACC]([COD]='F_PKD'));
+-- Параметры реализации
+lrecParam						&lib.rec_Param;
+-- Подраздел 1.2
+lrTun_1_2						ref [REPS_TUNING];
+-- Фин. инструменты
+lvFTtypes						varchar2(32767);
+-- Таблица с данными для сохранения
+laSaveData						arr_SaveData;
+-- Протокольная таблица
+laProtocol						&lib.arr_Protocol;
+-- Тип массив счетов ПКД
+type map_AccPKD	is table of [ACCNUM] index by varchar2(32767);
+-- Массив счетов ПКД
+lmAccPKD						map_AccPKD;
+
+/**
+ * Инициализация настроек
+ */
+procedure InitTuning
+is
+	vProfCode		::[REPS_PROF_TUN].[CODE]%type;
+begin
+	lrTun_1_2 := null;
+	vProfCode := null;
+	for(
+		select	t
+			(	t			: ID
+			,	t.[CODE]	: C_CODE
+			)
+		in	::[REPS_TUNING] all
+		where	t.[PROF] = lrecParam.rProf
+			and	t.[CODE] in ('1.2')
+		)
+	loop
+		lrTun_1_2 := t.ID;
+	end loop;
+
+	vProfCode := lrecParam.rProf.[CODE];
+
+	if lrTun_1_2 is null then
+		&debug_output('Внимание! В профиле "' || vProfCode || '" не задана настройка с кодом 1.2! Расчет данных по подразделу 1.2 произведен не будет!', 0);
+	end if;
+end;
+
+/**
+ * Инициализация параметров расчета
+ * 
+ * @param P_PARAM	ссылка на параметры реализации
+ */
+procedure InitParam
+		(
+			P_PARAM		ref [REPS_PARAMS]
+		)
+is
+begin
+	lrecParam := &lib.grecParam;
+	&lib.GetAcPatTun(lrecParam.rProf);
+	-- Инициализация библиотеки для работы с клиентами
+	&lc.init();
+
+	--Инициализация кэша данных по эмитенту
+	&lib.DeleteIssuerData;
+
+	-- Инициализация настроек
+	InitTuning();
+
+	-- Инициализация фин. инструментов
+	lvFTtypes := &lib.InitFTtypes;
+	&debug_output('Список типов ЭЦБ: "' || lvFTtypes || '"', 0);
+
+	lmAccPKD.delete;
+	--инициализация массива счетов с типом F_PKD (по справочнику "ФПЭ Справочник учетных счетов ЦБ и ЦФА" (REG_PATT_ACC)).
+	&debug_output('Инициализация массива счетов с типом F_PKD', 0);
+	for	(
+			select	al
+				(
+					ac.[MAIN_V_ID]	: C_MAIN_V_ID
+				)
+			in	lcrTypeAccFPKD.[ACC_ARR]
+			,	(::[AC_FIN]		all		:ac)
+				all
+			where	al.[ACC] = ac
+		)
+	loop
+		lmAccPKD(al.C_MAIN_V_ID) := al.C_MAIN_V_ID;
+	end loop;
+	&debug_output('	в массиве счетов: ' || lmAccPKD.count, 0);
+end;
+
+/**
+ *	Определение балансового счета 2-го порядка по массиву "Финансовые счета клиента"
+ *
+ *	@param	P_FIN_ACC_ARRAY	- массив финансовые счета клиента
+ *	@param	P_CURR			- ссылка на валюту платежа за ЦБ.
+ *	@return	- строка балансовоый счет 2-го порядка
+ */
+function GetBsNumFromFinAcc
+		(
+			P_FIN_ACC_ARRAY	::[DOG_BROCKER].[FA_INVESTOR_ARR]%type
+		,	P_CURR			ref [FT_MONEY]
+		)
+	return	varchar2(4000)
+is
+
+begin
+	&debug_output('			Определение балансового счета 2-го порядка по массиву "Финансовые счета клиента" [' || P_FIN_ACC_ARRAY || ']', 10);
+	for	(
+		select	ac
+			(
+				ac.[ACC].[MAIN_USV].[NUM]	: C_BSNUM
+			,	ac.[ACC].[FINTOOL]			: C_CURR
+			)
+		in	P_FIN_ACC_ARRAY
+		where	ac.[ACC].[DATE_OP] < lrecParam.dEnd + 1
+			and	(ac.[ACC].[DATE_CLOSE] >= lrecParam.dBeg or ac.[ACC].[DATE_CLOSE] is null)
+			-- Выбирается счет, валюта которого соответствует валюте платежа за ЦБ.
+		-- выбирается счет с более поздней датой открытия (не больше даты окончания отчетного периода).
+		order by	ac.[ACC].[DATE_OP] desc
+		)
+	loop
+		if ac.C_CURR = P_CURR then
+			&debug_output('			Балансовый счет: ' || ac.C_BSNUM, 10);
+			return ac.C_BSNUM;
+		else
+			&debug_output('			Валюта счета [' || ac.C_CURR || '] не соответствует валюте платежа за ЦБ [' || P_CURR || '], пропуск счета', 10);
+		end if;
+	end loop;
+
+	return null;
+end;
+
+/**
+ * Процедура обработки "Документы дня по эмиссионным ЦБ"
+ */
+procedure Calc
+is
+	recCBDataInt		&lib.rec_CBDataInt;		-- структура с данными интерфейса GetCBData405
+	bResEmitent			boolean;				-- Резидентность эмитента
+	bInvestorRz			boolean;				-- Резидентность инвестора
+	mSumFragment		&lib.map_SumFragment;	-- Разбивка по КВВО
+	recData				[F_405_DATA];			-- Рассчитанные данные для сохранения
+	recSaveData			rec_SaveData;			-- Данные для сохранения
+	recProtocol			&lib.rec_Protocol;		-- Данные для протокола
+	vEmitentName		varchar2(32767);		-- Имя эмитента
+	recClientInfo		&lc.ClientTypeRec;		-- Информация о клиенте: класс и тип клиента
+begin
+
+	&debug_output('+ Начало обработки "Документы дня по эмиссионным ЦБ"', 0);
+	for(
+		select	ds
+			(	ds					: C_ID
+			,	ds.[NUM_DOG]		: C_NUM_DOG
+			,	ds.[GASH_INFO]		: C_GASH_INFO		-- Информация о гашении облигаций и купонов
+			,	ds.[GASH_PROD]		: C_GASH_PROD		-- Признак "Обработка гашений"
+			,	ds.[DATE_BEGINING]	: C_DATE_BEGINING	-- Дата начала действия договора
+			,	ds.[FILIAL]			: C_FILIAL			-- филиал
+			)
+		in	::[DAYDOCS] all
+		where	ds.[DATE_BEGINING]	>= lrecParam.dBeg
+			and	ds.[DATE_BEGINING]	< lrecParam.dEnd + 1
+			and	(ds.[DATE_ENDING]	< lrecParam.dEnd + 1 or ds.[DATE_ENDING] is null)
+			and	ds.[FILIAL] = coalesce(lrecParam.rBranch, ds.[FILIAL])
+		)
+	loop
+		&debug_output(	'Документ дня № '					|| to_char(ds.C_NUM_DOG) || ' (id:' || to_char(ds.C_ID) || '); '
+					||	'Признак "Обработка гашений": '		|| bool_char(ds.C_GASH_PROD, 'да', 'нет') || '; '
+					||	'Дата начала действия договора: '	|| to_char(ds.C_DATE_BEGINING, 'dd/mm/yyyy')
+					,	10
+					);
+
+		-- Обработка гашений облигаций и купонов
+		for(
+			select gh
+				(	gh.[INVESTOR_PAYS]								: C_INVESTOR_PAYS
+				,	gh.[NS]											: C_FT
+				,	gh.[NS]%class									: C_P_FT_CLASS
+				,	gh.[NS].[NAME]									: C_FT_NAME
+				,	gh.[GCOUP]										: C_CUPON
+				,	gh.[GOBL]										: C_OBLIG
+				,	gh												: C_ID
+				,	gh.[SUMMA]										: C_COUP_SUM -- сумма к погашению по купону одной ЦБ
+				,	gh.[INVESTORS]									: C_INVESTORS
+				)
+			in	ds.C_GASH_INFO
+			where instr(lvFTtypes, '#' || gh.[NS]%class || '#') > 0
+			)
+		loop
+			&debug_output('	Информация о гашении (id:' || gh.C_ID%id || '), ЭЦБ id:' || gh.C_FT%id || '), '
+						||	' Погашение купона: '	|| bool_char(gh.C_CUPON, 'да', 'нет')
+			, 10
+			);
+
+			-- цикл по оплатам инвесторам
+			for(
+				select inv 
+					(	inv%class									: CLASS_ID
+					,	inv.[PAYMENTS]								: C_PS
+					,	inv.[AMOUNT]								: C_AMOUNT
+					,	inv.[SUM]									: C_ALL_SUM
+					,	inv											: C_ID
+					,	inv.[INVESTOR].[DOG].[FA_INVESTOR_ARR]		: C_FIN_ACC_ARRAY	-- Финансовые счета клиента
+					,	inv.[INVESTOR].[CLIENT]						: C_NRES
+					,	inv.[INVESTOR].[CLIENT].[NAME]				: C_NRES_NAME
+					,	inv.[INVESTOR].[CLIENT].[COUNTRY].[CODE]	: C_NRES_CODE
+					,	inv.[BARGAIN].[KIND_DEAL]					: C_KIND_DEAL		-- Вид сделки
+					,	inv.[BARGAIN].[KIND_DEAL].[CODE]			: C_KIND_DEAL_CODE	-- Код вида сделки
+					,	inv.[BARGAIN].[OPER]						: C_OPER			-- Массив операций по сделке
+					,	inv.[BARGAIN].[MARKET].[IS_VNEBIRJ]			: C_IS_VNEBIRJ		-- Признак площадки для внебиржевых сделок
+					,	inv.[BARGAIN].[MARKET].[MARKET_CODE]		: C_MR				-- Торговая площадка
+					)
+				in gh.C_INVESTOR_PAYS
+				)
+			loop
+				bInvestorRz		:= &lib.isResident(inv.C_NRES, lrecParam.dEnd);
+				recClientInfo	:= &lc.GetClientType(inv.C_NRES);
+
+				&debug_output('		Оплаты инвесторам id: ' || inv.C_ID%id || ', '
+								||	'массив оплат по датам: [' || to_char(inv.C_PS) || '], '
+								||	'массив операций по сделке: [' || to_char(inv.C_OPER) || '], '
+								||	'тип сделки: [' || inv.C_KIND_DEAL_CODE || '], '
+								||	'внебиржевая: [' || inv.C_IS_VNEBIRJ || '], '
+								||	'Резидентность инвестора: [' || bool_char(bInvestorRz) || '], '
+								||	'тип инвестора(клиента) : [' || recClientInfo.CLTYPE || ']'
+								,	10
+								);
+
+					-- Инициализация списка разбивки по КВВО
+					mSumFragment.delete;
+
+					-- цикл по оплатам по датам
+					for(
+						select	ps
+							(	ps																						: C_ID
+							,	coalesce(ps.[SUMMA_PAY].[SUM], ps.[SUMMA_OBL].[SUM], ps.[SUMMA].[SUM])					: C_SUM
+							,	coalesce(ps.[SUMMA_PAY].[CURRENCY], ps.[SUMMA_OBL].[CURRENCY], ps.[SUMMA].[CURRENCY])	: C_ISO_PL
+							,	ps.[DATE]																				: C_DT
+							)
+						in inv.C_PS
+						where	ps.[DATE] >= lrecParam.dBeg
+							and	ps.[DATE] < lrecParam.dEnd + 1
+							and	case when ds.C_GASH_PROD = '1' then ds.C_DATE_BEGINING else ps.[DATE] end = ps.[DATE]
+						)
+					loop
+						&debug_output('		Запись из массива оплат ID: ' || ps.C_ID%id || ', '
+										||	'сумма: [' || ps.C_SUM || '], '
+										||	'валюта: [' || to_char(ps.C_ISO_PL) || '], '
+										||	'дата: "' || to_char(ps.C_DT, 'dd.mm.yyyy hh24:mi:ss') || '"'
+										,	10);
+						recData := null;
+						recData.[PARAM]			:= lrecParam.rParam;
+						recData.[TUNING]		:= lrTun_1_2;
+						recData.[FILIAL]		:= ds.C_FILIAL;
+						recData.[DATA]			:= inv.CLASS_ID;
+						recData.[SRC_ID]		:= inv.C_ID%id;
+						recData.[DATE_OP]		:= ps.C_DT;
+						recData.[KOD_OPER]		:= '99';
+
+						-- информация по коду ценной бумаги из интерфейса
+						recCBDataInt := &lib.GetCBDataInt	(	P_CB_ID == gh.C_FT
+															,	P_DATE == recData.[DATE_OP] + 1
+															);
+			
+						-- Определение регистрационного номера в зависимости от резидентности эмитента
+						bResEmitent		:= &lib.isResident(recCBDataInt.recIssuer.rIssuer, lrecParam.dEnd);
+
+						-- Наименование эмитента опредяеляем в зависимости от резидентности и нахождении клиента в группах,
+						-- указанных в настройке FOREIGN_ORG_BR_NAME
+						vEmitentName	:=	case
+												when	recCBDataInt.recIssuer.rIssuer%class = ::[CL_BANK_F]%class
+												then	&lib.GetNameClQual(recCBDataInt.recIssuer.rIssuer, 'NAME', lrecParam.dEnd)
+												else	&lib.GetNameClRes(recCBDataInt.recIssuer.rIssuer, &lib.isResident(recCBDataInt.recIssuer.rIssuer, lrecParam.dEnd), lrecParam.dEnd, lrecParam.rProf)
+											end;
+
+						&debug_output	(	'Результат интерфейса GetCBDataOnDate для ЦБ: [' || gh.C_FT || ']: '
+										||	'Эмитент: "'					|| vEmitentName						|| '" (' || recCBDataInt.recIssuer.rIssuer%id || '), '
+										||	'Резидентность эмитента: 	['	|| bool_char(bResEmitent) || '] '
+										||	'Класс ЦБ: ['					|| recCBDataInt.vFTClass					|| '], '
+										||	'Наименование ЦБ: ['			|| recCBDataInt.vFTName						|| '], '
+										||	'Код ЦБ: ['						|| recCBDataInt.vCBCode						|| '], '
+										||	'Регистрационный номер ЦБ: ['	|| recCBDataInt.vRegNum						|| '], '
+										||	'Регистрационный номер ISIN: ['	|| recCBDataInt.vIsinNum					|| '], '
+										||	'Признак эмиссионной ЦБ: ['		|| recCBDataInt.iIsEmission					|| '], '
+										||	'Дата выпуска ЦБ: ['			|| recCBDataInt.dDateEmission				|| '], '
+										||	'Дата погашения ЦБ: ['			|| recCBDataInt.dDateMaturity				|| '], '
+										||	'Валюта ЦБ: ['					|| recCBDataInt.rCBCur%id					|| ']'
+										,	10);
+
+						recData.[KOD_CB]		:= recCBDataInt.vCBCode;
+
+						-- Если резидентность сторон совпадает, то сделка пропускается
+						if		(	bInvestorRz
+								and	bResEmitent
+								)
+							or	(	bInvestorRz
+								and	bResEmitent
+								)
+							or bResEmitent is null
+							or bInvestorRz is null
+						then
+							&debug_output	(	'Оплата с ID: [' || gh.C_FT || '] пропущена, так как резидентность инвестора и эмитента совпадает или не определена!',	10);
+							continue;
+						end if;
+
+
+						if bInvestorRz then
+							recData.[KOD_N_PL]	:= 'INR';
+							recData.[NEREZIDENT]	:= recCBDataInt.recIssuer.rIssuer;
+							-- код нерезидента в первую очередь определяем из справочника "ОП Группы клиентов"(REPS_CLIENTS)
+							-- по группы F_405_COUNTRY_CODE
+							recData.[NRES_CODE]	:= coalesce	(	&lib.GetRepsClientCodeCountry
+																(
+																	P_CODE_GROUP	== 'F_405_COUNTRY_CODE'
+																,	P_CLIENT		== recData.[NEREZIDENT]
+																)
+															,	recCBDataInt.recIssuer.vIssuerCountryCode
+															,	'999'
+															);
+							recData.[REZIDENT]	:= inv.C_NRES;
+							recData.[RES_CODE]	:= &lib.GetResCode
+														(
+															P_CLIENT == inv.C_NRES
+														,	P_IS_FIRST_RAZD == false
+														,	P_DATE == ps.C_DT
+														);
+						else
+							recData.[KOD_N_PL]	:= 'INN';
+							recData.[NEREZIDENT]	:= inv.C_NRES;
+							-- код нерезидента в первую очередь определяем из справочника "ОП Группы клиентов"(REPS_CLIENTS)
+							-- по группы F_405_COUNTRY_CODE
+							recData.[NRES_CODE]	:= coalesce	(	&lib.GetRepsClientCodeCountry
+																(
+																	P_CODE_GROUP	== 'F_405_COUNTRY_CODE'
+																,	P_CLIENT		== recData.[NEREZIDENT]
+																)
+														,	inv.C_NRES_CODE
+														,	'999');
+							recData.[REZIDENT]	:= recCBDataInt.recIssuer.rIssuer;
+							recData.[RES_CODE]	:= &lib.GetResCode
+														(
+															P_CLIENT == recCBDataInt.recIssuer.rIssuer
+														,	P_IS_FIRST_RAZD == false
+														,	P_DATE == ps.C_DT
+														);
+						end if;
+
+						-- Выполняем проход по списку документов из массива операций сделки
+						for(
+							select doc
+								(	md								: ID
+								,	md.[CURR_OPER]					: C_CURR_OPER
+								,	md.[SUM]						: C_SUM
+								,	md.[SUM_PO]						: C_SUM_PO
+								,	md.[ACC_KT].[MAIN_V_ID]			: C_ACC_KT
+								,	md.[ACC_KT].[MAIN_USV].[NUM]	: C_BSNUM
+								)
+							in	inv.C_OPER
+							,	(::[MAIN_DOCUM] all : md ) all
+							where
+								-- Операции с типом "Документы дня. Бухгалтерские (гашение)"
+									doc.[OPER_TYPE] = lcrTypeOperDDFinGash
+								and	doc.[DOCS].[DOCUM] = md
+								-- Дата проводки = дата оплаты
+								and	trunc(md.[DATE_PROV]) = trunc(ps.C_DT)
+								and	substr(md.[ACC_DT].[MAIN_V_ID], 1, 3) not in ('706', '612')
+							)
+						loop
+							&debug_output('документ из массива операций сделки id: '|| doc.ID
+										|| ', Сумма по Дт: ' || doc.C_SUM || ', Сумма по Кт: ' || doc.C_SUM_PO
+										|| ', Счет по кредиту: ' || doc.C_ACC_KT
+							,	10);
+							-- Формирование массива "Разбиение суммы по КВВО" только для собственных внебиржевых сделок.
+							-- Т.к. КВВО будет определяться только по собственным внебиржевым сделкам,
+							-- то накладываем ограничения на счета документа
+							if		inv.C_KIND_DEAL = lcrDilDeal
+								and	inv.C_IS_VNEBIRJ = '1'
+								and substr(doc.C_ACC_KT, 1, 3) in ('501', '502', '503')
+							then
+								mSumFragment := &lib.FillSumFragment
+												(	P_TAB_SF		== mSumFragment
+												,	P_DOC			== doc.ID
+												,	P_DOC_CURR_OPER	== doc.C_CURR_OPER
+												,	P_DOC_SUM		== doc.C_SUM
+												,	P_DOC_SUM_PO	== doc.C_SUM_PO
+												);
+							end if;
+
+							-- Если клиент наш банк
+							if recClientInfo.CLTYPE = 'OURBANK' then
+								&debug_output('		Определение балансового счета 2-го порядка по операции с типом "Документы дня. Бухгалтерские (гашение)', 10);
+								--Определение балансового счета 2-го порядка при выплате доходов по ценным бумагам
+								if lmAccPKD.exists(doc.C_ACC_KT) then
+									&debug_output('		Балансовый счет: ' || doc.C_BSNUM, 10);
+									if recData.[NOTES_7] is null then
+										recData.[NOTES_7]:= doc.C_BSNUM;
+									else
+										recData.[NOTES_7] := recData.[NOTES_7] || ', ' || doc.C_BSNUM;
+									end if;
+								else
+									&debug_output('			Счет не находится в массиве "ФПЭ Справочник учетных счетов ЦБ и ЦФА" ', 10);
+								end if;
+							end if;
+						end loop;
+
+						-- Выравниванием разбивку по КВВО в соответствии с суммой платежа
+						if		inv.C_KIND_DEAL = lcrDilDeal
+							and	inv.C_IS_VNEBIRJ = '1'
+						then
+							mSumFragment := &lib.EquateSumFragment
+												(	mSumFragment
+												,	ps.C_SUM
+												,	inv.C_AMOUNT
+												);
+						end if;
+
+						recData.[QUANTITY]	:= inv.C_AMOUNT;
+						recData.[CUR_PL]		:= ps.C_ISO_PL;
+						recData.[SUM_TOTAL]	:= round(ps.C_SUM, 2);
+						-- если информация о гашении ЦБ и НКД отражаются в одном массиве оплат,
+						-- и оплата прошла целиком, выделяем погашение НКД И ЦБ(в общем случае выделить не возможно)
+						if		char_bool(gh.C_OBLIG)
+							and	char_bool(gh.C_CUPON)
+							and	ps.C_SUM = inv.C_ALL_SUM
+						then
+							recData.[SUM_PRC] := nvl(round(inv.C_AMOUNT * gh.C_COUP_SUM, 2), 0);
+						else
+							if char_bool(gh.C_OBLIG) then
+								recData.[SUM_PRC] := 0;
+							else
+								recData.[SUM_PRC] := round(ps.C_SUM, 2);
+							end if;
+						end if;
+						&debug_output('	Сумма гашения: ' || recData.[SUM_TOTAL] || ' сумма гашения купона: ' || recData.[SUM_PRC], 10);
+						recData.[EMITENT]		:= recCBDataInt.recIssuer.rIssuer;
+
+						if bResEmitent then
+							if recCBDataInt.vCBCode in ('DR1', 'KSU') then
+								recData.[REGNUM]		:= nvl(recCBDataInt.vIsinNum, 'не определено');
+							else
+								if recCBDataInt.iIsEmission in (1, 2) then
+									recData.[REGNUM]	:= nvl(recCBDataInt.vRegNum, recCBDataInt.vIsinNum);
+								else
+									recData.[REGNUM]	:= 'не определено';
+								end if;
+							end if;
+						else
+							if recCBDataInt.iIsEmission in (1, 2) then
+								recData.[REGNUM]	:= nvl(recCBDataInt.vIsinNum, recCBDataInt.vRegNum);
+							else
+								recData.[REGNUM]	:= 'не определено';
+							end if;
+							-- если интерфейс передал значение "Тип номера ЦБ" = 0 то источник не определен
+						end if;
+
+						recData.[DATE_REG]		:= recCBDataInt.dDateEmission;
+						recData.[DATE_PAY]		:= recCBDataInt.dDateMaturity;
+						recData.[CUR_CB]		:= recCBDataInt.rCBCur;
+						recData.[NOTES]			:= '';
+
+						-- код эмитента в первую очередь определяем из справочника "ОП Группы клиентов"(REPS_CLIENTS)
+						-- по группы F_405_COUNTRY_CODE
+						recData.[EMIT_CODE]	:= &lib.GetRepsClientCodeCountry
+															(
+																P_CODE_GROUP	== 'F_405_COUNTRY_CODE'
+															,	P_CLIENT		== recData.[EMITENT]
+															);
+
+						--Если эмитент резидент или ФИ - инвестиционный пай
+						if recCBDataInt.recIssuer.rIssuerCountry = ::[SYSTEM].[COUNTRY] then
+							recData.[EMIT_CODE] := nvl(recData.[EMIT_CODE], recCBDataInt.recIssuer.vIssuerInn);
+						else
+							recData.[EMIT_CODE] := nvl(recData.[EMIT_CODE], recCBDataInt.recIssuer.vIssuerCountryCode);
+						end if;
+
+						-- для разбивки по КВВО (tvSumFragment) в случае одной записи в разбивке и отсутствия информации о процентах
+						-- сохраняем сумму процентов с recData
+						if mSumFragment.count = 1 then
+							if mSumFragment(mSumFragment.first).[SUM_PRC] is null then
+								mSumFragment(mSumFragment.first).[SUM_PRC] := recData.[SUM_PRC];
+							end if;
+						end if;
+
+						--заполнение флага "Собственные бумаги"
+						recData.[OWN_DEAL] := &slib.IsOwnDeal
+												(	-- ссылка на эмитента
+													P_EMITENT		== recData.[EMITENT]
+												,	-- ссылка на резидента
+													P_REZIDENT		== recData.[REZIDENT]
+												,	-- ссылка на нерезидента
+													P_NEREZIDENT	== recData.[NEREZIDENT]
+												,	-- код ЦБ
+													P_CB_CODE		== recData.[KOD_CB]
+												);
+
+					-- Определение балансового счета 2-го порядка, если инвестор не отчитывающийся банк.
+					if recClientInfo.CLTYPE <> 'OURBANK' then
+						recData.[NOTES_7] := GetBsNumFromFinAcc(inv.C_FIN_ACC_ARRAY, recCBDataInt.rCBCur%id);
+					end if;
+
+					if recData.[NOTES_7] is null then
+						&debug_output('			Не определен балансовый счет 2-го порядка', 10);
+					else
+						&debug_output('			Примечание 7 (Балансовый счет 2-го порядка): ' || recData.[NOTES_7], 10);
+					end if;
+
+
+						-- Заполнение временной таблицы для последующей записи в данные
+						recSaveData							:= null;
+						recSaveData.recF405					:= recData;
+						recSaveData.mSumFragment			:= mSumFragment;
+						laSaveData(laSaveData.count + 1)	:= recSaveData;
+
+						-- Заполнение протокольной таблицы
+						if lrecParam.bProtocol then
+							recProtocol := null;
+							recProtocol.vProduct		:= recData.[DATA];					-- Продукт
+							recProtocol.dOper			:= recData.[DATE_OP];				-- Дата операции
+							recProtocol.vIDDeal			:= recData.[SRC_ID];				-- ID Сделки
+							recProtocol.vCodeDeal		:= ds.C_NUM_DOG;					-- Код сделки
+							-- Если нерезидент является "Участниками SWIFT": наименование выводится
+							-- из реквизита NAME с учетом историчности
+							recProtocol.vInvestor	:=	case
+															when	inv.CLASS_ID = ::[CL_BANK_F]%class and not bInvestorRZ
+															then	&lib.GetNameClQual(inv.C_NRES, 'NAME', lrecParam.dEnd)
+															else	inv.C_NRES_NAME
+														end;								-- Наименование инвестора
+							recProtocol.vEmitent		:= vEmitentName;					-- Наименование эмитента
+							recProtocol.vRZInvestor		:= bool_char(bInvestorRZ);			-- Резидентность инвестора
+							recProtocol.vRZEmitent		:= bool_char(bResEmitent);			-- Резидентность эмитента
+							recProtocol.vKindDeal		:= inv.C_KIND_DEAL_CODE;			-- Вид сделки
+							recProtocol.vCBClass		:= nvl(recCBDataInt.vCBCode, 'не определено');	-- Класс ЭЦБ
+							recProtocol.vMarket			:= inv.C_MR;						-- Торговая площадка
+							recProtocol.vCBName			:= nvl(recCBDataInt.vFTName, 'не определено');	-- Наименование ЦБ
+							recProtocol.vCurPay			:= &slib.GetCurShort(ps.C_ISO_PL);	-- Валюта платежа
+							recProtocol.vISIN			:= nvl(recCBDataInt.vIsinNum, 'не определено');	-- Международный идентификационный код ценной бумаги (ISIN)
+							recProtocol.vRegNum			:= nvl(recCBDataInt.vRegNum, 'не определено');
+							recProtocol.vRegNumRep		:= recData.[REGNUM];				-- Код который пошел в отчет
+							recProtocol.dRegCB			:= recData.[DATE_REG];				-- Дата регистрации ЦБ
+							recProtocol.dRegRep			:= recData.[DATE_REG];				-- Дата регистрации ЦБ в отчет
+							recProtocol.vFilialNum		:= ::[REPS_DATA].[LIB_GENL].GetBranchOrDepart(ds.C_FILIAL%id).fCode; -- Номер филиала
+							recProtocol.vBal2ACC		:= recData.[NOTES_7];
+							laProtocol(laProtocol.count + 1) := recProtocol;
+						end if;
+					end loop;	-- Оплаты по датам
+			end loop;	-- Оплаты инвесторам
+		end loop;	-- Гашения облигаций и купонов
+	end loop;	-- Документы дня по эмиссионным ЦБ
+	&debug_output('- Выполнена обработка документов дня по эмиссионным ЦБ, всего добавлено записей: ' || laSaveData.count, 0);
+end;
+
+
+/**
+ * Процедура сохранения данных
+ */
+procedure SaveData
+is
+	recData				[F_405_DATA];			-- Рассчитанные данные для сохранения
+	mSumFragment		&lib.map_SumFragment;	-- Разбивка по КВВО
+	vIdx				varchar2(128);
+
+begin
+	&debug_output('>> Расчет завершен. Заполнение справочника данных', 0);
+	if laSaveData.count > 0 then
+		for i in 1..laSaveData.count
+		loop
+			-- Добавление записи в Ф-405-Данные
+			recData := laSaveData(i).recF405;
+			recData.[SUM_FRAGMENT] := next_value('SEQ_ID');
+			::[F_405_DATA]%insert(recData);
+
+			-- Заполнение массива с разбивкой по КВВО
+			mSumFragment := laSaveData(i).mSumFragment;
+			vIdx := mSumFragment.first;
+			while vIdx is not null
+			loop
+				recData.[SUM_FRAGMENT]%insert(mSumFragment(vIdx));
+				vIdx := mSumFragment.next(vIdx);
+			end loop;
+		end loop;
+	end if;
+	&debug_output('<< Выполнено заполнение справочника данных', 0);
+end;
+
+
+/**
+ * Обработка документов дня по эмиссионным ЦБ
+ * 
+ * @param P_PARAM	ссылка на параметры реализации
+ * @return	ссылка на реализацию
+ */
+public function Run
+		(
+			P_PARAM		ref [REPS_PARAMS]
+		)
+	return		ref [REPS_PARAMS]
+is
+begin
+	-- Инициализация параметров расчета
+	InitParam(P_PARAM);
+	laSaveData.delete;
+	laProtocol.delete;
+
+	--Если нет подраздела 1.2 - выход
+	if lrTun_1_2 is null then
+		return P_PARAM;
+	end if;
+
+	-- расчет
+	Calc;
+
+	-- сохранение рассчитанных данных
+	SaveData;
+
+	-- Сохранение данных в протокол
+	&lib.SaveProtocol(P_TAB_PROTOCOL == laProtocol);
+
+	--Очистка накопленного кеша
+	laSaveData.delete;
+	laProtocol.delete;
+	lmAccPKD.delete;
+	&lc.deInit();
+
+	return lrecParam.rParam;
+end;
+end;

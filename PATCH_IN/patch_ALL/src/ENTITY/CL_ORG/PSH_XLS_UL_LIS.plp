@@ -1,0 +1,116 @@
+class CL_ORG;
+
+@name('[ПСБ] Отчет: Лицензия ЮЛ')
+static method PSH_XLS_UL_LIS is
+
+@name('V_DEST') public V_DEST [MEMO_32767];
+public vUserFilial ref [BRANCH] 	:= ::[SYSTEM].[VARIABLES].OurBranch;
+PSH_XLS_UL_LIS (
+	@name('Дата начала') P_DATE     in [DATE],
+	@name('Дата конца')  P_DATE_END in [DATE]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATE := [SYSTEM]::[OP_DATE];
+	P_DATE_END := [SYSTEM]::[OP_DATE];
+
+end if;
+-- End initialization of parameters and variables
+declare
+pragma include( ::[PR_CRED].[LIB_MACRO] );
+
+i 			number;
+vColCount 	number; -- колво колонок в отчете
+vLineCount 	number; -- первая строка в Excel
+vFileName 	varchar2(250); -- имя Excel-шаблона
+s1 number;
+s2 number;
+s3 number;
+s4 number;
+s5 number;
+s6 number;
+
+
+begin
+  if P_MESSAGE = 'DEFAULT' then -- первый запуск процедуры
+		[EXCEL].Init_Xls;
+					
+  elsif P_MESSAGE = 'VALIDATE' then -- переход между полями
+
+		if p_info = 'OK' then
+  			
+  			if P_DATE is null or P_DATE_END is null then
+  				pragma error('Дата начала и конца обязательно для заполнения!');
+  			end if;
+  			
+  			vFileName := null;
+  			  			  	
+			if [EXCEL].F_Click then
+				[EXCEL].F_Click := False;
+
+				vColCount := 7; -- всего колонок в отчете
+				vLineCount := 5; -- первая строка в Excel
+				i:=vLineCount;
+							
+				-- запуск Excel
+				[EXCEL].open_file(vFileName,false,true);
+				[EXCEL].Write(2, 1, 'За период с '||to_char(P_DATE,'DD.MM.YYYY')||' по '||to_char(P_DATE_END,'DD.MM.YYYY'));
+				[EXCEL].Set_Column_Width(1,1,60);
+				[EXCEL].Set_Column_Width(2,vColCount,15);
+				[EXCEL].Wrap_Text(4,1,4,vColCount);
+				
+				[EXCEL].Write(4, 1, 'Наименование',true,null,null,null,'CT');
+				[EXCEL].Write(4, 2, 'Рег. номер',true,null,null,null,'CT');
+				[EXCEL].Write(4, 3, 'Номер',true,null,null,null,'CT');
+				[EXCEL].Write(4, 4, 'Вид лицензии',true,null,null,null,'CT');
+				[EXCEL].Write(4, 5, 'Дата выдачи',true,null,null,null,'CT');
+				[EXCEL].Write(4, 6, 'Дата окончания',true,null,null,null,'CT');
+				[EXCEL].Write(4, 7, 'Кем выдана',true,null,null,null,'CT');
+				
+				for (
+			        select d( d%id  : c_id
+			                 ,d.[NAME]: na
+			                 ,d.[REGISTR_NUM]: reg_n
+			                 ,d.[LICENCES].[NUM_LICENCE]: num_l
+			                 ,d.[LICENCES].[DOC_KIND].[NAME]: vid_l
+			                 ,d.[LICENCES].[DATE_BEGIN] : dat_b	
+			                 ,d.[LICENCES].[DATE_END] : dat_e
+			                 ,d.[LICENCES].[WHO] : who_l
+			                 )
+							
+								 in ::[CL_ORG]
+								where
+								 d.[LICENCES].[DATE_END]>=P_DATE and d.[LICENCES].[DATE_END]<=P_DATE_END
+						order by d%class,d.[NAME]
+							
+			)loop
+				
+				
+				[EXCEL].Write(i, 1, d.na);
+				[EXCEL].Write(i, 2, d.reg_n);
+				[EXCEL].Write(i, 3, d.num_l);
+				[EXCEL].Write(i, 4, d.vid_l);	
+				[EXCEL].Write(i, 5, d.dat_b);
+				[EXCEL].Write(i, 6, d.dat_e);
+				[EXCEL].Write(i, 7, d.who_l);
+
+				
+				i := i + 1;
+				end loop;
+				
+				[EXCEL].Borders(vLineCount-1, 1, i-1, vColCount, 'RLBTVH');
+				[EXCEL].Visible;
+				[EXCEL].Release;
+				
+			end if;
+			
+			[EXCEL].Exec_Script(V_DEST);	
+		end if;	
+  end if;
+end;
+end;
+end;
+end;

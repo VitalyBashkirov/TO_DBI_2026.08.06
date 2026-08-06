@@ -1,0 +1,40 @@
+class AC_FIN;
+
+@import_plsql(true)
+@this(plsql_lock:=false,assert_null:=false)
+@name('[ПСБ] Приложение 4 к Положению Банка России 579-П в Excel')
+@tag('COPIED')
+static method PSH_EXCEL_4_579P_DATE is
+
+@name('V_DEST')             public V_DEST           [STRING_32000];
+@name('Файл шаблона excel') public P_FILE_EXECL     [STRING_512];
+@name('Файл для вывода')    public P_FILE_PORT_DATE [STRING_512];
+pragma include(::[RUNTIME].[DEBUG_MACRO]);
+
+--DateTimeEnd date;
+/* DateTimeEnd date; */
+
+--v50.STOR.DATE.п.2.2 - [ПРОМПТ] Проанализируй код: DateTimeEnd date; | Правило: v50.STOR.DATE.п.2.2 | Описание: DATE -> DATE_TIME (тип) | Обоснование: В PostgreSQL тип DATE не хранит время. | Заключение: Требуется исправление
+--OLD 2026-04-28 13:50:41
+-- DateTimeEnd date;
+DateTimeEnd DATE_TIME;
+begin
+	-- DateTimeEnd:=sysdate;         --Вариант 1 
+	var tmp string(100);
+	tmp := 'DateTimeEnd:=sysdate';   --Вариант 2 
+	tmp := 'DateTimeEnd:=sysdate     --Вариант 3
+	абракадабра';
+
+	/** / DateTimeEnd:=sysdate; /**/ --Вариант 4
+	/* DateTimeEnd:=sysdate; */      --Вариант 5
+	/*			         --Вариант 6
+	DateTimeEnd:=sysdate;
+	*/
+	/** /			         --Вариант 7
+	DateTimeEnd:=sysdate;
+	/**/
+
+	DateTimeEnd:=sysdate;            --Вариант 8
+
+	tmpStr:='Сформировано '||to_char(DateTimeEnd,fmtHMS)||' __________________________________/'||stdlib.UserId.[NAME]||'/';
+end;

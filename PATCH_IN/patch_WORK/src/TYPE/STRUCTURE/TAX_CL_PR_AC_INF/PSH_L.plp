@@ -1,0 +1,580 @@
+class TAX_CL_PR_AC_INF;
+
+@name('[ПСБ] Библиотека')
+library PSH_L is
+--Электронный обмен с налоговыми органами. Доходы по счетам
+--TAX_CL_PR_AC_INF.PSB_L-[ПСБ] Библиотека
+
+pragma include (::[DEBUG_TRIGGER].[MACRO_LIB]);
+
+dp number:=0;	--управление debug_pipe;
+dp2 number:=null;	--управление debug_pipe;
+fmt string(10):='dd/mm/yyyy';
+fmt24 string(22):='dd/mm/yyyy HH24:MI:SS';
+
+public function GetPrdData(tc ref [TAX_CL_PR_AC_INF], tInfo number) return string(512) is
+oTc [TAX_CL_PR_AC_INF];
+dep ref [DEPN];
+rk ref [RKO];
+refProd ref [PRODUCT];
+ret_prc [SUMMA];
+oDepn [DEPN];
+oRko [RKO];
+d1 [DATE];
+d2 [DATE];
+ret_str string(512);
+begin
+	oTc:=tc;
+	d1:=oTc.[DATA_REQ].[PERIOD_BEG];
+	d2:=oTc.[DATA_REQ].[PERIOD_END];
+	refProd:=oTc.[PROD_ID];
+	if oTc.[PROD_CODE]='DEPN' then   dep:=refProd; oDepn:=dep;
+	elsif oTc.[PROD_CODE]='RKO' then rk :=refProd; oRko:=rk;
+	else
+		return null;
+	end if;
+	
+	if tInfo=0 then 
+		if oTc.[PROD_CODE]='DEPN' then   ret_str:=oDepn.[FINTOOL].[CUR_SHORT];
+		elsif oTc.[PROD_CODE]='RKO' then ret_str:=oRko.[CONTRACT_CUR].[CUR_SHORT];
+		end if;
+	elsif tInfo=1 then 
+		if oTc.[PROD_CODE]='DEPN' then   ret_str:=oDepn.[VID_DOG].[NAME];
+		elsif oTc.[PROD_CODE]='RKO' then ret_str:=oRko.[RKO_TYPE].[NAME];
+		end if;
+	/** /
+	elsif tInfo=2 then 
+		if oTc.[PROD_CODE]='DEPN' then   ret_str:=oDepn.[VID_DOG].[];
+		elsif oTc.[PROD_CODE]='RKO' then ret_str:=oRko.[];
+		end if;
+	elsif tInfo=3 then 
+		if oTc.[PROD_CODE]='DEPN' then   ret_str:=oDepn.[];
+		elsif oTc.[PROD_CODE]='RKO' then ret_str:=oRko.[];
+		end if;
+	elsif tInfo=4 then 
+		if oTc.[PROD_CODE]='DEPN' then   ret_str:=oDepn.[];
+		elsif oTc.[PROD_CODE]='RKO' then ret_str:=oRko.[];
+		end if;
+	/**/
+	end if;
+	return ret_str;
+end;
+
+public function CalcPrcDepn(prod ref [PRODUCT],d1 [DATE],d2 [DATE]) return [SUMMA] is
+dep ref [DEPN];
+rk ref [RKO];
+oDepn [DEPN];
+oRko [RKO];
+jcp ::[DEPN].[JOUR_CALC_PRC]%type;
+ret_summa [SUMMA];
+begin
+	if prod%class='DEPOSIT_PRIV' then          dep:=prod; oDepn:=dep;	jcp:=oDepn.[JOUR_CALC_PRC];
+	elsif prod%class in ('RKO','RKO_CUR') then rk :=prod; oRko:=rk;		jcp:=oRko.[JOUR_CALC_PRC];
+	else
+		return null;
+	end if;
+	begin
+		select f( sum(f.[SUMMA_PRC_ROUND]): sm)
+		in ::[STRING_CALC_PRC] all
+		where f%collection = jcp and 
+			((d1<=f.[DATE_BEG] and f.[DATE_BEG]<=d2 )
+			or
+			(d1<=f.[DATE_END] and f.[DATE_END]<=d2 ))
+			into ret_summa;
+	exception when others then
+		ret_summa:=null;
+	end;
+	return ret_summa;
+end;
+
+public function CalcProfit(tc ref [TAX_CL_PR_AC_INF]) return [SUMMA] is
+oTc [TAX_CL_PR_AC_INF];
+dep ref [DEPN];
+rk ref [RKO];
+refProd reference;
+ret_prc [SUMMA];
+oDepn [DEPN];
+oRko [RKO];
+jcp ::[DEPN].[JOUR_CALC_PRC]%type;
+d1 [DATE];
+d2 [DATE];
+begin
+	oTc:=tc;
+	d1:=oTc.[DATA_REQ].[PERIOD_BEG];
+	d2:=oTc.[DATA_REQ].[PERIOD_END];
+	debug_pipe('.CalcProfit -- Период '||to_char(d1,fmt)||'-'||to_char(d2,fmt),dp2);
+	
+	if PayProcLastDayOrClose(tc) then
+		d1:=oTc.[PROD_DATE_BEG];
+		debug_pipe('.CalcProfit -- Депозит с выплатой в конце срока или закрыт. Меняем период на '||to_char(d1,fmt)||'-'||to_char(d2,fmt),dp2);
+		if d1>d2 then
+			debug_pipe('.CalcProfit -- Выходим',dp2);
+			return null;
+		end if;
+	end if;
+	
+	refProd:=oTc.[PROD_ID];
+	if oTc.[PROD_CODE]='DEPN' then   dep:=refProd; oDepn:=dep;	jcp:=oDepn.[JOUR_CALC_PRC];
+	elsif oTc.[PROD_CODE]='RKO' then rk :=refProd; oRko:=rk;	jcp:=oRko.[JOUR_CALC_PRC];
+	else
+		return null;
+	end if;
+	
+	select f( sum(f.[SUMMA_PRC_ROUND]): sm)
+	in ::[STRING_CALC_PRC] all
+	where f%collection = jcp and 
+		((d1<=f.[DATE_BEG] and f.[DATE_BEG]<=d2 )
+		or
+		(d1<=f.[DATE_END] and f.[DATE_END]<=d2 ))
+		into ret_prc;	
+	debug_pipe('.CalcProfit < '||ret_prc,dp2);
+	return ret_prc;
+end;
+
+public function CalcProfitR(tc ref [TAX_CL_PR_AC_INF]) return [SUMMA] is
+oTc [TAX_CL_PR_AC_INF];
+dep ref [DEPN];
+rk ref [RKO];
+refProd reference;
+ret_prc [SUMMA];
+oDepn [DEPN];
+oRko [RKO];
+jcp ::[DEPN].[JOUR_CALC_PRC]%type;
+valuta ::[DEPN].[FINTOOL]%type;
+d1 [DATE];
+d2 [DATE];
+begin
+	oTc:=tc;
+	d1:=oTc.[DATA_REQ].[PERIOD_BEG];
+	d2:=oTc.[DATA_REQ].[PERIOD_END];
+	debug_pipe('.CalcProfitR -- Период '||to_char(d1,fmt)||'-'||to_char(d2,fmt),dp2);
+	
+	if PayProcLastDayOrClose(tc) then
+		d1:=oTc.[PROD_DATE_BEG];
+		debug_pipe('.CalcProfitR -- Депозит с выплатой в конце срока или закрыт. Меняем период на '||to_char(d1,fmt)||'-'||to_char(d2,fmt),dp2);
+		if d1>d2 then
+			debug_pipe('.CalcProfitR -- Выходим',dp2);
+			return null;
+		end if;
+	end if;
+	
+	refProd:=oTc.[PROD_ID];
+	if oTc.[PROD_CODE]='DEPN' then   dep:=refProd; oDepn:=dep;	jcp:=oDepn.[JOUR_CALC_PRC];	valuta:=oDepn.[FINTOOL];
+	elsif oTc.[PROD_CODE]='RKO' then rk :=refProd; oRko:=rk;	jcp:=oRko.[JOUR_CALC_PRC];	valuta:=oRko.[CONTRACT_CUR];
+	else
+		return null;
+	end if;
+
+    if valuta <> 43353 then
+		select f( 
+		         sum(
+		             f.[SUMMA_PRC_ROUND]
+		             * [HOOK]::[DEPN_COURCE](refProd, f.[DATE_CALC], valuta, 43353, null)
+		             ): sm)
+		             
+		in ::[STRING_CALC_PRC] all
+		where f%collection = jcp and 
+			((d1<=f.[DATE_BEG] and f.[DATE_BEG]<=d2 )
+			or
+			(d1<=f.[DATE_END] and f.[DATE_END]<=d2 ))
+			into ret_prc;	
+		debug_pipe('.CalcProfitR < '||ret_prc,dp2);
+    else
+        return null;
+    end if;
+	return ret_prc;
+end;
+
+public function CalcDiff(tc ref [TAX_CL_PR_AC_INF]) return [SUMMA] is
+ret_diff [SUMMA];
+begin
+	ret_diff:=nvl(coalesce(CalcProfit(tc),tc.[PROF_SUMM]),0)-nvl(CalcProfit(tc),0);
+	return ret_diff;
+end;
+
+public function PayDiff(tc ref [TAX_CL_PR_AC_INF]) return [SUMMA] is
+ret_Paydiff [SUMMA];
+begin
+	ret_Paydiff:=tc.[PROF_SUMM]-nvl(PayProc(tc),0);
+	return ret_Paydiff;
+end;
+
+
+
+
+------ Башкиров В.Г. 31.01.2025
+public function PayProcLastDayOrClose(tc ref [TAX_CL_PR_AC_INF], dp number default null) return boolean is
+oTc [TAX_CL_PR_AC_INF]; --Электронный обмен с налоговыми органами. Доходы по счетам
+rDepn ref [DEPN];
+ret_bool boolean:=false;
+begin
+	oTc:=tc;
+	if oTc.[PROD_CODE]<>'DEPN' then
+		--pragma error('Операция только для [DEPN]');
+		debug_pipe('.PayProcLastDayOrClose -- ID:'||tc%id||' Операция только для [DEPN]',dp2);
+		return null;
+	else
+		rDepn:=tc.[PROD_ID];
+		/** /
+		if rDepn.[VID_DOG].[PERIOD_PAY_PRC] is null 
+		and rDepn.[NUM_DOG] not like 'CARD%'
+		then
+			ret_bool:=true;
+			debug_pipe('.PayProcLastDayOrClose   Выплата %% в конце срока',dp2);
+		/**/
+		if rDepn.[COM_STATUS]=::[COM_STATUS_PRD]([CODE]='CLOSE') 
+		and rDepn.[VID_DOG].[PERIOD_PAY_PRC] is null 
+		and rDepn.[NUM_DOG] not like 'CARD%'
+		then
+			ret_bool:=true;
+			debug_pipe('.PayProcLastDayOrClose   Депозит закрыт',dp2);
+		end if;
+	end if;
+	debug_pipe('.PayProcLastDay < '||ret_bool,dp2);
+	return ret_bool;
+end;
+
+public function PayProcBeforePeriod(tc ref [TAX_CL_PR_AC_INF], dp number default null) return [SUMMA] is
+ret_payProc [SUMMA];
+rDepn ref [DEPN];
+sPs [SUMMA];
+AccDepn ref [AC_FIN];
+
+sPsNew [SUMMA]:=0;
+oMD [MAIN_DOCUM];
+oAccFinDt [AC_FIN];
+oAccFinKt [AC_FIN];
+AccDtrm ref [AC_FIN];	--D_TRM_INTS_LBS_ACC - Счет обязательств банка по уплате %% без нарушения сроков
+dB [DATE]; --:=to_date('01/01/2022',fmt);
+dE [DATE]; --:=to_date('31/12/2022',fmt)+1;
+
+oTc             [TAX_CL_PR_AC_INF]; --Электронный обмен с налоговыми органами. Доходы по счетам
+rTcpD_REQ   ref [TAX_CL_PR_D_REQ];  --Электронный обмен с налоговыми органами. Проценты. Запросы
+rTcpMESS    ref [TAX_CL_PR_MESS];   --Электронный обмен с налоговыми органами. Проценты. Сообщения
+rGtpr       ref [GM_TAX_PROF_REQ];  --Электронный обмен с налоговыми органами. Проценты. Сообщения о выплаченных суммах
+--rTcpLink  ref [TAX_CL_PR_LINK];   --Электронный обмен с налоговыми органами. Проценты. Связь с сообщениями
+rClient   ref [CLIENT];
+prc_client [SUMMA];
+begin
+	oTc:=tc;
+	if oTc.[PROD_CODE]<>'DEPN' then
+		--pragma error('Операция только для [DEPN]');
+		debug_pipe('.PayProcBeforePeriod -- ID:'||tc%id||' Операция только для [DEPN]',dp2);
+		return null;
+	end if;
+	if oTc.[IS_CHP] then
+		pragma error('Операция не для ИП-шника');
+		debug_pipe('.PayProcBeforePeriod -- ID:'||tc%id||' Операция не для ИП-шника',dp2);
+		return null;
+	end if;
+	
+	if not PayProcLastDayOrClose(tc) then
+		debug_pipe('.PayProcBeforePeriod -- Расчет за предыдущий период не требуется',dp2);
+		return null;
+	end if;
+	
+	dB:=oTc.[DATA_REQ].[PERIOD_BEG];
+	dE:=trunc(oTc.[DATA_REQ].[PERIOD_END])+1;
+	dB:=tc.[PROD_DATE_BEG];
+	dE:=Add_Months(dE,-12);
+	debug_pipe('.PayProcBeforePeriod -- Предыдущий перод: '||to_char(dB,fmt)||'-'||to_char(dE,fmt),dp);
+	if dB>dE then return 0; end if;
+
+	rDepn:=oTc.[PROD_ID];
+	sPs:=oTc.[PROF_SUMM];
+	AccDepn:=rDepn.[ACCOUNT];
+	debug_pipe('.PayProcBeforePeriod -- '||Rpad(to_char(dB,fmt)||'-'||to_char(dE,fmt)||' '||oTc.[PROD_NUM],70)||AccDepn.[MAIN_V_ID]||' СуммаВыплПроц:'||Rpad(sPs,17)||' '||rDepn.[CLIENT].[NAME],dp2);
+	
+	for am in AccDepn.[ARC_MOVE] where dB<=am.[DATE] and am.[DATE]<dE
+	loop
+		oMD:=am.[DOC];
+		oAccFinDt:=oMD.[ACC_DT];
+		oAccFinKt:=oMD.[ACC_KT];
+		if oMD.[SUM_NT] is null then
+			--pragma error(am.[DOC]%class||'.'||am.[DOC]%id||' нет SUM_NT');
+			debug_pipe('pragma -- .PayProcBeforePeriod -- '||TB$||am.[DOC]%class||'.'||am.[DOC]%id||' Проведен:'||to_char(oMd.[DATE_PROV],fmt)||' '||oAccFinDt.[MAIN_V_ID]||'-'||oAccFinKt.[MAIN_V_ID]||' '||lpad(oMD.[SUM_NT],16)||' '||oMD.[NAZN],0);
+		end if;
+		debug_pipe('.PayProcBeforePeriod -- '||TB$||am.[DOC]%class||'.'||am.[DOC]%id||' Проведен:'||to_char(oMd.[DATE_PROV],fmt)||' '||oAccFinDt.[MAIN_V_ID]||'-'||oAccFinKt.[MAIN_V_ID]||' '||lpad(oMD.[SUM_NT],16)||' '||oMD.[NAZN],dp2);
+		/** /
+		--Все проводки ДБ 47411 КТ 423, 426, 40817, 40820 необходимо просуммировать
+		if   oAccFinDt.[MAIN_V_ID] like '47411%' and 
+		(    oAccFinKt.[MAIN_V_ID] like '423%'
+		  or oAccFinKt.[MAIN_V_ID] like '426%'
+		  or oAccFinKt.[MAIN_V_ID] like '40817%'
+		  or oAccFinKt.[MAIN_V_ID] like '40820%')
+		then
+			sPsNew:=sPsNew+oMD.[SUM_NT];
+			debug_pipe(TB$||'+'||oMD.[SUM_NT]||'='||sPsNew,dp2);
+		end if;
+		/**/
+		--ДБ 423, 426, 47411, 40817,  40820 КТ 70601810300012440101 надо отнять
+		if   oAccFinKt.[MAIN_V_ID]='70601810300012440101' and
+		(    oAccFinDt.[MAIN_V_ID] like '423%'
+		  or oAccFinDt.[MAIN_V_ID] like '426%'
+		  or oAccFinDt.[MAIN_V_ID] like '47411%'
+		  or oAccFinDt.[MAIN_V_ID] like '40817%'
+		  or oAccFinDt.[MAIN_V_ID] like '40820%')
+		then
+			sPsNew:=sPsNew-oMD.[SUM_NT];
+			debug_pipe('.PayProcBeforePeriod -- '||TB$||'-'||oMD.[SUM_NT]||'='||sPsNew,dp2);
+		end if;
+	end loop;
+	
+	for ada in rDepn.[ARRAY_DOG_ACC] where ada.[NAME_ACCOUNT]=::[TIP_ACC]([COD]='D_TRM_INTS_LBS_ACC') --Счет обязательств банка по уплате %% без нарушения сроков
+	order by ada.[DATE_BEG] desc
+	loop
+		AccDtrm:=ada.[ACCOUNT_DOG].[1].[2];
+		exit;
+	end loop;
+	
+	if AccDtrm is not null then
+		debug_pipe('.PayProcBeforePeriod -- '||LF$||Rpad(oTc.[PROD_NUM],70)||AccDtrm.[MAIN_V_ID],dp2);
+		for am in AccDtrm.[ARC_MOVE] where dB<=am.[DATE] and am.[DATE]<dE
+		loop
+			oMD:=am.[DOC];
+			oAccFinDt:=oMD.[ACC_DT];
+			oAccFinKt:=oMD.[ACC_KT];
+			if oMD.[SUM_NT] is null then
+				pragma error(am.[DOC]%class||'.'||am.[DOC]%id||' нет SUM_NT');
+			end if;
+		  --debug_pipe(TB$||am.[DOC]%class||'.'||am.[DOC]%id||' '||oAccFinDt.[MAIN_V_ID]||'-'||oAccFinKt.[MAIN_V_ID],dp2);
+			debug_pipe('.PayProcBeforePeriod -- '||TB$||am.[DOC]%class||'.'||am.[DOC]%id||' Проведен:'||to_char(oMd.[DATE_PROV],fmt)||' '||oAccFinDt.[MAIN_V_ID]||'-'||oAccFinKt.[MAIN_V_ID]||' '||lpad(oMD.[SUM_NT],16)||' '||oMD.[NAZN],dp2);
+			
+			--Все проводки ДБ 47411 КТ 423, 426, 40817, 40820 необходимо просуммировать
+			if   oAccFinDt.[MAIN_V_ID] like '47411%' and 
+			(    oAccFinKt.[MAIN_V_ID] like '423%'
+			  or oAccFinKt.[MAIN_V_ID] like '426%'
+			  or oAccFinKt.[MAIN_V_ID] like '40817%'
+			  or oAccFinKt.[MAIN_V_ID] like '40820%')
+			then
+				sPsNew:=sPsNew+oMD.[SUM_NT];
+				debug_pipe('.PayProcBeforePeriod -- '||TB$||'+'||oMD.[SUM_NT]||'='||sPsNew,dp2);
+			end if;
+	
+			--ДБ 423, 426, 47411, 40817,  40820 КТ 70601810300012440101 надо отнять
+			if   oAccFinKt.[MAIN_V_ID]='70601810300012440101' and
+			(    oAccFinDt.[MAIN_V_ID] like '423%'
+			  or oAccFinDt.[MAIN_V_ID] like '426%'
+			  or oAccFinDt.[MAIN_V_ID] like '47411%'
+			  or oAccFinDt.[MAIN_V_ID] like '40817%'
+			  or oAccFinDt.[MAIN_V_ID] like '40820%')
+			then
+				sPsNew:=sPsNew-oMD.[SUM_NT];
+				debug_pipe('.PayProcBeforePeriod -- '||TB$||'-'||oMD.[SUM_NT]||'='||sPsNew,dp2);
+			end if;
+		end loop;
+	end if;
+	
+	--Электронный обмен с налоговыми органами. Доходы по счетам
+	debug_pipe('.PayProcBeforePeriod -- '||TB$||TB$||'По докум. СуммаВыплПроц:'||Rpad(sPsNew,17)||' в "Электронный обмен с налоговыми органами. Доходы по счетам"',dp2);
+	return sPsNew;
+end;
+------
+public function PayProc(tc ref [TAX_CL_PR_AC_INF], dp number default null) return [SUMMA] is
+ret_payProc [SUMMA];
+rDepn ref [DEPN];
+sPs [SUMMA];
+AccDepn ref [AC_FIN];
+
+sPsNew [SUMMA]:=0;
+oMD [MAIN_DOCUM];
+oAccFinDt [AC_FIN];
+oAccFinKt [AC_FIN];
+AccDtrm ref [AC_FIN];	--D_TRM_INTS_LBS_ACC - Счет обязательств банка по уплате %% без нарушения сроков
+dB [DATE]; --:=to_date('01/01/2022',fmt);
+dE [DATE]; --:=to_date('31/12/2022',fmt)+1;
+
+oTc             [TAX_CL_PR_AC_INF]; --Электронный обмен с налоговыми органами. Доходы по счетам
+rTcpD_REQ   ref [TAX_CL_PR_D_REQ];  --Электронный обмен с налоговыми органами. Проценты. Запросы
+rTcpMESS    ref [TAX_CL_PR_MESS];   --Электронный обмен с налоговыми органами. Проценты. Сообщения
+rGtpr       ref [GM_TAX_PROF_REQ];  --Электронный обмен с налоговыми органами. Проценты. Сообщения о выплаченных суммах
+--rTcpLink  ref [TAX_CL_PR_LINK];   --Электронный обмен с налоговыми органами. Проценты. Связь с сообщениями
+rClient   ref [CLIENT];
+prc_client [SUMMA];
+begin
+	oTc:=tc;
+	if oTc.[PROD_CODE]<>'DEPN' then
+		--pragma error('Операция только для [DEPN]');
+		debug_pipe('ID:'||tc%id||' Операция только для [DEPN]',dp2);
+		return null;
+	end if;
+	if oTc.[IS_CHP] then
+		pragma error('Операция не для ИП-шника');
+		debug_pipe('ID:'||tc%id||' Операция не для ИП-шника',dp2);
+		return null;
+	end if;
+
+	dB:=oTc.[DATA_REQ].[PERIOD_BEG];
+	dE:=trunc(oTc.[DATA_REQ].[PERIOD_END])+1;
+	rDepn:=oTc.[PROD_ID];
+	sPs:=oTc.[PROF_SUMM];
+	AccDepn:=rDepn.[ACCOUNT];
+	debug_pipe(Rpad(to_char(dB,fmt)||'-'||to_char(dE,fmt)||' '||oTc.[PROD_NUM],70)||AccDepn.[MAIN_V_ID]||' СуммаВыплПроц:'||Rpad(sPs,17)||' '||rDepn.[CLIENT].[NAME],dp2);
+	
+	for am in AccDepn.[ARC_MOVE] where dB<=am.[DATE] and am.[DATE]<dE
+	loop
+		oMD:=am.[DOC];
+		oAccFinDt:=oMD.[ACC_DT];
+		oAccFinKt:=oMD.[ACC_KT];
+		if oMD.[SUM_NT] is null then
+			pragma error(am.[DOC]%class||'.'||am.[DOC]%id||' нет SUM_NT');
+		end if;
+		debug_pipe(TB$||am.[DOC]%class||'.'||am.[DOC]%id||' Проведен:'||to_char(oMd.[DATE_PROV],fmt)||' '||oAccFinDt.[MAIN_V_ID]||'-'||oAccFinKt.[MAIN_V_ID]||' '||lpad(oMD.[SUM_NT],16)||' '||oMD.[NAZN],dp2);
+		/** /
+		--Все проводки ДБ 47411 КТ 423, 426, 40817, 40820 необходимо просуммировать
+		if   oAccFinDt.[MAIN_V_ID] like '47411%' and 
+		(    oAccFinKt.[MAIN_V_ID] like '423%'
+		  or oAccFinKt.[MAIN_V_ID] like '426%'
+		  or oAccFinKt.[MAIN_V_ID] like '40817%'
+		  or oAccFinKt.[MAIN_V_ID] like '40820%')
+		then
+			sPsNew:=sPsNew+oMD.[SUM_NT];
+			debug_pipe(TB$||'+'||oMD.[SUM_NT]||'='||sPsNew,dp2);
+		end if;
+		/**/
+		--ДБ 423, 426, 47411, 40817,  40820 КТ 70601810300012440101 надо отнять
+		if   oAccFinKt.[MAIN_V_ID]='70601810300012440101' and
+		(    oAccFinDt.[MAIN_V_ID] like '423%'
+		  or oAccFinDt.[MAIN_V_ID] like '426%'
+		  or oAccFinDt.[MAIN_V_ID] like '47411%'
+		  or oAccFinDt.[MAIN_V_ID] like '40817%'
+		  or oAccFinDt.[MAIN_V_ID] like '40820%')
+		then
+			sPsNew:=sPsNew-oMD.[SUM_NT];
+			debug_pipe(TB$||'-'||oMD.[SUM_NT]||'='||sPsNew,dp2);
+		end if;
+	end loop;
+	
+	for ada in rDepn.[ARRAY_DOG_ACC] where ada.[NAME_ACCOUNT]=::[TIP_ACC]([COD]='D_TRM_INTS_LBS_ACC') --Счет обязательств банка по уплате %% без нарушения сроков
+	order by ada.[DATE_BEG] desc
+	loop
+		AccDtrm:=ada.[ACCOUNT_DOG].[1].[2];
+		exit;
+	end loop;
+	
+	if AccDtrm is not null then
+		debug_pipe(LF$||Rpad(oTc.[PROD_NUM],70)||AccDtrm.[MAIN_V_ID],dp2);
+		for am in AccDtrm.[ARC_MOVE] where dB<=am.[DATE] and am.[DATE]<dE
+		loop
+			oMD:=am.[DOC];
+			oAccFinDt:=oMD.[ACC_DT];
+			oAccFinKt:=oMD.[ACC_KT];
+			if oMD.[SUM_NT] is null then
+				pragma error(am.[DOC]%class||'.'||am.[DOC]%id||' нет SUM_NT');
+			end if;
+		  --debug_pipe(TB$||am.[DOC]%class||'.'||am.[DOC]%id||' '||oAccFinDt.[MAIN_V_ID]||'-'||oAccFinKt.[MAIN_V_ID],dp2);
+			debug_pipe(TB$||am.[DOC]%class||'.'||am.[DOC]%id||' Проведен:'||to_char(oMd.[DATE_PROV],fmt)||' '||oAccFinDt.[MAIN_V_ID]||'-'||oAccFinKt.[MAIN_V_ID]||' '||lpad(oMD.[SUM_NT],16)||' '||oMD.[NAZN],dp2);
+			
+			--Все проводки ДБ 47411 КТ 423, 426, 40817, 40820 необходимо просуммировать
+			if   oAccFinDt.[MAIN_V_ID] like '47411%' and 
+			(    oAccFinKt.[MAIN_V_ID] like '423%'
+			  or oAccFinKt.[MAIN_V_ID] like '426%'
+			  or oAccFinKt.[MAIN_V_ID] like '40817%'
+			  or oAccFinKt.[MAIN_V_ID] like '40820%')
+			then
+				sPsNew:=sPsNew+oMD.[SUM_NT];
+				debug_pipe(TB$||'+'||oMD.[SUM_NT]||'='||sPsNew,dp2);
+			end if;
+	
+			--ДБ 423, 426, 47411, 40817,  40820 КТ 70601810300012440101 надо отнять
+			if   oAccFinKt.[MAIN_V_ID]='70601810300012440101' and
+			(    oAccFinDt.[MAIN_V_ID] like '423%'
+			  or oAccFinDt.[MAIN_V_ID] like '426%'
+			  or oAccFinDt.[MAIN_V_ID] like '47411%'
+			  or oAccFinDt.[MAIN_V_ID] like '40817%'
+			  or oAccFinDt.[MAIN_V_ID] like '40820%')
+			then
+				sPsNew:=sPsNew-oMD.[SUM_NT];
+				debug_pipe(TB$||'-'||oMD.[SUM_NT]||'='||sPsNew,dp2);
+			end if;
+		end loop;
+	end if;
+	
+	--Электронный обмен с налоговыми органами. Доходы по счетам
+	debug_pipe(TB$||TB$||'По докум. СуммаВыплПроц:'||Rpad(sPsNew,17)||' в "Электронный обмен с налоговыми органами. Доходы по счетам"',dp2);
+	var sPayProcBeforePeriod [SUMMA];
+	var sPayProcAll [SUMMA];
+	sPayProcBeforePeriod:=PayProcBeforePeriod(tc);
+	debug_pipe(TB$||TB$||'СуммаВыплПроц за пред.период:'||sPayProcBeforePeriod,dp2);
+	
+	sPayProcAll:=sPsNew+nvl(sPayProcBeforePeriod,0);
+	debug_pipe(TB$||TB$||'Итого sPsNew('||sPsNew||')+sPayProcBeforePeriod('||sPayProcBeforePeriod||')='||sPayProcAll,dp2);
+	return sPayProcAll;
+end;
+
+public function GetProfit(
+	 taxClProfir ref [TAX_CL_PROFIT]
+	,nameProd [STRING_128] default 'DEPN'
+	,curShort [STRING_3]
+	,nQuery number default 1)
+return [SUMMA] is
+
+ret_sum [SUMMA];
+isIP boolean := false;
+oTaxClProfir [TAX_CL_PROFIT];
+rClient ref [CLIENT];
+oClient [CLIENT];
+tmpQuery number;
+DataDt ::[TAX_CL_PR_AC_INF].[DATA_DT]%type;
+
+refProd ref [PRODUCT];
+dep ref [DEPN];
+rk ref [RKO];
+oDepn [DEPN];
+oRko [RKO];
+tmpCurShort [STRING_3];
+begin
+	oTaxClProfir:=taxClProfir; --Электронный обмен с налоговыми органами. Проценты. Выплаченные суммы
+	rClient:=oTaxClProfir.[CLIENT].[CLIENT];
+	oClient:=rClient;
+	
+	-- Клиент ИП ?
+	isIP := (coalesce(::[DEPN_INTERFACE].[PRX_CLIENT].GET_CLIENT_INT_TYPE(rClient), 'EMPTY') = 'INT_CL_CHP');
+	&debug('isIP: ' || isIP, 0)
+	if isIP then
+		&debug(oClient.[NAME]||' ИП. Игнорируем',dp2)
+		return null;
+	end if;
+	
+	debug_pipe('>',dp2);
+	debug_pipe('>  nameProd='||nameProd||' curShort='||curShort||' nQuery='||nQuery,dp2);
+	--Электронный обмен с налоговыми органами. Доходы по счетам
+	for (select t(	 t%id          : C_ID
+					,t.[PROD_CODE] : C_PROD_CODE
+					,t.[PROD_ID]   : C_PROD_ID
+					,t.[PROF_SUMM] : C_PROF_SUMM
+					,t.[DATA_DT]   : C_DATE_DT)
+		in ::[TAX_CL_PR_AC_INF] all
+		where t.[CL_PROFIT]=taxClProfir
+		and t.[PROD_CODE]=nameProd
+		order by t.[DATA_DT] desc)
+	loop
+		if DataDt is null then 
+			DataDt:=t.C_DATE_DT; tmpQuery:=1;
+		--elsif DataDt=t.C_DATE_DT and tmpQuery=nQuery then
+		--	null;
+		elsif DataDt<>t.C_DATE_DT then
+			DataDt:=t.C_DATE_DT; tmpQuery:=tmpQuery+1;
+		end if;
+		if DataDt=t.C_DATE_DT and tmpQuery=nQuery then
+			tmpCurShort:=null;
+			refProd:=t.C_PROD_ID;
+			if t.C_PROD_CODE='DEPN' then   dep:=refProd; oDepn:=dep; tmpCurShort:=oDepn.[FINTOOL].[CUR_SHORT];
+			elsif t.C_PROD_CODE='RKO' then  rk:=refProd; oRko:=rk;   tmpCurShort:=oRko.[CONTRACT_CUR].[CUR_SHORT];
+			else
+				return null;
+			end if;
+			debug_pipe('   ID:'||t.C_ID||' DataDt='||to_char(DataDt,fmt)||' nQuery='||nQuery||' curShort='||curShort||' tmpCurShort='||tmpCurShort||' tmpQuery='||tmpQuery,dp2);
+			if curShort is null and tmpCurShort not in ('RUB','USD','EUR') then
+				ret_sum:=nvl(ret_sum,0)+t.C_PROF_SUMM;
+				debug_pipe('(1)ID:'||t.C_ID||' ret_sum='||ret_sum,dp2);
+			elsif curShort=tmpCurShort then
+				ret_sum:=nvl(ret_sum,0)+t.C_PROF_SUMM;
+				debug_pipe('(2)ID:'||t.C_ID||' ret_sum='||ret_sum,dp2);
+			end if;
+		end if;
+	end loop;
+
+	return ret_sum;
+end;
+end;

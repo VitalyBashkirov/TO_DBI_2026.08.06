@@ -1,0 +1,45 @@
+class PSH_DEP_SETTINGS;
+
+@name('Добавить')
+@tag('CREATED')
+constructor PSH_NEW_AUTO is
+PSH_NEW_AUTO (
+	@name('Свойство')      P_WORK_NAME   in [STRING_100]      default null,
+	@name('Дата создания') P_DATE_CREATE in [DATE],
+	@name('Депозит')       P_DEP_REF     in [DEPOSIT_ORG_REF],
+	@name('Значение')      P_VALUE       in [STRING_100]      default null,
+	@name('Пользователь')  P_USER        in [USER_REF]        default null,
+	@name('Значение нум')  P_VALUE_NUM   in [INTEGER38]       default null
+) return ref [PSH_DEP_SETTINGS] is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_WORK_NAME := this.[WORK_NAME];
+	P_DATE_CREATE := this.[DATE_CREATE];
+	P_DEP_REF := this.[DEP_REF];
+	P_VALUE := this.[VALUE];
+	P_USER := this.[USER];
+	P_VALUE_NUM := this.[VALUE_NUM];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+begin
+	-- Установка значения реквизита "Свойство"
+	[WORK_NAME] := P_WORK_NAME;
+	-- Установка значения реквизита "Дата создания"
+	[DATE_CREATE] := P_DATE_CREATE;
+	-- Установка значения реквизита "Депозит"
+	[DEP_REF] := P_DEP_REF;
+	-- Установка значения реквизита "Значение"
+	[VALUE] := P_VALUE;
+	-- Установка значения реквизита "Пользователь"
+	[USER] := P_USER;
+	-- Установка значения реквизита "Значение нум"
+	[VALUE_NUM] := P_VALUE_NUM;
+end;
+end;
+end;

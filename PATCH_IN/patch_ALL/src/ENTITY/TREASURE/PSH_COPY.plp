@@ -1,0 +1,46 @@
+class TREASURE;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Копировать')
+method PSH_COPY is
+PSH_COPY return [TREASURE_REF] is
+
+execute is
+P_NUM_DOG [PRODUCT_NUM];
+P_INC_DATE [DATE];
+P_PAY_DATE [DATE];
+ret_newObj ref [TREASURE];
+begin
+	P_NUM_DOG := ::[TREASURE].[LIB].getNextContractNumber(this, this.[VID_OPER], this.[DATE_BEGIN]);
+	::[TREASURE].[LIB].get_INC_PAY_dates(this, P_INC_DATE, P_PAY_DATE);
+	ret_newObj:=::[TREASURE].[NEW_CORP](
+	 this.[VID_OPER]	--Вид сделки
+	,P_NUM_DOG			--Номер договора
+	,this.[CLIENT]		--Клиент
+	,this.[FI_METAL]	--Драгоценный металл
+	,this.[CURRENCY]	--Валюта сделки
+	,this.[FI_METAL_AMOUNT]		--Количество ДМ
+	,this.[RATE]		--Цена за единицу
+	,this.[AMOUNT]		--Стоимость ДМ
+	,this.[DATE_BEGIN]	--Дата заключения сделки
+	,this.[CLIENT_REQ]	--Реквизиты в валюте расчетов
+	,this.[BANK_REQ]	--Реквизиты в драгметалле
+	,this.[SWAP_REF]	--SWAP. Связанная сделка
+	,this.[IS_PERIOD]	--Исполнение в течение периода
+	,this.[NOTES]		--Примечания
+	,P_INC_DATE			--Дата поставки
+	,P_PAY_DATE			--Дата оплаты
+	,this.[EXT_SYS_NAME]--Внешняя система
+	,this.[EXT_DEAL_NUM]--Номер во внешней системе
+	);
+	commit;
+
+	--debug_pipe('Вызов <% CALL TREASURE EDIT_CORP ' || ret_newObj%id ||' %>', 0);
+	--stdio.put_line_buf('<% CALL TREASURE EDIT_CORP ' || c|| ' %>');
+
+	stdio.put_line_buf('Открыт договор № '||ret_newObj.[NUM_DOG]||' (ID:'||ret_newObj%id||')');
+	return ret_newObj;
+end;
+end;
+end;

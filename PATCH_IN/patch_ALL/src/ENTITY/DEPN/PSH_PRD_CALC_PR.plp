@@ -1,0 +1,23 @@
+class DEPN;
+
+@name('[ПСБ] Редактировать реквизит "Периодичность начисления %%"')
+method PSH_PRD_CALC_PR is
+PSH_PRD_CALC_PR (
+	@name('Периодичность начисления %%') P_PERIOD_CALC_PRC in [PERIODS_OPER_REF]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_PERIOD_CALC_PRC := this.[PERIOD_CALC_PRC];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+begin
+	this.[PERIOD_CALC_PRC]:=P_PERIOD_CALC_PRC;
+end;
+end;
+end;

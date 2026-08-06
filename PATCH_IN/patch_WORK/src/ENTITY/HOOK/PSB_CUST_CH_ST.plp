@@ -1,0 +1,19 @@
+class HOOK;
+
+@name('[ПСБ] Электронный обмен с таможенными органами. Дополнительные действия после изменения состояния документов')
+@tag('COPIED')
+static method PSB_CUST_CH_ST is
+pragma include (::[APPAUX_CALLPOINT].[COMPILE_LIB]);
+&setcallpoint('PSB_CUST_CH_ST', '[ПСБ] Электронный обмен с ФТС. Дополнительные действия после изменения состояния документов', 1)
+PSB_CUST_CH_ST (
+	@name('Документы') P_DOCS in out table of [PSH_CUST_DREF_ST]
+) is
+
+execute is
+
+begin
+	null;
+	&call_meth
+end;
+end;
+end;

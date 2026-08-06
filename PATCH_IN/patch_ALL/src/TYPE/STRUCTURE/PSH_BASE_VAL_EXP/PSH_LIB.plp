@@ -1,0 +1,71 @@
+class PSH_BASE_VAL_EXP;
+
+@name('[ПСБ] Библиотека')
+@tag('COPIED')
+library PSH_LIB is
+public F_TBSVK_TOplata				const ::[PSH_BASE_VAL_EXP].[TYPE_FILE]%type := 'TBSVK_TOplata'; -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25
+public F_TBSVK_KOplata				const ::[PSH_BASE_VAL_EXP].[TYPE_FILE]%type := 'TBSVK_KOplata'; -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25
+public F_TBSVK_Valoper				const ::[PSH_BASE_VAL_EXP].[TYPE_FILE]%type := 'TBSVK_Valoper'; -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25
+public F_TBSVK_TXT_FORMAT			const ::[PSH_BASE_VAL_EXP].[TYPE_FILE]%type := 'TBSVK_TXT_FORMAT'; -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25
+public F_TBSVK_VIOLATION			const ::[PSH_BASE_VAL_EXP].[TYPE_FILE]%type := 'TBSVK_VIOLATION'; -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25
+
+
+public type FieldTblRec is record ( 	  num		::[PSH_BASE_VAL_EXP].[NUM]%type -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25
+								, code		::[PSH_BASE_VAL_EXP].[CODE]%type -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25
+								, name		::[PSH_BASE_VAL_EXP].[NAME]%type -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25
+								, requied	varchar2(1)
+								, meth		::[PSH_BASE_VAL_EXP].[FMETHOD]%type -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25
+								, ftype		::[PSH_BASE_VAL_EXP].[TYPE_FIELD]%type -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25
+							);	
+public type FieldTblType is table of FieldTblRec;
+
+
+-- Функция формирует таблицу с полями для файла с типом p_file
+public function GetFields(p_file ::[PSH_BASE_VAL_EXP].[TYPE_FILE]%type) return FieldTblType is -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25
+tbl FieldTblType;
+begin
+	select t(	  t.[NUM]			: num
+				, t.[CODE]			: code
+				, t.[NAME]			: name
+				, t.[REQUIED]		: requied
+				, t.[FMETHOD]	: meth
+				, t.[TYPE_FIELD]	: ftype
+			)
+	in		::[PSH_BASE_VAL_EXP] -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25
+	where	t.[TYPE_FILE] = p_file
+			and t.[NUM] is not null
+	order by t.[NUM]
+	into 	tbl;
+
+	return tbl;	
+end;
+
+-- Расчет поля с кодом p_code
+public function CalcField(	  p_code		::[PSH_BASE_VAL_EXP].[CODE]%type			-- Код поля -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25
+					, p_meth		::[PSH_BASE_VAL_EXP].[FMETHOD]%type	-- Код для расчета -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25
+					, p_requied		::[PSH_BASE_VAL_EXP].[REQUIED]%type		-- Обязательность заполнения -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25
+					, p_val_op		ref [BASE_VAL_OP]						-- Валютная операция
+					, p_contr		ref [BASE_VAL_CONTR]					-- Инструкция 117-И. Контракты
+					, p_adds		varchar2(32000) default null
+				  --, p_violation ref [VAL_CONTROL_308P] default null	-- Запись архива нарушений
+				)
+return varchar2(32000) is
+vRet	CalcField%type;
+begin
+	::[RUNTIME].[STR].set_par(p_adds, 'CONTRACT', p_contr%id);
+  --::[RUNTIME].[STR].set_par(p_adds, 'VIOLATION', p_violation%id);
+	
+	if p_meth like '[%]' then
+	  	vRet :=  ::[PSH_BASE_VAL_EXP].[PSH_GET_VALUE](substr(p_meth, 2, length(p_meth) - 2), p_adds, p_val_op); -- updated CHANGE_QUALIFIER PSB_BASE_VAL_EXP->PSH_BASE_VAL_EXP 08/10/25 -- updated CHANGE_SHORT_NAME PSB_GET_VALUE->PSH_GET_VALUE 15/10/25
+	else
+		vRet := p_meth; -- В поле содержится просто текст, который не требуется вычислять
+	end if;	
+
+	if vRet is null and p_requied then
+		pragma error('Поле ' || p_code || ' обязательно для заполнения');
+	end if;	
+
+	return vRet;
+end;
+	
+end;

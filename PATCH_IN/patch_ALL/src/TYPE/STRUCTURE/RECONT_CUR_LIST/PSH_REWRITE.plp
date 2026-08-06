@@ -1,0 +1,60 @@
+class RECONT_CUR_LIST;
+
+@name('[ПСБ] Переписать курсы в журнале переоценки (списком)')
+method PSH_REWRITE is
+pragma include(::[RUNTIME].[DEBUG_MACRO]);
+dp integer:=0;	--управление debug_pipe
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+fmt	   string(10):='dd/mm/yyyy';
+fmtHMS string(22):='dd/mm/yyyy HH24:MI:SS';
+fmt24 string(22):='dd/mm/yyyy HH24:MI:SS';
+PSH_REWRITE (
+	@name('Дата начала действия курса') P_DATE_BEGIN in [DATE]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATE_BEGIN := this.[DATE_BEGIN];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+/*********************************************************************
+Назначение:
+
+bashkirov, последнее изменение 13 Май 2020 г.
+*********************************************************************/
+vRATE_NEW [SUMMA_16_6];
+begin
+
+	if P_DATE_BEGIN is null then pragma error('Укажите дату'); end if;
+	if this.[RATE_NEW] is null then pragma error('Не указан новый курс'); end if;
+
+
+	vRATE_NEW:=this.[RATE_NEW];
+	&debug('[ПСБ] Переписать курс в журнале переоценки '||to_char(P_DATE_BEGIN,fmt)||' Валюта:'||this.[CURRENCY].[CUR_SHORT]||' Курс:'||vRATE_NEW,dp)
+	
+	for j in this.[CURRENCY].[JOUR_RECONT] where j.[DATE_RECOUNT]=P_DATE_BEGIN loop
+		&debug(j.[COURSE]||' -> '||vRATE_NEW,dp)
+		j.[COURSE]:=vRATE_NEW;
+		&debug('Откорректировали курс в журнале переоценки '||to_char(P_DATE_BEGIN,fmt)||' Валюта:'||this.[CURRENCY].[CUR_SHORT]||' Курс:'||vRATE_NEW,dp)
+		return;
+	end loop;
+	
+	this.[CURRENCY].[JOUR_RECONT].[NEW#AUTO](
+	P_DATE_BEGIN		/*P#DATE_RECOUNT*/		--Дата переоценки
+	,vRATE_NEW			/*P#COURSE*/			--Курс переоценки
+	,this.[UNIT_NEW]	/*P#UNIT*/				--Единица измерения валюты
+	,null				/*P_RECONT_SUCCESS*/	--Документы переоценки сформированы
+	);
+	&debug('Добавили         курс в журнале переоценки '||to_char(P_DATE_BEGIN,fmt)||' Валюта:'||this.[CURRENCY].[CUR_SHORT]||' Курс:'||vRATE_NEW,dp)
+	--pragma error(this.[CURRENCY].[CUR_SHORT]||' Нет курса на '||to_char(P_DATE_BEGIN,fmt));
+end;
+end;
+end;

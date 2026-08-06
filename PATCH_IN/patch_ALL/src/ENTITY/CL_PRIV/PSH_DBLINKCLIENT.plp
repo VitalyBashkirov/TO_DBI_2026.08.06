@@ -1,0 +1,3428 @@
+class CL_PRIV;
+
+@import_plsql(true)
+@name('[ПСБ] RBO. Библиотека для работы с физ. лицами через DB_LINK 1')
+@tag('COPIED')
+/*
+ * Скопировано для переопределения типа MigrCardType для миграционной карты.
+ * Т.к. в дистрибутвной операции не учитывается серия карты - О_О !!!
+ * Возможно это временное решение.
+ */
+library PSH_DBLINKCLIENT is
+--public pragma macro (lib_cl, '::[CL_PRIV].[DB_LINK_CLIENT]');
+public pragma macro (lib_cl, '::[CL_PRIV].[PSH_DBLINKCLIENT]');
+
+--#include [INTERFACE].[COMPILE_LIB]
+
+/*********************************************************************
+Описание структур для создания/обновления досье физического лица.
+Вспомогательные структуры.
+*********************************************************************/
+--Счета в банках
+public type AccsBankType is record	(
+							 BANK			Varchar(100)	--Наименование банка
+							,DATE_BEGIN		date			--Дата открытия
+							,DATE_END		date			--Дата закрытия
+							,INN			Varchar(12)		--ИНН
+							,MAIN_V_ID		Varchar(25)		--Номер счета
+							,NAME_ORG		Varchar(160)	--Наименование организации
+							,NOTES			Varchar(2000)	--Назначение
+							,PR_FORM		boolean			--Признак формирования п/п
+							,TYPE_			Varchar(20)		--Код типа счета
+							,USH			Varchar(20)		--Код участника расчетов
+							);
+--Список счетов в банках
+public type AccsBankTable is table of AccsBankType;
+
+--Адреса
+public type AddressType is record	(
+							 ADDR_TYPE		Varchar2(20)	--Тип адреса
+							,COUNTRY		Varchar2(50)	--Государство (буквенный код - альфа 3)
+							,KLADR_CODE		Varchar2(50)	--Код КЛАДР, принадлежащий улице, городу или ре-гиону
+							,POST_CODE		Varchar2(50)	--Индекс
+							,REGION			Varchar2(128)	--Регион (обл., край, респ) (наименование)
+							,DISTRICT		Varchar2(128)	--Район региона (наименование)
+							,CITY			Varchar2(128)	--Населенный пункт (наименование)
+							,CITY_TYPE		Varchar2(50)	--Тип населенного пункта
+							,STREET			Varchar2(128)	-- Улица населенного пункта (наименование)
+							,HOUSE			Varchar2(50)	--Дом
+							,KORPUS			Varchar2(50)	--Корпус/строение
+							,FLAT			Varchar2(50)	--Квартира
+							,IMP_STR		Varchar2(250)	--Адрес строкой
+							,REG_PLACE_CODE Varchar2(20)
+							,REG_PLACE_NAME Varchar2(250)
+							);
+--Список адресов
+public type AddressTable is table of AddressType;
+
+--Место рождения
+public type BornType is record		(
+							 COUNTRY		Varchar2(100)	--Государство (буквенный код ? альфа 3)
+							,REGION			Varchar2(100)	--Регион (обл., край, респ) (наименование)
+							,CITY			Varchar2(250)	--Населенный пункт (наименование)
+							,CITY_TYPE		Varchar2(50)	--Тип населенного пункта
+							,KLADR_CODE		Varchar2(20)	--Код КЛАДР, принадлежащий городу
+							);
+
+--Операции клиента
+public type ClOperType is record	(
+							 OPER_COUNT		Varchar2(20)	--Число операций за квартал
+							,OPER_DATE		date		 	--Дата
+							,OPER_SUM		number			--Общая сумма операции
+							,OPERATION		Varchar2(100)	--Название операции
+							);
+--Список операций клиента
+public type ClOperTable is table of ClOperType;
+
+--Контакты для связи
+public type ContactType is record	(
+							 ACTIV			boolean			--Признак действия контакта
+							,NUMB			Varchar2(100)	--Номер (адрес) контакта
+							,PRIVATE		Varchar2(16)	--Код принадлежности контакта
+							,TYPE_			Varchar2(16)	--Код типа связи контакта
+							);
+--Список контактов для связи
+public type ContactTable is table of ContactType;
+
+
+--Склонения наименований
+public type DeclFioType is record	(
+							 CASE_GR		Varchar2(16)	--Код падежа
+							,NAME			Varchar2(100)	--Склоненное наименование
+							);
+--Список склонений наименований
+public type DeclFioTable is table of DeclFioType;
+
+--История характера отношений с банком
+public type DispositType is record	(
+							 DISPOSITION	Varchar2(3)		--Код характера отношений с банком
+							,DATE_BEG		date	 		--Дата начала действия отношения
+							,DATE_END		date 			--Дата окончания действия отношения
+							);
+--Список истории характера отношений с банком
+public type DispositTable is table of DispositType;
+
+--Удостоверения
+public type CertificType is record	(
+							 TYPE_			Varchar2(128)	--Тип удостоверения клиента
+							,SER			Varchar2(32)	--Серия удостоверения клиента
+							,NUM			Varchar2(32)	--Серия удостоверения клиента
+							,WHO			[CERTIFICATE].[WHO]%type	--Организация, выдавшая паспорт
+							,DATE_			date			--Дата выдачи
+							,DATE_END		date			--Дата окончания действия
+							,DEPART_CODE	Varchar2(20)	--Код подразделения, выдавшего паспорт
+							,PLACE			varchar2(250)	--Место выдачи
+							,MAIN			boolean			--Признак основного удостоверения
+							,VALID_BEFORE	date			--Действует по
+							);
+--Список удостоверений
+public type CertificTable is table of CertificType;
+
+--Налоговая инспекция
+public type InspectType is record	(
+							 DATE_			date			--Дата регистрации в налоговом органе
+							,INSPECTOR		Varchar2(100)	--Инспектор
+							,NUM			Varchar2(10)	--Номер налоговой инспекции
+							,NOTES			Varchar2(2000)	--Примечание
+							);
+--Список налоговых инспекций
+public type InspectTable is table of InspectType;
+
+--Допустимое наименование клиента
+public type NamesType is record	(
+							 DATE_			date			--Дата
+							,FLAG_NO		boolean			--Признак "Запрещено использовать"
+							,FLAG_YES		boolean			--Признак "Разрешено использовать"
+							,NAME			Varchar2(250)	--Допустимое наименование
+							);
+--Список допустимых наименований клиента
+public type NamesTable is table of NamesType;
+
+--Миграционная карта
+public type MigrCardType is record	(
+							 CARD_NUM		varchar2(16)	--Номер миграционной карты
+							,CARD_SERIA		varchar2(16)	--Серия миграционной карты
+							,DATE_BEG		date			--Дата начала действия миграционной карты
+							,DATE_END		date			--Дата окончания действия миграционной карты
+							);
+--Список миграционных карт
+public type MigrCardTable is table of MigrCardType;
+
+--Трудовая деятельность клиента
+public type WorkActivityType is record	(
+							 CORP			varchar2(1000)	--Наименование организации
+							,INN_CORP		varchar2(10)	--ИНН организации
+							,JOB_ADDRESS	AddressType		--Адрес организации
+							,RANGE			varchar2(250)	--Должность
+							,START_DATE		date			--Дата начала работы в организации
+							,PHONE			varchar2(100)	--Телефон организации
+							);
+--Список трудовой деятельности клиента
+public type WorkActivityTable is table of WorkActivityType;
+
+/*********************************************************************
+Описание структур для создания/обновления досье физического лица.
+Основные структуры.
+*********************************************************************/
+--Запрос на создание досье физического лица
+public type ReqClPrivType is record(
+							 CONFORM_EXT_CODE	boolean			--Признак использования справочника соответствия кодов из внешних систем
+							,ID_EXT				Varchar(128)	--ID в передающей Системе (в РБО)
+							,ID_INT				Varchar(128)	--ID в принимающей Системе (в ИБСО)
+							,NAME				Varchar2(512)	--Наименование клиента
+							,LAST_NAME			Varchar(128)	--Фамилия клиента
+							,FIRST_NAME			Varchar(128)	--Имя клиента
+							,SUR_NAME			Varchar(128)	--Отчество клиента
+							,ACCS_BANK			AccsBankTable	--Контейнер счетов в других банках - массив "Счета в банках"
+							,ADDRESSES			AddressTable	--Контейнер, содержащий данные об адресах клиента
+							,BORN				BornType		--Контейнер параметров место рождения клиента
+							,CL_OPER			ClOperTable		--Контейнер операций клиента - массив "Операции клиента"
+							,OKONH				Varchar2(2000)	--Действующий код ОКОНХ(перечисление с разделителем)
+							,COM_STATUS			Varchar2(16)	--Код статуса
+							,CONTACTS			ContactTable	--Контейнер контактов клиента - массив "Контакты для связи"
+							,COUNTRY			Varchar2(2000)	--Cтрана гражданства клиента
+							,DATE_OP			date 			--Дата заведения досье клиента
+							,MODIFY_DATE		date 			--Дата последних изменений
+							,DATE_PERS			date 			--Дата рождения клиента
+							,DECL_FIO			DeclFioTable	--Контейнер данных о склонении наименований клиента - массив "Склонения наименований"
+							,DEPART				Varchar2(16)	--Код подразделения
+							,DISPOSITS			DispositTable	--Контейнер отношений клиента с банком - массив "История характера отношений с банком"
+							,CERTIFICATES		CertificTable	--Контейнер удостоверений клиента - массив "Удостоверения"
+							,FAIL_LEVEL			Varchar2(16)	--Код уровня риска клиента по легализации
+							,FAIL_MARK			Varchar2(2000)	--Обоснование уровня риска клиента по легализации
+							,FILIAL				Varchar2(4)		--Код филиала
+							,GROUP_LINK			Varchar2(16)	--Номер группы взаимосвязанных клиентов
+							,I_NAME				Varchar2(250)	--Интернациональное наименование клиента
+							,INN				Varchar2(12)	--ИНН клиента
+							,INSPECT			InspectTable	--Контейнер налоговых инспекций - массив "Налоговая инспекция"
+							,INTERNAL_CODE		Varchar2(25)	--Внутренний код для импорта
+							,LOW				Varchar2(2000)	--Отношения с законом
+							,MARIGE_STATUS		Varchar2(16)	--Код семейного положения
+							,NAMES				NamesTable		--Контейнер допустимых наименований клиента - массив "Допустимые наименования клиента"
+							,NOTES				Varchar2(2000)	--Примечание
+							,OPER_CHARACTER		Varchar2(2000)	--Характеристика операций
+							,REG_STATUS			Varchar2(20)	--Код статуса зарегистрированного лица
+							,REGISTR_NUM		Varchar2(9)		--Регистрационный номер
+							,RESIDENT			boolean			--Признак налогового резидентсва
+							,RESIDENT_VAL		boolean			--Признак валютного резидентства
+							,IPDL_TYPE			Varchar2(16)	--Код принадлежности к ИПДЛ
+							,SEX				Varchar2(16)	--Код пола клиента
+							,VID_CL				Varchar2(16)	--Категория клиента
+							,VISA_INFO			Varchar2(2000)	--Сведения о въездной визе (для нерезидентов)
+							,MIGR_CARD			MigrCardTable	--Список миграционных карт
+							,WORK_ACTIVITY		WorkActivityTable--Список трудовой деятельности клиента
+							,CODEWORD			Varchar2(100)	--Кодовое слово
+							,SNILS				Varchar2(30)	--СНИЛС клиента
+							,CRS_INVEST_NATIONALITY			varchar2(255)
+							,CRS_TIN						varchar2(255)
+							,CRS_TIN_ABSCENCE				varchar2(255)
+							,CRS_REASON_FOR_TIN_ABSCENCE	varchar2(255)
+							,CRS_SUBREASON_FOR_TIN_ABSCENCE	varchar2(255)
+							,NEED_CHECK						varchar2(255)							
+							,PP_FOREIGN_PUBLIC_OFFICIAL		varchar2(1024)
+							,PP_INTERNATIONAL_PUBLIC_OFFICIAL	varchar2(1024)
+							,PP_RUSSIAN_PUBLIC_OFFICIAL		varchar2(1024)
+							,PP_PURPOSE_OF_RELATIONSHIP		varchar2(1024)
+							,PP_PURPOSE_OF_ACTIVITY			varchar2(1024)
+							,PP_FINANCIAL_STATUS			varchar2(1024)
+							,PP_BUSINESS_REPUTATION			varchar2(1024)
+							,PP_SOURCE_OF_FUNDS				varchar2(1024)
+							,PP_NEED_CHECK					varchar2(1024)
+							);
+
+pragma Include([RUNTIME]::[DEBUG_MACRO]);
+pragma Include([RUNTIME].[MACRO_LIB]);
+pragma include([CLIENT_INTERFACE].[PRX_CIT]);
+pragma macro (prx_cit, '::[CLIENT_INTERFACE].[PRX_CIT]');
+pragma macro (lib_conf_code, '::[CLIENT_INTERFACE].[PRX_CIT]');
+
+--Код текущей системы-абонента
+current_ab_code varchar2(16);
+
+--Макросы для ведения статистики времени обработки, используемые при получении запроса через Интегратор
+procedure start_timer(p_timer_code varchar2(64))
+is
+begin
+	if [CIT_INTERFACE].[CL_PRIV_INT].is_starting then
+		&start_timer(p_timer_code)
+	end if;
+end;
+
+procedure finish_timer(p_timer_code varchar2(64))
+is
+begin
+	if [CIT_INTERFACE].[CL_PRIV_INT].is_starting then
+		&finish_timer(p_timer_code)
+	end if;
+end;
+
+--pragma macro(debug,'stdio.put_line_pipe([1],''DB_LINK_CLIENT'');',substitute);
+
+function get_cert_type
+	( p_ext_code varchar2(100)
+	, p_conform_ext_code boolean
+	, p_error_msg out varchar2(4000)
+	)
+	return ref [CERTIFIC_TYPE]
+is
+	v_cert_type ref [CERTIFIC_TYPE];
+begin
+	if nvl(p_conform_ext_code,false) and current_ab_code is not null then
+		begin
+			v_cert_type%id := &lib_conf_code.get_ibso_ref(current_ab_code, [CERTIFIC_TYPE]%class, p_ext_code);
+		exception when message.app_exception then
+			p_error_msg := substr('Ошибка получения типа удостоверения с кодом "'||p_ext_code||'" из справочника "Справочник соответствия кодов из внешних систем". Текст ошибки: '||sqlerrm,1,2000);
+		end;
+	else
+		begin
+			v_cert_type := ::[CERTIFIC_TYPE](upper(KOD) = upper(p_ext_code));
+		exception when NO_DATA_FOUND then
+			begin
+				v_cert_type := ::[CERTIFIC_TYPE](upper(CODE_GNI) = upper(p_ext_code));
+			exception when NO_DATA_FOUND then
+				p_error_msg := 'Не найден тип удостоверения с кодом или кодом ГНИ '||p_ext_code;
+			when TOO_MANY_ROWS then
+				p_error_msg := 'Найдено несколько типов удостоверений с кодом ГНИ '||p_ext_code;
+			end;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько типов удостоверений с кодом '||p_ext_code;
+		end;
+	end if;
+	return v_cert_type;
+end;
+
+procedure extract_snils_from_cert
+	( p_snils in out varchar2(30)
+	, p_certificates in out CertificTable
+	, p_conform_ext_code boolean := false
+	)
+is
+	idx pls_integer;
+	idx_prev pls_integer;
+	idx_next pls_integer;
+	v_cert_type_snils ref [CERTIFIC_TYPE];
+	function cert_type_is_snils(p_type varchar2) return boolean is
+		v_err_msg varchar2(4000);
+	begin
+		if v_cert_type_snils is null then
+			for (select t(t:cert_type_snils) in ::[CERTIFIC_TYPE] where t.[KOD] = 'СНИЛС') loop
+				v_cert_type_snils := t.cert_type_snils;
+			end loop;
+		end if;
+		return nvl(v_cert_type_snils = get_cert_type(p_type,p_conform_ext_code,v_err_msg), false);
+	exception
+		when message.app_exception then
+			return false;
+	end;
+begin
+	&debug('<extract_snils_from_cert>',0)
+	p_snils := regexp_replace(p_snils,'\D+');
+	&debug('p_snils = '||p_snils,0)
+	idx := p_certificates.first;
+	while idx is not null loop
+		&debug('p_certificates('||idx||').TYPE_ = '||p_certificates(idx).TYPE_,0)
+		if cert_type_is_snils(p_certificates(idx).TYPE_) then -- Тип удостовереня опознан как "СНИЛС"
+			p_snils := coalesce(p_snils,regexp_replace(p_certificates(idx).NUM,'\D+'));
+			&debug('p_snils = '||p_snils,0)
+			-- Сдвигаем все последующие элементы в сторону удаляемого, чтобы сохранить плотную нумерацию (чтобы не переписывать обработку массива)
+			idx_prev := idx;
+			idx_next := p_certificates.next(idx_prev);
+			while idx_next is not null loop
+				p_certificates(idx_prev) := p_certificates(idx_next);
+				idx_prev := idx_next;
+				idx_next := p_certificates.next(idx_prev);
+			end loop;
+			p_certificates.delete(idx_prev);
+		end if;
+		idx := p_certificates.next(idx);
+	end loop;
+	&debug('</extract_snils_from_cert>',0)
+end;
+
+public function create_client(	ext_id reference,				-- ссылка на открытый счёт в др. системе
+						int_id reference,
+						acc_bank varchar2(32000),		-- счета в банках		массив
+														--		* Банк
+														--		* Дата открытия
+														--		* Дата закрытия
+														--		* ИНН
+														--		* Номер счета
+														--		* Наименование организации
+														--		* Назначение
+														--		* Признак формиров...
+														--		* код типа счета
+														--		* код Участника расчетов
+						addresses varchar2(32000),		-- адреса				массив
+														--		* код города
+														--		* район
+														--		* квартира
+														--		* дом
+														--		* корпус
+														--		* почтовый код
+														--		* улица
+														--		* код типа адреса
+						born varchar2(2000),			-- место рождения		код города из NAMES_CITY
+						cl_oper varchar2(32000),		-- операции клиента		массив
+														--		* количество операций
+														--		* дата
+														--		* сумма
+														--		* имя метакласса операции
+						codes_okonh varchar2(32000),	-- коды ОКОНХ			массив
+														--		* код оконх
+						com_status	varchar2(16),		-- обобщенный статус	CODE из COM_STATUS_PRD
+						contacts varchar2(32000),		-- контакты				массив
+														--		* активен
+														--		* номер (адрес)
+														--		* принадлежность
+														--		* тип связи
+						country	varchar2(3),			-- гражданство			CODE из COUNTRY
+						date_ank date,					-- дата заполн. анкеты
+						date_pers date,					-- дата рождения
+						decl_fio varchar2(32000),		-- склонения			массив
+						depart varchar2(16),			-- подразделение		CODE из DEPART
+						disposit varchar2(32000),		-- хар. отнош с банком	массив
+						doc	varchar2(32000),			-- удостоверения		массив
+						fail_level varchar2(16),		-- уровень риска		CODE из FAIL_LEVEL
+						fail_mark  varchar2(32000),		-- оц.риска легализ.дох.MEMO
+						branch	varchar2(3),			-- филиал				CODE из FILIAL
+						group_link varchar2(200),		-- группа связ.клиентов NUM из GROUP_LINK
+						i_name	varchar2(160),			-- интернац. наименов.
+						inn	varchar2(12),				-- ИНН
+						inspect varchar2(32000),		-- налоговая инспекция	массив
+						internal_code varchar2(25),		-- внутренний код
+						--limit_cred number(22,2),		-- лимит кредитования
+						--limit_val varchar2(3),		-- CODE_ISO из FT_MONEY
+						law	varchar2(32000),			-- отнош. с законом		MEMO
+						marige_status varchar2(16),		-- семейн. статус		CODE из FAMILY_TYPE
+						name varchar2(160),				-- наименование
+						names varchar2(32000),			-- допустимые наименов.	массив
+						notes varchar2(32000),			-- примечание			MEMO
+						oper_character varchar2(32000),	-- характеристика опер.	MEMO
+						REG_STATUS varchar2(20),		-- Статус лица			REG_STATUS из PERSON_STAT
+						REGISTR_NUM	number(9,0),		-- Регистрационный номер
+						RESIDENT	BOOLEAN,			-- Резидент
+						RES_INFO	varchar2(32000),	-- Резервирование.		массив
+						SEX	varchar2(16),				-- Пол					CODE из SEX
+						VID_CL	varchar2(16),			-- Категория клиента	CODE из CL_GROUP
+						VISA_INFO varchar2(32000),		-- Сведения о въездной визе (нерезидент)
+						error_message in out varchar2(200),
+						last_name varchar2(128) default null,	-- Фамилия клиента.
+						first_name varchar2(128) default null,	-- Имя клиента.
+						sur_name varchar2(128) default null		-- Отчество клиента.
+						) return Reference is
+--------------------------------------------------------------------------------
+sep             const varchar2(3)  := ';';				-- Разделитель
+client_ref		Ref [CL_PRIV];
+ReqClPriv		&lib_cl.ReqClPrivType;
+ret_value		integer;
+new_id			ref [RBS_SYNC_OBJ];
+--------------------------------------------------------------------------------
+Function getNextValue (inst in out varchar2(32000)) return varchar2(32000) is
+res	varchar2(32000);
+pos integer;
+Begin
+	pos:=instr(inst,sep);
+	if pos>0 then
+		res:=substr(inst,1,pos-1);
+		inst:=substr(inst,pos+1);
+		return res;
+	else
+		res:=inst;
+		inst:='';
+		return res;
+	end if;
+End;
+--------------------------------------------------------------------------------
+function getAccBank(acc_bank varchar2(32000)) return &lib_cl.AccsBankTable is
+AccsBank	&lib_cl.AccsBankTable;
+cnt			integer := 0;
+Begin
+	if acc_bank is not null then
+		while length(acc_bank)>0 loop
+			cnt := cnt + 1;
+			AccsBank(cnt).BANK			:= getNextValue(acc_bank);						--Наименование банка
+			AccsBank(cnt).DATE_BEGIN	:= getNextValue(acc_bank);						--Дата открытия
+			AccsBank(cnt).DATE_END		:= getNextValue(acc_bank);						--Дата закрытия
+			AccsBank(cnt).INN			:= getNextValue(acc_bank);						--ИНН
+			AccsBank(cnt).MAIN_V_ID		:= getNextValue(acc_bank);						--Номер счета
+			AccsBank(cnt).NAME_ORG		:= getNextValue(acc_bank);						--Наименование организации
+			AccsBank(cnt).NOTES			:= getNextValue(acc_bank);						--Назначение
+			AccsBank(cnt).PR_FORM		:= nvl(getNextValue(acc_bank)=1,false);			--Признак формирования п/п
+			AccsBank(cnt).TYPE_			:= getNextValue(acc_bank);						--Код типа счета
+			AccsBank(cnt).USH			:= getNextValue(acc_bank);						--Код участника расчетов
+		end loop;
+	end if;
+	return AccsBank;
+End;
+--------------------------------------------------------------------------------
+function getBorn(born_str varchar2(2000)) return &lib_cl.BornType
+is
+Born &lib_cl.BornType;
+begin
+	if born_str is not null then
+		Born.CITY	 := getNextValue(born_str);
+		Born.REGION	 := getNextValue(born_str);
+		Born.COUNTRY := getNextValue(born_str);
+	end if;
+	return Born;
+end;
+--------------------------------------------------------------------------------
+function getAddresses(addresses varchar2(32000)) return &lib_cl.AddressTable
+is
+AddressTbl	&lib_cl.AddressTable;
+cnt			integer := 0;
+Begin
+	if addresses is not null then
+		while length(addresses) > 0 loop
+			cnt := cnt + 1;
+			AddressTbl(cnt).COUNTRY			:= getNextValue(addresses);	--Государство (буквенный код - альфа 3)
+			AddressTbl(cnt).KLADR_CODE		:= getNextValue(addresses);	--Код КЛАДР, принадлежащий улице, городу или региону
+			AddressTbl(cnt).POST_CODE		:= getNextValue(addresses);	--Индекс
+			AddressTbl(cnt).DISTRICT		:= getNextValue(addresses);	--Район региона (наименование)
+			AddressTbl(cnt).CITY			:= getNextValue(addresses);	--Населенный пункт (наименование)
+			AddressTbl(cnt).STREET			:= getNextValue(addresses);	--Улица населенного пункта (наименование) или адрес строкой
+			AddressTbl(cnt).HOUSE			:= getNextValue(addresses);	--Дом
+			AddressTbl(cnt).KORPUS			:= getNextValue(addresses);	--Корпус/строение
+			AddressTbl(cnt).FLAT			:= getNextValue(addresses);	--Квартира
+			AddressTbl(cnt).ADDR_TYPE		:= getNextValue(addresses);	--Тип адреса
+			AddressTbl(cnt).REG_PLACE_CODE	:= getNextValue(addresses);	--Код регистратора
+			AddressTbl(cnt).REG_PLACE_NAME	:= getNextValue(addresses);	--Наименование регистратора
+		end loop;
+	end if;
+	return AddressTbl;
+end;
+--------------------------------------------------------------------------------
+function getOperations(operations varchar2(32000)) return &lib_cl.ClOperTable
+is
+ClOperTbl	&lib_cl.ClOperTable;
+cnt			integer := 0;
+Begin
+	if operations is not null then
+		while length(operations)>0 loop
+			cnt := cnt + 1;
+			ClOperTbl(cnt).OPER_COUNT	:= getNextValue(operations);	--Число операций за квартал
+			ClOperTbl(cnt).OPER_DATE	:= getNextValue(operations);	--Дата
+			ClOperTbl(cnt).OPER_SUM		:= getNextValue(operations);	--Общая сумма операции
+			ClOperTbl(cnt).OPERATION	:= getNextValue(operations);	--Название операции
+		end loop;
+	end if;
+	return ClOperTbl;
+End;
+--------------------------------------------------------------------------------
+function getContacts(contacts varchar2(32000)) return &lib_cl.ContactTable
+is
+ContactTbl	&lib_cl.ContactTable;
+cnt			integer := 0;
+Begin
+	if contacts is not null then
+		while length(contacts)>0 loop
+			cnt := cnt + 1;
+			ContactTbl(cnt).ACTIV	:= nvl(getNextValue(contacts)=1,false);	--Признак действия контакта
+			ContactTbl(cnt).NUMB	:= replace(getNextValue(contacts),chr(15), ';' );				--Номер (адрес) контакта
+			ContactTbl(cnt).PRIVATE	:= getNextValue(contacts);				--Код принадлежности контакта
+			ContactTbl(cnt).TYPE_	:= getNextValue(contacts);				--Код типа связи контакта
+		end loop;
+	end if;
+	return ContactTbl;
+End;
+--------------------------------------------------------------------------------
+function getDecl(decl varchar2(32000)) return &lib_cl.DeclFioTable
+is
+DeclFioTbl	&lib_cl.DeclFioTable;
+cnt			integer := 0;
+Begin
+	if decl is not null then
+		while length(decl)>0 loop
+			cnt := cnt + 1;
+			DeclFioTbl(cnt).CASE_GR	:= getNextValue(decl);	--Код падежа
+			DeclFioTbl(cnt).NAME	:= getNextValue(decl);	--Склоненное наименование
+		end loop;
+	end if;
+	return DeclFioTbl;
+End;
+--------------------------------------------------------------------------------
+function getDisposit(disposit varchar2(32000)) return &lib_cl.DispositTable
+is
+DispositTbl	&lib_cl.DispositTable;
+cnt			integer := 0;
+Begin
+	if disposit is not null then
+		while length(disposit)>0 loop
+			cnt := cnt + 1;
+			DispositTbl(cnt).DISPOSITION	:= getNextValue(disposit);							--Код характера отношений с банком
+			DispositTbl(cnt).DATE_BEG		:= to_date(getNextValue(disposit),'YYYY-MM-DD');	--Дата начала действия отношения
+			DispositTbl(cnt).DATE_END		:= to_date(getNextValue(disposit),'YYYY-MM-DD');	--Дата окончания действия отношения
+		end loop;
+	end if;
+	return DispositTbl;
+End;
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+function getDoc( doc varchar2(32000)) return &lib_cl.CertificTable
+is
+CertificTbl	&lib_cl.CertificTable;
+cnt			integer := 0;
+Begin
+	if doc is not null then
+		while length(doc) > 0 loop
+			cnt := cnt + 1;
+			CertificTbl(cnt).DATE_			:= getNextValue(doc);					--Дата выдачи
+			CertificTbl(cnt).DATE_END		:= getNextValue(doc);					--Дата окончания действия
+			CertificTbl(cnt).MAIN			:= nvl(getNextValue(doc)=1,false);		--Признак основного удостоверения
+			CertificTbl(cnt).SER			:= getNextValue(doc);					--Серия
+			CertificTbl(cnt).NUM			:= getNextValue(doc);					--Номер
+			CertificTbl(cnt).PLACE			:= getNextValue(doc);					--Место выдачи
+			CertificTbl(cnt).TYPE_			:= getNextValue(doc);					--Тип удостоверения клиента
+			CertificTbl(cnt).WHO			:= getNextValue(doc);					--Организация, выдавшая паспорт
+			CertificTbl(cnt).DEPART_CODE	:= getNextValue(doc);					--Код подразделения, выдавшего паспорт
+			if trim(CertificTbl(cnt).SER||CertificTbl(cnt).NUM) is null then
+				CertificTbl.delete(cnt);
+				cnt := cnt - 1;
+			end if;
+		end loop;
+	end if;
+	return CertificTbl;
+End;
+--------------------------------------------------------------------------------
+function getInspect(insp varchar2(32000)) return &lib_cl.InspectTable
+is
+InspectTbl	&lib_cl.InspectTable;
+cnt			integer := 0;
+Begin
+	if insp is not null then
+		while length(insp)>0 loop
+			cnt := cnt + 1;
+			InspectTbl(cnt).DATE_		:= getNextValue(insp);		--Дата регистрации в налоговом органе
+			InspectTbl(cnt).INSPECTOR	:= getNextValue(insp);		--Инспектор
+			InspectTbl(cnt).NUM			:= getNextValue(insp);		--Номер налоговой инспекции
+			InspectTbl(cnt).NOTES		:= getNextValue(insp);		--Примечание
+		end loop;
+	end if;
+	return InspectTbl;
+End;
+--------------------------------------------------------------------------------
+function getNames(names varchar2(32000)) return &lib_cl.NamesTable
+is
+NamesTbl	&lib_cl.NamesTable;
+cnt			integer := 0;
+Begin
+	if names is not null then
+		while length(names) > 0 loop
+			cnt := cnt + 1;
+			NamesTbl(cnt).DATE_		:= getNextValue(names);					--Дата
+			NamesTbl(cnt).FLAG_NO	:= nvl(getNextValue(names)=1,false);	--Признак "Запрещено использовать"
+			NamesTbl(cnt).FLAG_YES	:= nvl(getNextValue(names)=1,false);	--Признак "Разрешено использовать"
+			NamesTbl(cnt).NAME		:= 	getNextValue(names);				--Допустимое наименование
+		end loop;
+	end if;
+	return NamesTbl;
+End;
+
+--------------------------------------------------------------------------------
+-- НАЧАЛО
+--------------------------------------------------------------------------------
+Begin
+	&sp(a1)
+	error_message    := null;
+	&debug('check reqs',0)
+	ReqClPriv.ID_EXT		:= ext_id;			--ID в передающей Системе (в РБО)
+	ReqClPriv.ID_INT		:= int_id;			--ID в принимающей Системе (в ИБСО)
+	ReqClPriv.NAME			:= name;			--Наименование клиента
+	ReqClPriv.LAST_NAME		:= last_name;		--Фамилия клиента
+	ReqClPriv.FIRST_NAME	:= first_name;		--Имя клиента
+	ReqClPriv.SUR_NAME		:= sur_name;		--Отчество клиента
+	ReqClPriv.OKONH			:= codes_okonh;		--Действующий код ОКОНХ(перечисление с разделителем)
+	ReqClPriv.COM_STATUS	:= com_status;		--Код статуса
+	ReqClPriv.COUNTRY		:= country;			--Цифровой код страны гражданства клиента
+	ReqClPriv.DATE_OP		:= date_ank;		--Дата заведения досье клиента
+	ReqClPriv.DATE_PERS		:= date_pers;		--Дата рождения клиента
+	ReqClPriv.DEPART		:= depart;			--Код подразделения
+	ReqClPriv.FAIL_LEVEL	:= fail_level;		--Код уровня риска клиента по легализации
+	ReqClPriv.FAIL_MARK		:= fail_mark;		--Обоснование уровня риска клиента по легализации
+	ReqClPriv.FILIAL		:= branch;			--Код филиала
+	ReqClPriv.GROUP_LINK	:= group_link;		--Номер группы взаимосвязанных клиентов
+	ReqClPriv.I_NAME		:= i_name;			--Интернациональное наименование клиента
+	ReqClPriv.INN			:= inn;				--ИНН клиента
+	ReqClPriv.INTERNAL_CODE	:= internal_code;	--Внутренний код для импорта
+	ReqClPriv.LOW			:= law;				--Отношения с законом
+	ReqClPriv.MARIGE_STATUS	:= marige_status;	--Код семейного положения
+	ReqClPriv.NOTES			:= notes;			--Примечание
+	ReqClPriv.OPER_CHARACTER:= oper_character;	--Характеристика операций
+	ReqClPriv.REG_STATUS	:= REG_STATUS;		--Код статуса зарегистрированного лица
+	ReqClPriv.REGISTR_NUM	:= REGISTR_NUM;		--Регистрационный номер
+	ReqClPriv.RESIDENT		:= RESIDENT;		--Резидент
+	ReqClPriv.SEX			:= SEX;				--Код пола клиента
+	ReqClPriv.VID_CL		:= VID_CL;			--Категория клиента
+	ReqClPriv.VISA_INFO		:= VISA_INFO;		--Сведения о въездной визе (нерезидент)
+	--Массивы
+	&debug('check arrays',0)
+	ReqClPriv.ACCS_BANK		:= getAccBank(acc_bank);	--Контейнер счетов в других банках - массив "Счета в банках"
+	ReqClPriv.ADDRESSES		:= getAddresses(addresses); --Контейнер, содержащий данные об адресах клиента
+	ReqClPriv.BORN			:= getBorn(born); 			--Контейнер параметров место рождения клиента
+	ReqClPriv.CL_OPER		:= getOperations(cl_oper); 	--Контейнер операций клиента - массив "Операции клиента"
+	ReqClPriv.CONTACTS		:= getContacts(contacts); 	--Контейнер контактов клиента - массив "Контакты для связи"
+	ReqClPriv.DECL_FIO		:= getDecl(decl_fio);		--Контейнер данных о склонении наименований клиента - массив "Склонения наименований"
+	ReqClPriv.DISPOSITS		:= getDisposit(disposit);	--Контейнер отношений клиента с банком - массив "История характера отношений с банком"
+	ReqClPriv.CERTIFICATES	:= getDoc(doc);				--Контейнер удостоверений клиента - массив "Удостоверения"
+	ReqClPriv.INSPECT		:= getInspect(inspect);		--Контейнер налоговых инспекций - массив "Налоговая инспекция"
+	ReqClPriv.NAMES			:= getNames(names);			--Контейнер допустимых наименований клиента - массив "Допустимые наименования клиента"
+	&debug('create client',0)
+	--Обработка клиента
+	ret_value := &lib_cl.RegClient(ReqClPriv, client_ref, error_message);
+	&debug('client='||client_ref,0)
+	&debug('ret_value='||ret_value,0)
+	--Обновление записи в справочнике синхронизации аналитических систем
+	if client_ref is not null then
+		begin
+			new_id := null;
+			update	r(	r.[NUMBER_RBS]	= ext_id,
+						r.[PREV_TIME]	= null,
+						r.[PASS_TIME]	= Sysdate,
+						r.[RETURN_STR]	= error_message,
+						r.[PASS_USER]	= StdLib.User_ID
+					)
+			in		::[RBS_SYNC_OBJ] all
+			where	r.[NUMBER_IBSO] = to_char(client_ref) and
+					r.[OBJ_TYPE]	= &prx_cit.c_client_obj_type
+			return r%id into new_id;
+		exception
+			when TOO_MANY_ROWS then
+				
+				select	r( r%id )
+				in		::[RBS_SYNC_OBJ] all
+				where	r.[NUMBER_IBSO] = to_char(client_ref) and
+						r.[OBJ_TYPE]	= &prx_cit.c_client_obj_type
+				fetch 1
+				into new_id;
+				delete	r
+				in		::[RBS_SYNC_OBJ] all
+				where	r.[NUMBER_IBSO] = to_char(client_ref) and
+						r.[OBJ_TYPE]	= &prx_cit.c_client_obj_type
+						and	r%id != new_id;
+	
+				update	r(	r.[NUMBER_RBS]	= ext_id,
+							r.[PREV_TIME]	= null,
+							r.[PASS_TIME]	= Sysdate,
+							r.[RETURN_STR]	= error_message,
+							r.[PASS_USER]	= StdLib.User_ID
+						)
+				in		::[RBS_SYNC_OBJ] all
+				where	r%id = new_id;
+		end;
+		if new_id is null then
+			&prx_cit.AddRecord(client_ref, ext_id, null,
+								&prx_cit.c_client_obj_type,
+								Null, Null, true, error_message, SysDate, StdLib.User_Id);
+		end if;
+	end if;
+	
+	return to_char(client_ref);
+ exception when others then
+	&rb(a1)
+	error_message := 'Ошибка при создании/обновлении досье физического лица: '||::[RUNTIME].[UTILS].error_stack;
+End;
+
+/*********************************************************************
+Функции обработки запросов.
+Основные функции.
+*********************************************************************/
+pragma macro (replace_e,'replace(replace(upper([1]),''Ё'',''Е''),'' '')',substitute);
+
+/*********************************************************************
+Функции обработки запросов.
+Основные функции.
+*********************************************************************/
+--Создание/обновление физического лица с учетом поиска
+--	ReqClPriv - структура запроса
+--	p_cl_priv - ссылка на созданное/обновленное физическое лицо
+--	p_error_msg - текст ошибки, возникшей при обработке
+--Функция возвращает целое значение:
+--	0 - Клиент обработан успешно
+--	> 0 - ошибка при обработке
+public function RegClient(ReqClPriv ReqClPrivType, p_cl_priv out ref [CL_PRIV], p_error_msg out varchar2(2000), p_just_return_ok_if_exist boolean := false) return integer is
+find_result		integer;
+update_result	integer;
+reg_result		integer;
+V#ADDS			varchar2(2000);
+begin
+	&sp(a#01)
+	--Заполнение кода текущей системы-абонента
+	if &tlib.current_ab is not null and nvl(ReqClPriv.CONFORM_EXT_CODE,false) then
+		current_ab_code := &tlib.current_ab.[CODE];
+	end if;
+	--Заполнение наименования клиента из фамилии, имени и отчества, если наименование заполнено не было
+	ReqClPriv.NAME		:= trim(ReqClPriv.NAME);
+	ReqClPriv.LAST_NAME	:= trim(ReqClPriv.LAST_NAME);
+	ReqClPriv.FIRST_NAME:= trim(ReqClPriv.FIRST_NAME);
+	ReqClPriv.SUR_NAME	:= trim(ReqClPriv.SUR_NAME);
+	if ReqClPriv.NAME is null and ReqClPriv.LAST_NAME is not null then
+		ReqClPriv.NAME := ReqClPriv.LAST_NAME;
+		if ReqClPriv.FIRST_NAME is not null then
+			ReqClPriv.NAME := ReqClPriv.NAME||' '||ReqClPriv.FIRST_NAME;
+		end if;
+		if ReqClPriv.SUR_NAME is not null then
+			ReqClPriv.NAME := ReqClPriv.NAME||' '||ReqClPriv.SUR_NAME;
+		end if;
+	end if;
+	--Поиск клиента
+	start_timer('FIND_CLIENT');
+	find_result := findClient(ReqClPriv, p_cl_priv, p_error_msg);
+	finish_timer('FIND_CLIENT');
+	--Обработка результатов поиска
+	if find_result = 1 then												--Клиент найден
+		if p_just_return_ok_if_exist then
+			return 0;
+		end if;
+		start_timer('UPDATE_CLIENT');
+		update_result := UpdateClient(ReqClPriv, p_cl_priv, p_error_msg);--Обновление
+		finish_timer('UPDATE_CLIENT');
+		if update_result = -1 then 										--Ошибка обновления
+			&rb(a#01)
+			return 5;
+		end if;
+		-- Вызов хука без дистрибутивных проверок
+		begin
+			start_timer('CALL_HOOK');
+			::[RUNTIME].[STR].set_par(V#ADDS, 'NEW_CLIENT', '0');
+			::[CL_PRIV].[LIB].hook_uya_check_cl_a(p_cl_priv, false, V#ADDS, true);
+			finish_timer('CALL_HOOK');
+		exception when others then
+			-- Причина перехвата others: при возникновении непредвиденной ошибки необходимо продолжить выполнение операции
+			&rb(a#01)
+			finish_timer('CALL_HOOK');
+			p_error_msg := substr('Ошибка при выполнении расширения "УЯ. Дополнительная проверка клиента": '||sqlerrm,1,2000);
+			return 7;
+		end;
+	elsif find_result = 0 then										--Клиент не найден
+		start_timer('REG_CLIENT');
+		reg_result := CreateClient(ReqClPriv, p_cl_priv, p_error_msg);--Регистрация клиента
+		finish_timer('REG_CLIENT');
+		if reg_result = -1 then 									--Ошибка регистрации
+			&rb(a#01)
+			return 6;
+		end if;
+		-- Дополнительные проверки
+		begin
+			start_timer('CALL_HOOK');
+			::[RUNTIME].[STR].set_par(V#ADDS, 'NEW_CLIENT', '1');
+			::[CL_PRIV].[LIB].hook_uya_check_cl_a(p_cl_priv, false, V#ADDS);
+			finish_timer('CALL_HOOK');
+		exception when others then
+			-- Причина перехвата others: при возникновении непредвиденной ошибки необходимо продолжить выполнение операции
+			&rb(a#01)
+			finish_timer('CALL_HOOK');
+			p_error_msg := substr('Ошибка при выполнении расширения "УЯ. Дополнительная проверка клиента": '||sqlerrm,1,2000);
+			return 7;
+		end;
+	elsif find_result = -1 then										--Ошибка поиска
+		p_cl_priv := null;
+		return 4;
+	end if;
+	
+	return 0;
+exception when others then
+	&rb(a#01)
+	p_error_msg := substr('Ошибка при cоздании/обновлении физического лица: '||sqlerrm,1,2000);
+	return 3;
+end;
+
+
+/*********************************************************************
+Функции обработки запросов.
+Вспомогательные функции.
+*********************************************************************/
+--Сохранение списка счетов в банках
+function save_accs_bank(AccsBank in AccsBankTable, client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer;
+--Сохранение списка адресов
+function save_address(AddressList in AddressTable, client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer;
+--Сохранение списка операций клиента
+function save_cl_oper(ClOper in ClOperTable, client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer;
+--Сохранение списка действующих кодов ОКОНХ
+function save_okonh(okonh varchar2(2000), client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer;
+--Сохранение списка контактов
+function save_contact(ContactList in ContactTable, client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer;
+--Сохранение списка склонении наименований
+function save_decl_fio(DeclFio in DeclFioTable, client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer;
+--Сохранение истории характера отношений с банком
+function save_disposit(Disposit in DispositTable, client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer;
+--Сохранение списка удостоверений
+function save_cl_passport(PassportList in CertificTable, client in out [CL_PRIV], conform_ext_code boolean, p_error_msg out varchar2(2000), p_upd_cat in out [BOOLEAN]) return integer;
+--Сохранение списка налоговых инспекций
+function save_inspect(Inspect in InspectTable, client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer;
+--Сохранение категории клиента
+function save_vid_cl(Vid_Cl in Varchar2(16), client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer;
+--Сохранение миграционных карт
+function save_migr_cards(MigrCards in MigrCardTable, client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer;
+--Сохранение списка трудовой деятельности
+function save_work_activity(WorkActivity in WorkActivityTable, client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer;
+--Установка сроков действия удостоверений
+procedure set_sert_date(cl_id in ref [CL_PRIV],p_upd_cat out [BOOLEAN]);
+--Обновление наименования и допустимых наименований
+function update_cl_name(fullName in varchar2(512), Names NamesTable, client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer;
+--Обновление списка удостоверений
+function update_cl_passport(PassportList in CertificTable, client in out [CL_PRIV], conform_ext_code boolean, p_error_msg out varchar2(2000), p_upd_cat out [BOOLEAN]) return integer;
+--Обновление основного удостоверения
+function update_main_cert(cert [CERTIFICATE],  client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer;
+--Обновление дополнительного удостоверения
+function update_add_cert(cert [CERTIFICATE], client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer;
+--Получение тега страны для формата разбора адреса
+function get_country_tag(p_country in out varchar2(2000), p_modify_country_value boolean default true) return varchar2(128);
+--Сохранение гражданства
+function save_cl_country(p_country in varchar2(2000), client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer;
+--Тип удостоверения паспорт РФ
+const_passport_type const ref [CERTIFIC_TYPE] := ::[CERTIFIC_TYPE](KOD = '21');
+
+/******************************************************
+--Проверка наименований клиента--
+******************************************************/
+function checkNames(cl_name varchar2(500), req_name varchar2(500), cl_names [NAMES_ARR], Req_Names NamesTable)
+return boolean
+is
+begin
+	--Сравнение наименований
+	if &replace_e(cl_name) = &replace_e(req_name) then
+		return true;	--Клиент найден
+	--Сравнение допустимых наименований
+	else
+		for n in 1..Req_Names.count
+		loop
+			--Сравнение допустимого наименования из запроса с наименованием в досье
+			if &replace_e(cl_name) = &replace_e(Req_Names(n).NAME) then
+				return true;	--Клиент найден
+			end if;
+			--Сравнение допустимого наименования из запроса с допустимыми наименованиями в досье
+			begin
+				var names_ref ref [NAMES];
+				select a(a) in cl_names
+				where	(&replace_e(a.[NAME]) = &replace_e(req_name)
+					or	 &replace_e(a.[NAME]) = &replace_e(Req_Names(n).NAME))
+				into names_ref;
+				return true;	--Клиент найден
+			exception when NO_DATA_FOUND then
+				null;
+			when TOO_MANY_ROWS then
+				return true;	--Клиент найден
+			end;
+		end loop;
+	end if;
+	return false;	--Ошибка
+end;
+
+/******************************************************
+--Поиск клиента по удостоверениям, ИНН--
+--и соответствию наименования--
+--и допустимых наименований--
+******************************************************/
+/*********************************************************************
+Функции обработки запросов.
+Вспомогательные функции.
+*********************************************************************/
+--Поиск клиента по удостоверениям, ИНН и соответствию наименования и допустимых наименований
+--	ReqClPriv - структура запроса
+--	p_cl_priv - ссылка на найденное физическое лицо
+--	p_error_msg - текст ошибки, возникшей при поиске
+--Функция возвращает целое значение:
+--	1 - если клиент найден
+--	0 - если клиент не найден
+--	-1 - ошибка при поиске
+public function findClient(ReqClPriv ReqClPrivType, p_cl_priv out ref [CL_PRIV], p_error_msg out varchar2(2000)) return integer is
+type sernum_rec is record	(ser	varchar2(50)
+							,num	varchar2(50)
+							);							
+type sernum_tbl_type is table of sernum_rec;
+sernum_tbl sernum_tbl_type;
+sernum_cnt number := 0;
+type_cert_tbl	rtl.string_table;
+cl_priv_name	varchar2(500);
+cl_priv_names	[NAMES_ARR];
+checkNm			boolean;
+internalCode	varchar2(25);
+begin
+	&sp(findClient)
+	extract_snils_from_cert(ReqClPriv.SNILS,ReqClPriv.CERTIFICATES,ReqClPriv.CONFORM_EXT_CODE);
+	--поиск удостоверений и ИНН в запросе
+	if ReqClPriv.CERTIFICATES.count = 0 and ReqClPriv.INN is null and ReqClPriv.SNILS is null and ReqClPriv.ID_INT is null
+		and ReqClPriv.ID_EXT is null
+	then
+		p_error_msg := 'В запросе не указаны удостоверения, ИНН, СНИЛС или идентификатор клиента или внутренний id клиента';
+		return -1;
+	else
+		--Поиск основного удостоверения
+		for i in 1..ReqClPriv.CERTIFICATES.count
+		loop
+			if ReqClPriv.CERTIFICATES(i).MAIN then
+				--Получение ссылки на тип удостоверения
+				if nvl(ReqClPriv.CONFORM_EXT_CODE,false) and current_ab_code is not null then
+					begin
+						type_cert_tbl(type_cert_tbl.count+1) := &lib_conf_code.get_ibso_ref(current_ab_code, [CERTIFIC_TYPE]%class, ReqClPriv.CERTIFICATES(i).TYPE_);
+					exception when message.app_exception then
+						p_error_msg := substr('Ошибка получения типа удостоверения с кодом "'||ReqClPriv.CERTIFICATES(i).TYPE_||'" из справочника "Справочник соответствия кодов из внешних систем". Текст ошибки: '||sqlerrm,1,2000);
+						return -1;
+					end;
+				else
+					begin
+						type_cert_tbl(type_cert_tbl.count+1) := ::[CERTIFIC_TYPE](upper(KOD) = upper(ReqClPriv.CERTIFICATES(i).TYPE_));
+					exception when NO_DATA_FOUND then
+						begin
+							type_cert_tbl(type_cert_tbl.count+1) := ::[CERTIFIC_TYPE](upper(CODE_GNI) = upper(ReqClPriv.CERTIFICATES(i).TYPE_));
+						exception when NO_DATA_FOUND then
+							p_error_msg := 'Не найден тип удостоверения с кодом или кодом ГНИ '||ReqClPriv.CERTIFICATES(i).TYPE_;
+							return -1;
+						when TOO_MANY_ROWS then
+							p_error_msg := 'Найдено несколько типов удостоверений с кодом ГНИ '||ReqClPriv.CERTIFICATES(i).TYPE_;
+							return -1;
+						end;
+					when TOO_MANY_ROWS then
+						p_error_msg := 'Найдено несколько типов удостоверений с кодом '||ReqClPriv.CERTIFICATES(i).TYPE_;
+						return -1;
+					end;
+				end if;
+				sernum_cnt := sernum_tbl.count+1;
+				sernum_tbl(sernum_cnt).ser := UPPER(REPLACE(ReqClPriv.CERTIFICATES(i).SER,' '));
+				sernum_tbl(sernum_cnt).num := UPPER(REPLACE(ReqClPriv.CERTIFICATES(i).NUM,' ')); 
+				exit;
+			end if;
+		end loop;
+		--Если основное удостоверение не найдено, то получаем весь список удостоверений для дальнейшего поиска
+		if sernum_tbl.count = 0 then
+			for i in 1..ReqClPriv.CERTIFICATES.count
+			loop
+				--Получение ссылки на тип удостоверения
+				if nvl(ReqClPriv.CONFORM_EXT_CODE,false) and current_ab_code is not null then
+					begin
+						type_cert_tbl(i) := &lib_conf_code.get_ibso_ref(current_ab_code, [CERTIFIC_TYPE]%class, ReqClPriv.CERTIFICATES(i).TYPE_);
+					exception when message.app_exception then
+						p_error_msg := substr('Ошибка получения типа удостоверения с кодом "'||ReqClPriv.CERTIFICATES(i).TYPE_||'" из справочника "Справочник соответствия кодов из внешних систем". Текст ошибки: '||sqlerrm,1,2000);
+						return -1;
+					end;
+				else
+					begin
+						type_cert_tbl(i) := ::[CERTIFIC_TYPE](upper(KOD) = upper(ReqClPriv.CERTIFICATES(i).TYPE_));
+					exception when NO_DATA_FOUND then
+						begin
+							type_cert_tbl(type_cert_tbl.count+1) := ::[CERTIFIC_TYPE](upper(CODE_GNI) = upper(ReqClPriv.CERTIFICATES(i).TYPE_));
+						exception when NO_DATA_FOUND then
+							p_error_msg := 'Не найден тип удостоверения с кодом или кодом ГНИ '||ReqClPriv.CERTIFICATES(i).TYPE_;
+							return -1;
+						when TOO_MANY_ROWS then
+							p_error_msg := 'Найдено несколько типов удостоверений с кодом ГНИ '||ReqClPriv.CERTIFICATES(i).TYPE_;
+							return -1;
+						end;
+					when TOO_MANY_ROWS then
+						p_error_msg := 'Найдено несколько типов удостоверений с кодом '||ReqClPriv.CERTIFICATES(i).TYPE_;
+						return -1;
+					end;
+				end if;
+				sernum_tbl(i).ser := UPPER(REPLACE(ReqClPriv.CERTIFICATES(i).SER,' '));
+				sernum_tbl(i).num := UPPER(REPLACE(ReqClPriv.CERTIFICATES(i).NUM,' ')); 
+			end loop;
+		end if;
+	end if;
+	--проверка на заполненность Id клиента в запросе
+	if ReqClPriv.ID_INT is not null then
+		begin
+			select a(a,a.[NAME],a.[NAMES]) in ::[CL_PRIV]
+			where a%id = to_number(ReqClPriv.ID_INT)
+			into p_cl_priv,cl_priv_name,cl_priv_names;
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Неверный идентификатор клиента';
+			return -1;	--Ошибка "Неверный идентификатор клиента"
+		end;
+		--Сравнение наименований
+		--checkNm := checkNames(cl_priv_name, ReqClPriv.name, cl_priv_names, ReqClPriv.names);
+		--if checkNm then
+			return 1;
+		/*else
+			p_error_msg := 'Неверный идентификатор клиента';
+			return -1;
+		end if;*/
+	else
+		--Поиск по коду во внешней системе
+		if ReqClPriv.ID_EXT is not null and length(ReqClPriv.ID_EXT) <= 25 then
+			internalCode := ReqClPriv.ID_EXT;
+		elsif ReqClPriv.INTERNAL_CODE is not null and length(ReqClPriv.INTERNAL_CODE) <= 25 then
+			internalCode := ReqClPriv.INTERNAL_CODE;
+		end if;
+		if internalCode is not null then
+			begin
+				select c(c,c.[NAME],c.[NAMES])
+				in ::[CL_PRIV]
+				where c.[INTERNAL_CODE] = internalCode
+				into p_cl_priv,cl_priv_name,cl_priv_names;
+				--Сравнение наименований
+				checkNm := checkNames(cl_priv_name, ReqClPriv.name, cl_priv_names, ReqClPriv.names);
+				if checkNm then
+					return 1;
+				else
+					p_error_msg := 'Идентификатор клиента во внешней системе '||internalCode||' принадлежит клиенту "'||cl_priv_name||'" (id='||p_cl_priv%id||')';
+					return -1;
+				end if;
+			exception
+				when NO_DATA_FOUND then null;
+				when TOO_MANY_ROWS then null;
+			end;
+		end if;
+		
+		--Поиск найденых удостоверений из запроса во всей структуре "Удостоверения"
+		for i in 1..sernum_tbl.count
+		loop
+			begin
+				select c(distinct(c.cl_))
+				in (
+					select a(d :cl_)
+					in ::[CERTIFICATE], (::[CL_PRIV] all :d) collections
+					where a%collection = d.[DOC_ARR]
+						and	a.[TYPE] = to_number(type_cert_tbl(i))
+						and	((UPPER(REPLACE(a.[SER],' ')) = sernum_tbl(i).ser) or (sernum_tbl(i).ser is null and a.[SER] is null))
+						and	UPPER(REPLACE(a.[NUM],' ')) = sernum_tbl(i).num	
+						and (case when d.[COM_STATUS] = ::[COM_STATUS_PRD]([CODE] = 'ARHIVE') then 0 else 1 end = 1)
+					union
+					select b(b :cl_)
+					in ::[CL_PRIV] all
+					where b.[DOC].[TYPE] = to_number(type_cert_tbl(i))
+						and	((UPPER(REPLACE(b.[DOC].[SER],' ')) = sernum_tbl(i).ser) or (sernum_tbl(i).ser is null and b.[DOC].[SER] is null))
+						and	UPPER(REPLACE(b.[DOC].[NUM],' ')) = sernum_tbl(i).num
+						and (case when b.[COM_STATUS] = ::[COM_STATUS_PRD]([CODE] = 'ARHIVE') then 0 else 1 end = 1)
+					)
+				into p_cl_priv;
+				exit;
+			exception when NO_DATA_FOUND then
+				null;
+			when TOO_MANY_ROWS then
+				var temp_str varchar2(32000);
+				declare
+					type cl_tbl_type is table of ref [CL_PRIV];
+					cl_tbl	cl_tbl_type;
+					v_type_cert_num number;
+				begin
+					v_type_cert_num := to_number(type_cert_tbl(i));
+					select c(distinct(c.cl_))
+					in (
+						select a(d :cl_)
+						in ::[CERTIFICATE], (::[CL_PRIV] all :d) collections
+						where a%collection = d.[DOC_ARR]
+							and	a.[TYPE] = v_type_cert_num
+							and	((UPPER(REPLACE(a.[SER],' ')) = sernum_tbl(i).ser) or (sernum_tbl(i).ser is null and a.[SER] is null))
+							and	UPPER(REPLACE(a.[NUM],' ')) = sernum_tbl(i).num	
+							and (case when d.[COM_STATUS] = ::[COM_STATUS_PRD]([CODE] = 'ARHIVE') then 0 else 1 end = 1)
+						union
+						select b(b :cl_)
+						in ::[CL_PRIV] all
+						where b.[DOC].[TYPE] = v_type_cert_num
+							and	((UPPER(REPLACE(b.[DOC].[SER],' ')) = sernum_tbl(i).ser) or (sernum_tbl(i).ser is null and b.[DOC].[SER] is null))
+							and	UPPER(REPLACE(b.[DOC].[NUM],' ')) = sernum_tbl(i).num
+							and (case when b.[COM_STATUS] = ::[COM_STATUS_PRD]([CODE] = 'ARHIVE') then 0 else 1 end = 1)
+						)
+					into cl_tbl;
+					temp_str := 'c id ';
+					for cl_tbl_idx in 1..cl_tbl.count
+					loop
+						temp_str := temp_str||cl_tbl(cl_tbl_idx)%id||'; ';
+					end loop;
+				exception when VALUE_ERROR then
+					null;
+				end;
+				p_error_msg := substr('Удостоверение принадлежит нескольким клиентам '||temp_str,1,2000);
+				return -1;	--Ошибка "Удостоверение принадлежит нескольким клиентам"
+			end;
+		end loop;
+		
+		--Если клиент найден по удостоверению, то необходимо сравнить наименования
+		if p_cl_priv is not null then
+			select a(a.[NAME],a.[NAMES])
+			in ::[CL_PRIV] all
+			where a = p_cl_priv
+			into cl_priv_name,cl_priv_names;
+			--Сравнение наименований
+			checkNm := checkNames(cl_priv_name, ReqClPriv.name, cl_priv_names, ReqClPriv.names);
+			if checkNm then
+				return 1;
+			else
+				p_error_msg := 'Удостоверение принадлежит клиенту "'||cl_priv_name||'" (id='||p_cl_priv%id||')';
+				return -1;
+			end if;
+		--Если клиент не найден, то ищем по ИНН
+		else
+			--Поиск клиента по ИНН
+			if ReqClPriv.inn is not null or ReqClPriv.SNILS is not null then
+				begin
+					select a(a,a.[NAME],a.[NAMES]) in ::[CL_PRIV]
+					where a.[INN] = ReqClPriv.inn or a.[SNILS] = ReqClPriv.SNILS
+					into p_cl_priv, cl_priv_name, cl_priv_names;
+					--Сравнение наименований
+					checkNm := checkNames(cl_priv_name, ReqClPriv.name, cl_priv_names, ReqClPriv.names);
+					if checkNm then
+						return 1;
+					else
+						p_error_msg := 'ИНН '||ReqClPriv.inn||' принадлежит клиенту "'||cl_priv_name||'" (id='||p_cl_priv%id||')';
+						return -1;
+					end if;
+				exception when NO_DATA_FOUND then
+					return 0;	--Клиент не найден
+				when TOO_MANY_ROWS then
+					p_error_msg := 'Найдено несколько клиентов '||case when ReqClPriv.inn is not null then 'с ИНН "'||ReqClPriv.inn||'"'||case when ReqClPriv.SNILS is not null then ' или' end end||case when ReqClPriv.SNILS is not null then ' со СНИЛС "'||ReqClPriv.SNILS||'"' end;
+--					p_error_msg := 'ИНН '||ReqClPriv.inn||' принадлежит нескольким клиентам';
+					return -1;	--Ошибка "ИНН или СНИЛС принадлежит другому клиенту"
+				end;
+			end if;
+		end if;
+	end if;
+	return 0;
+exception when others then
+	-- Причина перехвата others: при возникновении непредвиденной ошибки необходимо продолжить выполнение операции
+	&rb(findClient)
+	p_error_msg := substr('Ошибка при поиске клиента: '||sqlerrm,1,2000);
+	return -1;
+end;
+
+procedure save_pdl
+	( p_pdl_arr [PDL_PERSONAL_ARR]
+	, p_pdl_type_code varchar2
+	)
+is
+	v_pdl_prs ref [PDL_PERSONAL];
+begin
+	if p_pdl_type_code is not null and p_pdl_arr is not null then
+		for	(select r(r.[CATEGORY] : pdl_category)
+				in ::[PDL_CATEGORY_MAP]
+				where r.[EXT_CATEGORIZER] = 'IPDL_TYPE'
+					and r.[EXT_CODE] = p_pdl_type_code
+					and not exists
+						(select p(1)
+							in p_pdl_arr
+							where p.[CATEGORY] = r.[CATEGORY]
+								and (p.[DATE_BEGIN] <= trunc(sysdate) or p.[DATE_BEGIN] is null)
+								and (p.[DATE_END] >= trunc(sysdate) or p.[DATE_END] is null)
+						)
+			)
+		loop
+			v_pdl_prs := &call_int(CLIENT_INTERFACE, INT_CL_PRIV, 1).add_pdl_category_to_arr
+				( p_arr == p_pdl_arr
+				, p_category == r.pdl_category
+				);
+		end loop;
+	end if;
+end;
+
+type add_prop_tab_type is table of varchar2(2000) index by varchar2;
+procedure setAddProperty(p_add_prop_tab in out nocopy add_prop_tab_type, p_property_code [PROPERTY_GRP].[CODE]%type, p_property_value [PROPERTIES].[STR]%type) is
+begin
+	if p_property_value is not null then
+		p_add_prop_tab(p_property_code) := p_property_value;
+	end if;
+end;
+function save_add_props(p_add_prop_tab add_prop_tab_type, client in out [CL_PRIV], p_error_msg out varchar2(2000)) return integer is
+v_prop		[PROPERTIES];
+v_prop_code	[PROPERTY_GRP].[CODE]%type;
+v_prop_ref	ref	[PROPERTIES];
+cv_sysdate	const date := sysdate;
+begin
+	v_prop_code := p_add_prop_tab.first;
+	while v_prop_code is not null loop
+		v_prop_ref := null;
+		v_prop := null;
+		v_prop%init;
+		v_prop.[DATE_BEG]	:= cv_sysdate;
+		v_prop.[GROUP_PROP]	:= ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].getPropertyGrpFromCache(v_prop_code);
+		v_prop.[STR]		:= p_add_prop_tab(v_prop_code);
+
+		for (select x(x :c_id)
+			 in client.[ADD_PROP]
+			 where x.[GROUP_PROP] = v_prop.[GROUP_PROP]
+			)
+		loop
+			v_prop_ref := x.c_id;
+		end loop;
+
+		if v_prop_ref is not null then
+			v_prop_ref := v_prop;
+		else
+			client.[ADD_PROP]%insert(v_prop);
+		end if;
+
+		v_prop_code := p_add_prop_tab.next(v_prop_code);
+	end loop;
+	return 0;
+end;
+
+
+/******************************************************
+--Добавление нового клиента--
+******************************************************/
+--Добавление нового клиента
+--	ReqClPriv - структура запроса
+--	p_cl_priv - ссылка на созданное физическое лицо
+--	p_error_msg - текст ошибки, возникшей при обработке
+--Функция возвращает целое значение:
+--	0 - Клиент создан успешно
+--	-1 - ошибка при создании
+public function CreateClient(ReqClPriv ReqClPrivType, p_cl_priv out ref [CL_PRIV], p_error_msg out varchar2(2000)) return integer is
+client			[CL_PRIV];
+nm				[NAMES];
+fail_level_ref	ref [FAIL_LEVEL] := null;
+v_upd_cat boolean :=false;
+v_upd_cat_fordate boolean :=false;
+
+v_add_properties add_prop_tab_type;
+
+begin
+	&sp(CreateClient)
+	client%init;
+
+	extract_snils_from_cert(ReqClPriv.SNILS,ReqClPriv.CERTIFICATES,ReqClPriv.CONFORM_EXT_CODE);
+	-- R2 обзательно
+	client.[PN] := ::[CLIENT].[LIB].get_pn;
+	--Сохранение ID во внешней системе
+	if ReqClPriv.ID_EXT is not null and length(ReqClPriv.ID_EXT) <= 25 then
+		client.[INTERNAL_CODE] := ReqClPriv.ID_EXT;
+	elsif ReqClPriv.INTERNAL_CODE is not null and length(ReqClPriv.INTERNAL_CODE) <= 25 then
+		client.[INTERNAL_CODE] := ReqClPriv.INTERNAL_CODE;
+	end if;
+	if	ReqClPriv.LAST_NAME		is null and
+		ReqClPriv.FIRST_NAME	is null and
+		ReqClPriv.SUR_NAME		is null and
+		ReqClPriv.NAME			is not null then
+		-- Определение и сохранение фамилии, имени, отчества из ФИО
+		ReqClPriv.LAST_NAME := substr([STDLIB].FIO(ReqClPriv.NAME, 'Ф'), 1, 128);
+		ReqClPriv.FIRST_NAME := substr([STDLIB].FIO(ReqClPriv.NAME, 'И'), 1, 128);
+		ReqClPriv.SUR_NAME := substr([STDLIB].FIO(ReqClPriv.NAME, 'О'), 1, 128);
+	end if;
+	--Сохранение ФИО
+	client.[NAME] := upper(ReqClPriv.NAME);
+	--Сохранение фамилии
+	client.[FAMILY_CL] := upper(ReqClPriv.LAST_NAME);
+	--Сохранение имени
+	client.[NAME_CL] := upper(ReqClPriv.FIRST_NAME);
+	--Сохранение отчества
+	client.[SNAME_CL] := upper(ReqClPriv.SUR_NAME);
+	--Сохранение допустимых наименований
+	for i in 1..ReqClPriv.NAMES.count
+	loop
+		nm				:= null;
+		nm.[DATE]		:= ReqClPriv.NAMES(i).DATE_;			--Дата
+		nm.[FLAG_NO]	:= ReqClPriv.NAMES(i).FLAG_NO;			--Признак "Запрещено использовать"
+		nm.[FLAG_YES]	:= ReqClPriv.NAMES(i).FLAG_YES;			--Признак "Разрешено использовать"
+		nm.[NAME]		:= substr(upper(ReqClPriv.NAMES(i).NAME),1,[NAMES].[NAME]%size);		--Наименование
+		nm%init;
+		client.[NAMES]%insert(nm);
+	end loop;
+	--Сохранение пола
+	if nvl(ReqClPriv.CONFORM_EXT_CODE,false) and ReqClPriv.SEX is not null and current_ab_code is not null then
+		begin
+			client.[SEX] := &lib_conf_code.get_ibso_ref(current_ab_code, [SEX]%class, ReqClPriv.SEX);
+		exception when message.app_exception then
+			p_error_msg := substr('Ошибка получения пола "'||ReqClPriv.SEX||'" из справочника "Справочник соответствия кодов из внешних систем". Текст ошибки: '||sqlerrm,1,2000);
+			return -1;
+		end;
+	elsif not nvl(ReqClPriv.CONFORM_EXT_CODE,false) and ReqClPriv.SEX is not null then
+		begin
+			client.[SEX] := ::[SEX](CODE = ReqClPriv.SEX);
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найден пол клиента c кодом "'||ReqClPriv.SEX||'"';
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько записей в справочние "Пол клиента" c кодом "'||ReqClPriv.SEX||'"';
+			return -1;
+		end;
+	end if;
+	--Сохранение даты рождения
+	client.[DATE_PERS] := ReqClPriv.DATE_PERS;
+	--Сохранение списка удостоверений
+	if save_cl_passport(ReqClPriv.CERTIFICATES, client, ReqClPriv.CONFORM_EXT_CODE, p_error_msg,v_upd_cat) = -1 then
+		return -1;
+	end if;
+	--Сохранение места рождения
+	if ReqClPriv.BORN.CITY is not null then
+		begin
+			&sp(born)
+			var pob [NAME_CITY_REF];
+			--собираем адрес в строку
+			var str varchar2(500);
+			var country_tag varchar2(128);
+			country_tag := get_country_tag(ReqClPriv.BORN.COUNTRY);
+			str :=	ReqClPriv.BORN.COUNTRY||
+					ReqClPriv.BORN.KLADR_CODE||';'||
+					ReqClPriv.BORN.REGION||';'||
+					ReqClPriv.BORN.CITY_TYPE||' '||
+					ReqClPriv.BORN.CITY;
+			--получение структуры адреса
+			pob := ::[PERSONAL_ADDRESS].[LIB].Parse_Str_For_City(
+												 p_Format	== country_tag||'KLADR_CODE,REGION,CITY'
+												,p_Delimiter== ';'
+												,p_Str		== str
+												,p_Country	== null
+												,p_Cache	== true
+												,p_Kladr	== 1
+												);
+			if pob is not null then
+				client.[BORN]		:= pob;
+			else
+				if ReqClPriv.BORN.REGION is not null then
+					str :=	ReqClPriv.BORN.REGION||', ';
+					if ReqClPriv.BORN.CITY_TYPE is not null then
+						str := str || ReqClPriv.BORN.CITY_TYPE || ' ' ||ReqClPriv.BORN.CITY;
+					else
+						str := str || ReqClPriv.BORN.CITY;
+					end if;
+				else
+					str :=	ReqClPriv.BORN.CITY;
+				end if;
+				client.[BORN]				:= null;
+				client.[DOC].[BIRTH_PLACE]	:= str;
+			end if;
+		exception when others then
+			-- Причина перехвата others: при возникновении непредвиденной ошибки необходимо продолжить выполнение операции
+			&rb(born)
+			null;
+		end;
+	end if;
+	--Сохранение списка счетов в банках
+	if save_accs_bank(ReqClPriv.ACCS_BANK, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Сохранение списка адресов
+	if save_address(ReqClPriv.ADDRESSES, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Сохранение списка операций клиента
+	if save_cl_oper(ReqClPriv.CL_OPER, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Сохранение списка действующих кодов ОКОНХ
+	if save_okonh(ReqClPriv.OKONH, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Сохранение списка контактов
+	if save_contact(ReqClPriv.CONTACTS, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Сохранение статуса
+	if ReqClPriv.COM_STATUS is not null then
+		begin
+			select a(a)
+			in ::[COM_STATUS_PRD] all
+			where	a.[CODE] = ReqClPriv.COM_STATUS
+			into client.[COM_STATUS];
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найден обобщенный статус по коду: '||ReqClPriv.COM_STATUS;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько обобщенных статусов по коду: '||ReqClPriv.COM_STATUS;
+			return -1;
+		end;
+	end if;
+	--Сохранение страны гражданства клиента
+	if save_cl_country(ReqClPriv.COUNTRY, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Сохранение списка склонении наименований
+	if save_decl_fio(ReqClPriv.DECL_FIO, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Сохранение подразделения
+	if ReqClPriv.DEPART is not null then
+		begin
+			select x(x%id)
+			in ::[DEPART] all
+			where x.[CODE] = ReqClPriv.DEPART
+			into client.[DEPART];
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найдено подразделение по коду :'||ReqClPriv.DEPART;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько подразделений по коду :'||ReqClPriv.DEPART;
+			return -1;
+		end;
+	end if;
+	--Сохранение истории характера отношений с банком
+	if save_disposit(ReqClPriv.DISPOSITS, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Сохранение кода уровня риска клиента по легализации
+	if ReqClPriv.FAIL_LEVEL is not null then
+		begin
+			fail_level_ref := ::[FAIL_LEVEL]([CODE] = ReqClPriv.FAIL_LEVEL);
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найден уровень риска по коду: '||ReqClPriv.FAIL_LEVEL;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько уровней риска по коду: '||ReqClPriv.FAIL_LEVEL;
+			return -1;
+		end;
+	end if;
+	--Сохранение обоснования уровня риска
+	if trim(ReqClPriv.FAIL_MARK) is not null then
+		client.[FAIL_MARK] := ReqClPriv.FAIL_MARK;
+	else
+		client.[FAIL_MARK] := 'Оснований для отнесения клиента к высокому уровню риска на момент идентификации не установлено';
+	end if;
+	--Сохранение филиала
+	if ReqClPriv.FILIAL is not null then
+		begin
+			client.[FILIAL]:=::[BRANCH]([CODE]=ReqClPriv.FILIAL);
+		exception when NO_DATA_FOUND then
+			p_error_msg:='Не найден филиал по коду: '||ReqClPriv.FILIAL;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg:='Найдено несколько филиалов по коду: '||ReqClPriv.FILIAL;
+			return -1;
+		end;
+	end if;
+	--Сохранение группы взаимосвязанных клиентов
+	if ReqClPriv.GROUP_LINK is not null then
+		begin
+			client.[GROUP_LINK]:=::[GROUP_LINK]([NUM]=ReqClPriv.GROUP_LINK);
+		exception when NO_DATA_FOUND then
+			p_error_msg:='Не найдена группа по коду: '||ReqClPriv.GROUP_LINK;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg:='Найдено несколько групп по коду: '||ReqClPriv.GROUP_LINK;
+			return -1;
+		end;
+	end if;
+	--Сохранение интернационального наименования
+	if ReqClPriv.I_NAME is not null then
+		client.[I_NAME] := ReqClPriv.I_NAME;
+	end if;
+	--Сохранение ИНН
+	if ReqClPriv.INN is not null then
+		client.[INN] := ReqClPriv.INN;
+	end if;
+	--Сохранение СНИЛС
+	if ReqClPriv.SNILS is not null then
+		if length(ReqClPriv.SNILS) > ::[CL_PRIV].[SNILS]%size then
+			p_error_msg := 'Длина СНИЛС превышает '||::[CL_PRIV].[SNILS]%size||' символов!';
+			return -1;
+		end if;
+		client.[SNILS] := ReqClPriv.SNILS;
+	end if;
+	--Сохранение списка налоговых инспекций
+	if save_inspect(ReqClPriv.INSPECT, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Сохранение отношений с законом
+	if ReqClPriv.LOW is not null then
+		client.[LOW] := ReqClPriv.LOW;
+	end if;
+	--Сохранение семейного положения
+	if ReqClPriv.MARIGE_STATUS is not null then
+		begin
+			client.[MARIGE_STATUS] := ::[FAMILY_TYPE]([CODE]=ReqClPriv.MARIGE_STATUS);
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найдено семейное положение по коду: '||ReqClPriv.MARIGE_STATUS;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько семейных положений по коду: '||ReqClPriv.MARIGE_STATUS;
+			return -1;
+		end;
+	end if;
+	--Сохранение примечания
+	if ReqClPriv.NOTES is not null then
+		client.[NOTES] := ReqClPriv.NOTES;
+	end if;
+	--Сохранение характеристики операций
+	if ReqClPriv.OPER_CHARACTER is not null then
+		client.[OPER_CHARACTER]:=ReqClPriv.OPER_CHARACTER;
+	end if;
+	--Сохранение статуса зарегистрированного лица
+	if ReqClPriv.REG_STATUS is not null then
+		begin
+			client.[REG_STATUS]:=::[PERSON_STAT]([REG_STATUS]=ReqClPriv.REG_STATUS and [CL_REF] is null);
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найден статус зарегистрированного лица по коду: '||ReqClPriv.REG_STATUS;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько статусов зарегистрированного лица по коду: '||ReqClPriv.REG_STATUS;
+			return -1;
+		end;
+	end if;
+	--Сохранение регистрационного номера
+	if ReqClPriv.REGISTR_NUM is not null then
+		client.[REGISTR_NUM] := ReqClPriv.REGISTR_NUM;
+	end if;
+	--Сохранение налогового резидентсва
+	if ReqClPriv.RESIDENT is not null then
+		client.[NU_REZIDENT] := ReqClPriv.RESIDENT;
+	else
+		if client.[COUNTRY] = [SYSTEM].[COUNTRY] then
+			client.[NU_REZIDENT] := true;
+		elsif client.[COUNTRY] is not null and client.[COUNTRY] != [SYSTEM].[COUNTRY] then
+			client.[NU_REZIDENT] := false;
+		elsif client.[COUNTRY] is null then
+			client.[COUNTRY] := [SYSTEM].[COUNTRY];
+			client.[NU_REZIDENT] := true;
+		end if;
+	end if;
+	--Сохранение валютного резидентсва
+	if ReqClPriv.RESIDENT_VAL is not null then
+		client.[IS_RESIDENT] := ReqClPriv.RESIDENT_VAL;	
+	else
+		if nvl(client.[COUNTRY], [SYSTEM].[COUNTRY]) = [SYSTEM].[COUNTRY] then
+			client.[IS_RESIDENT] := true;
+		else
+			client.[IS_RESIDENT] := false;
+		end if;
+	end if;
+	--Сохранение принадлежности к ПДЛ (публичное должностное лицо)
+	if ReqClPriv.IPDL_TYPE is not null then
+		begin
+			client.[IS_IPDL]:=::[IPDL_TYPE]([CODE]=ReqClPriv.IPDL_TYPE);
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найден тип ПДЛ по коду: '||ReqClPriv.IPDL_TYPE;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько типов ПДЛ по коду: '||ReqClPriv.IPDL_TYPE;
+			return -1;
+		end;
+	end if;
+	--Сохранение категории клиента
+	if save_vid_cl(ReqClPriv.VID_CL, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Сохранение миграционных карт
+	if save_migr_cards(ReqClPriv.MIGR_CARD, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Сохранение трудовой деятельности
+	if save_work_activity(ReqClPriv.WORK_ACTIVITY, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_CRS_INVEST_NATIONALITY			, ReqClPriv.CRS_INVEST_NATIONALITY);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_CRS_TIN							, ReqClPriv.CRS_TIN);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_CRS_TIN_ABSCENCE				, ReqClPriv.CRS_TIN_ABSCENCE);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_CRS_REASON_FOR_TIN_ABSCENCE		, ReqClPriv.CRS_REASON_FOR_TIN_ABSCENCE);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_CRS_SUBREASON_FOR_TIN_ABSCENCE	, ReqClPriv.CRS_SUBREASON_FOR_TIN_ABSCENCE);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_NEED_CHECK						, ReqClPriv.NEED_CHECK);
+
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_FOREIGN_PUBLIC_OFFICIAL		, ReqClPriv.PP_FOREIGN_PUBLIC_OFFICIAL);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_INTERNATIONAL_PUBLIC_OFFICIAL, ReqClPriv.PP_INTERNATIONAL_PUBLIC_OFFICIAL);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_RUSSIAN_PUBLIC_OFFICIAL		, ReqClPriv.PP_RUSSIAN_PUBLIC_OFFICIAL);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_PURPOSE_OF_RELATIONSHIP		, ReqClPriv.PP_PURPOSE_OF_RELATIONSHIP);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_PURPOSE_OF_ACTIVITY			, ReqClPriv.PP_PURPOSE_OF_ACTIVITY);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_FINANCIAL_STATUS				, ReqClPriv.PP_FINANCIAL_STATUS);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_BUSINESS_REPUTATION			, ReqClPriv.PP_BUSINESS_REPUTATION);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_SOURCE_OF_FUNDS				, ReqClPriv.PP_SOURCE_OF_FUNDS);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_NEED_CHECK					, ReqClPriv.PP_NEED_CHECK);
+
+
+	if save_add_props(v_add_properties, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+
+	--Создание клиента
+	p_cl_priv := ::[CL_PRIV]%insert(client);
+	save_pdl(p_cl_priv.[PDL],ReqClPriv.IPDL_TYPE);
+	save_pdl(p_cl_priv.[PDL], 'NOT_PDL');
+	--Сохранение кодового слова
+	if ReqClPriv.CODEWORD is not null then
+		[CODEWORD].[LIB].create_or_update(ReqClPriv.CODEWORD, p_cl_priv%class, p_cl_priv%id);
+	end if;
+	--Установка сроков действия удостоверений
+	set_sert_date(p_cl_priv,v_upd_cat_fordate);
+	if not v_upd_cat and v_upd_cat_fordate then
+		v_upd_cat :=true;
+	end if;
+	--Обновление "Дата обновления анкеты"
+	p_cl_priv.[DATE_ANK]		:= ReqClPriv.DATE_OP;
+	p_cl_priv.[DATE_FORM_UPD_F]	:= nvl(ReqClPriv.MODIFY_DATE,ReqClPriv.DATE_OP);
+	--Сохранение кода уровня риска клиента по легализации
+	if fail_level_ref is not null then
+		::[RISK_RESULTS].[LIB].addRisk_FailLevel(p_cl_priv, fail_level_ref);
+	end if;
+	--Проверка по 207-П
+	::[CLIENT_INTERFACE].[PRX_LEGAL].CL_CHECK_ADD_RESULT
+												(  p_cl_priv										--Клиент
+												, ::[CLIENT_CHECKS]([CODE] = 'TERROR_LIST')			--Вид проверки
+												, ::[CLIENT_INTERFACE].[PRX_LEGAL].get_cl_susp(p_cl_priv, false)--Результат проверки
+												, 'Проверка по списку террористов/экстремистов РФ'	--Примечание
+												, true);
+	-- категория информации
+	::[CATEGORY_INFO].[LIB].GetCategoryInfo(p_cl_priv,null,null,null,p_cl_priv.[CATEGORY_INFO]);
+	-- установка льготных категорий 
+	if v_upd_cat then
+		::[CLIENT].[LIB].set_cat_cl_vulnerable_groups(p_cl_priv);
+	end if;
+	return 0;
+exception when others then
+	-- Причина перехвата others: при возникновении непредвиденной ошибки необходимо продолжить выполнение операции
+	&rb(CreateClient)
+	p_error_msg := substr('Ошибка при создании клиента: '||sqlerrm,1,2000);
+	return -1;
+end;
+
+/******************************************************
+--Обновление существующего клиента--
+******************************************************/
+--Обновление существующего клиента
+--	ReqClPriv - структура запроса
+--	p_cl_priv - ссылка на существующее физическое лицо
+--	p_error_msg - текст ошибки, возникшей при обработке
+--Функция возвращает целое значение:
+--	0 - Клиент обновлен успешно
+--	-1 - ошибка при создании
+public function UpdateClient(ReqClPriv ReqClPrivType, p_cl_priv ref [CL_PRIV], p_error_msg out varchar2(2000)) return integer is
+client			[CL_PRIV];
+fail_level_ref	ref [FAIL_LEVEL]:= null;
+v_upd_cat boolean :=false;
+v_upd_cat_fordate boolean :=false;
+
+v_add_properties add_prop_tab_type;
+
+begin
+	&sp(UpdateClient)
+	client := p_cl_priv;
+	extract_snils_from_cert(ReqClPriv.SNILS,ReqClPriv.CERTIFICATES,ReqClPriv.CONFORM_EXT_CODE);
+	--Обновление ID во внешней системе
+	if ReqClPriv.ID_EXT is not null and length(ReqClPriv.ID_EXT) <= 25 then
+		client.[INTERNAL_CODE] := ReqClPriv.ID_EXT;
+	elsif ReqClPriv.INTERNAL_CODE is not null and length(ReqClPriv.INTERNAL_CODE) <= 25 then
+		client.[INTERNAL_CODE] := ReqClPriv.INTERNAL_CODE;
+	end if;
+	--Обновление наименования и допустимых наименований
+	if update_cl_name(upper(ReqClPriv.NAME), ReqClPriv.NAMES, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Обновление фамилии
+	client.[FAMILY_CL] := nvl(upper(ReqClPriv.LAST_NAME),client.[FAMILY_CL]);
+	--Обновление имени
+	client.[NAME_CL] := nvl(upper(ReqClPriv.FIRST_NAME),client.[NAME_CL]);
+	--Обновление отчества
+	client.[SNAME_CL] := nvl(upper(ReqClPriv.SUR_NAME),client.[SNAME_CL]);
+	--Обновление пола
+	if nvl(ReqClPriv.CONFORM_EXT_CODE,false) and ReqClPriv.SEX is not null and current_ab_code is not null then
+		begin
+			client.[SEX] := &lib_conf_code.get_ibso_ref(current_ab_code, [SEX]%class, ReqClPriv.SEX);
+		exception when message.app_exception then
+			p_error_msg := substr('Ошибка получения пола "'||ReqClPriv.SEX||'" из справочника "Справочник соответствия кодов из внешних систем". Текст ошибки: '||sqlerrm,1,2000);
+			return -1;
+		end;
+	elsif not nvl(ReqClPriv.CONFORM_EXT_CODE,false) and ReqClPriv.SEX is not null then
+		begin
+			client.[SEX] := ::[SEX](CODE = ReqClPriv.SEX);
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найден пол клиента c кодом "'||ReqClPriv.SEX||'"';
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько записей в справочние "Пол клиента" c кодом "'||ReqClPriv.SEX||'"';
+			return -1;
+		end;
+	end if;
+	--Обновление даты рождения
+	if ReqClPriv.DATE_PERS is not null then
+		client.[DATE_PERS] := ReqClPriv.DATE_PERS;
+	end if;
+	--Обновление списка удостоверений
+	if update_cl_passport(ReqClPriv.CERTIFICATES, client, ReqClPriv.CONFORM_EXT_CODE, p_error_msg, v_upd_cat) = -1 then
+		return -1;
+	end if;
+	--Обновление места рождения
+	if ReqClPriv.BORN.CITY is not null then
+		begin
+			&sp(born2)
+			var pob [NAME_CITY_REF];
+			--собираем адрес в строку
+			var str varchar2(500);
+			var country_tag varchar2(128);
+			country_tag := get_country_tag(ReqClPriv.BORN.COUNTRY);
+			str :=	ReqClPriv.BORN.COUNTRY||
+					ReqClPriv.BORN.KLADR_CODE||';'||
+					ReqClPriv.BORN.REGION||';'||
+					ReqClPriv.BORN.CITY;
+			--получение структуры адреса
+			pob := ::[PERSONAL_ADDRESS].[LIB].Parse_Str_For_City(
+												 p_Format	== country_tag||'KLADR_CODE,REGION,CITY'
+												,p_Delimiter== ';'
+												,p_Str		== str
+												,p_Country	== null
+												,p_Cache	== true
+												,p_Kladr	== 1
+												);
+			if pob is not null then
+				client.[BORN]		:= pob;
+			--Ссылку на населенный пункт не определили
+			--Сохраняем место рождения строкой, если на клиенте не заполнена ссылка
+			elsif client.[BORN] is null then
+				if ReqClPriv.BORN.REGION is not null then
+					str :=	ReqClPriv.BORN.REGION||', '||
+							ReqClPriv.BORN.CITY;
+				else
+					str :=	ReqClPriv.BORN.CITY;
+				end if;
+				client.[BORN]				:= null;
+				client.[DOC].[BIRTH_PLACE]	:= str;
+			end if;
+		exception when others then
+			-- Причина перехвата others: при возникновении непредвиденной ошибки необходимо продолжить выполнение операции
+			&rb(born2)
+			null;
+		end;
+	end if;
+	--Обновление списка счетов в банках
+	if save_accs_bank(ReqClPriv.ACCS_BANK, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Обновление списка адресов
+	if save_address(ReqClPriv.ADDRESSES, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Обновление списка операций клиента
+	if save_cl_oper(ReqClPriv.CL_OPER, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Обновление списка действующих кодов ОКОНХ
+	if save_okonh(ReqClPriv.OKONH, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Обновление списка контактов
+	if save_contact(ReqClPriv.CONTACTS, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Обновление статуса
+	if ReqClPriv.COM_STATUS is not null then
+		begin
+			select a(a)
+			in ::[COM_STATUS_PRD] all
+			where	a.[CODE] = ReqClPriv.COM_STATUS
+			into client.[COM_STATUS];
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найден обобщенный статус по коду: '||ReqClPriv.COM_STATUS;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько обобщенных статусов по коду: '||ReqClPriv.COM_STATUS;
+			return -1;
+		end;
+	end if;
+	--Обновление страны гражданства клиента
+	if save_cl_country(ReqClPriv.COUNTRY, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Обновление списка склонений наименований
+	if save_decl_fio(ReqClPriv.DECL_FIO, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Обновление подразделения
+	if ReqClPriv.DEPART is not null then
+		begin
+			select x(x%id)
+			in ::[DEPART] all
+			where	x.[CODE] = ReqClPriv.DEPART
+			into client.[DEPART];
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найдено подразделение по коду :'||ReqClPriv.DEPART;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько подразделений по коду :'||ReqClPriv.DEPART;
+			return -1;
+		end;
+	end if;
+	--Обновление истории характера отношений с банком
+	if save_disposit(ReqClPriv.DISPOSITS, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Обновление кода уровня риска клиента по легализации
+	if ReqClPriv.FAIL_LEVEL is not null then
+		begin
+			fail_level_ref := ::[FAIL_LEVEL]([CODE] = ReqClPriv.FAIL_LEVEL);
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найден уровень риска по коду: '||ReqClPriv.FAIL_LEVEL;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько уровней риска по коду: '||ReqClPriv.FAIL_LEVEL;
+			return -1;
+		end;
+	end if;
+	--Обновление обоснования уровня риска
+	if trim(ReqClPriv.FAIL_MARK) is not null then
+		client.[FAIL_MARK] := ReqClPriv.FAIL_MARK;
+	else
+		client.[FAIL_MARK] := 'Оснований для отнесения клиента к высокому уровню риска на момент идентификации не установлено';
+	end if;
+	--Обновление филиала
+	if ReqClPriv.FILIAL is not null then
+		begin
+			client.[FILIAL]:=::[BRANCH]([CODE]=ReqClPriv.FILIAL);
+		exception when NO_DATA_FOUND then
+			p_error_msg:='Не найден филиал по коду: '||ReqClPriv.FILIAL;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg:='Найдено несколько филиалов по коду: '||ReqClPriv.FILIAL;
+			return -1;
+		end;
+	end if;
+	--Обновление группы взаимосвязанных клиентов
+	if ReqClPriv.GROUP_LINK is not null then
+		begin
+			client.[GROUP_LINK]:=::[GROUP_LINK]([NUM]=ReqClPriv.GROUP_LINK);
+		exception when NO_DATA_FOUND then
+			p_error_msg:='Не найдена группа по коду: '||ReqClPriv.GROUP_LINK;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg:='Найдено несколько групп по коду: '||ReqClPriv.GROUP_LINK;
+			return -1;
+		end;
+	end if;
+	--Обновление интернационального наименования
+	if ReqClPriv.I_NAME is not null then
+		client.[I_NAME] := ReqClPriv.I_NAME;
+	end if;
+	--Обновление ИНН
+	if ReqClPriv.INN is not null then
+		client.[INN] := ReqClPriv.INN;
+	end if;
+	--Обновление СНИЛС
+	if ReqClPriv.SNILS is not null then
+		if length(ReqClPriv.SNILS) > ::[CL_PRIV].[SNILS]%size then
+			p_error_msg := 'Длина СНИЛС превышает '||::[CL_PRIV].[SNILS]%size||' символов!';
+			return -1;
+		end if;
+		client.[SNILS] := ReqClPriv.SNILS;
+	end if;
+	--Обновление списка налоговых инспекций
+	if save_inspect(ReqClPriv.INSPECT, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Обновление отношений с законом
+	if ReqClPriv.LOW is not null then
+		client.[LOW] := ReqClPriv.LOW;
+	end if;
+	--Обновление семейного положения
+	if ReqClPriv.MARIGE_STATUS is not null then
+		begin
+			client.[MARIGE_STATUS] := ::[FAMILY_TYPE]([CODE]=ReqClPriv.MARIGE_STATUS);
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найдено семейное положение по коду: '||ReqClPriv.MARIGE_STATUS;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько семейных положений по коду: '||ReqClPriv.MARIGE_STATUS;
+			return -1;
+		end;
+	end if;
+	--Обновление примечания
+	if ReqClPriv.NOTES is not null then
+		client.[NOTES] := ReqClPriv.NOTES;
+	end if;
+	--Обновление характеристики операций
+	if ReqClPriv.OPER_CHARACTER is not null then
+		client.[OPER_CHARACTER]:=ReqClPriv.OPER_CHARACTER;
+	end if;
+	--Обновление статуса зарегистрированного лица
+	if ReqClPriv.REG_STATUS is not null then
+		begin
+			client.[REG_STATUS]:=::[PERSON_STAT]([REG_STATUS]=ReqClPriv.REG_STATUS and [CL_REF] is null);
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найден статус зарегистрированного лица по коду: '||ReqClPriv.REG_STATUS;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько статусов зарегистрированного лица по коду: '||ReqClPriv.REG_STATUS;
+			return -1;
+		end;
+	end if;
+	--Обновление регистрационного номера
+	if ReqClPriv.REGISTR_NUM is not null then
+		client.[REGISTR_NUM] := ReqClPriv.REGISTR_NUM;
+	end if;
+	--Обновление налогового резидентства
+	if ReqClPriv.RESIDENT is not null then
+		client.[NU_REZIDENT] := ReqClPriv.RESIDENT;
+	else
+		if client.[COUNTRY] = [SYSTEM].[COUNTRY] then
+			client.[NU_REZIDENT] := true;
+		elsif client.[COUNTRY] is not null and client.[COUNTRY] != [SYSTEM].[COUNTRY] then
+			client.[NU_REZIDENT] := false;
+		elsif client.[COUNTRY] is null then
+			client.[COUNTRY] := [SYSTEM].[COUNTRY];
+			client.[NU_REZIDENT] := true;
+		end if;
+	end if;
+	--Обновление валютного резидентсва
+	if ReqClPriv.RESIDENT_VAL is not null then
+		client.[IS_RESIDENT] := ReqClPriv.RESIDENT_VAL;	
+	else
+		if nvl(client.[COUNTRY], [SYSTEM].[COUNTRY]) = [SYSTEM].[COUNTRY] then
+			client.[IS_RESIDENT] := true;
+		else
+			client.[IS_RESIDENT] := false;
+		end if;
+	end if;
+	--Обновление принадлежности к ПДЛ (публичное должностное лицо)
+	if ReqClPriv.IPDL_TYPE is not null then
+		begin
+			client.[IS_IPDL]:=::[IPDL_TYPE]([CODE]=ReqClPriv.IPDL_TYPE);
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найден тип ПДЛ по коду: '||ReqClPriv.IPDL_TYPE;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько типов ПДЛ по коду: '||ReqClPriv.IPDL_TYPE;
+			return -1;
+		end;
+	end if;
+	save_pdl(client.[PDL],ReqClPriv.IPDL_TYPE);
+	--Обновление категории клиента
+	if save_vid_cl(ReqClPriv.VID_CL, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Обновление миграционных карт
+	if save_migr_cards(ReqClPriv.MIGR_CARD, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	--Обновление трудовой деятельности
+	if save_work_activity(ReqClPriv.WORK_ACTIVITY, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	
+	--Обновление "Дата последних изменений"
+	begin
+	select cl( cl.[MODIFY_DATE])
+		in ::[CLIENT]
+		where cl%id = p_cl_priv%id
+		into client.[MODIFY_DATE];
+	exception when NO_DATA_FOUND then
+		null;
+	end;
+
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_CRS_INVEST_NATIONALITY			, ReqClPriv.CRS_INVEST_NATIONALITY);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_CRS_TIN							, ReqClPriv.CRS_TIN);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_CRS_TIN_ABSCENCE				, ReqClPriv.CRS_TIN_ABSCENCE);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_CRS_REASON_FOR_TIN_ABSCENCE		, ReqClPriv.CRS_REASON_FOR_TIN_ABSCENCE);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_CRS_SUBREASON_FOR_TIN_ABSCENCE	, ReqClPriv.CRS_SUBREASON_FOR_TIN_ABSCENCE);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_NEED_CHECK						, ReqClPriv.NEED_CHECK);
+
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_FOREIGN_PUBLIC_OFFICIAL		, ReqClPriv.PP_FOREIGN_PUBLIC_OFFICIAL);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_INTERNATIONAL_PUBLIC_OFFICIAL, ReqClPriv.PP_INTERNATIONAL_PUBLIC_OFFICIAL);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_RUSSIAN_PUBLIC_OFFICIAL		, ReqClPriv.PP_RUSSIAN_PUBLIC_OFFICIAL);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_PURPOSE_OF_RELATIONSHIP		, ReqClPriv.PP_PURPOSE_OF_RELATIONSHIP);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_PURPOSE_OF_ACTIVITY			, ReqClPriv.PP_PURPOSE_OF_ACTIVITY);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_FINANCIAL_STATUS				, ReqClPriv.PP_FINANCIAL_STATUS);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_BUSINESS_REPUTATION			, ReqClPriv.PP_BUSINESS_REPUTATION);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_SOURCE_OF_FUNDS				, ReqClPriv.PP_SOURCE_OF_FUNDS);
+	setAddProperty(v_add_properties, ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].cv_property_grp_PP_NEED_CHECK					, ReqClPriv.PP_NEED_CHECK);
+
+	if save_add_props(v_add_properties, client, p_error_msg) = -1 then
+		return -1;
+	end if;
+	
+	--Обновление клиента
+	client%attrs; -- BS00483857 Исправление дефекта установки даты обновления в функциональном реквизите
+	
+	--Обновление "Дата обновления анкеты"
+	if nvl(ReqClPriv.MODIFY_DATE,[SYSTEM]::[OP_DATE]) is not null then
+		client.[DATE_FORM_UPD_F] := nvl(ReqClPriv.MODIFY_DATE,[SYSTEM]::[OP_DATE]);
+	end if;
+	
+	p_cl_priv := client;
+	
+	--Сохранение кодового слова
+	if ReqClPriv.CODEWORD is not null then
+		[CODEWORD].[LIB].create_or_update(ReqClPriv.CODEWORD, p_cl_priv%class, p_cl_priv%id);
+	end if;
+	--Сохранение кода уровня риска клиента по легализации
+	if fail_level_ref is not null then
+		::[RISK_RESULTS].[LIB].addRisk_FailLevel(p_cl_priv, fail_level_ref);
+	end if;
+	--Установка сроков действия удостоверений
+	set_sert_date(p_cl_priv,v_upd_cat_fordate);
+	if not v_upd_cat and v_upd_cat_fordate then
+		v_upd_cat :=true;
+	end if;
+	--Проверка по 207-П
+	::[CLIENT_INTERFACE].[PRX_LEGAL].CL_CHECK_ADD_RESULT
+												(  p_cl_priv										--Клиент
+												, ::[CLIENT_CHECKS]([CODE] = 'TERROR_LIST')			--Вид проверки
+												, ::[CLIENT_INTERFACE].[PRX_LEGAL].get_cl_susp(p_cl_priv, false)--Результат проверки
+												, 'Проверка по списку террористов/экстремистов РФ'	--Примечание
+												, true);								
+	-- установка льготных категорий 
+	if v_upd_cat then
+		::[CLIENT].[LIB].set_cat_cl_vulnerable_groups(p_cl_priv);
+	end if;
+	return 0;
+exception when others then
+	-- Причина перехвата others: при возникновении непредвиденной ошибки необходимо продолжить выполнение операции
+	&rb(UpdateClient)
+	p_error_msg := substr('Ошибка при обновлении клиента: '||sqlerrm,1,2000);
+	return -1;
+end;
+
+/******************************************************
+--Сохранение списка счетов в банках--
+******************************************************/
+function save_accs_bank(AccsBank in AccsBankTable, client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+acc		[BANKS_ACC];
+acc_ref	ref [BANKS_ACC];
+Begin
+	for i in 1..AccsBank.count
+	loop
+		acc := null;
+		acc%init;
+		--Поиск банка по наименованию
+		begin
+			select a(a)
+			in ::[CL_BANK] all
+			where	upper(a.[NAME]) = upper(AccsBank(i).BANK)
+			fetch 1
+			into acc.[BANK];
+		exception when NO_DATA_FOUND then
+			null;
+		end;
+		acc.[DATE_BEGIN]	:= AccsBank(i).DATE_BEGIN;
+		acc.[DATE_END]		:= AccsBank(i).DATE_END;
+		acc.[INN]			:= AccsBank(i).INN;
+		acc.[MAIN_V_ID]		:= AccsBank(i).MAIN_V_ID;
+		acc.[NAME_ORG]		:= AccsBank(i).NAME_ORG;
+		acc.[NOTES]			:= AccsBank(i).NOTES;
+		acc.[PR_FORM]		:= AccsBank(i).PR_FORM;
+		--Поиск типа счета
+		begin
+			select a(a)
+			in ::[TIP_ACC] all
+			where	a.[COD] = AccsBank(i).TYPE_
+			fetch 1
+			into acc.[TYPE];
+		exception when NO_DATA_FOUND then
+			null;
+		end;
+		--Поиск участника расчетов
+		begin
+			select a(a)
+			in ::[CL_PART] all
+			where	a.[CODE] = AccsBank(i).USH
+			fetch 1
+			into acc.[USH];
+		exception when NO_DATA_FOUND then
+			null;
+		end;
+		--Поиск существующей записи в массиве, добавление/обновление
+		begin
+			select a(a)
+			in client.[ACC_BANK]
+			where	a.[BANK] = acc.[BANK]
+				and a.[MAIN_V_ID] = acc.[MAIN_V_ID]
+			fetch 1
+			into acc_ref;
+			acc_ref := acc;
+		exception when NO_DATA_FOUND then
+			client.[ACC_BANK]%insert(acc);
+		end;
+	end loop;
+	return 0;
+end;
+
+
+function createCity(pCountryRef ref [COUNTRY], pCountryCode varchar2, pCityName varchar2) return ref [NAMES_CITY] is
+	vCountry	ref [COUNTRY];
+	--vCityKind	ref [PEOPLE_PLACE] := ::[PEOPLE_PLACE]([SHORT_NAME] = 'г' and [OBJ_LEVEL] = 5);
+	vNamesCity	[NAMES_CITY];
+	vCityName	[NAMES_CITY].[NAME]%type := upper(pCityName);
+begin
+	if pCountryRef is null then
+		for (select x(x :c_ref)
+			 in ::[COUNTRY]
+			 where rtrim(pCountryCode, '; ') in (x.[CODE], x.[ALFA_3], x.[ALFA_2])
+			)
+		loop
+			vCountry := x.c_ref;
+		end loop;
+	else
+		vCountry := pCountryRef;
+	end if;
+
+	for (select x(x :c_ref)
+		 in ::[NAMES_CITY]
+		 where x.[COUNTRY] = vCountry
+		 and upper(x.[NAME]) = vCityName
+		)
+	loop
+		return x.c_ref;
+	end loop;
+	vNamesCity.[COUNTRY]	:= vCountry;
+	--vNamesCity.[KIND]		:= vCityKind;
+	vNamesCity.[NAME]		:= vCityName;
+	return ::[NAMES_CITY]%insert(vNamesCity);
+end;
+
+/******************************************************
+--Сохранение списка адресов--
+******************************************************/
+function save_address(AddressList in AddressTable, client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+addrType	ref [ADDRESS_TYPE];
+address_struct	[PERSONAL_ADDRESS];
+address_ref	ref	[PERSONAL_ADDRESS];
+country			[COUNTRY_REF];
+addr_str	varchar2(1000);
+country_tag varchar2(128);
+begin
+	--проверка заполненности списка адресов в запросе
+	for i in 1..AddressList.count
+	loop
+		--Определение ссылки на тип адреса
+		if AddressList(i).ADDR_TYPE is not null then
+			begin
+				addrType := ::[ADDRESS_TYPE](KOD = AddressList(i).ADDR_TYPE);
+			exception when NO_DATA_FOUND then
+				p_error_msg := 'Не найден тип адреса c кодом "'||AddressList(i).ADDR_TYPE||'"';
+				return -1;
+			when TOO_MANY_ROWS then
+				p_error_msg := 'Найдено несколько записей в справочние "Типы адресов" c кодом "'||AddressList(i).ADDR_TYPE||'"';
+				return -1;
+			end;
+		end if;
+		--собираем адрес в строку
+		country_tag := get_country_tag(AddressList(i).COUNTRY);
+		addr_str :=	AddressList(i).COUNTRY||
+					AddressList(i).KLADR_CODE||';'||
+					AddressList(i).POST_CODE||';'||
+					AddressList(i).REGION||';'||
+					AddressList(i).DISTRICT||';'||
+					AddressList(i).CITY_TYPE||' '||
+					AddressList(i).CITY||';'||
+					AddressList(i).STREET||';'||
+					AddressList(i).HOUSE||';'||
+					AddressList(i).KORPUS||';'||
+					AddressList(i).FLAT;
+		if trim(replace(addr_str,';')) is not null then
+			--получение структуры адреса
+			::[PERSONAL_ADDRESS].[LIB].Parse_Str(
+												 p_Format	== country_tag||'KLADR_CODE,ZIP,REGION,DISTRICT,CITY,STREET,HOUSE_NT,KORPUS_NT,FLAT_NT'
+												,p_Delimiter== ';'
+												,p_Str		== addr_str
+												,p_Country	== country
+												,P_Addr 	== address_struct
+												,p_Cache	== true
+												,p_Kladr	== 1
+												);
+			if trim(AddressList(i).IMP_STR) is not null then
+				address_struct.[IMP_STR] := AddressList(i).IMP_STR;
+			end if;
+		else
+			address_struct.[IMP_STR] := AddressList(i).IMP_STR;
+		end if;
+		address_struct.[TYPE] := addrType;
+		address_struct.[REG_PLACE_CODE] := AddressList(i).REG_PLACE_CODE;
+		address_struct.[REG_PLACE_NAME] := AddressList(i).REG_PLACE_NAME;
+
+		if address_struct.[CITY] is null then
+			address_struct.[CITY] := createCity(country, AddressList(i).COUNTRY, AddressList(i).CITY);
+		end if;
+
+		begin
+			select a(a) in ::[PERSONAL_ADDRESS] collections
+			where	a%collection = client.[ADDRESSES]
+				and	a.[TYPE] = addrType
+			fetch 1
+			into address_ref;
+			address_struct.[METRO_STATIONS] := address_ref.[METRO_STATIONS];
+			address_ref := address_struct;
+		exception when NO_DATA_FOUND then
+			address_struct%init(true,true);
+			client.[ADDRESSES]%insert(address_struct);
+		end;
+		address_struct := null;
+	end loop;
+	
+	return 0;
+end;
+
+/******************************************************
+--Сохранение списка операций клиента--
+******************************************************/
+function save_cl_oper(ClOper in ClOperTable, client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+op			[CL_OPERATIONS];
+op_ref	ref	[CL_OPERATIONS];
+begin
+	for i in 1..ClOper.count
+	loop
+		op:=null;
+		op%init;
+		op.[OPER_COUNT]	:= ClOper(i).OPER_COUNT;
+		op.[OPER_DATE]	:= ClOper(i).OPER_DATE;
+		op.[OPER_SUM]	:= ClOper(i).OPER_SUM;
+		Begin
+			select a(a)
+			in ::[METACLASS] all
+			where a.[NAME] = ClOper(i).OPERATION
+			into op.[OPERATION];
+		Exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найден метакласс операции по имени :'||op.[OPERATION];
+			return -1;
+		End;
+		--Поиск существующей записи. Добавление/обновление.
+		begin
+			select a(a)
+			in client.[CL_OPER1]
+			where	a.[OPERATION] = op.[OPERATION]
+			fetch 1
+			into op_ref;
+			op_ref := op;
+		exception when NO_DATA_FOUND then
+			op_ref := client.[CL_OPER1]%insert(op);
+		end;
+	end loop;
+	return 0;
+end;
+
+/******************************************************
+--Сохранение списка действующих кодов ОКОНХ--
+******************************************************/
+function save_okonh(okonh varchar2(2000), client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+okonh_ref	[OKONH_REF];
+ext_code	varchar2(200);
+okonh_str	[OKONH_PERIOD];
+okonh_p_ref	ref [OKONH_PERIOD];
+	function getNextValue (inst in out varchar2(32000))
+	return varchar2(32000)
+	is
+	sep varchar2(1) := ';';
+	res varchar2(32000);
+	pos integer;
+	begin
+		pos:=instr(inst,sep);
+		if pos>0 then
+			res:=substr(inst,1,pos-1);
+			inst:=substr(inst,pos+1);
+			return res;
+		else
+			res:=inst;
+			inst:='';
+			return res;
+		end if;
+		return '';
+	end;
+begin
+	if okonh is not null then
+		while length(okonh)>0 loop
+			okonh_ref:=null;
+			ext_code:=getNextValue(okonh);
+			begin
+				select a(a)
+				in ::[OKONH] all
+				where	a.[CODE] = ext_code
+				fetch 1
+				into okonh_ref;
+			Exception when NO_DATA_FOUND then
+				p_error_msg:='Не найден ОКОНХ по коду :'||ext_code;
+				return -1;
+			end;
+			okonh_str.[OKONH] := okonh_ref;
+			--Поиск существующей записи. Добавление/обновление.
+			begin
+				select a(a)
+				in client.[OKONH_IN_PERIOD]
+				where a.[OKONH] = okonh_str.[OKONH]
+				fetch 1
+				into okonh_p_ref;
+			exception when NO_DATA_FOUND then
+				client.[OKONH_IN_PERIOD]%insert(okonh_str);
+			end;
+		end loop;
+	end if;
+	return 0;
+end;
+
+/******************************************************
+--Сохранение списка контактов--
+******************************************************/
+function save_contact(ContactList in ContactTable, client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+device_ref	ref [COMUNICATION];
+status_ref	ref [OWNER_COM];
+contact		ref [CONTACTS];
+begin
+	for i in 1..ContactList.count
+	loop
+		device_ref := null;
+		status_ref := null;
+		contact := null;
+		if ContactList(i).NUMB is null then
+			continue;
+		end if;
+		--поиск ссылки на тип устройства в справочнике "Тип связи"
+		if ContactList(i).TYPE_ is not null then
+			begin
+				device_ref := ::[COMUNICATION](CODE = ContactList(i).TYPE_);
+			exception when NO_DATA_FOUND then
+				p_error_msg := 'Не найден тип связи c кодом "'||ContactList(i).TYPE_||'"';
+				return -1;
+			when TOO_MANY_ROWS then
+				p_error_msg := 'Найдено несколько записей в справочние "Тип связи" c кодом "'||ContactList(i).TYPE_||'"';
+				return -1;
+			end;
+		end if;
+		--поиск ссылки на статус контакта в справочнике "Принадлежность контакта"
+		if ContactList(i).PRIVATE is not null then
+			begin
+				status_ref := ::[OWNER_COM](CODE = ContactList(i).PRIVATE);
+			exception when NO_DATA_FOUND then
+				p_error_msg := 'Не найдена принадлежность контакта c кодом "'||ContactList(i).PRIVATE||'"';
+				return -1;
+			when TOO_MANY_ROWS then
+				p_error_msg := 'Найдено несколько записей в справочние "Принадлежность контакта" c кодом "'||ContactList(i).PRIVATE||'"';
+				return -1;
+			end;
+		end if;
+		--Поиск существующей записи в массиве. Добавление/обновление.
+		begin
+			select a(a)
+			in client.[CONTACTS]
+			where	nvl(a.[TYPE],0) = nvl(device_ref,nvl(a.[TYPE],0))
+				and nvl(a.[PRIVATE],0) = nvl(status_ref,nvl(a.[PRIVATE],0))
+				and a.[NUMB] = ContactList(i).NUMB
+			fetch 1
+			into contact;
+			--обновление даты регистрации контакта и признака "Действующий"
+			update a(a.[ACTIV] = ContactList(i).ACTIV)
+			in ::[CONTACTS] collections
+			where a = contact;
+		exception when NO_DATA_FOUND then
+			client.[CONTACTS].NEW#AUTO	(
+										 P#ACTIV	== ContactList(i).ACTIV	--Действующий контакт
+										,P#NUMB		== ContactList(i).NUMB	--Номер (адрес)
+										,P#PRIVATE	== status_ref			--Принадлежность
+										,P#TYPE		== device_ref			--Тип связи
+										);
+		end;
+	end loop;
+	return 0;
+end;
+
+/******************************************************
+--Сохранение списка склонении наименований--
+******************************************************/
+function save_decl_fio(DeclFio in DeclFioTable, client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+dec_ref	ref [DECLENSION];
+dec		[DECLENSION];
+begin
+	for i in 1..DeclFio.count
+	loop
+		if DeclFio(i).CASE_GR is not null and DeclFio(i).NAME is not null then
+			dec := null;
+			dec%init;
+			begin
+				dec.[CASE_GR]:=::[CASE_GRAM]([CODE] = DeclFio(i).CASE_GR);
+			exception when NO_DATA_FOUND then
+				p_error_msg := 'Не найден падеж по коду: '||DeclFio(i).CASE_GR;
+				return -1;
+			when TOO_MANY_ROWS then
+				p_error_msg := 'Найдено несколько падежей по коду: '||DeclFio(i).CASE_GR;
+				return -1;
+			end;
+			dec.[NAME] := DeclFio(i).NAME;
+			--Поиск существующей записи в массиве. Добавление/обновление.
+			begin
+				select a(a)
+				in client.[DECL_FIO]
+				where a.[CASE_GR] = dec.[CASE_GR]
+				fetch 1
+				into dec_ref;
+				dec_ref := dec;
+			exception when NO_DATA_FOUND then
+				dec_ref := client.[DECL_FIO]%insert(dec);
+			end;
+		end if;
+	end loop;
+	return 0;
+end;
+
+/******************************************************
+--Сохранение истории характера отношений с банком--
+******************************************************/
+function save_disposit(Disposit in DispositTable, client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+str_disp_ref	ref [STR_DISPOSITION];
+dis_ref			[REF_DISPOSITION];
+begin
+	for i in 1..Disposit.count
+	loop
+		begin
+			dis_ref := ::[DISPOSITION](upper([SHORT_NAME])=upper(Disposit(i).DISPOSITION));
+		exception when NO_DATA_FOUND then
+			p_error_msg:='Не найден характер отношений с банком по короткому наименованию: '||Disposit(i).DISPOSITION||'.'||NL$||'Синхронизируйте записи в справочниках "Характер отношений с банком".';
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg:='Найдено несколько характеров отношений с банком по короткому наименованию: '||Disposit(i).DISPOSITION||'.'||NL$||'Синхронизируйте записи в справочниках "Характер отношений с банком".';
+			return -1;
+		End;
+		--Поиск существующей записи в массиве. Добавление/обновление.
+		begin
+			select a(a)
+			in client.[DISPOSITS]
+			where a.[DISPOSITION] = dis_ref
+			fetch 1
+			into str_disp_ref;
+			str_disp_ref.[EDIT#AUTO](
+									 P_DATE_BEG		== Disposit(i).DATE_BEG	--Дата начала действия
+									,P_DATE_END		== Disposit(i).DATE_END	--Дата окончания действия
+									,P_DISPOSITION	== dis_ref				--Характер отношений с банком
+									);
+		exception when NO_DATA_FOUND then
+			client.[DISPOSITS].[NEW#AUTO]	(
+											 P_DATE_BEG		== Disposit(i).DATE_BEG	--Дата начала действия
+											,P_DATE_END		== Disposit(i).DATE_END	--Дата окончания действия
+											,P_DISPOSITION	== dis_ref				--Характер отношений с банком
+											);
+		end;
+	end loop;
+	return 0;
+End;
+
+/******************************************************
+--Сохранение списка удостоверений--
+******************************************************/
+function save_cl_passport(PassportList in CertificTable, client in out [CL_PRIV], conform_ext_code boolean, p_error_msg out varchar2(2000), p_upd_cat in out [BOOLEAN])
+return integer
+is
+type certif_rec is record	(
+							 type_cert	ref [CERTIFIC_TYPE]
+							,ser_num		varchar2(50)
+							,passp_list_id	integer
+							);
+type certif_tbl_type is table of certif_rec;
+certif_tbl					certif_tbl_type;
+type uniq_sernum_tbl_type is varray(0) of varchar2;
+uniq_sernum_tbl				uniq_sernum_tbl_type;
+cert_rec					[CERTIFICATE];
+is_main_exist				boolean := false;
+begin
+	uniq_sernum_tbl.init;
+	--Получение списка уникальных удостоверений
+	for i in 1..PassportList.count
+	loop
+		--Получение ссылки на тип удостоверения
+		if nvl(conform_ext_code,false) and current_ab_code is not null then
+			begin
+				certif_tbl(i).type_cert := &lib_conf_code.get_ibso_ref(current_ab_code, [CERTIFIC_TYPE]%class, PassportList(i).TYPE_);
+			exception when message.app_exception then
+				p_error_msg := substr('Ошибка получения типа удостоверения с кодом "'||PassportList(i).TYPE_||'" из справочника "Справочник соответствия кодов из внешних систем". Текст ошибки: '||sqlerrm,1,2000);
+				return -1;
+			end;
+		else
+			begin
+				certif_tbl(i).type_cert := ::[CERTIFIC_TYPE](upper(KOD) = upper(PassportList(i).TYPE_));
+			exception when NO_DATA_FOUND then
+				begin
+					certif_tbl(i).type_cert := ::[CERTIFIC_TYPE](upper(CODE_GNI) = upper(PassportList(i).TYPE_));
+				exception when NO_DATA_FOUND then
+					p_error_msg := 'Не найден тип удостоверения с кодом или кодом ГНИ '||PassportList(i).TYPE_;
+					return -1;
+				when TOO_MANY_ROWS then
+					p_error_msg := 'Найдено несколько типов удостоверений с кодом ГНИ '||PassportList(i).TYPE_;
+					return -1;
+				end;
+			when TOO_MANY_ROWS then
+				p_error_msg := 'Найдено несколько типов удостоверений с кодом '||PassportList(i).TYPE_;
+				return -1;
+			end;
+		end if;
+		certif_tbl(i).ser_num := PassportList(i).SER||PassportList(i).NUM;
+		certif_tbl(i).passp_list_id := i;
+		--Уникальными считаем только паспорта РФ
+		if certif_tbl(i).type_cert = const_passport_type then
+			uniq_sernum_tbl.extend(1);
+			uniq_sernum_tbl(uniq_sernum_tbl.count) := PassportList(i).SER||PassportList(i).NUM;
+		end if;
+		if nvl(PassportList(i).main,false) then
+			--Первое основное удостоверение
+			if not is_main_exist then
+				is_main_exist := true;
+			--Последующие основные удостоверения
+			else
+				p_error_msg := 'В запросе передано более одного основного удостоверения';
+				return -1;
+			end if;
+		end if;
+	end loop;
+	--Обработка списка уникальных удостоверений
+	if certif_tbl.count > 0 then
+		declare
+			type cl_tbl_type is table of ref [CL_PRIV];
+			cl_tbl	cl_tbl_type;
+			temp_str varchar2(32000);
+			main_cert boolean;
+		begin
+			var temp_cl_id ref [CL_PRIV];
+			select c(distinct(c.cl_))
+			in (
+				select a(d :cl_)
+				in ::[CERTIFICATE], (::[CL_PRIV] all :d) collections
+				where a%collection = d.[DOC_ARR]
+					and	a.[TYPE] = const_passport_type
+					and	replace(a.[SER]||a.[NUM], ' ', '') in (select z(replace(z.COLUMN_VALUE,' ','')) in uniq_sernum_tbl)
+					and (case when d.[COM_STATUS] = ::[COM_STATUS_PRD]([CODE] = 'ARHIVE') then 0 else 1 end = 1)
+				union
+				select b(b :cl_)
+				in ::[CL_PRIV] all
+				where b.[DOC].[TYPE] = const_passport_type
+					and	replace(b.[DOC].[SER]||b.[DOC].[NUM], ' ', '') in (select z(replace(z.COLUMN_VALUE,' ','')) in uniq_sernum_tbl)
+					and (case when b.[COM_STATUS] = ::[COM_STATUS_PRD]([CODE] = 'ARHIVE') then 0 else 1 end = 1)
+				)
+			into temp_cl_id;
+			--Ошибка "Уникальное удостоверение принадлежит другому клиенту"
+			p_error_msg := 'Уникальное удостоверение принадлежит клиенту "'||temp_cl_id.[NAME]||'" (id='||temp_cl_id%id||')';
+			return -1;
+		exception
+			when NO_DATA_FOUND then
+				--Добавление всех уникальных удостоверений
+				for i in 1..certif_tbl.count
+				loop
+					main_cert := false;
+					--Установка признака "Основное"
+					if not is_main_exist then
+						--Основное удостоверение не отмечено в запросе
+						if ((PassportList(certif_tbl(i).passp_list_id).DATE_END > nvl([SYSTEM]::[OP_DATE],trunc(sysdate))
+									or PassportList(certif_tbl(i).passp_list_id).DATE_END is null)
+								and certif_tbl(i).type_cert = const_passport_type) then
+							main_cert := true;
+						end if;
+					else
+						--Основное удостоверение отмечено в запросе
+						if PassportList(certif_tbl(i).passp_list_id).MAIN then
+							main_cert := true;
+						end if;
+					end if;
+					if PassportList(certif_tbl(i).passp_list_id).DATE_END is not null and PassportList(certif_tbl(i).passp_list_id).DATE_ >= PassportList(certif_tbl(i).passp_list_id).DATE_END then
+						p_error_msg := 'Дата начала действия удостоверения '||certif_tbl(i).type_cert.[NAME]||' '||PassportList(certif_tbl(i).passp_list_id).SER||' '||PassportList(certif_tbl(i).passp_list_id).NUM||' больше даты окончания действия.';
+						return -1;
+					end if;
+					--Добавление удостоверения
+					cert_rec.[TYPE]			:= certif_tbl(i).type_cert;									--Тип удостоверения
+					cert_rec.[SER]			:= PassportList(certif_tbl(i).passp_list_id).SER;			--Серия
+					cert_rec.[NUM]			:= PassportList(certif_tbl(i).passp_list_id).NUM;			--Номер
+					cert_rec.[WHO]			:= PassportList(certif_tbl(i).passp_list_id).WHO;			--Кем выдан
+					cert_rec.[DATE]			:= PassportList(certif_tbl(i).passp_list_id).DATE_;			--Дата выдачи
+					cert_rec.[DATE_END]		:= PassportList(certif_tbl(i).passp_list_id).DATE_END;		--Действителен до
+					cert_rec.[VALID_BEFORE] := ::[CL_PRIV].[EDIT#AUTO].Calc_Date_Valid_Cert(cert_rec.[TYPE], cert_rec.[DATE_END]);
+					cert_rec.[DEPART_CODE]	:= PassportList(certif_tbl(i).passp_list_id).DEPART_CODE;	--Код подразделения, выдавшего удостоверение
+					cert_rec.[PLACE]		:= PassportList(certif_tbl(i).passp_list_id).PLACE;			--Место выдачи
+					if main_cert then
+						client.[DOC] := cert_rec;
+					else
+						client.[DOC_ARR]%insert(cert_rec);
+					end if;
+					if not p_upd_cat and ::[CLIENT].[LIB].type_cert_upd_cat_cl(certif_tbl(i).type_cert) then -- если относятся к льготникам, то необходимо будет обновить категорию клиента 
+						p_upd_cat:=true;
+					end if;					
+				end loop;
+			when TOO_MANY_ROWS then
+				begin
+					select c(distinct(c.cl_))
+					in (
+						select a(d :cl_)
+						in ::[CERTIFICATE], (::[CL_PRIV] all :d) collections
+						where a%collection = d.[DOC_ARR]
+							and	a.[TYPE] = const_passport_type
+							and	replace(a.[SER]||a.[NUM], ' ', '') in (select z(replace(z.COLUMN_VALUE,' ','')) in uniq_sernum_tbl)
+							and (case when d.[COM_STATUS] = ::[COM_STATUS_PRD]([CODE] = 'ARHIVE') then 0 else 1 end = 1)
+						union
+						select b(b :cl_)
+						in ::[CL_PRIV] all
+						where b.[DOC].[TYPE] = const_passport_type
+							and	replace(b.[DOC].[SER]||b.[DOC].[NUM], ' ', '') in (select z(replace(z.COLUMN_VALUE,' ','')) in uniq_sernum_tbl))
+					into cl_tbl;
+					temp_str := 'c id ';
+					for cl_tbl_idx in 1..cl_tbl.count loop
+						temp_str := temp_str||cl_tbl(cl_tbl_idx)%id||'; ';
+					end loop;
+				exception when VALUE_ERROR or NO_DATA_FOUND or TOO_MANY_ROWS then
+					null;
+				end;
+				--Ошибка "Уникальное удостоверение принадлежит другому клиенту"
+				p_error_msg := substr('Уникальное удостоверение принадлежит другим клиентам '||temp_str,1,2000);
+				return -1;
+		end;
+	end if;
+	return 0;
+end;
+
+/******************************************************
+--Сохранение списка налоговых инспекций--
+******************************************************/
+function save_inspect(Inspect in InspectTable, client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+ins			[TAX_INSP];
+ins_ref	ref [TAX_INSP];
+Begin
+	for i in 1..Inspect.count
+	loop
+		ins:=null;
+		ins%init;
+		ins.[DATE]		:= Inspect(i).DATE_;
+		ins.[INSPECTOR]	:= Inspect(i).INSPECTOR;
+		ins.[NOTES]		:= Inspect(i).NOTES;
+		begin
+			ins.[NAME]:=::[TAX_INSPECT]([NUM]=Inspect(i).NUM);
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найдена налоговая инспекция по коду :'||Inspect(i).NUM;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько налоговых инспекций по коду :'||Inspect(i).NUM;
+			return -1;
+		end;
+		--Поиск существующей записи в массиве. Добавление/обновление.
+		begin
+			select a(a)
+			in client.[INSPECT]
+			where a.[NAME] = ins.[NAME]
+			fetch 1
+			into ins_ref;
+			ins_ref := ins;
+		exception when NO_DATA_FOUND then
+			client.[INSPECT]%insert(ins);
+		end;
+	end loop;
+	return 0;
+End;
+
+/******************************************************
+--Установка сроков действия удостоверений--
+******************************************************/
+procedure set_sert_date(cl_id in ref [CL_PRIV], p_upd_cat out [BOOLEAN])
+is
+	prev_cert ref [CERTIFICATE];
+	prev_cert_type [CERTIFICATE].[TYPE]%type;
+	prev_cert_date_end date;
+	cl_cert_type [CERTIFICATE].[TYPE]%type;
+	cl_cert_date date;
+	procedure verify_with_client_cert is
+	begin
+		if cl_cert_type = prev_cert_type and (cl_cert_date <= prev_cert_date_end or prev_cert_date_end is null) then
+			-- сравниваем дату окончания последнего удостоверения предыдущего типа, с датой выдачи основного удостоверения клиента, если их типы совпадают
+			-- изменяем её, если она не меньше
+			prev_cert.[DATE_END] := cl_cert_date - 1;
+			prev_cert.[VALID_BEFORE] := ::[CL_PRIV].[EDIT#AUTO].Calc_Date_Valid_Cert(prev_cert.[TYPE], prev_cert.[DATE_END]);
+			if ::[CLIENT].[LIB].type_cert_upd_cat_cl(prev_cert.[TYPE]) then -- если относятся к льготникам, то необходимо будет обновить категорию клиента 
+				p_upd_cat:=true;
+			end if;
+		end if;
+	end;
+begin
+	p_upd_cat :=false;
+	cl_cert_type := cl_id.[DOC].[TYPE];
+	cl_cert_date := cl_id.[DOC].[DATE];
+	-- Приводим в порядок даты окончания действий удостоверений в каждом типе удостоверений
+	for
+		(select a(a : id, a.[DATE] : date_begin, a.[DATE_END] : date_end, a.[TYPE] : cert_type)
+			in cl_id.[DOC_ARR]
+			order by a.[TYPE], a.[DATE], a
+		)
+	loop
+		if nvl(prev_cert_type,-1) != nvl(a.cert_type,-1) then -- Начался новый тип удостоверений
+			verify_with_client_cert;
+			 -- Сбрасываем переменные для обработки нового типа удостоверений
+			prev_cert := null;
+			prev_cert_type := a.cert_type;
+			prev_cert_date_end := null;
+		end if;
+		if prev_cert is not null and (a.date_begin <= prev_cert_date_end or prev_cert_date_end is null) then
+			-- изменяем дату окончания предыдущего удостоверения, если она не меньше, чем дата начала текущего
+			prev_cert.[DATE_END] := a.date_begin - 1;
+			prev_cert.[VALID_BEFORE] := ::[CL_PRIV].[EDIT#AUTO].Calc_Date_Valid_Cert(prev_cert.[TYPE], prev_cert.[DATE_END]);
+			if ::[CLIENT].[LIB].type_cert_upd_cat_cl(prev_cert.[TYPE]) then -- если относятся к льготникам, то необходимо будет обновить категорию клиента 
+				p_upd_cat:=true;
+			end if;
+		end if;
+		if a.date_begin > a.date_end then
+			-- изменяем дату окончания удостоверения, если она меньше, чем дата начала
+			a.id.[DATE_END] := a.date_begin;
+			prev_cert_date_end := a.date_begin;
+			if ::[CLIENT].[LIB].type_cert_upd_cat_cl(a.cert_type) then -- если относятся к льготникам, то необходимо будет обновить категорию клиента 
+				p_upd_cat:=true;
+			end if;
+		else
+			prev_cert_date_end := a.date_end;
+		end if;
+		prev_cert := a.id;
+	end loop;
+	verify_with_client_cert;
+end;
+
+
+/******************************************************
+--Обновление наименования и допустимых наименований--
+******************************************************/
+function update_cl_name(fullName in varchar2(512), Names NamesTable, client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+cl_name varchar2(512);
+type cl_names_type is record (name_id ref [NAMES], name varchar2(256));
+type cl_names_arr_type is table of cl_names_type;
+cl_names_arr cl_names_arr_type;
+LAdd boolean := true;
+nm		[NAMES];
+idx		integer;
+begin
+	--получение наименования клиента из досье
+	cl_name := upper(client.[NAME]);
+	--получение списка допустимых наименований из досье
+	begin
+		select a(a, upper(a.[NAME])) in ::[NAMES] collections
+		where a%collection = client.[NAMES]
+		into cl_names_arr;
+	exception when NO_DATA_FOUND then
+		null;
+	end;
+	--сравнение ФИО из запроса с ФИО в досье
+	if &replace_e(fullName) = &replace_e(cl_name) then
+		--Сохранение ФИО из запроса в ФИО в досье
+		client.[NAME] := fullName;
+		--Обновление допустимых наименований
+		for k in 1..Names.count
+		loop
+			--Ингорируем допустимые наименования, совпадающие с основным наименованием
+			if &replace_e(Names(k).NAME) = &replace_e(fullName) then
+				continue;
+			end if;
+			--Поиск допустимого наименования из запроса в допустимых наименованиях досье
+			for i in 1..cl_names_arr.count
+			loop
+				--Обновление допустимого наименования
+				if &replace_e(Names(k).NAME) = &replace_e(cl_names_arr(i).name) then
+					nm := cl_names_arr(i).name_id;
+					nm.[NAME]		:= Names(k).NAME;
+					nm.[DATE]		:= Names(k).DATE_;
+					nm.[FLAG_NO]	:= Names(k).FLAG_NO;
+					nm.[FLAG_YES]	:= Names(k).FLAG_YES;
+					cl_names_arr(i).name_id := nm;
+					LAdd := false;
+				end if;
+			end loop;
+			--Добавление нового допустимого наименования
+			if LAdd then
+				nm := null;
+				nm%init;
+				nm.[NAME]		:= Names(k).NAME;
+				nm.[DATE]		:= Names(k).DATE_;
+				nm.[FLAG_NO]	:= Names(k).FLAG_NO;
+				nm.[FLAG_YES]	:= Names(k).FLAG_YES;
+				client.[NAMES]%insert(nm);
+			end if;
+			LAdd := true;
+		end loop;
+	else
+		--Поиск ФИО из запроса в массиве допустимых наименований
+		for i in 1..cl_names_arr.count
+		loop
+			if &replace_e(fullName) = &replace_e(cl_names_arr(i).name) then
+				--удаление найденного ФИО из массива допустимых наименований
+				cl_names_arr(i).name_id.DELETE#AUTO();
+				--сохранение ФИО из досье в массиве допустимых наименований
+				cl_names_arr(i).name_id := client.[NAMES].NEW#AUTO(P#NAME == cl_name);
+				cl_names_arr(i).name	:= cl_name;
+				--Сохранение ФИО из запроса в ФИО в досье
+				if fullName is not null then
+					client.[NAME] := fullName;
+				end if;
+				LAdd := false;
+				exit;
+			end if;
+		end loop;
+		--Добавляем наименование в массив допустимых наименований, если его там не было
+		if LAdd then
+			idx := cl_names_arr.count + 1;
+			--сохранение ФИО из досье в массиве допустимых наименований
+			cl_names_arr(idx).name_id	:= client.[NAMES].NEW#AUTO(P#NAME == cl_name);
+			cl_names_arr(idx).name		:= cl_name;
+			--Сохранение ФИО из запроса в ФИО в досье
+			if fullName is not null then
+				client.[NAME] := fullName;
+			end if;
+		end if;
+		LAdd := true;
+		--Обновление допустимых наименований
+		for k in 1..Names.count
+		loop
+			--Ингорируем допустимые наименования, совпадающие с основным наименованием
+			if &replace_e(Names(k).NAME) = &replace_e(fullName) then
+				continue;
+			end if;
+			--Поиск допустимого наименования из запроса в допустимых наименованиях досье
+			for i in 1..cl_names_arr.count
+			loop
+				--Обновление допустимого наименования
+				if &replace_e(Names(k).NAME) = &replace_e(cl_names_arr(i).name) then
+					nm := cl_names_arr(i).name_id;
+					nm.[NAME]		:= Names(k).NAME;
+					nm.[DATE]		:= Names(k).DATE_;
+					nm.[FLAG_NO]	:= Names(k).FLAG_NO;
+					nm.[FLAG_YES]	:= Names(k).FLAG_YES;
+					cl_names_arr(i).name_id := nm;
+					LAdd := false;
+				end if;
+			end loop;
+			--Добавление нового допустимого наименования
+			if LAdd then
+				nm := null;
+				nm%init;
+				nm.[NAME]		:= Names(k).NAME;
+				nm.[DATE]		:= Names(k).DATE_;
+				nm.[FLAG_NO]	:= Names(k).FLAG_NO;
+				nm.[FLAG_YES]	:= Names(k).FLAG_YES;
+				client.[NAMES]%insert(nm);
+			end if;
+			LAdd := true;
+		end loop;
+	end if;
+	return 0;
+end;
+
+/******************************************************
+--Обновление списка удостоверений--
+******************************************************/
+function update_cl_passport(PassportList in CertificTable, client in out [CL_PRIV], conform_ext_code boolean, p_error_msg out varchar2(2000),p_upd_cat out [BOOLEAN])
+return integer
+is
+type cert_tbl_type is table of [CERTIFICATE];
+cert_tbl		cert_tbl_type;
+type_cert		ref [CERTIFIC_TYPE];
+is_main_exist	boolean := false;
+main_cert		pls_integer;
+begin
+	p_upd_cat := false;
+	&sp(update_cl_passport)
+	--Перенос данных из запроса в массив удостоверений
+	for i in 1..PassportList.count
+	loop
+		--Получение ссылки на тип удостоверения
+		if nvl(conform_ext_code,false) and current_ab_code is not null then
+			begin
+				type_cert := &lib_conf_code.get_ibso_ref(current_ab_code, [CERTIFIC_TYPE]%class, PassportList(i).TYPE_);
+			exception when message.app_exception then
+				p_error_msg := substr('Ошибка получения типа удостоверения с кодом "'||PassportList(i).TYPE_||'" из справочника "Справочник соответствия кодов из внешних систем". Текст ошибки: '||sqlerrm,1,2000);
+				return -1;
+			end;
+		else
+			begin
+				type_cert := ::[CERTIFIC_TYPE](upper(KOD) = upper(PassportList(i).TYPE_));
+			exception when NO_DATA_FOUND then
+				begin
+					type_cert := ::[CERTIFIC_TYPE](upper(CODE_GNI) = upper(PassportList(i).TYPE_));
+				exception when NO_DATA_FOUND then
+					p_error_msg := 'Не найден тип удостоверения с кодом или кодом ГНИ '||PassportList(i).TYPE_;
+					return -1;
+				when TOO_MANY_ROWS then
+					p_error_msg := 'Найдено несколько типов удостоверений с кодом ГНИ '||PassportList(i).TYPE_;
+					return -1;
+				end;
+			when TOO_MANY_ROWS then
+				p_error_msg := 'Найдено несколько типов удостоверений с кодом '||PassportList(i).TYPE_;
+				return -1;
+			end;
+		end if;
+		cert_tbl(i).[TYPE]			:= type_cert;							--Тип удостоверения
+		cert_tbl(i).[DATE]			:= PassportList(i).DATE_;				--Дата выдачи
+		cert_tbl(i).[DATE_END]		:= PassportList(i).DATE_END;			--Дата окончания действия
+		cert_tbl(i).[VALID_BEFORE]	:= ::[CL_PRIV].[EDIT#AUTO].Calc_Date_Valid_Cert(cert_tbl(i).[TYPE], cert_tbl(i).[DATE_END]);
+		cert_tbl(i).[DEPART_CODE]	:= PassportList(i).DEPART_CODE;			--Код подразделения, выдавшего документ
+		cert_tbl(i).[SER]			:= PassportList(i).SER;					--Серия
+		cert_tbl(i).[NUM]			:= PassportList(i).NUM;					--Номер
+		cert_tbl(i).[WHO]			:= substr(PassportList(i).WHO,1,cert_tbl(i).[WHO]%size);	--Кем выдан
+		cert_tbl(i).[PLACE]			:= substr(PassportList(i).PLACE,1,cert_tbl(i).[PLACE]%size);	--Место выдачи
+		if nvl(PassportList(i).main,false) then
+			--Первое основное удостоверение
+			if not is_main_exist then
+				is_main_exist := true;
+				main_cert := i;
+			--Последующие основные удостоверения
+			else
+				p_error_msg := 'В запросе передано более одного основного удостоверения';
+				return -1;
+			end if;
+		end if;
+	end loop;
+	
+	if main_cert is null then
+		-- Определяем основное удостоверение, если оно не отмечено в запросе
+		for i in 1..cert_tbl.count loop
+			if (cert_tbl(i).[DATE_END] > nvl([SYSTEM]::[OP_DATE],trunc(sysdate)) or cert_tbl(i).[DATE_END] is null)
+				and cert_tbl(i).[TYPE] = const_passport_type
+			then -- Считаем основным документом действующий паспорт
+				if main_cert is null then
+					main_cert := i;
+				elsif cert_tbl(i).[DATE] > cert_tbl(main_cert).[DATE] then -- с более поздней датой выдачи
+					main_cert := i;
+				end if;
+			end if;
+		end loop;
+	end if;
+	--Обновление основного удостоверения (важно, чтобы оно обработалось первым)
+	if main_cert is not null then
+		if update_main_cert(cert_tbl(main_cert), client, p_error_msg) = -1 then
+			return -1;
+		end if;
+	end if;
+	--Обновление дополнительных удостоверений
+	for i in 1..cert_tbl.count
+	loop
+		if i != main_cert or main_cert is null then
+			if client.[DOC].[TYPE] = cert_tbl(i).[TYPE] and replace(client.[DOC].[SER]||client.[DOC].[NUM], ' ', '') = replace(cert_tbl(i).[SER]||cert_tbl(i).[NUM], ' ', '') then
+				-- Если пришедшее дополнительное удостоверение является основным, то пропускаем его
+				-- (при обработке пришедшего основного, старое основное будет перемещено в дополнительные)
+				if cert_tbl(i).[DATE_END] is not null and (cert_tbl(i).[DATE_END] != client.[DOC].[DATE_END] or client.[DOC].[DATE_END] is null)  then
+					client.[DOC].[DATE_END] := cert_tbl(i).[DATE_END];
+					client.[DOC].[VALID_BEFORE] := ::[CL_PRIV].[EDIT#AUTO].Calc_Date_Valid_Cert(cert_tbl(i).[TYPE], cert_tbl(i).[DATE_END]);
+				end if;
+				continue;
+			end if;
+			if update_add_cert(cert_tbl(i), client, p_error_msg) = -1 then
+				return -1;
+			end if;
+		end if;
+		-- проверяем на льготное удостоверение
+		if not p_upd_cat and ::[CLIENT].[LIB].type_cert_upd_cat_cl(cert_tbl(i).[TYPE]) then 
+			p_upd_cat :=true;
+		end if;	
+	end loop;	
+	return 0;
+exception when others then
+	-- Причина перехвата others: при возникновении непредвиденной ошибки необходимо продолжить выполнение операции
+	&rb(update_cl_passport)
+	p_error_msg := 'Ошибка обновления списка удостоверений: '||sqlerrm;
+	return -1;
+end;
+
+/******************************************************
+--Обновление основного удостоверения--
+******************************************************/
+function update_main_cert(cert [CERTIFICATE], client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+	cert_ref ref [CERTIFICATE];
+	procedure ReplaceMainCert is
+		-- Замена основного удостоверения новым
+	begin
+		-- Переносим старое основное удостоверение в дополнительные
+		update_add_cert(client.[DOC],client,p_error_msg);
+		-- Пришедшее удостоверение копируем в основное
+		client.[DOC] := cert;
+		-- Если в дополнительных удостоверениях есть то, которое стало основным, то удаляем его
+		delete a
+			in client.[DOC_ARR]
+			where a.[TYPE] = cert.[TYPE]
+				and	replace(a.[SER]||a.[NUM], ' ', '') = replace(cert.[SER]||cert.[NUM], ' ', '');
+	end;
+begin
+	&sp(update_main_cert)
+	if trim(cert.[SER]||cert.[NUM]) is null then
+		-- Пришёл пустой документ. Ничего не делаем.
+		return 0;
+	end if;
+	--Сравнение удостоверения из запроса с основным удостоверением клиента
+	if client.[DOC].[TYPE] = cert.[TYPE] then
+		if replace(client.[DOC].[SER]||client.[DOC].[NUM], ' ', '') = replace(cert.[SER]||cert.[NUM], ' ', '') then
+			-- Пришло то же самое основное удостоверение. Обновляем.
+			if cert.[DATE_END] is null then
+				cert.[DATE_END] := client.[DOC].[DATE_END];
+				cert.[VALID_BEFORE] := ::[CL_PRIV].[EDIT#AUTO].Calc_Date_Valid_Cert(cert.[TYPE], cert.[DATE_END]);
+			end if;
+			client.[DOC] := cert;
+		elsif cert.[DATE] < client.[DOC].[DATE] then
+			-- Пришедшее удостоверение более старое, поэтому основное, которое было, не трогаем.
+			-- Сохраняем пришедшее в дополнительные
+			update_add_cert(cert,client,p_error_msg);
+		else
+			ReplaceMainCert;
+		end if;
+	else
+		ReplaceMainCert;
+	end if;
+	return 0;
+exception when others then
+	-- Причина перехвата others: при возникновении непредвиденной ошибки необходимо продолжить выполнение операции
+	&rb(update_main_cert)
+	p_error_msg := 'Ошибка обновления основного удостоверения: '||sqlerrm;
+	return -1;
+end;
+
+
+/******************************************************
+--Обновление дополнительного удостоверения--
+******************************************************/
+function update_add_cert(cert [CERTIFICATE], client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+cert_ref ref [CERTIFICATE];
+begin
+	&sp(update_add_cert)
+	if trim(cert.[SER]||cert.[NUM]) is null then
+		-- Пришёл пустой документ. Ничего не делаем.
+		return 0;
+	end if;
+	begin
+		--Поиск удостоверения из запроса в массиве доп.удостоверений клиента
+		select a(a) in ::[CERTIFICATE] collections
+		where	a%collection = client.[DOC_ARR]
+			and	a.[TYPE] = cert.[TYPE]
+			and	replace(a.[SER]||a.[NUM], ' ', '') = replace(cert.[SER]||cert.[NUM], ' ', '')
+		into cert_ref;
+		--Обновление удостоверения
+		if cert.[DATE_END] is null then
+			cert.[DATE_END] := cert_ref.[DATE_END];
+			cert.[VALID_BEFORE] := ::[CL_PRIV].[EDIT#AUTO].Calc_Date_Valid_Cert(cert.[TYPE], cert.[DATE_END]);
+		end if;
+		cert_ref := cert;
+	exception when NO_DATA_FOUND then
+		--Добавление удостоверения
+		cert_ref := client.[DOC_ARR]%insert(cert);
+	when TOO_MANY_ROWS then
+		p_error_msg := 'Ошибка обновления дополнительного удостоверения: найдено несколько удостоверений с типом "'||cert.[TYPE].[NAME]||'", серией и номером '||cert.[SER]||cert.[NUM];
+		return -1;
+	end;
+	return 0;
+exception when others then
+	-- Причина перехвата others: при возникновении непредвиденной ошибки необходимо продолжить выполнение операции
+	&rb(update_add_cert)
+	p_error_msg := 'Ошибка обновления дополнительного удостоверения: '||sqlerrm;
+	return -1;
+end;
+
+/******************************************************
+--Сохранение категории клиента--
+******************************************************/
+function save_vid_cl(Vid_Cl in Varchar2(16), client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+v_cl_categories		[CL_CATEGORIES];
+v_cl_cat_ref	ref	[CL_CATEGORIES];
+begin
+	if Vid_Cl is not null then
+		v_cl_categories := null;
+		v_cl_categories%Init;
+		v_cl_categories.[DATE_BEGIN] := [SYSTEM]::[OP_DATE];
+		begin
+			select a(a)
+			in ::[CL_GROUP]
+			where upper(a.[CODE]) = upper(vid_cl)
+			into v_cl_categories.[CATEGORY];
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найден вид клиента по коду: ' || vid_cl;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько видов клиента по коду: ' || vid_cl;
+			return -1;
+		end;
+		--Поиск существующей записи в массиве. Добавление.
+		begin
+			select a(a)
+			in client.[VIDS_CL]
+			where a.[CATEGORY] = v_cl_categories.[CATEGORY]
+			fetch 1
+			into v_cl_cat_ref;
+		exception when NO_DATA_FOUND then
+			client.[VIDS_CL]%insert(v_cl_categories);
+		end;
+	end if;
+	return 0;
+end;
+
+--TODO: Сохранение доп. свойств
+function save_add_prop(MigrCards in MigrCardTable, client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+MigrCard_ref	ref [MIGRATION_CARD];
+MigrCard			[MIGRATION_CARD];
+begin
+	--проверка заполненности списка миграционных карт в запросе
+	for i in 1..MigrCards.count
+	loop
+		MigrCard			:= null;
+		MigrCard.[CARD_NUM]	:= MigrCards(i).CARD_NUM;
+		MigrCard.[CARD_SERIA]	:= MigrCards(i).CARD_SERIA;
+		MigrCard.[DATE_BEG]	:= MigrCards(i).DATE_BEG;
+		MigrCard.[DATE_END]	:= MigrCards(i).DATE_END;
+		--Поиск миграционных карт с заданным типом в списке миграционных карт досье
+		begin
+			select a(a) in ::[MIGRATION_CARD] collections
+			where	a%collection = client.[MIGR_CARD]
+				and	a.[CARD_NUM] = MigrCard.[CARD_NUM]
+			fetch 1
+			into MigrCard_ref;
+			MigrCard_ref := MigrCard;
+		exception when NO_DATA_FOUND then
+			client.[MIGR_CARD]%insert(MigrCard);
+		end;
+	end loop;
+	return 0;
+end;
+
+--Сохранение миграционных карт
+function save_migr_cards(MigrCards in MigrCardTable, client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+MigrCard_ref	ref [MIGRATION_CARD];
+MigrCard			[MIGRATION_CARD];
+vIsMerged		boolean;
+begin
+	--проверка заполненности списка миграционных карт в запросе
+	for i in 1..MigrCards.count
+	loop
+		vIsMerged := false;
+		MigrCard			:= null;
+		MigrCard.[CARD_NUM]	:= MigrCards(i).CARD_NUM;
+		MigrCard.[CARD_SERIA]	:= MigrCards(i).CARD_SERIA;
+		MigrCard.[DATE_BEG]	:= MigrCards(i).DATE_BEG;
+		MigrCard.[DATE_END]	:= MigrCards(i).DATE_END;
+		-- ещё один костыль
+		if (MigrCard.[CARD_NUM] is null and MigrCard.[CARD_SERIA] is null)
+			or (MigrCard.[DATE_BEG] is null and MigrCard.[DATE_END] is null)
+		then
+			for (select x(x					:c_card_ref
+						 ,x.[CARD_NUM]		:c_card_num
+						 ,x.[CARD_SERIA]	:c_card_seria
+						 ,x.[DATE_BEG]		:c_date_beg
+						 ,x.[DATE_END]		:c_date_end
+						 )
+				 in client.[MIGR_CARD]
+				 where ((x.[CARD_NUM] is null and x.[CARD_SERIA] is null)
+						or (x.[DATE_BEG] is null and x.[DATE_END] is null))
+				 order by x desc
+				 fetch 1
+				)
+			loop
+				vIsMerged := true;
+				if (MigrCard.[CARD_NUM] is not null and MigrCard.[CARD_SERIA] is not null)
+					and (x.c_card_num is null and x.c_card_seria is null)
+				then
+					update u(u.[CARD_NUM]	= MigrCard.[CARD_NUM]
+						 	,u.[CARD_SERIA]	= MigrCard.[CARD_SERIA])
+					in ::[MIGRATION_CARD] all
+					where u = x.c_card_ref;
+				elsif (MigrCard.[DATE_BEG] is not null) and (x.c_date_beg is null)
+				then
+					update u(u.[DATE_BEG]	= MigrCard.[DATE_BEG]
+						 	,u.[DATE_END]	= MigrCard.[DATE_END])
+					in ::[MIGRATION_CARD] all
+					where u = x.c_card_ref;
+				end if;
+			end loop;
+			if not vIsMerged then
+				client.[MIGR_CARD]%insert(MigrCard);
+			end if;
+		else
+			--Поиск миграционных карт с заданным типом в списке миграционных карт досье
+			begin
+				select a(a) in ::[MIGRATION_CARD] collections
+				where	a%collection = client.[MIGR_CARD]
+					and	a.[CARD_NUM] = MigrCard.[CARD_NUM]
+				fetch 1
+				into MigrCard_ref;
+				MigrCard_ref := MigrCard;
+			exception when NO_DATA_FOUND then
+				client.[MIGR_CARD]%insert(MigrCard);
+			end;
+		end if;
+	end loop;
+	&debug('.save_migr_cards END', 0)
+	return 0;
+end;
+
+--Обновление списка трудовой деятельности
+function save_work_activity(WorkActivity in WorkActivityTable, client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+work_ref		ref [WORK_BOOK];
+address_struct		[PERSONAL_ADDRESS];
+country 			[COUNTRY_REF];
+work_rec			[WORK_BOOK];
+corp_ref		ref [CL_ORG];
+cur_corp_ref	ref [CL_ORG];
+begin
+	for i in 1..WorkActivity.count
+	loop
+		--Получаем ссылку на страну
+		if WorkActivity(i).JOB_ADDRESS.city is not null or WorkActivity(i).JOB_ADDRESS.street is not null or WorkActivity(i).JOB_ADDRESS.KLADR_CODE is not null then
+			--собираем адрес в строку
+			var str varchar2(500);
+			var country_tag varchar2(128);
+			country_tag := get_country_tag(WorkActivity(i).JOB_ADDRESS.COUNTRY);
+			str :=	WorkActivity(i).JOB_ADDRESS.COUNTRY||
+					WorkActivity(i).JOB_ADDRESS.KLADR_CODE||';'||
+					WorkActivity(i).JOB_ADDRESS.POST_CODE||';'||
+					WorkActivity(i).JOB_ADDRESS.REGION||';'||
+					WorkActivity(i).JOB_ADDRESS.DISTRICT||';'||
+					WorkActivity(i).JOB_ADDRESS.CITY_TYPE||' '||
+					WorkActivity(i).JOB_ADDRESS.CITY||';'||
+					WorkActivity(i).JOB_ADDRESS.STREET||';'||
+					WorkActivity(i).JOB_ADDRESS.HOUSE||';'||
+					WorkActivity(i).JOB_ADDRESS.KORPUS||';'||
+					WorkActivity(i).JOB_ADDRESS.FLAT;
+			if trim(replace(str,';')) is not null then
+				--получение структуры адреса
+				::[PERSONAL_ADDRESS].[LIB].Parse_Str(
+													 p_Format	== country_tag||'KLADR_CODE,ZIP,REGION,DISTRICT,CITY,STREET,HOUSE_NT,KORPUS_NT,FLAT_NT'
+													,p_Delimiter== ';'
+													,p_Str		== str
+													,p_Country	== country
+													,P_Addr 	== address_struct
+													,p_Cache	== true
+													,p_Kladr	== 1
+													);
+				address_struct.[TYPE] := ::[ADDRESS_TYPE](KOD = 'FACT');
+				if trim(WorkActivity(i).JOB_ADDRESS.IMP_STR) is not null then
+					address_struct.[IMP_STR] := WorkActivity(i).JOB_ADDRESS.IMP_STR;
+				end if;
+			elsif WorkActivity(i).JOB_ADDRESS.IMP_STR is not null then
+				address_struct.[IMP_STR] := WorkActivity(i).JOB_ADDRESS.IMP_STR;
+				address_struct.[TYPE] := ::[ADDRESS_TYPE](KOD = 'FACT');
+			end if;
+		end if;
+		WorkActivity(i).CORP := trim(WorkActivity(i).CORP);
+		WorkActivity(i).INN_CORP := trim(WorkActivity(i).INN_CORP);
+		--Поиск организации
+		if WorkActivity(i).CORP is not null and WorkActivity(i).INN_CORP is not null then
+			begin
+				select a(a) in ::[CL_ORG] all
+				where	(upper(a.[NAME]) = upper(WorkActivity(i).CORP)
+					or	upper(a.[LONG_NAME]) = upper(WorkActivity(i).CORP))
+					and a.[INN] = WorkActivity(i).INN_CORP
+				fetch 1
+				into corp_ref;
+			exception when NO_DATA_FOUND then
+				null;
+			when TOO_MANY_ROWS then
+				null;
+			end;
+		end if;
+		begin
+			--Поиск места работы из запроса в массиве трудовой деятельности досье
+			select a(a,a.[CORP_R]) in ::[WORK_BOOK] collections
+			where	a%collection = client.[WORK_ACTIVITY]
+				and	(a.[CORP] = WorkActivity(i).CORP
+					or a.[CORP] = WorkActivity(i).CORP||', ИНН '||WorkActivity(i).INN_CORP
+					or a.[CORP_R].[NAME] = WorkActivity(i).CORP)
+				and a.[RANGE] = WorkActivity(i).RANGE
+			into work_ref, cur_corp_ref;
+			--Обновление ссылки на организацию, если она не указана
+			if cur_corp_ref is null then
+				work_ref.[CORP_R] := corp_ref;
+			end if;
+			--Обновление датя начала работы
+			work_ref.[START_DATE] := WorkActivity(i).START_DATE;
+		exception when NO_DATA_FOUND then
+			--Добавление места работы в массив
+			work_rec:=null;
+			work_rec%init;
+			work_rec.[START_DATE] := WorkActivity(i).START_DATE;
+			if WorkActivity(i).INN_CORP is not null then
+				work_rec.[CORP] := WorkActivity(i).CORP||', ИНН '||WorkActivity(i).INN_CORP;
+			else
+				work_rec.[CORP] := WorkActivity(i).CORP;
+			end if;
+			work_rec.[RANGE] := WorkActivity(i).RANGE;
+			work_rec.[CORP_R] := corp_ref;
+			work_ref := client.[WORK_ACTIVITY]%insert(work_rec);
+		when TOO_MANY_ROWS then
+			return 0;
+		end;
+		--сохранение адреса в массив адресов места работы
+		if address_struct.[TYPE] is not null then
+			begin
+				var addr_ref ref [PERSONAL_ADDRESS];
+				select addr(addr) in ::[PERSONAL_ADDRESS] collections
+				where	addr%collection = work_ref.[ADDRESSES]
+					and	addr.[TYPE] = address_struct.[TYPE]
+				into addr_ref;
+				address_struct.[METRO_STATIONS] := addr_ref.[METRO_STATIONS];
+				addr_ref := address_struct;
+			exception when NO_DATA_FOUND then
+				address_struct%init(true,true);
+				work_ref.[ADDRESSES]%insert(address_struct);
+			when TOO_MANY_ROWS then
+				return 0;
+			end;
+		end if;
+	end loop;
+	return 0;
+end;
+
+--Сохранение гражданства
+function save_cl_country(p_country in varchar2(2000), client in out [CL_PRIV], p_error_msg out varchar2(2000))
+return integer
+is
+begin
+	p_country := trim(p_country);
+	if p_country is not null then
+		declare
+		crit_search_name	varchar2;
+		country_tag			varchar2(128);
+		begin
+			country_tag := get_country_tag(p_country, false);
+			case country_tag of
+				--Числовой код страны
+				:'COUNTRY_CODE,':
+					crit_search_name := 'коду';
+					client.[COUNTRY]:=::[COUNTRY]([CODE]=p_country);
+				--Код страны "Альфа-3"
+				:'COUNTRY_ALFA3,':
+					crit_search_name := 'коду "Альфа-3"';
+					client.[COUNTRY]:=::[COUNTRY]([ALFA_3]=upper(p_country));
+				--Код страны "Альфа-2"
+				:'COUNTRY_ALFA2,':
+					crit_search_name := 'коду "Альфа-2"';
+					client.[COUNTRY]:=::[COUNTRY]([ALFA_2]=upper(p_country));
+				--Полное или короткое наименование
+				:'COUNTRY,COUNTRY_FULL,':
+					crit_search_name := 'наименованию или полному наименованию';
+					client.[COUNTRY]:=::[COUNTRY](upper([VALUE])=upper(p_country) or upper([NAME])=upper(p_country));
+			end;
+		exception when NO_DATA_FOUND then
+			p_error_msg := 'Не найдена страна гражданства по '||crit_search_name||' :'||p_country;
+			return -1;
+		when TOO_MANY_ROWS then
+			p_error_msg := 'Найдено несколько стран гражданства по '||crit_search_name||' :'||p_country;
+			return -1;
+		end;
+	end if;
+	return 0;
+end;
+
+--Получение тега страны для формата разбора адреса
+function get_country_tag(p_country in out varchar2(2000), p_modify_country_value boolean default true)
+return varchar2(128)
+is
+country_len integer;
+begin
+	p_country	:= trim(p_country);
+	country_len	:= nvl(length(p_country),0);
+	p_modify_country_value := nvl(p_modify_country_value,true);
+	if country_len = 3 and replace(translate(p_country, '1234567890', '##########'),'#') is null then
+		if p_modify_country_value then
+			p_country := p_country||';';
+		end if;
+		--Числовой код страны
+		return 'COUNTRY_CODE,';
+	elsif country_len = 3 and replace(translate(upper(p_country), 'QWERTYUIOPASDFGHJKLZXCVBNM', '##########################'),'#') is null then
+		if p_modify_country_value then
+			p_country := upper(p_country)||';';
+		end if;
+		--Код страны "Альфа-3"
+		return 'COUNTRY_ALFA3,';
+	elsif country_len = 2 and replace(translate(upper(p_country), 'QWERTYUIOPASDFGHJKLZXCVBNM', '##########################'),'#') is null then
+		if p_modify_country_value then
+			p_country := upper(p_country)||';';
+		end if;
+		--Код страны "Альфа-2"
+		return 'COUNTRY_ALFA2,';
+	elsif p_country is not null then
+		--Для поиска по наименованию и полному наименованию
+		if p_modify_country_value then
+			p_country := p_country||';'||p_country||';';
+		end if;
+		--Полное или короткое наименование
+		return 'COUNTRY,COUNTRY_FULL,';
+	end if;
+	--Страна не указана
+	return null;
+end;
+end;

@@ -1,0 +1,169 @@
+class DOCUM_RC;
+@import_plsql(true)
+
+@name('[ПСБ] Реестр по комиссиям за платежи Сбербанка')
+static method PSH_REP_COM_SBER is
+
+pragma macro(xl, '::[OOXML].[API_XL]');
+pragma macro(lp, '::[SHABLON_DOC].[LIB_OOXML]');
+
+li_cur_row		integer;
+
+procedure gen_rep(P_DATE_BEG date, P_DATE_END date, P_COMM_TAR summa, v_rub varchar2(1))
+is
+i integer;
+begin
+	li_cur_row := 1;
+	if P_COMM_TAR < 1 then
+		&xl.put(1, 3, 'Комиссия 0' || P_COMM_TAR ||'%, руб.'); 		-- Заголовок комиссии
+	else
+		&xl.put(1, 3, 'Комиссия ' || P_COMM_TAR ||'%, руб.'); 		-- Заголовок комиссии
+	end if;
+	
+	for (select rc(rc doc)
+			in ::[DOCUM_RC] all
+		  where rc%state in ('S_16')
+		  	and rc.[DOG_SD].[CLIENT].[CODE] = 'LK_SBANK' -- получены от SberFinLine
+		  	and (rc.[TYPE_DOC] || '.' || rc.[SUB_TYPE] = '001.B' -- МТ103 
+		  		or
+		  		rc.[TYPE_DOC] = 'ISO') -- SWIFT MX
+		  	and rc.[MAIN_DOC] is not null
+		  	and rc.[MAIN_DOC]%STATE = 'PROV'
+		  	and rc.[MAIN_DOC]->(MAIN_DOCUM)[DATE_PROV] >= P_DATE_BEG
+		  	and rc.[MAIN_DOC]->(MAIN_DOCUM)[DATE_PROV] <  P_DATE_END + 1
+		  	and trim(replace(rc.[PAYER].[ACC], '/')) not like '30233%' -- PSH VRI 26/01/2026 CFT-3484 исключить операции по эквайрингу ("MERCHANT") из реестра
+			and ( 
+					(v_rub = '1' and (rc.[ISO] = ::[SYSTEM].[SYS_MAIN_VAL].[CUR_SHORT]
+									  or	
+									  exists (select mx(mx)
+												in ::[ISO_FIN] all
+												where mx.[DOCUM_RC] = rc
+													and mx.[INTR_BK_STTL_AMT].[CURRENCY].[CUR_SHORT] = ::[SYSTEM].[SYS_MAIN_VAL].[CUR_SHORT]
+													fetch 1
+											  )
+									  )
+					)
+					or
+					(v_rub = '0' and not(rc.[ISO] = ::[SYSTEM].[SYS_MAIN_VAL].[CUR_SHORT] 
+									 	 or	
+									 	 exists (select mx(mx)
+												 in ::[ISO_FIN] all
+											 	 where mx.[DOCUM_RC] = rc
+													and mx.[INTR_BK_STTL_AMT].[CURRENCY].[CUR_SHORT] = ::[SYSTEM].[SYS_MAIN_VAL].[CUR_SHORT]
+													fetch 1
+											     )
+									     )
+					)
+				)
+
+		order by rc.[MAIN_DOC]->(MAIN_DOCUM)[DATE_PROV], rc.[SUMMA]
+		)
+	loop
+		i:= 1;
+		li_cur_row := li_cur_row + 1;	
+		-- Для SWIFT MT103
+		if rc.doc.[TYPE_DOC] || '.' || rc.doc.[SUB_TYPE] = '001.B' then
+			&xl.put(li_cur_row, i, trim(replace(rc.doc.[PAYER].[ACC], '/'))); 		-- Счет плательщика
+			i := i + 1;
+			&xl.put(li_cur_row, i, case when rc.doc.[RECEIVER].[ACC] not like '%30111810%' then 
+											trim(replace(rc.doc.[RECEIVER].[ACC], '/')) 
+										when rc.doc.[ISO] = ::[SYSTEM].[SYS_MAIN_VAL].[CUR_SHORT] then
+											trim(substr(rc.doc.[DEST], 1, instr(replace(rc.doc.[DEST], NL$, ' '), ' ') - 1)) 
+									end); 	-- Счет получателя
+			i := i + 1;
+			if rc.doc.[ISO] = ::[SYSTEM].[SYS_MAIN_VAL].[CUR_SHORT] then
+				&xl.put(li_cur_row, i, round(rc.doc.[SUMMA] * P_COMM_TAR / 100, 2));	 			-- Сумма комиссии для платежей в рублях
+			else
+				&xl.put(li_cur_row, i, round(rc.doc.[FIRST_REF].[SUMMA] * P_COMM_TAR / 100, 2));	-- Сумма комиссии для платежей в валюте
+			end if;
+			i := i + 1;
+			&xl.put(li_cur_row, i, 'Комиссия третьего банка за перевод средств ' 
+								   || rc.doc.[ISO] || ' ' || trim(to_char(rc.doc.[SUMMA], '9,999,999,999,990.99')) 
+								   || ' сумма (' || rc.doc.[FIRST_REF].[ISO] || ' ' || trim(to_char(rc.doc.[FIRST_REF].[SUMMA], '9,999,999,999,990.99')) 
+								   || '), МТ103 реф.' || replace(rc.doc.[FIRST_REF].[AUDIT].[UNICUM_CODE], '+') || ' от ' 
+								   || to_char(rc.doc.[FIRST_REF].[CRDATE], 'DDMMYYYY')); 	-- Назначение платежа
+		-- Для SWIFT MX pacs.008
+		elsif rc.doc.[TYPE_DOC] = 'ISO' then
+			for (select mx(mx doc)
+				in ::[ISO_FIN] all
+				where mx.[DOCUM_RC] = rc.doc
+					fetch 1
+				) 
+			loop
+				&xl.put(li_cur_row, i, trim(mx.doc.[DBTR_ACCT].[ACC_ID])); 		-- Счет плательщика
+				i := i + 1;
+				&xl.put(li_cur_row, i, trim(mx.doc.[CDTR_ACCT].[ACC_ID])); 		-- Счет получателя
+				i := i + 1;
+				if mx.doc.[INTR_BK_STTL_AMT].[CURRENCY] = ::[SYSTEM].[SYS_MAIN_VAL] then
+					&xl.put(li_cur_row, i, round(mx.doc.[INTR_BK_STTL_AMT].[SUMMA] * P_COMM_TAR / 100, 2));	-- Сумма комиссии для платежей в рублях
+				else
+					&xl.put(li_cur_row, i, round(rc.doc.[FIRST_REF].[SUMMA] * P_COMM_TAR / 100, 2));	 	-- Сумма комиссии для платежей в валюте 
+				end if;
+				i := i + 1;
+				&xl.put(li_cur_row, i, 'Комиссия третьего банка за перевод средств ' 
+									   || mx.doc.[INTR_BK_STTL_AMT].[CURRENCY].[CUR_SHORT] || ' ' || trim(to_char(mx.doc.[INTR_BK_STTL_AMT].[SUMMA], '9,999,999,999,990.99')) 
+									   || ' сумма (' || rc.doc.[FIRST_REF].[ISO] || ' ' || trim(to_char(rc.doc.[FIRST_REF].[SUMMA], '9,999,999,999,990.99')) 
+									   || '), МТ103 реф.' || replace(rc.doc.[FIRST_REF].[AUDIT].[UNICUM_CODE], '+') || ' от ' 
+									   || to_char(rc.doc.[FIRST_REF].[CRDATE], 'DDMMYYYY')); 	-- Назначение платежа
+			end loop;
+		end if;
+		i := i + 1;
+		&xl.put(li_cur_row, i, '044525225'); 	-- БИК ПСХБ
+		i := i + 1;
+		&xl.put(li_cur_row, i, '6449011425'); 	-- ИНН ПСХБ
+		i := i + 1;
+		&xl.put(li_cur_row, i, '770701001'); 	-- КПП ПСХБ
+		i := i + 1;
+		&xl.put(li_cur_row, i, '30109810600000001585'); 	-- Корр.счет ПСХБ
+		i := i + 1;
+		&xl.put(li_cur_row, i, 'ООО "Промсельхозбанк"'); 	-- Наименование ПСХБ
+	end loop;
+	&xl.Set_Format_Range(1, 1, li_cur_row, &xl.getSheetColCount ,p_borderId==&xl.get_border(p_top=='thin',p_bottom=='thin',p_left=='thin',p_right=='thin'));
+		
+	&xl.put(li_cur_row + 3, 2, 'Общая сумма комиссии Респондента');
+	&xl.formula(li_cur_row + 3, 3, '=SUM(C2:C' || (li_cur_row) || ')' );
+	&xl.put(li_cur_row + 4, 2, 'Комиссионное вознаграждение ПАО Сбербанк (50%)'); 		-- Заголовок комиссии
+	&xl.formula(li_cur_row + 4, 3, '=SUM(C2:C' || (li_cur_row) || ')/2' );	
+	&xl.Set_Format_Range(li_cur_row + 3, 2, li_cur_row + 4, 3, p_fontId == &xl.get_font('Calibri', 2, 12, 1, false, false, true), p_fillId == &xl.get_fill_back_color('FAF61E'));
+end;
+PSH_REP_COM_SBER (
+	@name('Дата начала')   		P_DATE_BEG in [DATE],
+	@name('Дата окочания') 		P_DATE_END in [DATE],
+	@name('Процент комиссии') 	P_COMM_TAR in [SUMMA]
+) is
+
+validate is
+begin
+	if p_message = 'DEFAULT' then
+		P_DATE_BEG := CALENDAR.Next_Date('HOLIDAYS', '0', ::[SYSTEM].[OP_DATE], -2);
+		P_DATE_END := ::[SYSTEM].[OP_DATE];
+		P_COMM_TAR := ::[DEFVALS].[SLIB].RestoreNum(stdlib.userid, &METHOD$CLASS, &METHOD$SNAME, 'P_COMM_TAR');
+
+	elsif  P_MESSAGE = 'VALIDATE'  then
+		if P_INFO = 'OK' then
+				if P_DATE_BEG is null or P_DATE_END is null or P_DATE_BEG > P_DATE_END then
+					pragma error('Некорректно заполнены даты!');
+				end if;
+
+				if P_COMM_TAR is null then
+					pragma error('Не заполнено поле "Процент комиссии"!');
+				end if;
+				
+				if not nvl(&xl.open_file(::[SHABLON_DOC]([CODE] = 'PSH_REP_COM_SBER').[RPT_TMPL]), False) then
+					pragma error('Ошибка открытия шаблона с кодом '||'PSH_REP_COM_SBER');
+		    	end if;
+				&lp.xl_init('PSH_REP_COM_SBER');
+		    	&xl.open_sheet(1);		    					
+				-- Формирование листа для валютных переводов
+				gen_rep(P_DATE_BEG, P_DATE_END, P_COMM_TAR, '0');
+		    	&xl.open_sheet(2);		    					
+				-- Формирование листа для рублёвых переводов
+				gen_rep(P_DATE_BEG, P_DATE_END, P_COMM_TAR, '1');
+				
+				&lp.xl_finish;	
+				::[DEFVALS].[SLIB].SaveNum(::[RUNTIME].[STDLIB].userid, &METHOD$CLASS, &METHOD$SNAME, 'P_COMM_TAR', P_COMM_TAR);			
+	    end if;
+	end if;
+end;
+end;
+end;

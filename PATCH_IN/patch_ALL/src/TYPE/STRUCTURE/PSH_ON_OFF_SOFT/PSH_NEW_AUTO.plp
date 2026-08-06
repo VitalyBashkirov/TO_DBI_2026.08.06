@@ -1,0 +1,165 @@
+class PSH_ON_OFF_SOFT;
+
+@name('[ПСБ] Добавить')
+@tag('CREATED')
+constructor PSH_NEW_AUTO is
+of5 [ONE_FROM_5];
+PSH_NEW_AUTO (
+	@name('Код ТПБ')                                                                                                              P_CODE_TBP         in [STRING_16],
+	@name('Наименование ТБП')                                                                                                     P_NAME_TBP         in [STRING_128],
+	@name('Имя объекта')                                                                                                          P_SHORT_NAME       in [STRING_100],
+	@name('Наименование объекта')                                                                                                 P_NAME_M           in [STRING_128],
+	@name('Создатель')                                                                                                            P_USER_INIT        in [SBRF_NAME],
+	@name('Зачем разработано, кто заказчик')                                                                                      P_BISINESS         in [MEMO_32767],
+	@name('Что сделано')                                                                                                          P_WORK             in [MEMO_32767],
+	@name('Дата, Время включения в справочник')                                                                                   P_DATE_WRATE       in [DATE_TIME],
+	@name('Пользователь изменивший доступность')                                                                                  P_USER_ACCESS_EDIT in [STRING_100],
+	@name('Дата, Время изменения доступности')                                                                                    P_ACCESS_EDIT_DATE in [DATE_TIME],
+	@name('Обоснование изменение доступа')                                                                                        P_JUSTIFICATION    in [MEMO_32767],
+	@name('Режим работы (0-Только журналировать вызов,1-Журналировать и предупреждать,2-Журналировать и запрещать использовать)') P_TYPE_WORK        in [SHORT1],
+	@name('До какой даты разрешать пользоваться')                                                                                 P_DATE_END         in [DATE_TIME],
+	@name('Журнал вызовов')                                                                                                       P_MAG              in [PSH_MAG_ARR],
+	@name('Рекомендуемая дистрибутивная операция')                                                                                P_DISTRIB          in [STRING_140],
+	@name('Контроль встроен в операцию')                                                                                          P_IN_CHECK         in [BOOLEAN],
+	@name('Размер журнала')                                                                                                       P_RECS_IN_MAG      in [SHORT8],
+	@name('Принято сопровождением')                                                                                               P_USER_ACCEPT      in [USER_REF],
+	@name('Пользователь протестировавший функционал')                                                                             P_USER_TEST        in [USER_REF],
+	@name('Дата создания')                                                                                                        P_DATE_CREATED     in [DATE_TIME],
+	@name('Пользователь создавший')                                                                                               P_USER_CREAT       in [STRING_100],
+	@name('Комментарий')                                                                                                          P_COMMENT          in [MEMO_32767],
+	@name('Автодокументирование')                                                                                                 P_AVTODOC          in [MEMO_32767],
+	@name('Метка')                                                                                                                P_METKA            in [STRING_256],
+	@name('На удаление')                                                                                                          P_DT_OPER          in [BOOLEAN],
+	@name('Пользователь, рекомендующий удаление')                                                                                 P_USER_DEL_OPER    in [USER_REF],
+	@name('Обоснование удаления')                                                                                                 P_REZ_DEL_OPER     in [MEMO_32767],
+	@name('Операция на схеме')                                                                                                    P_OPER_ON_BASE     in [BOOLEAN],
+	@name('Дата проверки')                                                                                                        P_DATE_PROV        in [DATE],
+	@name('Тип')                                                                                                                  P_FLAG             in [STRING_1],
+	@name('ЦФТ операция')                                                                                                         P_CFT_BOOL         in [BOOLEAN],
+	@name('Индекс (0..4)')                                                                                                        P_CFT3816_INDEX    in [ONE_FROM_5]  default null,
+	@name('Дата последнего существования')                                                                                        P_CFT3816_LAST_DAY in [DATE]        default null,
+	@name('DBI ready')                                                                                                            P_CFT3816_DBIREADY in [BOOLEAN]     default null,
+	@name('DBI user')                                                                                                             P_CFT3816DBIUSER   in [STRING_30]   default null
+) return ref [PSH_ON_OFF_SOFT] is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_CODE_TBP := this.[CODE_TBP];
+	P_NAME_TBP := this.[NAME_TBP];
+	P_SHORT_NAME := this.[SHORT_NAME];
+	P_NAME_M := this.[NAME_M];
+	P_USER_INIT := this.[USER_INIT];
+	P_BISINESS := this.[BISINESS];
+	P_WORK := this.[WORK];
+	P_DATE_WRATE := this.[DATE_WRATE];
+	P_USER_ACCESS_EDIT := this.[USER_ACCESS_EDIT];
+	P_ACCESS_EDIT_DATE := this.[ACCESS_EDIT_DATE];
+	P_JUSTIFICATION := this.[JUSTIFICATION];
+	P_TYPE_WORK := this.[TYPE_WORK];
+	P_DATE_END := this.[DATE_END];
+	P_MAG := this.[MAG];
+	P_DISTRIB := this.[DISTRIB];
+	P_IN_CHECK := this.[IN_CHECK];
+	P_RECS_IN_MAG := this.[RECS_IN_MAG];
+	P_USER_ACCEPT := this.[USER_ACCEPT];
+	P_USER_TEST := this.[USER_TEST];
+	P_DATE_CREATED := this.[DATE_CREATED];
+	P_USER_CREAT := this.[USER_CREAT];
+	P_COMMENT := this.[COMMENT];
+	P_AVTODOC := this.[AVTODOC];
+	P_METKA := this.[METKA];
+	P_DT_OPER := this.[DT_OPER];
+	P_USER_DEL_OPER := this.[USER_DEL_OPER];
+	P_REZ_DEL_OPER := this.[REZ_DEL_OPER];
+	P_OPER_ON_BASE := this.[OPER_ON_BASE];
+	P_DATE_PROV := this.[DATE_PROV];
+	P_FLAG := this.[FLAG];
+	P_CFT_BOOL := this.[CFT_BOOL];
+	P_CFT3816_LAST_DAY := this.[CFT3816_LAST_DAY];
+	P_CFT3816_DBIREADY := this.[CFT3816_DBIREADY];
+	P_CFT3816DBIUSER := this.[CFT3816DBIUSER];
+end if;
+-- End initialization of parameters and variables
+begin
+	if p_message='DEFAULT' then
+		--Башкиров В.Г. 09.04.2026 CFT-3816
+		of5.[0]:=nvl(this.[CFT3816_INDEX].[0],null);
+		P_CFT3816_INDEX		:=of5;						--Индекс (0..4)
+		P_CFT3816_LAST_DAY	:=this.[CFT3816_LAST_DAY];	--Дата последнего существования
+		P_CFT3816_DBIREADY	:=this.[CFT3816_DBIREADY];	--DBI ready
+		P_CFT3816DBIUSER	:=this.[CFT3816DBIUSER]	 ;	--DBI user
+	end if;
+end;
+end;
+
+execute is
+begin
+	-- Установка значения реквизита "Код ТПБ"
+	[CODE_TBP] := P_CODE_TBP;
+	-- Установка значения реквизита "Наименование ТБП"
+	[NAME_TBP] := P_NAME_TBP;
+	-- Установка значения реквизита "Имя объекта"
+	[SHORT_NAME] := P_SHORT_NAME;
+	-- Установка значения реквизита "Наименование объекта"
+	[NAME_M] := P_NAME_M;
+	-- Установка значения реквизита "Создатель"
+	[USER_INIT] := P_USER_INIT;
+	-- Установка значения реквизита "Зачем разработано, кто заказчик"
+	[BISINESS] := P_BISINESS;
+	-- Установка значения реквизита "Что сделано"
+	[WORK] := P_WORK;
+	-- Установка значения реквизита "Дата, Время включения в справочник"
+	[DATE_WRATE] := P_DATE_WRATE;
+	-- Установка значения реквизита "Пользователь изменивший доступность"
+	[USER_ACCESS_EDIT] := P_USER_ACCESS_EDIT;
+	-- Установка значения реквизита "Дата, Время изменения доступности"
+	[ACCESS_EDIT_DATE] := P_ACCESS_EDIT_DATE;
+	-- Установка значения реквизита "Обоснование изменение доступа"
+	[JUSTIFICATION] := P_JUSTIFICATION;
+	-- Установка значения реквизита "Режим работы (0-Только журналировать вызов,1-Журналировать и предупреждать,2-Журналировать и запрещать использовать)"
+	[TYPE_WORK] := P_TYPE_WORK;
+	-- Установка значения реквизита "До какой даты разрешать пользоваться"
+	[DATE_END] := P_DATE_END;
+	-- Установка значения реквизита "Рекомендуемая дистрибутивная операция"
+	[DISTRIB] := P_DISTRIB;
+	-- Установка значения реквизита "Контроль встроен в операцию"
+	[IN_CHECK] := P_IN_CHECK;
+	-- Установка значения реквизита "Размер журнала"
+	[RECS_IN_MAG] := P_RECS_IN_MAG;
+	-- Установка значения реквизита "Принято сопровождением"
+	[USER_ACCEPT] := P_USER_ACCEPT;
+	-- Установка значения реквизита "Пользователь протестировавший функционал"
+	[USER_TEST] := P_USER_TEST;
+	-- Установка значения реквизита "Дата создания"
+	[DATE_CREATED] := P_DATE_CREATED;
+	-- Установка значения реквизита "Пользователь создавший"
+	[USER_CREAT] := P_USER_CREAT;
+	-- Установка значения реквизита "Комментарий"
+	[COMMENT] := P_COMMENT;
+	-- Установка значения реквизита "Автодокументирование"
+	[AVTODOC] := P_AVTODOC;
+	-- Установка значения реквизита "Метка"
+	[METKA] := P_METKA;
+	-- Установка значения реквизита "На удаление"
+	[DT_OPER] := P_DT_OPER;
+	-- Установка значения реквизита "Пользователь, рекомендующий удаление"
+	[USER_DEL_OPER] := P_USER_DEL_OPER;
+	-- Установка значения реквизита "Обоснование удаления"
+	[REZ_DEL_OPER] := P_REZ_DEL_OPER;
+	-- Установка значения реквизита "Операция на схеме"
+	[OPER_ON_BASE] := P_OPER_ON_BASE;
+	[DATE_PROV] := P_DATE_PROV;
+	[FLAG] := P_FLAG;
+	[CFT_BOOL] := P_CFT_BOOL;
+	[MAG]:=P_MAG;
+	
+	--Башкиров В.Г. 09.04.2026 CFT-3816
+	[CFT3816_INDEX]		:=of5;
+	[CFT3816_LAST_DAY]	:=P_CFT3816_LAST_DAY;
+	[CFT3816_DBIREADY]	:=P_CFT3816_DBIREADY;
+	[CFT3816DBIUSER]	:=P_CFT3816DBIUSER;
+end;
+end;
+end;

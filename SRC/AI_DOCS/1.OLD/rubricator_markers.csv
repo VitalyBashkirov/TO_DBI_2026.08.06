@@ -1,0 +1,11 @@
+ID,Документ,Строки,Маркер,Формат маркировки,Описание,Статус,Версия,Дата_обновления,Примечания
+M001,DOC_V50,строки с 32 по 48,v50.2.1,-- v50.2.1 строки с XXXX по YYYY. NativeID: NUMBER -> VARCHAR2(100),Замена NUMBER на VARCHAR2(100) для полей NativeID,active,v50.1,2026-04-15,Применяется ко всем полям типа NUMBER используемым как идентификаторы
+M002,DOC_V50,строки с 36 по 41,v50.1.3,-- v50.1.3 строки с XXXX по YYYY. SYSDATE -> SYSTEM.OP_DATE,Замена SYSDATE на SYSTEM.OP_DATE,active,v50.1,2026-04-15,Все упоминания SYSDATE в коде
+M003,DOC_V50,строки с 16 по 35,v50.1.2,-- v50.1.2 строки с XXXX по YYYY. ROWNUM -> FETCH FIRST,Замена ROWNUM на FETCH FIRST n ROWS ONLY,active,v50.1,2026-04-15,Только для конструкций WHERE ROWNUM = 1 и WHERE ROWNUM <= N
+M004,DOC_V50,строки с 36 по 37,v50.3.5,-- v50.3.5 строки с XXXX по YYYY. WHEN OTHERS без ROLLBACK/RAISE,Добавление ROLLBACK и RAISE в блоки EXCEPTION WHEN OTHERS,active,v50.1,2026-04-15,Если в блоке только NULL добавить ROLLBACK; RAISE;
+M005,DOC_V50,строки с 36 по 36,v50.3.3,-- v50.3.3 строки с XXXX по YYYY. DBMS_OUTPUT -> STDIO,Замена DBMS_OUTPUT на STDIO,active,v50.1,2026-04-15,PUT_LINE -> PUT_LINE_BUF NEW_LINE -> NEW_LINE
+M006,DOC_V50,строки с 34 по 34,v50.3.1,-- v50.3.1 строки с XXXX по YYYY. UTL_HTTP -> RUNTIME.HTTP_MGR,Замена UTL_HTTP на RUNTIME.HTTP_MGR,active,v50.1,2026-04-15,
+M007,DOC_TDS20240828,строки с XX по YY,тдс20240828.п.1,-- тдс20240828.п.1 строки с XXXX по YYYY. SYSDATE -> SYSTEM.OP_DATE,Замена SYSDATE на SYSTEM.OP_DATE (альтернативная метка),active,v1.0,2026-04-15,Альтернатива v50.1.3 использовать при наличии ссылок на этот документ
+M008,DOC_TDS20240828,строки с XX по YY,тдс20240828.п.2,-- тдс20240828.п.2 строки с XXXX по YYYY. USER -> STDLIB.USERID,Замена USER на STDLIB.USERID,active,v1.0,2026-04-15,Исключение: USER FROM в запросах
+M009,DOC_KLOIK20240828,строки с XX по YY,тклоик20240828.КОДИРОВАНИЕ.п.3,-- тклоик20240828.КОДИРОВАНИЕ.п.3 строки с XXXX по YYYY. VARCHAR -> VARCHAR2,Замена VARCHAR на VARCHAR2,active,v1.0,2026-04-15,Только VARCHAR без указания длины
+M010,DOC_TDS20240828,строки с XX по YY,тдс20240828.п.3,-- тдс20240828.п.3 строки с XXXX по YYYY. Описание,Пример расширения рубрикатора,draft,v1.1,2026-04-15,Черновик - требует уточнения

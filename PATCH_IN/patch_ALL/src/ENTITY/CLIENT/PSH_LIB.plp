@@ -1,0 +1,1371 @@
+class CLIENT;
+
+@name('ПСХ. Библиотека')
+library PSH_LIB is
+
+
+
+
+
+-- Функция IsClientBank возвращает 1 если клиент является пользователем ДБО, и 0 если нет
+-- В случае если второй параметр p_date равен NULL, то он инициализируется датой операционного дня
+-- При поиске период 12.01.14-16.03.2014 расширяется до 01.01.14-31.03.2014
+
+public function IsClientBank(p_client ref [CLIENT], p_date	[DATE] default null) return number is 
+begin
+	p_date	:= nvl(p_date, ::[SYSTEM].[OP_DATE]);
+	--debug_pipe('p_date='||to_char(p_date, 'dd.mm.yyyy'), 0);
+	--debug_pipe('First_day='||to_char((add_months(last_day(p_date), -1) + 1), 'dd.mm.yyyy'), 0);
+	--debug_pipe('Last_day='||to_char(last_day(p_date), 'dd.mm.yyyy'), 0);
+	
+	for z in p_client.[ADD_PROP]
+		where z.[GROUP_PROP]= ::[PROPERTY_GRP]([CODE]='CLIENT_BANK')
+			and (z.[DATE_BEG] is null or add_months(last_day(z.[DATE_BEG]), -1) + 1 <= p_date)
+			--and (z.[DATE_END] is null or p_date <= last_day(z.[DATE_END])) and z.[bool] = true
+			and (z.[DATE_END] is null or p_date <= last_day(z.[DATE_END])) and upper(z.[str]) = 'ДА'
+	loop
+--		debug_pipe('z.[DATE_BEG]='||to_char(z.[DATE_BEG], 'dd.mm.yyyy'), 0);
+--		debug_pipe('z.[DATE_END]='||to_char(z.[DATE_END], 'dd.mm.yyyy'), 0);
+		return 1;
+	end loop;	
+	return 0;
+end;
+
+
+function checkNaznPlat_ZRP (a_st string ) return boolean is
+begin
+	if 	upper(a_st) like upper('%зараб%')
+	or 	upper(a_st) like upper('%зарп%')
+	or 	upper(a_st) like upper('%з/п%')
+	or 	upper(a_st) like upper('%труда%')
+	or	upper(a_st) like upper('%декрет%')
+	or	upper(a_st) like upper('%увольн%')
+	--or upper(a_st) like upper('%аванс%')
+	or upper(a_st) like upper('%отпускн%')
+	or upper(a_st) like upper('%по уходу%')
+	or upper(a_st) like upper('%ребен%')
+	or upper(a_st) like upper('%больнич%')
+	or upper(a_st) like upper('%нетруд%')
+	or upper(a_st) like upper('%з.п.%')
+	or upper(a_st) like upper('%з.плата%')
+	or upper(a_st) like upper('%з. плата%')
+	then
+		return true;
+	else
+		return false;
+	end if;
+end;
+
+function checkNaznPlat_NONDS (a_st string ) return boolean is
+begin
+	if 	upper(a_st) like upper('%без НДС%')
+	or 	upper(a_st) like upper('%без налога%')
+	or 	upper(a_st) like upper('%не облагается%')
+	or 	upper(a_st) like upper('%не предусмотрен%')
+	or	upper(a_st) like upper('%без учета%')
+	or	upper(a_st) like upper('%отсутст%')
+	then
+		return true;
+	else
+		return false;
+	end if;
+end;
+
+function checkNaznPlat_NDS (a_st string ) return boolean is
+begin
+	if 	upper(a_st) like upper('%в том числе НДС%')
+	or 	upper(a_st) like upper('%в т.ч. НДС%')
+	or 	upper(a_st) like upper('%в т.ч.НДС%')
+	or 	upper(a_st) like upper('%в т. ч. НДС%')
+	or 	upper(a_st) like upper('%в т. ч.НДС%')
+	or 	upper(a_st) like upper('%с учетом НДС%')
+	or 	upper(a_st) like upper('%НДС перечислен%')
+	then
+		return true;
+	else
+		return false;
+	end if;
+end;
+
+
+public function FirstAcc_for_view (p_client ref [CLIENT], p_d_beg	[DATE], p_d_end	[DATE]) return varchar(1) is 
+ret varchar(1);
+opened_in_period boolean;
+opened_in_past 	 boolean;
+
+begin
+
+	ret  := '0';
+	opened_in_period  := false;
+	opened_in_past 	  := false;
+	
+	for acc in [AC_FIN] where acc.[CLIENT_V] = p_client and substr(acc.[MAIN_V_ID], 1,5) not in ('40905','40909','40910','40911','40912','40913')
+								and  (acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] >= p_d_beg)
+								and (acc.[COM_STATUS].[CODE] not in ('TO_OPEN') or acc.[COM_STATUS] is null)
+								and acc.[DATE_OP]<=p_d_end -- or acc.[DATE_CLOSE]
+
+	-- бежим по открытым
+	loop
+		-- если открыт в диапазоне
+		if acc.[DATE_OP] >= p_d_beg then
+			opened_in_period := true;
+			--ret := '1';
+		end if;
+		-- если открыт до диапазона
+		if acc.[DATE_OP] < p_d_beg then
+			opened_in_past  := true;
+		end if;
+		
+	end loop;
+	
+	if opened_in_period and not opened_in_past then
+		ret := '1';
+	end if;
+	
+	return ret;
+end;
+
+public function FirstAcc_for_view2 (p_client ref [CLIENT], p_d_beg	[DATE], p_d_end	[DATE]) return ref [AC_FIN] is 
+ret varchar(1);
+opened_in_period boolean;
+opened_in_past 	 boolean;
+acc_id ref [AC_FIN];
+
+begin
+
+	ret  := '0';
+	opened_in_period  := false;
+	opened_in_past 	  := false;
+	
+	for acc in [AC_FIN] where acc.[CLIENT_V] = p_client and substr(acc.[MAIN_V_ID], 1,5) not in ('40905','40909','40910','40911','40912','40913')
+								and  (acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] >= p_d_beg)
+								and (acc.[COM_STATUS].[CODE] not in ('TO_OPEN') or acc.[COM_STATUS] is null)
+								and acc.[DATE_OP]<=p_d_end-- or acc.[DATE_CLOSE]
+								order by acc.[DATE_OP] desc
+	-- бежим по открытым
+	loop
+		-- если открыт в диапазоне
+		if acc.[DATE_OP] >= p_d_beg then
+			opened_in_period := true;
+			acc_id:=acc;
+			--ret := '1';
+		end if;
+		-- если открыт до диапазона
+		if acc.[DATE_OP] < p_d_beg then
+			opened_in_past  := true;
+		end if;
+		
+	end loop;
+	
+	if opened_in_period and not opened_in_past then
+		ret := '1';
+	end if;
+	
+	if ret=1 then return acc_id;
+	else return null;
+	end if;
+	
+end;
+
+
+
+public function LastAcc_for_view  	(p_client ref [CLIENT], p_d_beg	[DATE], p_d_end	[DATE]) return varchar(1) is 
+ret varchar(1);
+closed_in_period boolean;
+has_opened 	 boolean;
+
+begin
+
+	ret  := '0';
+	closed_in_period  := false;
+	has_opened 	      := false;
+	
+	--debug_pipe('p_d_beg='||p_d_beg||' '||'p_d_end='||p_d_end,0 );
+	
+	for acc in [AC_FIN] where acc.[CLIENT_V] = p_client and substr(acc.[MAIN_V_ID], 1,5) not in ('40905','40909','40910','40911','40912','40913')
+	--and (acc.[DATE_CLOSE] acc.[DATE_CLOSE] >= p_d_beg)-- or acc.[DATE_CLOSE]
+	-- бежим по счетам
+	loop
+		-- если закрыт в диапазоне
+		if acc.[DATE_CLOSE] >= p_d_beg and  acc.[DATE_CLOSE] <= p_d_end  then
+			closed_in_period := true;
+		end if;
+		-- если есть открытые
+		if acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] > p_d_end then
+			has_opened  := true;
+		end if;
+		
+	end loop;
+	
+	if closed_in_period and not has_opened then
+		ret := '1';
+	end if;
+	
+	return ret;
+end;
+
+public function LastAcc_for_view2 	(p_client ref [CLIENT], p_d_beg	[DATE], p_d_end	[DATE]) return ref [AC_FIN] is 
+ret varchar(1);
+closed_in_period boolean;
+has_opened 	 boolean;
+acc_id ref [AC_FIN];
+
+begin
+
+	ret  := '0';
+	closed_in_period  := false;
+	has_opened 	      := false;
+	
+	--debug_pipe('p_d_beg='||p_d_beg||' '||'p_d_end='||p_d_end,0 );
+	
+	for acc in [AC_FIN] where acc.[CLIENT_V] = p_client and substr(acc.[MAIN_V_ID], 1,5) not in ('40905','40909','40910','40911','40912','40913')
+	order by acc.[DATE_CLOSE]
+	--and (acc.[DATE_CLOSE] acc.[DATE_CLOSE] >= p_d_beg)-- or acc.[DATE_CLOSE]
+	-- бежим по счетам
+	loop
+		-- если закрыт в диапазоне
+		if acc.[DATE_CLOSE] >= p_d_beg and  acc.[DATE_CLOSE] <= p_d_end  then
+			closed_in_period := true;
+			acc_id:=acc;
+		end if;
+		-- если есть открытые
+		if acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] > p_d_end then
+			has_opened  := true;
+		end if;
+		
+	end loop;
+	
+	if closed_in_period and not has_opened then
+		ret := '1';
+	end if;
+	
+	if ret=1 then return acc_id;
+	else return null;
+	end if;
+	
+end;
+
+public function isCheckURtoFIZ 	(p_client ref [CLIENT], p_d_beg	[DATE], p_d_end	[DATE]) return varchar(1) is 
+ret varchar(1);
+closed_in_period boolean;
+has_opened 	 boolean;
+--acc_id ref [AC_FIN];
+sm number(18,2);
+
+begin
+
+	ret  := '0';
+	closed_in_period  := false;
+	has_opened 	      := false;
+	
+	--debug_pipe('p_d_beg='||p_d_beg||' '||'p_d_end='||p_d_end,0 );
+	sm := 0;
+	for acc in [AC_FIN] where 	acc.[CLIENT_V] = p_client
+								and  (acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] >= p_d_beg)
+								and acc.[DATE_OP]<=p_d_end -- or acc.[DATE_CLOSE]
+	order by acc.[DATE_CLOSE]
+	-- бежим по счетам
+	loop
+	
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_DT] = acc
+									and (
+											(md.[KL_KT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,5) in ('40817','40820','30232','30233','40802') ))
+											or
+											(md.[KL_KT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,3) in ('423', '426')) )
+											or
+											(md.[KL_KT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,5) in ('40817','40820','30232','30233','40802')) )
+											or
+											(md.[KL_KT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,3) in ('423', '426') ))
+										)
+		loop
+			if not checkNaznPlat_ZRP(md.[NAZN])
+			then
+					sm := sm + md.[SUM_NT];
+					if sm >= 100000 then
+						ret  := '1';
+						return ret;
+					end if;
+			end if;
+			--exit;
+		end loop;
+	
+	end loop;
+	
+	return ret;
+	
+end;
+
+-- переводы от Юриков Физикам - если больше 100000 по всем плат от Юр.
+public function isCheckURtoFIZSM		(p_client ref [CLIENT], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is 
+sm number(18,2);
+begin
+
+	sm := 0;	
+	for acc in [AC_FIN] where 	acc.[CLIENT_V] = p_client
+								--and substr(acc.[MAIN_V_ID], 1,5) not in ('40905','40909','40910','40911','40912','40913')
+								and  (acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] >= p_d_beg)
+								--and (acc.[COM_STATUS].[CODE] not in ('TO_OPEN') or acc.[COM_STATUS] is null)
+								and acc.[DATE_OP]<=p_d_end -- or acc.[DATE_CLOSE]
+	loop
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_DT] = acc
+									and (
+											(md.[KL_KT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,5) in ('40817','40820','30232','40802') ))
+											or
+											(md.[KL_KT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,3) in ('423', '426')) )
+											or
+											(md.[KL_KT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,5) in ('40817','40820','30232','40802')) )
+											or
+											(md.[KL_KT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,3) in ('423', '426') ))
+										)
+		loop
+			if not checkNaznPlat_ZRP(md.[NAZN]) then
+				sm := sm + md.[SUM_NT];
+			end if;
+		end loop;
+	end loop;
+	return sm;
+end;
+
+-----------------------
+public function isCheckURtoFIZSMAll	(p_client ref [CLIENT], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is 
+sm number(18,2);
+begin
+
+	sm := 0;	
+	for acc in [AC_FIN] where 	acc.[CLIENT_V] = p_client
+								--and substr(acc.[MAIN_V_ID], 1,5) not in ('40905','40909','40910','40911','40912','40913')
+								and  (acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] >= p_d_beg)
+								--and (acc.[COM_STATUS].[CODE] not in ('TO_OPEN') or acc.[COM_STATUS] is null)
+								and acc.[DATE_OP]<=p_d_end -- or acc.[DATE_CLOSE]
+	loop
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_DT] = acc
+									/*and (
+											(md.[KL_DT].[0] = 1 and (substr(md.[ACC_DT].[MAIN_V_ID],1,5) 	in ('40701','40702','40703','40804','40805','40806','40807','40802') ))
+											or
+											(md.[KL_DT].[0] = 2 and (substr(md.[KL_DT].[2].[1],1,5) 		in ('40701','40702','40703','40804','40805','40806','40807','40802') ))
+										)*/
+		loop
+			--if not checkNaznPlat_ZRP(md.[NAZN]) then
+				sm := sm + md.[SUM_NT];
+			--end if;
+		end loop;
+	end loop;
+	return sm;
+end;
+
+
+-- переводы от Юриков Физикам - если больше 100000 Проц от общих приходов
+public function isCheckURtoFIZPrc(p_client ref [CLIENT], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is 
+sm number(18,2);
+sm1 number(18,2);
+begin
+
+	sm := 0;	
+	for acc in [AC_FIN] where 	acc.[CLIENT_V] = p_client
+								and  (acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] >= p_d_beg)
+								and acc.[DATE_OP]<=p_d_end -- or acc.[DATE_CLOSE]
+	loop
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_DT] = acc
+									and (
+											(md.[KL_KT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,5) in ('40817','40820','30232','40802') ))
+											or
+											(md.[KL_KT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,3) in ('423', '426')) )
+											or
+											(md.[KL_KT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,5) in ('40817','40820','30232','40802')) )
+											or
+											(md.[KL_KT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,3) in ('423', '426') ))
+										)
+		loop
+			if not checkNaznPlat_ZRP(md.[NAZN]) then
+				sm := sm + md.[SUM_NT];
+			end if;
+		end loop;
+	end loop;
+
+	sm1 := 0;	
+	for acc in [AC_FIN] where 	acc.[CLIENT_V] = p_client
+								and  (acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] >= p_d_beg)
+								and acc.[DATE_OP]<=p_d_end -- or acc.[DATE_CLOSE]
+	loop
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_KT] = acc
+									/*and (
+											(md.[KL_DT].[0] = 1 and (substr(md.[ACC_DT].[MAIN_V_ID],1,5) 	in ('40701','40702','40703','40804','40805','40806','40807','40802') ))
+											or
+											(md.[KL_DT].[0] = 2 and (substr(md.[KL_DT].[2].[1],1,5) 		in ('40701','40702','40703','40804','40805','40806','40807','40802') ))
+										)*/
+		loop
+			--if not checkNaznPlat_ZRP(md.[NAZN]) then
+				sm1 := sm1 + md.[SUM_NT];
+			--end if;
+		end loop;
+	end loop;
+	if sm1 = 0 then
+		return -1;
+	else
+		return sm/sm1*100;
+	end if;
+end;
+
+
+
+
+
+-- переводы от Юриков Физикам 1 - если больше 100000
+public function isCheckFIZfromUR 	(p_client ref [CLIENT], p_d_beg	[DATE], p_d_end	[DATE]) return varchar(1) is 
+ret varchar(1);
+closed_in_period boolean;
+has_opened 	 boolean;
+--acc_id ref [AC_FIN];
+sm number(18,2);
+
+begin
+
+	ret  := '0';
+	closed_in_period  := false;
+	has_opened 	      := false;
+	
+	--debug_pipe('p_d_beg='||p_d_beg||' '||'p_d_end='||p_d_end,0 );
+
+	sm := 0;	
+	for acc in [AC_FIN] where 	acc.[CLIENT_V] = p_client
+								--and substr(acc.[MAIN_V_ID], 1,5) not in ('40905','40909','40910','40911','40912','40913')
+								and  (acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] >= p_d_beg)
+								--and (acc.[COM_STATUS].[CODE] not in ('TO_OPEN') or acc.[COM_STATUS] is null)
+								and acc.[DATE_OP]<=p_d_end -- or acc.[DATE_CLOSE]
+	--order by acc.[DATE_CLOSE]
+	-- бежим по счетам
+	loop
+	
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_KT] = acc
+									and (
+											(md.[KL_DT].[0] = 1 and (substr(md.[ACC_DT].[MAIN_V_ID],1,5) 	in ('40701','40702','40703','40804','40805','40806','40807','40802') ))
+											or
+											(md.[KL_DT].[0] = 2 and (substr(md.[KL_DT].[2].[1],1,5) 		in ('40701','40702','40703','40804','40805','40806','40807','40802') ))
+										)
+		loop
+			if not checkNaznPlat_ZRP(md.[NAZN]) then
+					sm := sm + md.[SUM_NT];
+					if sm >= 100000 then
+						ret  := '1';
+						return ret;
+					end if;
+			end if;
+			--exit;
+		end loop;
+		
+	end loop;
+	
+	return ret;
+	
+end;
+
+-- переводы от Юриков Физикам - если больше 100000 по всем плат от Юр.
+public function isCheckFIZfromURSM		(p_client ref [CLIENT], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is 
+sm number(18,2);
+begin
+
+	sm := 0;	
+	for acc in [AC_FIN] where 	acc.[CLIENT_V] = p_client
+								--and substr(acc.[MAIN_V_ID], 1,5) not in ('40905','40909','40910','40911','40912','40913')
+								and  (acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] >= p_d_beg)
+								--and (acc.[COM_STATUS].[CODE] not in ('TO_OPEN') or acc.[COM_STATUS] is null)
+								and acc.[DATE_OP]<=p_d_end -- or acc.[DATE_CLOSE]
+	loop
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_KT] = acc
+									and (
+											(md.[KL_DT].[0] = 1 and (substr(md.[ACC_DT].[MAIN_V_ID],1,5) 	in ('40701','40702','40703','40804','40805','40806','40807','40802') ))
+											or
+											(md.[KL_DT].[0] = 2 and (substr(md.[KL_DT].[2].[1],1,5) 		in ('40701','40702','40703','40804','40805','40806','40807','40802') ))
+										)
+		loop
+			if not checkNaznPlat_ZRP(md.[NAZN]) then
+				sm := sm + md.[SUM_NT];
+			end if;
+		end loop;
+	end loop;
+	return sm;
+end;
+
+-----------------------
+public function isCheckFIZfromURSMAll	(p_client ref [CLIENT], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is 
+sm number(18,2);
+begin
+
+	sm := 0;	
+	for acc in [AC_FIN] where 	acc.[CLIENT_V] = p_client
+								--and substr(acc.[MAIN_V_ID], 1,5) not in ('40905','40909','40910','40911','40912','40913')
+								and  (acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] >= p_d_beg)
+								--and (acc.[COM_STATUS].[CODE] not in ('TO_OPEN') or acc.[COM_STATUS] is null)
+								and acc.[DATE_OP]<=p_d_end -- or acc.[DATE_CLOSE]
+	loop
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_KT] = acc
+									/*and (
+											(md.[KL_DT].[0] = 1 and (substr(md.[ACC_DT].[MAIN_V_ID],1,5) 	in ('40701','40702','40703','40804','40805','40806','40807','40802') ))
+											or
+											(md.[KL_DT].[0] = 2 and (substr(md.[KL_DT].[2].[1],1,5) 		in ('40701','40702','40703','40804','40805','40806','40807','40802') ))
+										)*/
+		loop
+			--if not checkNaznPlat_ZRP(md.[NAZN]) then
+				sm := sm + md.[SUM_NT];
+			--end if;
+		end loop;
+	end loop;
+	return sm;
+end;
+
+
+-- переводы от Юриков Физикам - если больше 100000 Проц от общих приходов
+public function isCheckFIZfromURPrc(p_client ref [CLIENT], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is 
+sm number(18,2);
+sm1 number(18,2);
+begin
+
+	sm := 0;	
+	for acc in [AC_FIN] where 	acc.[CLIENT_V] = p_client
+								and  (acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] >= p_d_beg)
+								and acc.[DATE_OP]<=p_d_end -- or acc.[DATE_CLOSE]
+	loop
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_KT] = acc
+									and (
+											(md.[KL_DT].[0] = 1 and (substr(md.[ACC_DT].[MAIN_V_ID],1,5) 	in ('40701','40702','40703','40804','40805','40806','40807','40802') ))
+											or
+											(md.[KL_DT].[0] = 2 and (substr(md.[KL_DT].[2].[1],1,5) 		in ('40701','40702','40703','40804','40805','40806','40807','40802') ))
+										)
+		loop
+			if not checkNaznPlat_ZRP(md.[NAZN]) then
+				sm := sm + md.[SUM_NT];
+			end if;
+		end loop;
+	end loop;
+
+	sm1 := 0;	
+	for acc in [AC_FIN] where 	acc.[CLIENT_V] = p_client
+								and  (acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] >= p_d_beg)
+								and acc.[DATE_OP]<=p_d_end -- or acc.[DATE_CLOSE]
+	loop
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_KT] = acc
+									/*and (
+											(md.[KL_DT].[0] = 1 and (substr(md.[ACC_DT].[MAIN_V_ID],1,5) 	in ('40701','40702','40703','40804','40805','40806','40807','40802') ))
+											or
+											(md.[KL_DT].[0] = 2 and (substr(md.[KL_DT].[2].[1],1,5) 		in ('40701','40702','40703','40804','40805','40806','40807','40802') ))
+										)*/
+		loop
+			--if not checkNaznPlat_ZRP(md.[NAZN]) then
+				sm1 := sm1 + md.[SUM_NT];
+			--end if;
+		end loop;
+	end loop;
+	if sm1 = 0 then
+		return -1;
+	else
+		return sm/sm1*100;
+	end if;
+end;
+
+
+/*
+0 - нет счета
+
+*/
+public function isAccOpen 			(p_client ref [CLIENT], p_d_beg	[DATE], p_d_end	[DATE]) return varchar(1) is 
+ret varchar(1);
+closed_in_period boolean;
+has_opened 	 boolean;
+
+begin
+
+	ret  := '0';
+	closed_in_period  := false;
+	has_opened 	      := false;
+	
+	--debug_pipe('p_d_beg='||p_d_beg||' '||'p_d_end='||p_d_end,0 );
+	
+	for acc in [AC_FIN] where acc.[CLIENT_V] = p_client and substr(acc.[MAIN_V_ID], 1,5) not in ('40905','40909','40910','40911','40912','40913')
+	--and (acc.[DATE_CLOSE] acc.[DATE_CLOSE] >= p_d_beg)-- or acc.[DATE_CLOSE]
+	-- бежим по счетам
+	loop
+		-- если закрыт в диапазоне
+		if acc.[DATE_CLOSE] >= p_d_beg and  acc.[DATE_CLOSE] <= p_d_end  then
+			closed_in_period := true;
+		end if;
+		-- если есть открытые
+		if acc.[DATE_CLOSE] is null or acc.[DATE_CLOSE] > p_d_end then
+			has_opened  := true;
+		end if;
+		
+	end loop;
+	
+	if closed_in_period and not has_opened then
+		ret := '1';
+	end if;
+	
+	return ret;
+end;
+
+
+public function UR_AccSUMOBR 		(p_acc ref [AC_FIN], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is 
+ret varchar(1);
+closed_in_period boolean;
+has_opened 	 boolean;
+--acc_id ref [AC_FIN];
+sm number(18,2);
+
+begin
+
+	ret  := '0';
+	closed_in_period  := false;
+	has_opened 	      := false;
+	
+	--debug_pipe('p_d_beg='||p_d_beg||' '||'p_d_end='||p_d_end,0 );
+
+	sm := 0;	
+	
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_DT] = p_acc
+									and (
+											(md.[KL_KT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,5) =	'40101' ))
+											or
+											(md.[KL_KT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,5) 	 =	'40101' ))
+
+											/*or
+											(md.[KL_DT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,3) in ('423', '426')) )
+											or
+											(md.[KL_DT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,5) in ('40817','40820','30232','40802')) )
+											or
+											(md.[KL_DT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,3) in ('423', '426') ))*/
+										)
+		loop
+			sm := sm + md.[SUM_NT];
+		end loop;
+		
+	
+	return sm;
+	
+end;
+
+public function UR_AccSUMOBR_ZP	(p_acc ref [AC_FIN], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is 
+--acc_id ref [AC_FIN];
+sm number(18,2);
+
+begin
+
+	
+	--debug_pipe('p_d_beg='||p_d_beg||' '||'p_d_end='||p_d_end,0 );
+
+	sm := 0;	
+	
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_DT] = p_acc
+									/*and (
+											(md.[KL_KT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,5) =	'40101' ))
+											or
+											(md.[KL_KT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,5) 	 =	'40101' ))
+										)*/
+		loop
+			if checkNaznPlat_ZRP(md.[NAZN])
+			then
+					sm := sm + md.[SUM_NT];
+			end if;
+		end loop;
+		
+	
+	return sm;
+	
+end;
+
+public function UR_AccSUMOBR_ARND	(p_acc ref [AC_FIN], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is 
+sm number(18,2);
+begin
+	--debug_pipe('p_d_beg='||p_d_beg||' '||'p_d_end='||p_d_end,0 );
+	sm := 0;	
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_DT] = p_acc
+		loop
+			if	upper(md.[NAZN]) like upper('%аренд%')
+			then
+				sm := sm + md.[SUM_NT];
+			end if;
+		end loop;
+	return sm;
+end;
+
+-- приход с НДС
+public function UR_AccSUMPri_NDS	(p_acc ref [AC_FIN], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is 
+sm number(18,2);
+begin
+	--debug_pipe('p_d_beg='||p_d_beg||' '||'p_d_end='||p_d_end,0 );
+	sm := 0;	
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_KT] = p_acc
+		loop
+			if	checkNaznPlat_NDS (md.[NAZN] ) then
+				sm := sm + md.[SUM_NT];
+			end if;
+		end loop;
+	return sm;
+end;
+
+-- приход с Prc
+public function UR_AccSUMPri_NDSPrc(p_acc ref [AC_FIN], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is 
+sm number(18,2);
+begin
+		sm := nvl(::[RUNTIME].[F_5].A('И'||p_acc||'КВ', p_d_beg, p_d_end),0);	
+		if sm > 0 then
+		
+			return UR_AccSUMPri_NDS(p_acc, p_d_beg, p_d_end)/sm*100;
+		else
+			return 0;
+		end if;
+end;
+
+
+-- списание без НДС (за минусом налогов и ЗП)
+public function UR_AccSUMRas_NDSPRC(p_acc ref [AC_FIN], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is 
+sm number(18,2);
+smdbt number(18,2);
+begin
+	smdbt := nvl(::[RUNTIME].[F_5].A('И'||p_acc||'КВ', p_d_beg, p_d_end),0);	
+	if smdbt >0 then	
+		sm := 0;	
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_DT] = p_acc
+									and not (
+											(md.[KL_KT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,5) =	'40101' ))
+											or
+											(md.[KL_KT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,5) 	 =	'40101' ))
+									)
+		loop
+			if	checkNaznPlat_NDS(md.[NAZN] ) then
+				sm := sm + md.[SUM_NT];
+			end if;
+		end loop;
+		return sm/smdbt*100;
+		
+	else
+		return 0;
+	end if;
+end;
+
+-- списание без НДС (за минусом налогов и ЗП)
+public function UR_AccSUMRas_noNDSPRC(p_acc ref [AC_FIN], p_INN string,  p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is 
+sm number(18,2);
+smdbt number(18,2);
+begin
+	smdbt := nvl(::[RUNTIME].[F_5].A('И'||p_acc||'КВ', p_d_beg, p_d_end),0);	
+	if smdbt >0 then	
+		sm := 0;	
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_DT] = p_acc
+									and not (
+											(md.[KL_KT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,5) =	'40101' ))
+											or
+											(md.[KL_KT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,5) 	 =	'40101' ))
+									)
+					--,	decode(md.[KL_KT].[0],1,md.[KL_KT].[1].[1].[INN],2,md.[KL_KT].[2].[INN]) : C_INN
+									and (
+											(md.[KL_KT].[0] = 1 and (md.[KL_KT].[1].[1].[INN] =	p_inn ))
+											or
+											(md.[KL_KT].[0] = 2 and (md.[KL_KT].[2].[INN] 	 =	p_inn ))
+									)
+									and ((	md.[KL_KT].[0] = 1
+										AND ( 	SUBSTR(md.[KL_KT].[1].[2].[MAIN_V_ID],1,5) IN ('40701', '40702', '40703', '40802', '40804', '40805', '40806', '40807', '30232')
+											OR	SUBSTR(md.[KL_KT].[1].[2].[MAIN_V_ID],1,3) IN ('423', '426') 				
+											)
+										)
+										OR
+										( md.[KL_KT].[0] = 2
+										AND ( 	SUBSTR(md.[KL_KT].[2].[1],1,5) IN ('40701', '40702', '40703', '40802', '40804', '40805', '40806', '40807', '30232')
+											OR	SUBSTR(md.[KL_KT].[2].[1],1,3) IN ('423', '426') 				
+				)			
+			)
+		)
+									
+		loop
+			if	checkNaznPlat_NONDS(md.[NAZN] ) then
+			--if	checkNaznPlat_NDS(md.[NAZN] ) then
+				sm := sm + md.[SUM_NT];
+			end if;
+		end loop;
+		--return sm/smdbt*100;
+		return sm;
+		
+	else
+		return 0;
+	end if;
+end;
+
+
+
+-- проверка кода УФМС
+--function isCheckCodeUFMS(p_client ref [CLIENT]) return boolean
+-- проверка кода УФМС
+--function isCheckCodeUFMS(p_client ref [CLIENT]) return boolean;
+public function isCheckCodeUFMS(p_client ref [CLIENT]) return string(4000) is 
+prv ref [CL_PRIV];
+skd string;
+b boolean;
+--kl string(4000);
+kl string(4000);
+begin
+	if p_client%class = 'CL_PRIV' then
+		prv := p_client;--->()	
+		--debug_pipe(prv.[DOC].[DEPART_CODE],0);
+		if length(trim(prv.[DOC].[DEPART_CODE])) = 7 then
+			skd := trim(prv.[DOC].[DEPART_CODE]);
+			b := false;
+			kl := '';
+			for kd in [PSH_PS_UFMS] WHERE kd.[CODE] = skd
+			loop		
+				B := TRUE;	
+				kl := kl ||'-->'||trim(kd.[WHO])||LF$;
+				if upper(trim(kd.[WHO])) = upper(trim(prv.[DOC].[WHO])) then
+					return 'OK';
+				end if;
+			end loop;
+			if b then
+				return 'ERROR-Название не совпало. Возможны варианты:'||LF$||kl;
+			else
+				return 'ERROR-не найден код подразделения ';
+			end if;
+		else
+			debug_pipe('Err->'||prv.[DOC].[DEPART_CODE],0);
+			return 'ERROR-длина не равна 7';
+		end if;
+	else
+		return 'ERROR-ORG';
+	end if;
+end;
+
+
+--function GetDTReg(p_client ref [CLIENT]) return date
+--function GetDTReg(p_client ref [CLIENT]) return date;
+public function GetDTReg(p_client ref [CLIENT]) return varchar(10) is 
+org ref [CL_CORP];
+d date;
+--skd string;
+--kl string(4000);
+begin
+	d := null;
+	if p_client%class = 'CL_ORG' then
+		org := p_client;--->()	
+		return to_char(org.[REGISTER].[DATE_REG], 'dd/mm/yyyy');
+
+	else
+		return null;
+	end if;
+
+end;
+
+public function GetDTRegD(p_client ref [CLIENT]) return date is 
+org ref [CL_CORP];
+d date;
+--skd string;
+--kl string(4000);
+begin
+	d := null;
+	if p_client%class = 'CL_ORG' then
+		org := p_client;--->()	
+		return org.[REGISTER].[DATE_REG];
+
+	else
+		return null;
+	end if;
+
+end;
+
+-- Даты открытия\закрытия расчетного счета
+public function GetRKODate_for_vw (p_client ref [CL_ORG], p_par varchar2 ) return date is  -- KAS 16/04/2020 по задаче Шмидт для представления
+ret_open  date;
+ret_close date;
+rko_dog ref [RKO];
+ret date;
+begin
+	for rko in ::[RKO] where rko.[CLIENT] = p_client and rko.[CONTRACT_CUR].[CUR_SHORT]= 'RUB' -- для определения дат брем только рублевые р/с
+		order by rko.[DATE_BEGINING]
+	loop
+		ret_open  := rko.[ACCOUNT].[DATE_OP];
+		ret_close := rko.[ACCOUNT].[DATE_CLOSE];
+		if rko.[ACCOUNT].[DATE_CLOSE] is null then			
+			exit; -- если найден работающий договор, берем его и выходим из цикла
+		end if;
+	end loop;
+	
+	if p_par = 'OPEN' then return ret_open;
+	elsif p_par = 'CLOSE' then return ret_close;
+	end if;
+	return null;
+end;
+
+-- Сумма платежей с расчетного счета в пользу ФЛ, кроме з/п и соц. выплат
+public function GetRKOPayFIZ_for_vw (p_client ref [CL_ORG], p_d_beg [DATE], p_d_end [DATE]) return number(18,2) is  -- KAS 16/04/2020 по задаче Шмидт для представления
+ret number(18,2);
+begin
+	ret := 0;
+	for rko in ::[RKO] all where rko.[CLIENT] = p_client --and rko.[CONTRACT_CUR].[CUR_SHORT]= 'RUB' -- KAS 17/04/2020 добавил обработку валютных договоров РКО
+	loop
+		--debug_pipe ('GetRKOPayFIZ_for_vw	'||rko.[ACCOUNT].[MAIN_V_ID],0);
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and trunc(md.[DATE_PROV]) <= p_d_end
+									and md.[ACC_DT] = rko.[ACCOUNT]
+									and (
+											(md.[KL_KT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,5) in ('40817','40820','30232') ))--,'40802') ))
+											or
+											(md.[KL_KT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,3) in ('423', '426')) )
+											or
+											(md.[KL_KT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,5) in ('40817','40820','30232')) )--,'40802')) )
+											or
+											(md.[KL_KT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,3) in ('423', '426') ))
+										)
+		loop
+			if not checkNaznPlat_ZRP(md.[NAZN]) then
+				ret := ret + md.[SUM_NT];
+			end if;
+		end loop;								
+	end loop;
+	
+	return ret;
+end;
+
+-- Сумма платежей c расчетного счета
+public function GetRKOPayDT_for_vw (p_client ref [CL_ORG], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is  -- KAS 16/04/2020 по задаче Шмидт для представления
+ret number(18,2);
+begin
+	ret := 0;
+	for rko in ::[RKO] all where rko.[CLIENT] = p_client --and rko.[CONTRACT_CUR].[CUR_SHORT]= 'RUB' -- KAS 17/04/2020 добавил обработку валютных договоров РКО
+	loop
+		--debug_pipe ('GetRKOPayDT_for_vw	'||rko.[ACCOUNT].[MAIN_V_ID],0);
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and trunc(md.[DATE_PROV]) <= p_d_end
+									and md.[ACC_DT] = rko.[ACCOUNT]
+									and (
+											(md.[KL_KT].[0] = 1 and md.[ACC_DT].[MAIN_V_ID] like '4%')
+											or
+											(md.[KL_KT].[0] = 2 and md.[KL_DT].[2].[1] like '4%')
+										)
+		loop
+				ret := ret + md.[SUM_NT];
+		end loop;						
+	end loop;
+	
+	return ret;
+end;
+
+-- Сумма платежей на расчетный счет
+public function GetRKOPayKT_for_vw (p_client ref [CL_ORG], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is  -- KAS 16/04/2020 по задаче Шмидт для представления
+ret number(18,2);
+begin
+	ret := 0;
+	for rko in ::[RKO] all where rko.[CLIENT] = p_client --and rko.[CONTRACT_CUR].[CUR_SHORT]= 'RUB' -- KAS 17/04/2020 добавил обработку валютных договоров РКО
+	loop
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and trunc(md.[DATE_PROV]) <= p_d_end
+									and md.[ACC_KT] = rko.[ACCOUNT]
+									and (
+											(md.[KL_DT].[0] = 1 and md.[ACC_DT].[MAIN_V_ID] like '4%')
+											or
+											(md.[KL_DT].[0] = 2 and md.[KL_DT].[2].[1] like '4%')
+										)
+		loop
+				ret := ret + md.[SUM_NT];
+		end loop;									
+	end loop;
+
+	return ret;
+end;
+
+-- Проверка: Сумма платежей с расчетного счета в пользу ФЛ (кроме з/п и соц. выплат) > 100 000
+public function CheckRKOPayFIZ_for_vw (p_client ref [CL_ORG], p_d_beg [DATE], p_d_end	[DATE]) return varchar(1) is  -- KAS 16/04/2020 по задаче Шмидт для представления
+ret varchar(1);
+begin
+	ret := '0';
+	if GetRKOPayFIZ_for_vw (p_client, p_d_beg, p_d_end) > 100000 then
+		ret := '1';
+	end if;
+	return ret;
+end;
+
+-- Отношение суммы платежей с расчетного счета в пользу ФЛ (кроме з/п и соц. выплат) к сумме всех платежей
+public function GetRKOPayFIZ_PRC_for_vw (p_client ref [CL_ORG], p_d_beg [DATE], p_d_end [DATE]) return number(18,2) is  -- KAS 16/04/2020 по задаче Шмидт для представления
+ret number(18,2);
+vPayFIZ number(18,2);
+vPayDT number(18,2);
+begin
+	vPayFIZ := GetRKOPayFIZ_for_vw (p_client, p_d_beg, p_d_end);
+	if vPayFIZ != 0	then
+		vPayDT := GetRKOPayDT_for_vw (p_client, p_d_beg, p_d_end);
+		if vPayDT != 0 then
+			ret := vPayFIZ/vPayDT * 100;
+		else
+			ret := null;	
+		end if;
+	else
+		ret := 0;
+	end if;
+	return ret;
+end;
+
+-- Сумма платежей на клиента-ФЛ
+public function GetToFIZPayKT_for_vw (p_client ref [CL_ORG], p_d_beg [DATE], p_d_end [DATE]) return number(18,2) is  -- KAS 20/04/2020 по задаче Шмидт для представления
+ret number(18,2);
+begin
+	ret := 0;
+	for acc in ::[AC_FIN] where acc.[CLIENT_V] = p_client
+	loop
+		for md in ::[MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and trunc(md.[DATE_PROV]) <= p_d_end
+									
+									and md.[ACC_KT] = acc
+									and (
+											(md.[KL_DT].[0] = 1 and md.[ACC_DT].[MAIN_V_ID] like '4%')
+											or
+											(md.[KL_DT].[0] = 1 and (substr(md.[ACC_DT].[MAIN_V_ID],1,5) in ('30233') ))
+											or
+											(md.[KL_DT].[0] = 2 and md.[KL_DT].[2].[1] like '4%')
+											or
+											(md.[KL_DT].[0] = 2 and (substr(md.[KL_DT].[2].[1],1,5) in ('30233')) )
+										)
+		loop
+			ret := ret + md.[SUM_NT];							
+		end loop;
+	end loop;
+	return ret;
+end;
+
+-- Сумма платежей на клиента-ФЛ со счетов ЮЛ (кроме з/п и соц. выплат)
+public function GetToFIZPayUR_for_vw (p_client ref [CL_ORG], p_d_beg [DATE], p_d_end [DATE]) return number(18,2) is  -- KAS 20/04/2020 по задаче Шмидт для представления
+ret number(18,2);
+begin
+	ret := 0;
+	for acc in ::[AC_FIN] where acc.[CLIENT_V] = p_client
+	loop
+		--debug_pipe ('GetRKOPayFIZ_for_vw	'||rko.[ACCOUNT].[MAIN_V_ID],0);
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and trunc(md.[DATE_PROV]) <= p_d_end
+									
+									and md.[ACC_KT] = acc
+									and (
+											(md.[KL_DT].[0] = 1 and (substr(md.[ACC_DT].[MAIN_V_ID],1,5) in ('40701','40702','40703','40804','40805','40806','40807','40802') )) -- расчетные счета ЮЛ и ИП (рез и не рез) в Банке
+											or
+											(md.[KL_DT].[0] = 1 and (substr(md.[ACC_DT].[MAIN_V_ID],1,3) in ('420', '421', '422', '425')) ) -- депозиты ЮЛ и ИП
+											or
+											(md.[KL_DT].[0] = 2 and (substr(md.[KL_DT].[2].[1],1,5) 	 in ('40701','40702','40703','40804','40805','40806','40807','40802') )) -- расчетные счета ЮЛ и ИП (рез и не рез) в другом банке
+											or
+											(md.[KL_DT].[0] = 2 and (substr(md.[KL_DT].[2].[1],1,3)		 in ('420', '421', '422', '425')) ) --  депозиты ЮЛ и ИП
+										)
+		loop
+			if not checkNaznPlat_ZRP(md.[NAZN]) then
+				ret := ret + md.[SUM_NT];
+			end if;
+		end loop;								
+	end loop;
+	
+	return ret;
+end;
+
+-- Проверка: Сумма платежей на клиента-ФЛ со счетов ЮЛ (кроме з/п и соц. выплат) > 100 000
+public function CheckToFIZPayUR_for_vw (p_client ref [CL_ORG], p_d_beg [DATE], p_d_end	[DATE]) return varchar(1) is  -- KAS 20/04/2020 по задаче Шмидт для представления
+ret varchar(1);
+begin
+	ret := '0';
+	if GetToFIZPayUR_for_vw (p_client, p_d_beg, p_d_end) > 100000 then
+		ret := '1';
+	end if;
+	return ret;
+end;
+
+-- Отношение суммы платежей на клиента-ФЛ со счетов ЮЛ (кроме з/п и соц. выплат) к сумме всех платежей на клиента-ФЛ
+public function GetToFIZPay_PRC_for_vw (p_client ref [CL_ORG], p_d_beg [DATE], p_d_end [DATE]) return number(18,2) is  -- KAS 20/04/2020 по задаче Шмидт для представления
+ret number(18,2);
+vPayUR number(18,2);
+vPayKT number(18,2);
+begin
+	vPayUR := GetToFIZPayUR_for_vw (p_client, p_d_beg, p_d_end);
+	if vPayUR != 0	then
+		vPayKT := GetToFIZPayKT_for_vw (p_client, p_d_beg, p_d_end);
+		if vPayKT != 0 then
+			ret := vPayUR/vPayKT * 100;
+		else
+			ret := null;	
+		end if;
+	else
+		ret := 0;
+	end if;
+	return ret;
+end;
+
+-- Сумма списаний на контрагента (за исключением налогов и ЗП)
+public function GetDTPayContragent(p_acc ref [AC_FIN], p_INN string, p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is  -- KAS 21/05/2020 по задаче Шмидт для представления
+sm number(18,2);
+smdbt number(18,2);
+begin
+	smdbt := nvl(::[RUNTIME].[F_5].A('И'||p_acc||'ДВ', p_d_beg, p_d_end),0);	
+	if smdbt >0 then	
+		sm := 0;	
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_DT] = p_acc
+									and not (
+											(md.[KL_KT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,5) =	'40101' ))
+											or
+											(md.[KL_KT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,5) 	 =	'40101' ))
+									)
+
+									and (
+											(md.[KL_KT].[0] = 1 and (md.[KL_KT].[1].[1].[INN] =	p_inn ))
+											or
+											(md.[KL_KT].[0] = 2 and (md.[KL_KT].[2].[INN] 	 =	p_inn ))
+									)
+									and ((	md.[KL_KT].[0] = 1
+										AND ( 	SUBSTR(md.[KL_KT].[1].[2].[MAIN_V_ID],1,5) IN ('40701', '40702', '40703', '40802', '40804', '40805', '40806', '40807', '30232', '40817', '40820')
+											OR	SUBSTR(md.[KL_KT].[1].[2].[MAIN_V_ID],1,3) IN ('423', '426') 				
+											)
+										)
+										OR
+										( md.[KL_KT].[0] = 2
+										AND ( 	SUBSTR(md.[KL_KT].[2].[1],1,5) IN ('40701', '40702', '40703', '40802', '40804', '40805', '40806', '40807', '30232', '40817', '40820')
+											OR	SUBSTR(md.[KL_KT].[2].[1],1,3) IN ('423', '426') 				
+				)			
+			)
+		)
+									
+		loop
+			if	checkNaznPlat_ZRP(md.[NAZN])=false then
+				sm := sm + md.[SUM_NT];
+			end if;
+		end loop;
+
+		return sm;
+		
+	else
+		return 0;
+	end if;
+end;
+
+-- Сумма списаний на контрагента без НДС (за исключением налогов и ЗП)
+public function GetDTPayContragent_noNDS(p_acc ref [AC_FIN], p_INN string, p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is  -- KAS 21/05/2020 по задаче Шмидт для представления
+sm number(18,2);
+smdbt number(18,2);
+begin
+	smdbt := nvl(::[RUNTIME].[F_5].A('И'||p_acc||'ДВ', p_d_beg, p_d_end),0);	
+	if smdbt >0 then	
+		sm := 0;	
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_DT] = p_acc
+									and not (
+											(md.[KL_KT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,5) =	'40101' ))
+											or
+											(md.[KL_KT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,5) 	 =	'40101' ))
+									)
+					--,	decode(md.[KL_KT].[0],1,md.[KL_KT].[1].[1].[INN],2,md.[KL_KT].[2].[INN]) : C_INN
+									and (
+											(md.[KL_KT].[0] = 1 and (md.[KL_KT].[1].[1].[INN] =	p_inn ))
+											or
+											(md.[KL_KT].[0] = 2 and (md.[KL_KT].[2].[INN] 	 =	p_inn ))
+									)
+									and ((	md.[KL_KT].[0] = 1
+										AND ( 	SUBSTR(md.[KL_KT].[1].[2].[MAIN_V_ID],1,5) IN ('40701', '40702', '40703', '40802', '40804', '40805', '40806', '40807', '30232', '40817', '40820')
+											OR	SUBSTR(md.[KL_KT].[1].[2].[MAIN_V_ID],1,3) IN ('423', '426') 				
+											)
+										)
+										OR
+										( md.[KL_KT].[0] = 2
+										AND ( 	SUBSTR(md.[KL_KT].[2].[1],1,5) IN ('40701', '40702', '40703', '40802', '40804', '40805', '40806', '40807', '30232', '40817', '40820')
+											OR	SUBSTR(md.[KL_KT].[2].[1],1,3) IN ('423', '426') 				
+				)			
+			)
+		)
+									
+		loop
+			if	checkNaznPlat_NONDS(md.[NAZN] ) and checkNaznPlat_ZRP(md.[NAZN])=false then
+			--if	checkNaznPlat_NDS(md.[NAZN] ) then
+				sm := sm + md.[SUM_NT];
+			end if;
+		end loop;
+		--return sm/smdbt*100;
+		return sm;
+		
+	else
+		return 0;
+	end if;
+end;
+
+-- Сумма зачислений на клиента c НДС
+public function GetKTPayClient_NDS(p_acc ref [AC_FIN], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is  -- KAS 21/05/2020 по задаче Шмидт для представления
+sm number(18,2);
+smkt number(18,2);
+begin
+	smkt := nvl(::[RUNTIME].[F_5].A('И'||p_acc||'КВ', p_d_beg, p_d_end),0);	
+	if smkt >0 then	
+		sm := 0;	
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_KT] = p_acc
+
+									and ((	md.[KL_DT].[0] = 1
+										AND ( 	SUBSTR(md.[KL_DT].[1].[2].[MAIN_V_ID],1,5) IN ('40701', '40702', '40703', '40802', '40804', '40805', '40806', '40807', '30232', '40817', '40820')
+											OR	SUBSTR(md.[KL_DT].[1].[2].[MAIN_V_ID],1,3) IN ('423', '426') 				
+											)
+										)
+										OR
+										( md.[KL_DT].[0] = 2
+										AND ( 	SUBSTR(md.[KL_DT].[2].[1],1,5) IN ('40701', '40702', '40703', '40802', '40804', '40805', '40806', '40807', '30232', '40817', '40820')
+											OR	SUBSTR(md.[KL_DT].[2].[1],1,3) IN ('423', '426') 				
+				)			
+			)
+		)
+									
+		loop
+			if	checkNaznPlat_NDS(md.[NAZN] ) and checkNaznPlat_ZRP(md.[NAZN])=false then
+			--if	checkNaznPlat_NDS(md.[NAZN] ) then
+				sm := sm + md.[SUM_NT];
+			end if;
+		end loop;
+		--return sm/smdbt*100;
+		return sm;
+		
+	else
+		return 0;
+	end if;
+end;
+
+-- Доля зачислений на клиента c НДС к КТ обороту (в процентах)
+public function GetKTPayClient_NDS_PRC(p_acc ref [AC_FIN], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is  -- KAS 21/05/2020 по задаче Шмидт для представления
+sm number(18,2);
+smkt number(18,2);
+begin
+	smkt := nvl(::[RUNTIME].[F_5].A('И'||p_acc||'КВ', p_d_beg, p_d_end),0);	
+	if smkt >0 then	
+		sm := 0;	
+		sm := nvl ( GetKTPayClient_NDS(p_acc, p_d_beg, p_d_end), 0);
+		return sm/smkt*100;
+	else
+		return 0;
+	end if;
+end;
+
+-- Доля списаний на контрагента без НДС к сумме списаний на контрагента (в процентах)
+public function GetDTPayContragent_noNDS_PRC(p_acc ref [AC_FIN], p_INN string, p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is  -- KAS 21/05/2020 по задаче Шмидт для представления
+sm number(18,2);
+smctg number(18,2);
+begin
+	smctg := nvl( GetDTPayContragent(p_acc, p_INN, p_d_beg, p_d_end),0);	
+	if smctg >0 then	
+		sm := 0;	
+		sm := nvl( GetDTPayContragent_noNDS(p_acc, p_INN, p_d_beg, p_d_end),0);	
+		return sm/smctg*100;
+	else
+		return 0;
+	end if;
+end;
+
+-- Доля списаний на контрагента без НДС к ДТ-обороту (в процентах)
+public function GetDTPayContragent_noNDS_PRC_DT(p_acc ref [AC_FIN], p_INN string, p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is  -- KAS 21/05/2020 по задаче Шмидт для представления
+sm number(18,2);
+smdt number(18,2);
+begin
+	smdt := nvl(::[RUNTIME].[F_5].A('И'||p_acc||'ДВ', p_d_beg, p_d_end),0);	
+	if smdt >0 then	
+		sm := 0;	
+		sm := nvl ( GetDTPayContragent_noNDS(p_acc, p_INN, p_d_beg, p_d_end), 0);
+		return sm/smdt*100;
+	else
+		return 0;
+	end if;	
+end;
+
+-- Для подсветки обозначения при дате регистрации менее 1 года по отношению к текущей дате
+public function RegDateIn365 (p_cl ref [CL_CORP]) return varchar2(1) is  -- KAS 21/05/2020 по задаче Шмидт для представления
+begin
+	if (sysdate - p_cl.[REGISTER].[DATE_REG]) < 366 then
+		return 1;
+	else
+		return 0;
+	end if;
+end;
+
+-- Сумма списаний клиента (за исключением налогов и ЗП) без НДС
+public function GetDTPayClient_noNDS(p_acc ref [AC_FIN], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is  -- KAS 18/06/2020 по задаче Шмидт для представления
+sm number(18,2);
+smdbt number(18,2);
+begin
+	smdbt := nvl(::[RUNTIME].[F_5].A('И'||p_acc||'ДВ', p_d_beg, p_d_end),0);	
+	if smdbt >0 then	
+		sm := 0;	
+		for md in [MAIN_DOCUM] WHERE md%state = 'PROV'
+									and md.[DATE_PROV] >= p_d_beg and md.[DATE_PROV] <= p_d_end
+									and md.[ACC_DT] = p_acc
+									and not (
+											(md.[KL_KT].[0] = 1 and (substr(md.[ACC_KT].[MAIN_V_ID],1,5) =	'40101' ))
+											or
+											(md.[KL_KT].[0] = 2 and (substr(md.[KL_KT].[2].[1],1,5) 	 =	'40101' ))
+									)
+
+									and ((	md.[KL_KT].[0] = 1
+										AND ( 	SUBSTR(md.[KL_KT].[1].[2].[MAIN_V_ID],1,5) IN ('40701', '40702', '40703', '40802', '40804', '40805', '40806', '40807', '30232', '40817', '40820')
+											OR	SUBSTR(md.[KL_KT].[1].[2].[MAIN_V_ID],1,3) IN ('423', '426') 				
+											)
+										)
+										OR
+										( md.[KL_KT].[0] = 2
+										AND ( 	SUBSTR(md.[KL_KT].[2].[1],1,5) IN ('40701', '40702', '40703', '40802', '40804', '40805', '40806', '40807', '30232', '40817', '40820')
+											OR	SUBSTR(md.[KL_KT].[2].[1],1,3) IN ('423', '426') 				
+				)			
+			)
+		)
+									
+		loop
+			if	checkNaznPlat_NONDS(md.[NAZN] ) and checkNaznPlat_ZRP(md.[NAZN])=false then
+			--if	checkNaznPlat_NDS(md.[NAZN] ) then
+				sm := sm + md.[SUM_NT];
+			end if;
+		end loop;
+		--return sm/smdbt*100;
+		return sm;
+		
+	else
+		return 0;
+	end if;
+end;
+
+-- Доля списаний клиента (за исключением налогов и ЗП) без НДС к ДТ-обороту (в процентах)
+public function GetDTPayClient_noNDS_PRC_DT(p_acc ref [AC_FIN], p_d_beg	[DATE], p_d_end	[DATE]) return number(18,2) is  -- KAS 18/06/2020 по задаче Шмидт для представления
+sm number(18,2);
+smdt number(18,2);
+begin
+	smdt := nvl(::[RUNTIME].[F_5].A('И'||p_acc||'ДВ', p_d_beg, p_d_end),0);	
+	if smdt >0 then	
+		sm := 0;	
+		sm := nvl ( GetDTPayClient_noNDS(p_acc, p_d_beg, p_d_end), 0);
+		return sm/smdt*100;
+	else
+		return 0;
+	end if;	
+end;
+end;

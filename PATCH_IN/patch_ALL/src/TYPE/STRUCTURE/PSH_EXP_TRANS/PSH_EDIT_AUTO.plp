@@ -1,0 +1,56 @@
+class PSH_EXP_TRANS;
+
+@name('[ПСБ] Изменить')
+@tag('CREATED')
+method PSH_EDIT_AUTO uses PSH_NEW_AUTO is
+PSH_EDIT_AUTO (
+	@name('Адрес. Объект. ID')                         P_TR_ID            in [REFERENCE],
+	@name('GUID объекта')                              P_TR_AOID          in [STRING_40],
+	@name('GUID записи (изменения)')                   P_TR_AOGUID        in [STRING_40],
+	@name('Адресный объект. Код')                      P_TR_KIND_KLADR    in [INTEGER],
+	@name('Адресный объект. Сокращенное наименование') P_TR_KIND_KLADR_SN in [STRING_10],
+	@name('Адресный объект. Наименование')             P_TR_KIND_KLADR_NA in [NAME],
+	@name('Адрес. Элемент. Наименование')              P_TR_NAME          in [STRING_200],
+	@name('Адрес. Элемент. Сокращенное наименование')  P_TR_SNAME         in [STRING_200],
+	@name('Адрес. Класс')                              P_TR_CLASS         in [STRING_16],
+	@name('Файл')                                      P_FILE             in [FILE$PATH]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_TR_ID := this.[TR_ID];
+	P_TR_AOID := this.[TR_AOID];
+	P_TR_AOGUID := this.[TR_AOGUID];
+	P_TR_KIND_KLADR := this.[TR_KIND_KLADR];
+	P_TR_KIND_KLADR_SN := this.[TR_KIND_KLADR_SN];
+	P_TR_KIND_KLADR_NA := this.[TR_KIND_KLADR_NA];
+	P_TR_NAME := this.[TR_NAME];
+	P_TR_SNAME := this.[TR_SNAME];
+	P_TR_CLASS := this.[TR_CLASS];
+end if;
+-- End initialization of parameters and variables
+declare
+	v_this ref [PSH_EXP_TRANS]; -- updated CHANGE_QUALIFIER EXP_TRANS->PSH_EXP_TRANS 08/10/25
+begin
+	if this is not null then
+		v_this := this;
+		&BASE$SETVARS;
+		&BASE$VALIDATE(v_this);
+		&BASE$GETVARS;
+	end if;
+end;
+end;
+
+execute is
+	v_this ref [PSH_EXP_TRANS]; -- updated CHANGE_QUALIFIER EXP_TRANS->PSH_EXP_TRANS 08/10/25
+begin
+	if this is not null then
+		v_this := this;
+		&BASE$SETVARS;
+		v_this := &BASE$EXECUTE(v_this);
+	end if;
+end;
+end;
+end;

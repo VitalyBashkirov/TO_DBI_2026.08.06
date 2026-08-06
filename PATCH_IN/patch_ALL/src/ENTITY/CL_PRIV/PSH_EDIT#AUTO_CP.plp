@@ -1,0 +1,2145 @@
+class CL_PRIV;
+
+@optimize(false)
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Изменить ФЛ')
+@tag('COPIED')
+method PSH_EDIT#AUTO_CP is
+
+@name('Сообщение')                                  public V#ERR                     [STRING_32000];
+@name('Категория клиента')                          public V#VIDS_CL                 [CL_CATEGORIE_ARR];
+@name('Удостоверение')                              public V#CERT_REF                [CERTIFIC_REF];
+@name('Клиент-скрипт')                              public V_VB                      [STRING_32000];
+@name('Выдан')                                      public V_ORG_MAY_GIVE            [ORG_MAY_GIVE_REF];
+@name('Выдано (строка)')                            public V_WHO_V                   [WHO_V];
+@name('Вызов из конструктора')                      public V_CONSTRUCT               [BOOLEAN];
+@name('Произошла валидация типа удостоверения')     public V_VALIDATE_CERT           [BOOLEAN];
+@name('Кредитная  история')                         public V_LOAN_HISTORYS           [LOAN_HISTORY_ARR];
+@name('Отметки')                                    public V_CHECKS         table of [LEGAL_CHECKS];
+@name('Отметка')                                    public V_CHECK1                  [P207_TERR_FL_REF];
+@name('Уровни идентификации')                       public V_IDENTIFY_LEVEL table of [IL_CLIENT_ANK];
+@name('Бизнес-процессы, в которых участвует досье') public V_BUS_PROC       table of [IL_CLIENT_ANK];
+@name('Место выдачи')                               public V_CITY_MAY_GIVE           [NAME_CITY_REF];
+@name('Документы и изображения')                    public V_DOCS                    [DOSSIER_DOC_ARR];
+@name('Удостоверение (выбор)')                      public V_CERT_REF                [CERTIFIC_REF];
+@name('Информация о банкротстве')                   public V_BANKRUPT_INFO           [STRING_512];
+@name('Ссылка на клиента')                          public V_CL_ID                   [CL_PRIV_REF];
+@name('ББО. Согласие на электронное подписание')    public V_CREATE_ES               [BOOLEAN];
+@name('Адрес строкой')                              public V_STR                     [MEMO];
+--BWG
+pragma include(::[RUNTIME].[DEBUG_MACRO]);
+dp  number:=0;	--управление debug_pipe
+dp2 number:=0;	--управление debug_pipe
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+fmt	   string(10):='dd/mm/yyyy';
+fmtHMS string(22):='dd/mm/yyyy HH24:MI:SS';
+
+	
+--#define equal substitute (nvl([1]=[2],false) or nvl([1],[2]) is null)
+pragma include (::[RUNTIME].[MACRO_LIB]);
+pragma include (::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma Include ([PERSONAL_ADDRESS]::[LIB]);
+pragma include ([CLIENT_INTERFACE].[PRX_LEGAL]);
+pragma include ([IDENTIFY_LEVEL].[LIB]);
+
+v_cert_mark			::[CLIENT_CHECKS].[EDIT_MARK]%type;
+v_cert_fms_mark		::[CLIENT_CHECKS].[EDIT_MARK]%type;
+fpt_int_name		integer;
+
+terr_manual 		const ref [P207_TERROR_FLAG] := ::[P207_TERROR_FLAG]([CODE] = 'TERRORIST_MANUAL');
+extr_manual			const ref [P207_TERROR_FLAG] := ::[P207_TERROR_FLAG]([CODE] = 'EXTREMIST_MANUAL');
+
+check_terror			const ref [CLIENT_CHECKS] := ::[CLIENT_CHECKS]([CODE] = 'TERROR_LIST');
+check_invalid_cert      const ref [CLIENT_CHECKS] := ::[CLIENT_CHECKS]([CODE] = 'INVALID_CERT');
+check_invalid_cert_fms  const ref [CLIENT_CHECKS] := ::[CLIENT_CHECKS]([CODE] = 'INVALID_CERT_FMS');
+
+v_form_id varchar2(128) := ::[PERSONAL_ADDRESS].[LIB].get_form_id(&METHOD$CLASS,&METHOD$SNAME);
+
+v_legal_form			varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_form(v_form_id);
+v_legal_checks_n		varchar2(100) 	:= &validate('V_CHECKS');
+v_legal_checks_t		varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('V_CHECKS'),v_form_id);
+v_legal_checks_vn		varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('V_CHECKS'),v_form_id);
+v_legal_checks_f		varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_sub_form(&validate('V_CHECKS'), v_form_id);
+v_legal_name_n			varchar2(100) 	:= &validate('P#NAME');	
+v_legal_name_t			varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('P#NAME'),v_form_id);
+v_legal_name_vn			varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('P#NAME'),v_form_id);
+v_legal_inter_n			varchar2(100) 	:= &validate('P#INTER');
+v_legal_inter_t			varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('P#INTER'),v_form_id);
+v_legal_inter_vn		varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('P#INTER'),v_form_id);
+v_legal_date_pers_n		varchar2(100) 	:= &validate('P#DATE_PERS');
+v_legal_date_pers_t		varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('P#DATE_PERS'),v_form_id);
+v_legal_date_pers_vn	varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('P#DATE_PERS'),v_form_id);
+v_legal_place_born_n	varchar2(100) 	:= &validate('nvl(P#BORN.[NAME], P#DOC.[BIRTH_PLACE])');
+v_legal_place_born_t	varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('nvl(P#BORN.[NAME], P#DOC.[BIRTH_PLACE])'),v_form_id);
+v_legal_place_born_vn	varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('nvl(P#BORN.[NAME], P#DOC.[BIRTH_PLACE])'),v_form_id);
+v_legal_inn_n			varchar2(100) 	:= &validate('P#INN');
+v_legal_inn_t			varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('P#INN'),v_form_id);
+v_legal_inn_vn			varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('P#INN'),v_form_id);
+v_legal_country_n		varchar2(100) 	:= &validate('P#COUNTRY');
+v_legal_country_t		varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('P#COUNTRY'),v_form_id);
+v_legal_country_vn		varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('P#COUNTRY'),v_form_id);
+v_legal_ipdl_n			varchar2(100) 	:= &validate('P_IPDL');
+v_legal_ipdl_t			varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('P_IPDL'),v_form_id);
+v_legal_ipdl_vn			varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('P_IPDL'),v_form_id);
+v_legal_doc_n			varchar2(100) 	:= &validate('P#DOC');
+v_legal_doc_t			varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('P#DOC'),v_form_id);
+v_legal_doc_vn			varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('P#DOC'),v_form_id);
+v_legal_doc_ser_n		varchar2(100) 	:= &validate('P#DOC.[SER]');
+v_legal_doc_ser_t		varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('P#DOC.[SER]'),v_form_id);
+v_legal_doc_ser_vn		varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('P#DOC.[SER]'),v_form_id);
+v_legal_doc_num_n		varchar2(100) 	:= &validate('P#DOC.[NUM]');
+v_legal_doc_num_t		varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('P#DOC.[NUM]'),v_form_id);
+v_legal_doc_num_vn		varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('P#DOC.[NUM]'),v_form_id);
+v_legal_address_n		varchar2(100) 	:= &validate('P#ADDRESS');
+v_legal_address_t		varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('P#ADDRESS'),v_form_id);
+v_legal_address_vn		varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('P#ADDRESS'),v_form_id);
+v_legal_addresses_n		varchar2(100) 	:= &validate('P#ADDR_PERS');
+v_legal_addresses_t		varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('P#ADDR_PERS'),v_form_id);
+v_legal_addresses_vn	varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('P#ADDR_PERS'),v_form_id);
+v_legal_KOD_OKPO_n		varchar2(100) 	:= &validate('null');
+v_legal_KOD_OKPO_t		varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('null'),v_form_id);
+v_legal_KOD_OKPO_vn		varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('null'),v_form_id);
+v_legal_LONG_NAME_n		varchar2(100) 	:= &validate('null');
+v_legal_LONG_NAME_t		varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('null'),v_form_id);
+v_legal_LONG_NAME_vn	varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('null'),v_form_id);
+v_legal_register_n		varchar2(100) 	:= &validate('null');
+v_legal_register_t		varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('null'),v_form_id);
+v_legal_register_vn		varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('null'),v_form_id);
+v_legal_mark1_n			varchar2(100) 	:= &validate('V_CHECK1');
+v_legal_mark1_t		 	varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('V_CHECK1'),v_form_id);
+v_legal_mark1_vn		varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('V_CHECK1'),v_form_id);
+v_legal_is_resident_n	varchar2(100) 	:= &validate('P#RESIDENT');
+v_legal_is_resident_t	varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('P#RESIDENT'),v_form_id);
+v_legal_is_resident_vn	varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('P#RESIDENT'),v_form_id);
+v_legal_doc_arr_n		varchar2(100) 	:= &validate('P_DOC_ARR');
+v_legal_doc_arr_t		varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('P_DOC_ARR'),v_form_id);
+v_legal_doc_arr_vn		varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('P_DOC_ARR'),v_form_id);
+v_legal_all_boss_n		varchar2(100) 	:= &validate('null');
+v_legal_all_boss_t		varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('null'),v_form_id);
+v_legal_all_boss_vn		varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('null'),v_form_id);
+v_legal_fatca_info_n	varchar2(100) 	:= &validate('null');
+v_legal_fatca_info_t	varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('null'),v_form_id);
+v_legal_fatca_info_vn	varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('null'),v_form_id);
+v_legal_vids_cl_n		varchar2(100) 	:= &validate('null');	
+v_legal_vids_cl_t		varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('null'),v_form_id);
+v_legal_vids_cl_vn		varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('null'),v_form_id);
+v_legal_kio_n			varchar2(100) 	:= &validate('null');
+v_legal_kio_t			varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('null'),v_form_id);
+v_legal_kio_vn			varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('null'),v_form_id);
+
+
+v_ILtable_n 	varchar2(100) 	:= &validate('V_IDENTIFY_LEVEL');
+v_ILtable_t 	varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('V_IDENTIFY_LEVEL'),v_form_id);
+v_ILtable_vn 	varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('V_IDENTIFY_LEVEL'),v_form_id);
+v_ILtable_f 	varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_sub_form(&validate('V_IDENTIFY_LEVEL'), v_form_id);
+v_BPtable_n 	varchar2(100) 	:= &validate('V_BUS_PROC');
+v_BPtable_t 	varchar2(1) 	:= ::[PERSONAL_ADDRESS].[LIB].get_t(&validate('V_BUS_PROC'),v_form_id);
+v_BPtable_vn 	varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('V_BUS_PROC'),v_form_id);
+v_BPtable_f 	varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_sub_form(&validate('V_BUS_PROC'), v_form_id);
+
+v_CEfield_vn	varchar2(100) 	:= ::[PERSONAL_ADDRESS].[LIB].get_vn(&validate('V_CREATE_ES'),v_form_id);
+
+mark_2202_exists	boolean;
+pragma macro(prx_legal, '::[CLIENT_INTERFACE].[PRX_LEGAL]', substitute);
+
+v_snils varchar2(20);
+v_archive_status const ref [COM_STATUS_PRD] := ::[COM_STATUS_PRD]([CODE] = 'ARHIVE');
+
+l_cl_family [STRING_128];
+l_cl_name [STRING_128];
+l_cl_sname [STRING_128];
+
+v_upd_cat_validator boolean :=false;
+
+-- Проверка существования клиентов с одинаковыми данными документа, удостоверяющего личность
+procedure check_docnum_unique
+	(p_this ref [CL_PRIV]
+	,p_doc ::[CL_PRIV].[DOC]%type
+	,p_err out varchar2
+	,p_vb_msg boolean := true
+	,p_bp_code varchar2(128)
+	)
+is
+	v_check_level ::[CHECK_GUIDE].[CHECK_LEVEL].[0]%type;
+	v_err varchar2(32767);
+	v_cnt pls_integer := 0;
+	v_doc ::[CL_PRIV].[DOC]%type;
+begin
+	for
+		(select c(c.[CHECK_LEVEL].[0] : check_level)
+			in ::[CHECK_GUIDE]
+			where c.[CODE]='CHECK_DOC_NUM'
+				and c.[BUS_PROCESS].[CODE] = p_bp_code
+		)
+	loop
+		v_check_level := c.check_level;
+	end loop;
+	if nvl(v_check_level,0) not in (1,2)
+		or p_doc.[SER] is null
+		or p_doc.[NUM] is null
+		or p_doc.[TYPE] is null
+	then
+		return;
+	end if;
+	for c in ::[CL_PRIV]
+		where (c <> p_this or p_this is null)
+			and c.[DOC].[SER] = p_doc.[SER]
+			and c.[DOC].[NUM] = p_doc.[NUM]
+			and c.[DOC].[TYPE] = p_doc.[TYPE]
+	loop
+		v_cnt := v_cnt + 1;
+		if v_cnt > 10 then
+			v_err := substr(v_err || '...', 1, 3900);
+			exit;
+		end if;
+		v_err := substr(v_err || NL$ || c.[NAME] || ', ' || p_doc.[TYPE].[NAME] || ' ' || p_doc.[SER] || ' ' || p_doc.[NUM], 1, 3900);
+	end loop;
+	if v_err is not null then
+		v_err := 'Найдены клиенты с такими же данными документа, удостоверяющего личность:' || v_err;
+		if v_check_level = 1 then -- Жёсткая проверка
+			pragma error(v_err);
+		elsif v_check_level = 2 then -- Мягкая проверка
+			if p_vb_msg then -- Нужен текст ошибки для показа в VB
+				p_err := '?' || v_err || NL$ || NL$ || 'Игнорировать?';
+			else
+				stdio.put_buf(v_err);
+			end if;
+		end if;
+	end if;
+end;
+
+procedure check_docnum_unique
+	(p_this ref [CL_PRIV]
+	,p_doc ::[CL_PRIV].[DOC]%type
+	,p_bp_code varchar2(128)
+	)
+is
+	v_err varchar2(32767);
+begin
+	check_docnum_unique
+		(p_this == p_this
+		,p_doc == p_doc
+		,p_err == v_err
+		,p_vb_msg == false
+		,p_bp_code == p_bp_code
+		);
+end;
+
+procedure check_right2stay -- Проверка права пребывания нерезидентов в РФ
+	(p_this ref [CL_PRIV]
+	,p_country ref [COUNTRY]
+	,p_cert [CERTIFICATE]
+	,p_resident boolean
+	,p_constructor boolean
+	,p_err in out nocopy varchar2
+	,p_vb_msg boolean := true
+	)
+is
+	v_bp_code ::[BUS_PROCESS].[CODE]%type;
+	v_date date;
+begin
+	if not nvl(p_resident,false) then -- Проверяем только нерезидентов
+		v_bp_code := case when p_constructor then 'REG_CLIENT' else 'EDIT_CLIENT' end;
+		v_date := trunc(sysdate);
+		for
+			(select c
+				(c.[CHECK_LEVEL].[0] : check_level
+				,c.[MESS] : mess
+				)
+				in ::[CHECK_GUIDE]
+				where c.[CODE]='CP_DOC_MIGR_CARD_EXISTS'
+					and c.[BUS_PROCESS].[CODE] = v_bp_code
+					and c.[CHECK_LEVEL].[0] in (1,2) -- Проверяем только если установлен жёсткий или мягкий уровень проверки
+			)
+		loop
+			
+			-- Основное удостоверение подтверждает право пребывания в РФ
+			if p_cert.[TYPE] is not null
+				and p_cert.[TYPE].[RESIDENCE_RIGHT]
+				and (p_cert.[DATE] <= v_date or p_cert.[DATE] is null)
+				and (p_cert.[DATE_END] >= v_date or p_cert.[DATE_END] is null)
+			then
+				return; -- Прекращаем проверку
+			end if;
+			
+			-- В массиве доп.удостоверений имеется действующее удостоверение подтверждающее право пребывания в РФ
+			for(select d(1) in p_this.[DOC_ARR]
+					where d.[TYPE].[RESIDENCE_RIGHT]
+					and (d.[DATE] <= v_date or d.[DATE] is null)
+					and (d.[DATE_END] >= v_date or d.[DATE_END] is null)
+				)
+			loop
+				return; -- Прекращаем проверку
+			end loop;
+			-- Проверяем требуется ли документ на право пребывания
+			if not ::[CL_PRIV].[LIB].need_doc_for_visit(p_this, p_country, p_cert) then
+				return;
+			end if;
+			-- Если дошли до этого места, то проверка закончилась неудачно
+			if c.check_level = 1 then -- Жёсткая проверка
+				pragma error(c.mess);
+			elsif c.check_level = 2 then -- Мягкая проверка
+				if p_vb_msg then -- Нужен текст ошибки для показа в VB
+					if p_err is not null then
+						p_err := p_err || NL$;
+					end if;
+					p_err := p_err ||'?' || c.mess || NL$ || NL$ || 'Игнорировать?';
+				else
+					stdio.put_buf(c.mess);
+				end if;
+			end if;
+		end loop;
+	end if;
+end;
+	
+-- Разбивает строку ФИО на 3 строки Фамилия Имя Отчество
+-- по 2-м встреченным пробелам
+procedure Div_Name_FIO (full_n varchar2(500), family in out varchar2(128), name in out varchar2(128), sname in out varchar2(128))
+is
+	pos1 integer;
+	pos2 integer;
+begin
+	full_n :=trim(regexp_replace(full_n,'\s+',' '));
+	pos1 := instr(full_n, ' ');		
+	pos2 := instr(full_n, ' ', 1, 2);
+	if pos2 = 0 then -- нет отчества
+		family := substr(full_n, 1, pos1-1);
+		name := substr(full_n,pos1+1);
+		sname := '';
+	else			-- полное имя (Ф И О)
+		family := substr(full_n, 1, pos1-1);
+		name := substr(full_n,pos1+1,pos2-pos1-1);
+		sname := substr(full_n,pos2+1);
+	end if;
+	l_cl_family = family := ::[DECLENSION].[PADEG].properInitcap(family);
+	l_cl_name = name := ::[DECLENSION].[PADEG].properInitcap(name);
+	l_cl_sname = sname := ::[DECLENSION].[PADEG].properInitcap(sname);
+end;
+
+function s_trim(s string(128)) return string is
+begin
+	return regexp_replace(regexp_replace(s, '\s+', ' '), '^\s+|\s+$', '');
+end;
+
+--Объединяет 3 строки ФИО в единую строку, которую и возвращает -- ITyschenko
+function Concat_FIO(family varchar2(128), name varchar2(128), sname varchar2(128)) return varchar2 is
+begin
+	return s_trim(family||' '||name||' '||sname);
+end;
+
+--	Ysuchkova	--
+--Используется в INT_CL_PRIV_001.
+public function Calc_Date_End_Cert
+/* Функция вычисляет дату окончания срока действия удостоверения клиента по дате выдачи удостоверения.
+ Если не задана дата выдачи удостоверения, то вернёт null.
+ Для Паспорта гражданина РФ дата окончания срока действия вычисляется
+   1) по возрасту клиента, который вычисляется на дату p_date, а если она не задана, то на дату sys_context(user_context, 'SYS_DATE');
+   2) если не задана дата p_date, и возраст клиента на дату sys_context(user_context, 'SYS_DATE') меньше 14 лет, то вернёт ошибку;
+   3) если дата рождения не задана, то вернёт null.
+*/
+ (
+   p_tDoc [CERTIFICATE]
+ /* Удостоверение */
+ , p_dDate_Born DATE
+ /* Дата рождения клиента */
+ , p_date date := null
+ /* Дата, по состоянию на которую осуществляется расчёт возраста клиента. Если не задана, то используется sys_context(user_context, 'SYS_DATE'). */
+ , p_no_citizenship boolean := false
+ /* Признак "Без гражданства". Если не задано - false*/
+ ) return date
+ /*  Дата окончания срока действия удостоверения клиента */
+is
+	nCur_Ages number;
+begin
+	-- При незаполненной дате выдачи документа рассчитать
+	-- корректно дату "действителен до" не представляется возможным
+	if p_tDoc.[DATE] is Null then
+		return Null;
+	end if;
+
+	--	Установка значения реквизита "Удостоверение"		--
+	--  Расчёт максимальной даты действия удостоверения для	--
+	--  - Паспорта гражданина РФ							--
+	--  - Загранпаспорта гражданина РФ						--
+	--  - Вида на жительство								--
+	
+	case p_tDoc.[TYPE].[CODE_GNI] of
+		
+		--	Паспорт гражданина РФ	--
+		: '21':
+			
+			if p_dDate_Born is not null then
+				if p_date is null then
+					nCur_Ages := Months_Between(to_date(sys_context(user_context, 'SYS_DATE'),'dd/mm/yyyy'), p_dDate_Born) / 12;
+					if nCur_Ages < 14 then
+						pragma error ('Клиент не достиг возраста 14-ти лет. Проверьте дату рождения');
+					end if;
+				else
+					nCur_Ages := Months_Between(p_date, p_dDate_Born) / 12;
+				end if;
+				
+				if p_date is not null and nCur_Ages < 14 then
+					p_tDoc.[DATE_END] := null;
+				elsif 13 < nCur_Ages and nCur_Ages < 20 then
+					p_tDoc.[DATE_END] := ADD_MONTHS(p_dDate_Born, 240);
+				
+				elsif 19 < nCur_Ages and nCur_Ages < 45 then
+					if (p_tDoc.[DATE] >= ADD_MONTHS(p_dDate_Born, 240))
+						and (p_tDoc.[DATE] is not null) then
+						p_tDoc.[DATE_END] := ADD_MONTHS(p_dDate_Born, 540);
+					elsif (p_tDoc.[DATE] < ADD_MONTHS(p_dDate_Born, 240))
+						or (p_tDoc.[DATE] is null) then
+						p_tDoc.[DATE_END] := ADD_MONTHS(p_dDate_Born, 240);
+					end if;
+				
+				elsif 44 < nCur_Ages then
+					if (p_tDoc.[DATE] >= ADD_MONTHS(p_dDate_Born, 540))
+						 and (p_tDoc.[DATE] is not null) then
+						p_tDoc.[DATE_END] := NULL;
+					elsif p_tDoc.[DATE] is null then
+						p_tDoc.[DATE_END] := ADD_MONTHS(p_dDate_Born, 240);
+					elsif p_tDoc.[DATE] < ADD_MONTHS(p_dDate_Born, 540) then
+						p_tDoc.[DATE_END] := ADD_MONTHS(p_dDate_Born, 540);
+					end if;
+				
+				end if;
+			end if;
+		-- Загранпаспорт гражданина РФ - 10 лет
+		: '22' : 
+			p_tDoc.[DATE_END] := ADD_MONTHS(p_tDoc.[DATE], 120) + 1;	
+		-- Вид на жительство
+		: '12' : 
+			if p_no_citizenship then 
+				p_tDoc.[DATE_END] := ADD_MONTHS(p_tDoc.[DATE], 120) + 1;	
+			end if;
+		else p_tDoc.[DATE_END] := null;
+	end;
+	return p_tDoc.[DATE_END];
+end ;
+--	Ysuchkova	--
+
+public function Calc_Date_Valid_Cert(p_type_cert ::[CERTIFICATE].[TYPE]%type, p_date_end date)
+return date
+is
+begin
+	return Calc_Date_Valid_Cert(p_type_cert.[KOD], p_date_end);
+end;
+
+public function Calc_Date_Valid_Cert(p_type_cert string(128), p_date_end date)
+return date
+is
+	v_result date;
+	v_cnt_days integer;
+begin
+	-- для паспортов РФ если заполнена дата окончания
+	if p_type_cert = '21' and p_date_end is not null then
+		v_cnt_days := ::[FP_TUNE].[LIB].GET_NUM_VALUE('CERT_DAYS_AFTER_END', null, '0');
+		if v_cnt_days is not null then
+			v_result := p_date_end + v_cnt_days;
+		end if;
+	end if;
+	return v_result;
+end;
+
+pragma INCLUDE( ::[SYSTEM].[PRODUCTS] );
+
+	t1			::[RUNTIME].[COMP_OBJ].table_list%type;
+	n1			integer;
+
+public procedure validator(P_MESSAGE in out varchar2, P_INFO in out varchar2,
+cl in out ref [CL_PRIV],
+    is_new boolean,
+	P#NAME in out [STRING_100],
+	P#INN in out [STRING_12],
+	P#COUNTRY in out [COUNTRY_REF],
+	P#RESIDENT in out [BOOLEAN],
+	P#PRIVILEGES in out [PRIVILEGE_ARR],
+	P#DATE_PERS in out [DATE],
+	P#MARIGE_STATUS in out [FAMILY_TYPE_REF],
+	P#SEX in out [SEX_REF],
+	P#BORN in out [NAME_CITY_REF],
+	P#ADDR_PERS in out [ADDRESSES],
+	P#TELEFON in out [CONTACTS_ARR],
+	P#DOC in out [CERTIFICATE],
+	P#NOTES in out [MEMO],
+	P#LOW in out [MEMO],
+	P#DISPOSITS in out [STR_DISPOSIT_ARR],
+	P#STATUS in out [PERSON_STAT_REF],
+	P#REGISTR in out [DIG_9],
+	P#INSPECT in out [TAX_INSP_ARR],
+	P#INTER in out ::[CLIENT].[I_NAME]%type,
+	P#ACC_BANK in out [BANKS_ACC_ARR],
+	P#RELATIVES in out [RELATIVES_ARR],
+	P#DECL_FIO in out [DECLENSION_ARR],
+	P#ADDRESS in out [PERSONAL_ADDRESS],
+	V#VIDS_CL in out [CL_CATEGORIE_ARR],
+	V#ERR in out [STRING_32000],
+	P_WELF_HIST in out [WELF_HIST_ARR],
+	V#CERT_REF in out ref [CERTIFIC_TYPE],
+	V_CERT_REF in out ref [CERTIFIC_TYPE],
+	P_REZIDENT_NU in out boolean,
+	P_DEPEND_COUNT in out [SHORT2],
+	P_ED_ESTAB in out [ED_ESTAB_ARR],
+	P_WORK_ACTIVITY in out [WORK_BOOK_ARR],
+	P_SOC_PRIV in out [FO_SOC_PRIV_ARR],
+	P_CL_FAMILY in out [STRING_128],
+	P_CL_NAME in out [STRING_128],
+	P_CL_SNAME in out [STRING_128],
+	V_ORG_MAY_GIVE in out [ORG_MAY_GIVE_REF],
+	V_WHO_V in out [WHO_V],
+	P_OFFSHORE in out ref [OFFSHORES],
+	P_SI_NAME in out [SBRF_NAME],
+	P_NAMES in out [NAMES_ARR],
+	P_IPDL in out ref [IPDL_TYPE],
+	P_OKATO_CODE in out [STRING_11],
+	P_INVALID_CERT	in out ref [P207_TERROR_FLAG],
+	V_CHECKS	in out LEGAL_CHECKS_TABLE,
+	P_DOC_ARR	in out [CERTIFICATE_ARR],
+	V_CITY_MAY_GIVE in out ref [NAMES_CITY],
+	P_INVALID_CERT_FMS	in out ref [P207_TERROR_FLAG],
+	P_NO_CITIZENSHIP	in out boolean,
+	P_SNILS in out [SNILS],
+	P_SAVE_DOC_OLD	in out boolean,
+	P_ASSETS in out [ASSETS_ARR],
+	V_STR in out [MEMO],
+	V_CREATE_ES	in out boolean
+) is
+	name 			::[CLIENT].[NAME]%type;
+	v_name_cl 		varchar2(400);
+	temp_address	[PERSONAL_ADDRESS];
+	v_strAddr		::[PERSONAL_ADDRESS].[IMP_STR]%type;
+	V_DATE_DEATH	[DATE];
+	v_bp_code		::[BUS_PROCESS].[CODE]%type;
+	v_err varchar2(32767);
+	v_str_plp varchar2(2000);
+	procedure Set_Mark(p_type_check ref [CLIENT_CHECKS], p_mark ref [P207_TERROR_FLAG])
+	is
+		v_idx integer;
+	begin
+		if p_mark is null or v_checks.count = 0 then return; end if;
+
+		v_idx := v_checks.first;
+		while not v_idx is null loop
+			if v_checks(v_idx).[TYPE_CHECK] = p_type_check then
+				v_checks(v_idx).[MARK] := p_mark;
+				exit;
+			end if;
+			v_idx := v_checks.next(v_idx);
+		end loop;
+	end;
+
+	procedure Get_Mark(p_type_check ref [CLIENT_CHECKS], p_mark in out ref [P207_TERROR_FLAG]) is
+		v_idx integer;
+	begin
+		if p_mark is null or v_checks.count = 0 then return; end if;
+
+		v_idx := v_checks.first;
+		while not v_idx is null loop
+			if v_checks(v_idx).[TYPE_CHECK] = p_type_check then
+				p_mark := v_checks(v_idx).[MARK];
+				exit;
+			end if;
+			v_idx := v_checks.next(v_idx);
+		end loop;
+	end;
+
+	procedure Visits2Ru_on_off is
+		v_set_visiblse boolean := false;
+	begin
+		
+		if P#COUNTRY is not null then
+			for (select x(x : id, nvl(x.[OPTIONAL_CERT], false) :oCert, nvl(x.[OPTIONAL_MIGR], false) : oMigr)
+					in ::[COUNTRY]	where x = P#COUNTRY
+				)
+			loop
+				/*
+				 * Заполнение массива доступно для физических лиц, у которых в поле "Гражданство" указана
+				 * страна с установленными признаками
+				 * "Соглашение о свободе перемещения (не требуется миграционная карта)"
+				 * или "Соглашение о безвизовых поездках"
+				 */
+				if ( x.oCert or x.oMigr ) then
+					v_set_visiblse := true;
+				end if;
+			end loop;
+		end if;
+		if v_set_visiblse then 								
+			::[RUNTIME].[CSMD].Command(v_vb, 'Visits2Ru.enabled = true');
+		else
+			::[RUNTIME].[CSMD].Command(v_vb, 'Visits2Ru.enabled = false');
+		end if;
+	end;
+
+	function compare_text(str1 string(128), str2 string(128)) return boolean is
+	begin
+		if str1 is NULL and str2 is NULL then
+			return true;
+		elsif upper(str1) = upper(str2) then
+			return true;
+		end if;
+		return false;
+	end;
+	
+	procedure need_show_check_fms_button is
+	begin
+		if ::[CLIENT_INTERFACE].[PRX_LEGAL].is_check_fms_work and P#RESIDENT and coalesce(V#CERT_REF,'') = ::[CERTIFIC_TYPE]([KOD] = '21') then	
+			::[RUNTIME].[CSMD].ShowS(V_VB, 'CheckFMS');
+		else
+			::[RUNTIME].[CSMD].HideS(V_VB, 'CheckFMS');
+		end if;
+	end;
+
+	function find_org_may_give(org_code string(128), org_name string(128)) return ref [ORG_MAY_GIVE] is
+	begin
+		if org_code is not NULL then -- сначала поиск по коду, если есть
+			for x in ::[ORG_MAY_GIVE]
+				where regexp_replace(x.[CODE_ORG], '[^0123456789]', '') = regexp_replace(org_code, '[^0123456789]', '')
+			loop
+				return x;
+			end loop;
+		end if;
+
+		if org_name is not NULL then -- поиск по наименованию
+			declare
+				v_min_dst_up integer;
+				v_min_dst integer;
+				v_org ref [ORG_MAY_GIVE];
+				v_cur_dst integer;
+			begin
+				for (
+					select x(x : ref#, x.[NAME] : name) in ::[ORG_MAY_GIVE]
+					where upper(x.[NAME]) like '%' || upper(org_name) || '%'
+				) loop
+					v_cur_dst := ::[RUNTIME].[STR_DISTANCE].levenshtein_distance(upper(x.name), upper(org_name));
+					if v_min_dst_up is null or v_cur_dst < v_min_dst_up then
+						v_min_dst_up := v_cur_dst;
+						v_org := x.ref#;
+						v_min_dst := ::[RUNTIME].[STR_DISTANCE].levenshtein_distance(x.name, org_name);
+					elsif v_cur_dst = v_min_dst_up then
+						v_cur_dst := ::[RUNTIME].[STR_DISTANCE].levenshtein_distance(x.name, org_name);
+						if v_cur_dst < v_min_dst then
+							v_min_dst := v_cur_dst;
+							v_org := x.ref#;
+						end if;
+					end if;
+				end loop;
+				return v_org;
+			end;
+		end if;
+
+		return NULL;
+	end;
+
+	procedure depart_code_visibility is
+	begin
+		if V#CERT_REF = ::[CERTIFIC_TYPE]([KOD] = '21') then
+			::[RUNTIME].[CSMD].command(V_VB, 'ValidBefore.Enabled = true');
+		else
+			::[RUNTIME].[CSMD].command(V_VB, 'ValidBefore.Enabled = false');
+		end if;
+	end;
+
+begin
+	fpt_int_name := nvl(::[FP_TUNE].[LIB].get_num_value('CLIENT_INT_NAME',  ::[FP_TUNE].[LIB].set_canons('BRANCH', ::[SYSTEM].[VARIABLES].OurBranch, '<FILL_CLIENT_REQS>','I_NAME', 'METACLASS', 'CL_PRIV'), '0'), 0);
+	v_bp_code := case when V_CONSTRUCT then 'REG_CLIENT' else 'EDIT_CLIENT' end;
+	if P_MESSAGE = 'DEFAULT' and P_INFO is NULL or P_MESSAGE = 'VALIDATE' and P_INFO = '%PLPCALL%' then
+		V_VALIDATE_CERT:= false;
+		V_CONSTRUCT := nvl(V_CONSTRUCT,false); --признак вызов из конструктора или редактора
+		::[RUNTIME].[CSMD].Init_Form(V_VB, &METHOD$CLASS, &METHOD$SNAME );
+
+		P#STATUS := nvl(P#STATUS, ::[PERSON_STAT]([REG_STATUS] = 'YES' and [CL_REF] is null));
+		if cl is not null then
+			P#ADDRESS := cl.[GET_ADDRESS](::[ADDRESS_TYPE]([KOD]= 'REGISTRATION'));
+			V_STR := ::[PERSONAL_ADDRESS].[API_LIB].get_address_str(P#ADDRESS, p_use_addr_struct == true);
+			
+		else
+			P#ADDRESS.[TYPE] := ::[ADDRESS_TYPE]([KOD]= 'REGISTRATION');
+		end if;
+
+		V#CERT_REF := P#DOC.[TYPE];
+		
+		-- Заполнение параметра "Сохранить данные старого удостоверения"
+		if cl.[DOC].[TYPE] is not null then
+			P_SAVE_DOC_OLD := nvl(::[FP_TUNE].[LIB].get_bool_value
+											( 'CLIENT_SAVE_DOC_OLD'
+											, ::[FP_TUNE].[LIB].set_canons
+																	( ::[CERTIFIC_TYPE]%class
+																	, cl.[DOC].[TYPE]
+																	)
+											, '0'
+											)
+								, false);
+		else
+			P_SAVE_DOC_OLD := false;
+		end if;
+		
+		if V_CONSTRUCT then
+			if P#COUNTRY = ::[SYSTEM].[COUNTRY] then
+				if V#CERT_REF is null then
+					V#CERT_REF:= ::[CERTIFIC_TYPE]([KOD] = '21');
+					P#DOC.[TYPE] := V#CERT_REF;
+				end if;
+			else
+				if V#CERT_REF is null then
+					V#CERT_REF:= ::[CERTIFIC_TYPE]([KOD] = '10');
+					P#DOC.[TYPE] := V#CERT_REF;
+				end if;
+			end if;
+		else
+			if V#CERT_REF is not null then
+				V_VALIDATE_CERT:= true;
+			end if;
+		end if;
+
+		depart_code_visibility;
+
+		V_CERT_REF := V#CERT_REF;
+
+		if ::[FP_TUNE].[LIB].get_bool_value('FO_SYNCH_DEPEND') then
+			V_VB := V_VB || '
+				NmbCountDepend.Enabled = False
+			';
+		else
+			V_VB := V_VB || '
+				NmbCountDepend.Enabled = True
+			';
+		end if;
+
+		V_WHO_V := P#DOC.[WHO];
+		-- поиск выдавшего документ органа
+		V_ORG_MAY_GIVE := find_org_may_give(P#DOC.[DEPART_CODE], P#DOC.[WHO]);
+
+		if V_CONSTRUCT then
+			if P_CL_FAMILY is null and P_CL_NAME is null and P_CL_SNAME is null then
+				Div_Name_FIO(P#NAME,P_CL_FAMILY,P_CL_NAME,P_CL_SNAME);
+			else
+				P_CL_FAMILY = l_cl_family := ::[DECLENSION].[PADEG].properInitcap(P_CL_FAMILY);
+				P_CL_NAME = l_cl_name := ::[DECLENSION].[PADEG].properInitcap(P_CL_NAME);
+				P_CL_SNAME = l_cl_sname := ::[DECLENSION].[PADEG].properInitcap(P_CL_SNAME);
+			end if;
+			P#NAME := substr(Concat_FIO(P_CL_FAMILY,P_CL_NAME,P_CL_SNAME),1,P#NAME%size);
+			if fpt_int_name = 2 or fpt_int_name = 1 and P#INTER is null then
+				P#INTER := ::[RUNTIME].[STR].Transleterate(P#NAME);
+			end if;
+		end if;
+		l_cl_family := P_CL_FAMILY;
+		l_cl_name := P_CL_NAME;
+		l_cl_sname := P_CL_SNAME;
+		V_DATE_DEATH := cl.[DATE_DEATH];
+		if V_DATE_DEATH is not null then--если дата смерти заполнена, отобразим её на ЭФО
+			::[RUNTIME].[CSMD].Command(v_vb, 'date_death_name.visible = true');
+			::[RUNTIME].[CSMD].Command(v_vb, 'date_death_lbl.visible = true');
+			::[RUNTIME].[CSMD].Command(v_vb, 'date_death_lbl.caption = "'||to_char(V_DATE_DEATH, 'DD/MM/YYYY')||'"');
+		end if;
+		::[PERSONAL_ADDRESS].[LIB].set_addr_type_context(2, P#ADDRESS.[TYPE]);	
+		
+		-- Отобразим/Скроем поля приложения "Контроль недействительных удостоверений" (1B010180).
+		-- Поля отображаем только в случае, если приложение включено и для данных проверок в справочнике "Клиенты. Виды проверок" (CLIENT_CHECKS)
+		--в реквизита "Отметка при создании/редактировании досье" (EDIT_MARK) стоит одно из значений: 1,2,3. Для значения "3" показываем, но блокируем.
+		if coalesce(::[FP_TUNE].[LIB].get_bool_value('1B010180', null, '0'), false) then
+			v_cert_mark		:= &prx_legal.CLIENT_CHECKS_GET_MARK('INVALID_CERT');
+			P_INVALID_CERT	:= &prx_legal.CL_CHECK_GET_LAST_RESULT(cl, ::[CLIENT_CHECKS]([CODE] = 'INVALID_CERT'));
+			if v_cert_mark in ('1', '2') then
+				::[RUNTIME].[CSMD].Show(V_VB, 'P_INVALID_CERT');
+			elsif v_cert_mark = '3' then
+				::[RUNTIME].[CSMD].Show(V_VB, 'P_INVALID_CERT');
+				::[RUNTIME].[CSMD].Disable(V_VB, 'P_INVALID_CERT');
+			else
+				::[RUNTIME].[CSMD].Hide(V_VB, 'P_INVALID_CERT');	
+			end if;
+	
+			v_cert_fms_mark		:= &prx_legal.CLIENT_CHECKS_GET_MARK('INVALID_CERT_FMS');
+			P_INVALID_CERT_FMS	:= &prx_legal.CL_CHECK_GET_LAST_RESULT(cl, ::[CLIENT_CHECKS]([CODE] = 'INVALID_CERT_FMS'));
+			if v_cert_fms_mark in ('1', '2') then
+				::[RUNTIME].[CSMD].Show(V_VB, 'P_INVALID_CERT_FMS');
+			elsif v_cert_fms_mark = '3' then
+				::[RUNTIME].[CSMD].Show(V_VB, 'P_INVALID_CERT_FMS');
+				::[RUNTIME].[CSMD].Disable(V_VB, 'P_INVALID_CERT_FMS');
+			else
+				::[RUNTIME].[CSMD].Hide(V_VB, 'P_INVALID_CERT_FMS');	
+			end if;
+		else
+			::[RUNTIME].[CSMD].Hide(V_VB, 'P_INVALID_CERT');
+			::[RUNTIME].[CSMD].Hide(V_VB, 'P_INVALID_CERT_FMS');
+		end if;
+		
+		--Проверка приложения "Контроль недействительных удостоверений" (1B010180), ("Электронный обмен с ГУВМ МВД России" (1B025050)
+		need_show_check_fms_button;
+
+		Visits2Ru_on_off;
+
+		V_BANKRUPT_INFO := null;
+		for (select b
+				( b.[KIND_LIMIT].[NAME] : stage_name
+				, b.[DATE_END] : date_end
+				, case when months_between(sysdate, b.[DATE_END] ) > 60 then '10'			
+					when months_between(sysdate, b.[DATE_END]) > 36 then '5'
+					when months_between(sysdate, b.[DATE_END]) >= 0 then '3' end : years_ago
+				)
+				in cl.[STATE_STAGE]
+				where b.[KIND_LIMIT].[CODE] like 'BANKRUPT\_PRIV%' escape '\'
+					and (b.[DATE_END] is null or b.[DATE_END] >= add_months(trunc(sysdate),-120))
+				order by b.[DATE_END] desc, b.[DATE_BEGIN] desc
+
+			)
+		loop
+			V_BANKRUPT_INFO := '"'||b.stage_name||'"'|| case when b.date_end is not null then ' прекращено менее '||b.years_ago||' лет назад '||to_char(b.date_end,'(DD.MM.YYYY)') end;
+			exit;
+		end loop;
+		v_snils := P_SNILS;
+		
+		P_NO_CITIZENSHIP := nvl(P_NO_CITIZENSHIP, false);
+		if P_NO_CITIZENSHIP then
+			::[RUNTIME].[CSMD].Disable(V_VB, 'P#COUNTRY');
+		end if;
+
+		if not nvl(::[FP_TUNE].[LIB].get_bool_value('1B025075', NULL, '0'), false) then
+			::[RUNTIME].[CSMD].Command(V_VB, 'bSNILSRequest.Enabled=false');
+		end if;
+
+		::[RUNTIME].[CSMD].Command(V_VB, 'GetPassportRF.Visible='||case when ::[CLIENT_INTERFACE].[PRX_OCR].app_passport_rf_enabled then 'true' else 'false' end);
+
+		if V_CONSTRUCT or (cl is not null and (nvl(P#DOC.[DATE],to_date('1','j')) != nvl(cl.[DOC].[DATE],to_date('1','j')))) then
+			P#DOC.[DATE_END] := Calc_Date_End_Cert(P#DOC, P#DATE_PERS, null, P_NO_CITIZENSHIP);
+			P#DOC.[VALID_BEFORE] := Calc_Date_Valid_Cert(P#DOC.[TYPE], P#DOC.[DATE_END]);
+		end if;
+		if cl is not null and cl.[ADD_PROP]%size(0) = 0 then
+			::[CLIENT_INTERFACE].[PRX_CRED_SRV].make_default_properties
+				( cl.[ADD_PROP]
+				, 'CL_PRIV'
+				, ::[SYSTEM].[OP_DATE]
+				);
+		end if;
+
+		::[RUNTIME].[CSMD].Command(v_vb, 'call SetEnableControl(vStr, false)');
+		::[CLIENT_INTERFACE].[PRX_PP].view_agreement_client(cl, V_CREATE_ES, V_VB, v_CEfield_vn);
+
+---------------------------------------------------------------------------------------
+	elsif P_MESSAGE = 'VALIDATE' then
+
+		if P_INFO = 'SetCertificate' then
+			V#CERT_REF := P#DOC.[TYPE];
+			V_WHO_V := P#DOC.[WHO];
+			V_ORG_MAY_GIVE := find_org_may_give(P#DOC.[DEPART_CODE], P#DOC.[WHO]);
+			P#DOC.[DATE_END] := Calc_Date_End_Cert(P#DOC, P#DATE_PERS, null, P_NO_CITIZENSHIP);
+			P#DOC.[VALID_BEFORE] := Calc_Date_Valid_Cert(P#DOC.[TYPE], P#DOC.[DATE_END]);
+			depart_code_visibility;
+		end if;
+
+		if P_INFO in ('P_CL_FAMILY', 'P_CL_NAME', 'P_CL_SNAME') then
+			if P_INFO = 'P_CL_FAMILY' then
+				if not compare_text(P_CL_FAMILY, l_cl_family) then
+					P_CL_FAMILY = l_cl_family := ::[DECLENSION].[PADEG].properInitcap(P_CL_FAMILY);
+				end if;
+			elsif P_INFO = 'P_CL_NAME' then
+				if not compare_text(P_CL_NAME, l_cl_name) then
+					P_CL_NAME = l_cl_name := ::[DECLENSION].[PADEG].properInitcap(P_CL_NAME);
+				end if;
+			elsif P_INFO = 'P_CL_SNAME' then
+				if not compare_text(P_CL_SNAME, l_cl_sname) then
+					P_CL_SNAME = l_cl_sname := ::[DECLENSION].[PADEG].properInitcap(P_CL_SNAME);
+				end if;
+			end if;
+			v_name_cl := Concat_FIO(P_CL_FAMILY,P_CL_NAME,P_CL_SNAME);
+			-- ITyschenko
+			if length(v_name_cl)>160 then
+				pragma error('Фамилия Имя Отчество вместе не могут превышать длину 160 символов!');
+			else
+				P#NAME := v_name_cl;
+			end if;
+			--
+			--Заполнение поля "Интернациональное наименование" в зависимости от настройки
+			if fpt_int_name = 2 then
+				P#INTER := ::[RUNTIME].[STR].Transleterate(P#NAME);	
+			elsif P_INFO = 'P_CL_SNAME' and fpt_int_name = 1 and P#INTER is null then
+				P#INTER := ::[RUNTIME].[STR].Transleterate(P#NAME);
+			end if;
+			--10.02.2012 BS00187011 изменено условие
+			if P_CL_FAMILY is not null and P_CL_NAME is not null or p_info='P_CL_SNAME' then
+				P_INFO := 'P#NAME';
+			end if;
+		end if;
+		
+		if P_INFO in ('Рассчитать', 'P#DOC.DATE','P#DATE_PERS', '%VAR%.V#CERT_REF', '%VAR%.V_CERT_REF') then
+			if P_INFO = '%VAR%.V_CERT_REF' then
+				P_INFO := '%VAR%.V#CERT_REF';
+				V#CERT_REF := V_CERT_REF;
+			end if;
+			if P_INFO = '%VAR%.V#CERT_REF' then
+				-- показать признак "Сохранить данные старого удостоверения"
+				if nvl(cl.[DOC].[SER], cl.[DOC].[NUM]) is not null and cl.[DOC].[TYPE] is not null then
+					::[RUNTIME].[CSMD].SHOW(V_VB, 'P_SAVE_DOC_OLD');
+				end if;	
+				P#DOC := null;
+				V_ORG_MAY_GIVE := null;
+				V_WHO_V := null;
+				P#DOC.[TYPE] := V#CERT_REF;
+				V_VALIDATE_CERT:= true;
+				V_CERT_REF := V#CERT_REF;
+				need_show_check_fms_button;
+			end if;
+			P#DOC.[DATE_END] := Calc_Date_End_Cert (P#DOC, P#DATE_PERS, null, P_NO_CITIZENSHIP);
+			P#DOC.[VALID_BEFORE] := Calc_Date_Valid_Cert(P#DOC.[TYPE], P#DOC.[DATE_END]);
+			depart_code_visibility;
+		elsif P_INFO = 'Склонение ФИО по падежам' then
+			debug_pipe('(1)   P#DECL_FIO%size(0)='||P#DECL_FIO%size(0),dp);
+			debug_pipe('(1)cl.[DECL_FIO]%size(0)='||cl.[DECL_FIO]%size(0),dp);
+			V_VB := 'Form1.ScriptPlayEx("<% PLPCALL [EDIT_DECLENSION](P_DECL_ARR => %PARAM%.P#DECL_FIO, P_LAST_NAME => %PARAM%.P_CL_FAMILY, P_FIRST_NAME => %PARAM%.P_CL_NAME, P_MIDDLE_NAME => %PARAM%.P_CL_SNAME, P_SEX => %PARAM%.P#SEX, P_NAME => %PARAM%.P#NAME) %>")';
+			debug_pipe('(2)   P#DECL_FIO%size(0)='||P#DECL_FIO%size(0),dp);
+			debug_pipe('(2)cl.[DECL_FIO]%size(0)='||cl.[DECL_FIO]%size(0),dp);
+		
+		elsif P_INFO = 'P_NO_CITIZENSHIP' then
+			if P_NO_CITIZENSHIP then
+				::[RUNTIME].[CSMD].Disable(V_VB, 'P#COUNTRY');
+				P#COUNTRY := null;
+			else
+				::[RUNTIME].[CSMD].Enable(V_VB, 'P#COUNTRY');
+			end if;
+			Visits2Ru_on_off;
+			if P#DOC.[TYPE].[CODE_GNI] = 12 then
+				if P_NO_CITIZENSHIP then
+					P#DOC.[DATE_END] := Calc_Date_End_Cert (P#DOC, P#DATE_PERS, null, P_NO_CITIZENSHIP);
+				else
+					P#DOC.[DATE_END] := null;	
+				end if;					
+			end if;
+					
+		elsif p_info = 'OK' then
+			::[PERSONAL_ADDRESS].[LIB].set_addr_type_context(null, null);
+			v_vb := null;--почистим  клиент-скрипт, чтобы не было сообщений-дублей.
+			V#ERR := null;
+			if P#NAME is not null and P_CL_FAMILY is null and P_CL_NAME is null and P_CL_SNAME is null then
+				Div_Name_FIO(P#NAME,P_CL_FAMILY,P_CL_NAME,P_CL_SNAME);
+				if fpt_int_name = 2 or fpt_int_name = 1 and P#INTER is null then
+					P#INTER := ::[RUNTIME].[STR].Transleterate(P#NAME);
+				end if;
+				V#ERR := V#ERR||'?Выполнено автоматическое заполнение полей "Фамилия", "Имя", "Отчество" на основании значения в поле "Ф.И.О."'||NL$||NL$||'Продолжить?';
+			end if;
+			--	Проверка на заполнение даты рождения клиента	--
+			if P#DATE_PERS is null then
+				for	(select r(r.[CHECK_LEVEL].[0] : check_level)
+						in ::[CHECK_GUIDE]
+						where r.[CODE] = 'DATE_BORN' and r.[BUS_PROCESS].[CODE] = v_bp_code
+					)
+				loop
+					if r.check_level = 1 then --	Жёсткая проверка
+						pragma error ('Дата рождения должна быть заполнена!');
+					elsif r.check_level = 2 then --	Мягкая проверка
+						::[RUNTIME].[CSMD].messagebox(V_VB,'День рождения','Дата рождения клиента не заполнена!');
+					end if;
+				end loop;
+			end if;
+			check_right2stay -- Проверка права пребывания нерезидентов в РФ
+				(p_this == cl
+				,p_country == P#COUNTRY
+				,p_cert == P#DOC
+				,p_resident == P#RESIDENT
+				,p_constructor == V_CONSTRUCT
+				,p_err == V#ERR
+				,p_vb_msg == true
+				);
+
+			cl.[SET_ADDRESS](P#ADDRESS);
+			
+			-- Проверка на заполненность гражданства физ. лица
+			if P#COUNTRY is null and not nvl(P_NO_CITIZENSHIP, false) then
+				for rec in ::[CHECK_GUIDE] where rec.[CODE] = 'CP_NATIONALITY' and rec.[BUS_PROCESS].[CODE] = v_bp_code and rec.[CHECK_LEVEL].[0] in (1, 2)
+				loop
+					if rec.[CHECK_LEVEL].[0] = 1 then
+						pragma error(rec.[MESS]);
+					elsif rec.[CHECK_LEVEL].[0] = 2 then
+						stdio.put_buf(rec.[MESS]);
+					end if;
+				end loop;
+			end if;
+			
+			if P_SNILS is null then
+				for	(
+					select r(r.[CHECK_LEVEL].[0] : chk_level, r.[MESS] : mess)
+					in ::[CHECK_GUIDE]
+					where r.[CODE] = 'SNILS_REQUIRED'
+						and r.[BUS_PROCESS].[CODE] = v_bp_code
+						and r.[CHECK_LEVEL].[0] in (1, 2)
+					)
+				loop
+					if r.chk_level = 1 then
+						pragma error(r.mess);
+					elsif r.chk_level = 2 then
+						V#ERR := V#ERR||'?'||r.mess||NL$||NL$||'Игнорировать?';
+					end if;
+				end loop;
+			elsif P_SNILS is not null then
+				v_err := ::[CL_PRIV].[LIB].check_snils(P_SNILS,false,true);
+				if v_err is not null then
+					for	(
+						select r(r.[CHECK_LEVEL].[0] : chk_level, r.[MESS] : mess)
+						in ::[CHECK_GUIDE]
+						where r.[CODE] = 'SNILS_VALID'
+							and r.[BUS_PROCESS].[CODE] = v_bp_code
+							and r.[CHECK_LEVEL].[0] in (1, 2)
+						)
+					loop
+						if r.chk_level = 1 then
+							pragma error(r.mess||': '||v_err);
+						elsif r.chk_level = 2 then
+							V#ERR := V#ERR||'?'||r.mess||': '||v_err||NL$||NL$||'Игнорировать?';
+						end if;
+					end loop;
+				end if;
+				v_err := null;
+				for	(
+					select r(r.[CHECK_LEVEL].[0] : chk_level, r.[MESS] : mess)
+					in ::[CHECK_GUIDE]
+					where r.[CODE] = 'SNILS_UNIQUE'
+						and r.[BUS_PROCESS].[CODE] = v_bp_code
+						and r.[CHECK_LEVEL].[0] in (1, 2)
+					)
+				loop
+					for	(
+						select c(c%id:id, c.[NAME]:name, analytic(row_number(), 'over(order by 1)'):rn)
+						in ::[CL_PRIV]
+						where c != cl
+							and c.[SNILS] = P_SNILS
+							and decode(c.[COM_STATUS],v_archive_status,1,0) = 0
+						fetch 4
+						)
+					loop
+						v_err := v_err||case when v_err is null then r.mess||':' else ',' end || NL$ || c.name || ' id=' || c.id;
+						if c.rn = 4 then
+							v_err := v_err||NL$||'...';
+						end if;
+					end loop;
+					if v_err is not null then
+						if r.chk_level = 1 then
+							pragma error(v_err);
+						elsif r.chk_level = 2 then
+							V#ERR := V#ERR||'?'||v_err||NL$||NL$||'Игнорировать?';
+						end if;
+					end if;
+				end loop;
+			end if;
+			
+		elsif p_info = 'P#NAME' then
+			V#ERR := null;
+			declare
+				v_count number := 0;
+			begin
+				name := ::[DECLENSION].[PADEG].properInitcap(stdlib.fio(P#NAME));
+				var fnm	::[CLIENT].[NAME]%type;
+				fnm := ::[DECLENSION].[PADEG].properInitcap(stdlib.fio(P#NAME, 'Ф'));
+				for (
+					select c(c%id: D_ID, UPPER(c.[NAME]) : D_FIO)
+					in ::[CLIENT]
+					where UPPER(c.[NAME]) like upper(fnm)||'%'
+						and c%class = ::[CL_PRIV]%class
+						and c <> nvl(cl, 0)
+					)
+				loop
+					if ::[RUNTIME].[STDLIB].FIO(c.D_FIO) = upper(name) then
+						v_count := v_count+1;
+						if v_count<=15 then
+							declare
+								prv ref [CL_PRIV];
+							begin
+								prv := c.[D_ID];
+								V#ERR := substr(V#ERR||prv.[NAME]||case when prv.[DOC].[TYPE] is not null then ',  ' end
+									||prv.[DOC].[TYPE].[NAME]||' '||prv.[DOC].[SER]||' '||prv.[DOC].[NUM]||NL$, 1, V#ERR%size);
+							end;
+						end if;
+					end if;
+				end loop;
+				if v_count > 15 then
+					V#ERR := V#ERR||'...'||chr(10)||'Всего найдено: '||v_count||chr(10);
+				end if;
+			end;
+			if nvl(length(V#ERR),0)>0 then
+				V#ERR := substr('Найдены клиенты, имеющие похожие Ф.И.О.:' || NL$ || V#ERR, 1, V#ERR%size);
+			end if;
+		elsif p_info = 'P#INN' then
+			V#ERR := ::[CLIENT].[LIB].Check_Inn_For_Script(cl, P#COUNTRY, P#INN); -- Проверка ИНН на длину и только цифры должна осуществляться всегда (RP0159694)
+		
+		elsif p_info in ('P#DOC.SER','P#DOC.NUM') then
+			-- вызов hook для возможности обхода кода валидации
+			-- если возвращает false код валидации пропускает
+			-- при необходимости работы кода перегрузить hook с возвратом true
+			if ::[CL_PRIV].[LIB].hook_uya_check_cl_a(cl, true, null) then
+				if p_info = 'P#DOC.SER' then
+					if not ::[CERTIFIC_TYPE].[LIBR].CheckMask(P#DOC.[TYPE]->[MASK_SERIA], P#DOC.[SER]) then
+						pragma error(::[CERTIFIC_TYPE].[LIBR].GetErrorMessage('SERIA'));
+					end if;
+				end if;
+				if p_info = 'P#DOC.NUM' then
+					if not ::[CERTIFIC_TYPE].[LIBR].CheckMask(P#DOC.[TYPE]->[MASK_NUMBER], P#DOC.[NUM]) then
+						pragma error(::[CERTIFIC_TYPE].[LIBR].GetErrorMessage('NUMBER'));
+					end if;
+				end if;
+				-- Проверка существования клиентов с одинаковыми данными документа, удостоверяющего личность
+				check_docnum_unique(
+					p_this == cl
+					, p_doc == P#DOC
+					, p_err == V#ERR
+					, p_vb_msg == true
+					, p_bp_code == v_bp_code
+					);
+			end if;
+			-- показать признак "Сохранить данные старого удостоверения"
+			if nvl(cl.[DOC].[SER], cl.[DOC].[NUM]) is not null then
+				::[RUNTIME].[CSMD].SHOW(V_VB, 'P_SAVE_DOC_OLD');
+			end if;	
+		
+		elsif p_info = 'P#DOC.DATE_END' then
+			P#DOC.[VALID_BEFORE] := Calc_Date_Valid_Cert(P#DOC.[TYPE], P#DOC.[DATE_END]);
+		elsif p_info = 'P#COUNTRY' then
+			P#RESIDENT := nvl(P#COUNTRY = ::[SYSTEM].[COUNTRY], true);
+			declare
+				l_offshore ref [OFFSHORES];
+				v_op_date	date;
+			begin
+				v_op_date := ::[SYSTEM].[OP_DATE];
+				locate l_offshore
+				in ::[OFFSHORES]
+				where l_offshore.[COUNTRY] = P#COUNTRY
+					and nvl (l_offshore.[D1], v_op_date) <= v_op_date
+					and nvl (l_offshore.[D2], v_op_date) >= v_op_date;
+				P_OFFSHORE := l_offshore;
+			exception when NO_DATA_FOUND then
+				P_OFFSHORE := null;
+			end;
+			
+			if not V_VALIDATE_CERT then
+				if P#COUNTRY = ::[SYSTEM].[COUNTRY] then
+					V#CERT_REF:= ::[CERTIFIC_TYPE]([KOD] = '21');
+				else
+					V#CERT_REF:= ::[CERTIFIC_TYPE]([KOD] = '10');
+				end if;
+				P#DOC.[TYPE] := V#CERT_REF;
+				V_CERT_REF := V#CERT_REF;
+			end if;
+
+			Visits2Ru_on_off;
+			
+			need_show_check_fms_button;
+
+		elsif p_info = '+' then
+			P#REGISTR := ::[CLIENT].[LIB].get_next_reg_num(cl);
+		elsif p_info = 'P#RELATIVES' then
+			if ::[FP_TUNE].[LIB].get_bool_value('FO_SYNCH_DEPEND') then
+				P_DEPEND_COUNT := cl.[DEPEND_COUNT];
+			end if;
+		elsif p_info = 'BtnSocPriv' then
+			V_VB := 'Form1.ScriptPlayEx("<% PLPCALL [FO_SOC_PRIV].[FO_EDIT_PRIV](%PARAM%.P_ARR_PRIV =>' || '''' || cl.[SOC_PRIV] || '''' || ') %>")';
+		elsif p_info = 'P#RESIDENT' then
+			need_show_check_fms_button;
+		elsif p_info = 'P_DOC_ARR' then
+			v_upd_cat_validator :=true;
+			if cl.[SNILS] != P_SNILS or (P_SNILS is null and cl.[SNILS] is not null) then
+				P_SNILS := cl.[SNILS];
+			end if;
+		end if;
+
+		if P_INFO = '%VAR%.V_ORG_MAY_GIVE' then
+			V_WHO_V := V_ORG_MAY_GIVE.[NAME];
+			if V#CERT_REF = ::[CERTIFIC_TYPE]([KOD] = '21') then
+				P#DOC.[DEPART_CODE] := V_ORG_MAY_GIVE.[CODE_ORG];
+			end if;
+			P#DOC.[WHO] := V_WHO_V;
+
+		elsif P_INFO = 'P#DOC.DEPART_CODE' then
+			V_ORG_MAY_GIVE := find_org_may_give(P#DOC.[DEPART_CODE], '');
+			if V_ORG_MAY_GIVE is not NULL and V_WHO_V is NULL then
+				V_WHO_V := V_ORG_MAY_GIVE.[NAME];
+			end if;
+			P#DOC.[WHO] := V_WHO_V;
+
+		elsif P_INFO = '%VAR%.V_WHO_V' then
+			if V_WHO_V is not NULL then
+				P#DOC.[WHO] := substr(V_WHO_V, 1, P#DOC.[WHO]%size);
+			else
+				P#DOC.[WHO] := null;
+			end if;
+		end if;
+
+		if P_INFO = '%VAR%.V_CITY_MAY_GIVE' then
+			P#DOC.[PLACE] := V_CITY_MAY_GIVE->[NAME];
+		end if;
+		
+		if p_info = 'CANCEL' and V_CONSTRUCT = false then		
+			V#ERR := 'Реквизиты  Фамилия, Имя, Отчество клиента'||NL$||'остались без изменений!';
+		end if;
+		if p_info = 'CANCEL' then
+			::[PERSONAL_ADDRESS].[LIB].set_addr_type_context(null, null);
+			::[PERSONAL_ADDRESS].[LIB].set_run_edit_context;
+			v_snils := null;
+			if v_upd_cat_validator then
+				::[CLIENT].[LIB].set_cat_cl_vulnerable_groups(cl);	
+			end if;
+			v_upd_cat_validator :=false;
+		end if;
+
+		if P_INFO = 'P#ADDRESS.TYPE' then
+			P#ADDRESS := cl.[GET_ADDRESS](P#ADDRESS.[TYPE]);
+			V_STR := ::[PERSONAL_ADDRESS].[API_LIB].get_address_str(P#ADDRESS, p_use_addr_struct == true);
+			
+		elsif P_INFO = 'P#ADDR_PERS' then	
+			temp_address	:=	 cl.[GET_ADDRESS](P#ADDRESS.[TYPE]);
+			P#ADDRESS := temp_address;
+			V_STR := ::[PERSONAL_ADDRESS].[API_LIB].get_address_str(P#ADDRESS, p_use_addr_struct == true);			
+		end if;
+
+		if p_info = 'After_bAddress' then
+			V_STR := ::[PERSONAL_ADDRESS].[API_LIB].get_address_str(P#ADDRESS, p_use_addr_struct == true);
+			P#ADDRESS.[CITY] := ::[PERSONAL_ADDRESS].[API_LIB].get_city(P#ADDRESS.[ADDR_OBJ]);
+			P#ADDRESS.[STREET_REF] := ::[PERSONAL_ADDRESS].[API_LIB].get_street(P#ADDRESS.[ADDR_OBJ]);
+			cl.[SET_ADDRESS](P#ADDRESS);
+		end if;
+	end if;
+	
+	Set_Mark(check_invalid_cert, p_invalid_cert);
+	Set_Mark(check_invalid_cert_fms, p_invalid_cert_fms);
+	
+	-- !!! При измении значений передаваемых в параметры нельзя забывать делать аналогичные изменения в переменных, соответсвующие параметрам 
+	-- с имененм "[текущий параметр]_[n/t/vn/f]" (сдвинуты вправо дополнительным оступом)
+	::[CLIENT_INTERFACE].[PRX_LEGAL].legal_client_validate(
+		p_cl == cl
+		, p_cl_type == 'CL_PRIV'
+		, p_Vb == V_Vb
+		, p_checks == v_checks
+			, p_checks_n == v_legal_checks_n
+			, p_checks_t == v_legal_checks_t
+			, p_checks_vn == v_legal_checks_vn
+			, p_checks_f == v_legal_checks_f
+		, p_err == V#ERR
+		, p_message == P_MESSAGE
+		, p_info == P_INFO
+		, p_form == v_legal_form
+		, p_name == p#NAme
+			, p_name_n == v_legal_name_n
+			, p_name_t == v_legal_name_t
+			, p_name_vn == v_legal_name_vn
+		, p_inter == p#inter
+			, p_inter_n == v_legal_inter_n
+			, p_inter_t == v_legal_inter_t
+			, p_inter_vn == v_legal_inter_vn
+		, p_date_pers == p#date_pers
+			, p_date_pers_n == v_legal_date_pers_n
+			, p_date_pers_t == v_legal_date_pers_t
+			, p_date_pers_vn == v_legal_date_pers_vn
+		, p_place_born == nvl(P#BORN.[NAME], P#DOC.[BIRTH_PLACE])
+			, p_place_born_n == v_legal_place_born_n
+			, p_place_born_t == v_legal_place_born_t
+			, p_place_born_vn == v_legal_place_born_vn
+		, p_inn == P#INN
+			, p_inn_n == v_legal_inn_n
+			, p_inn_t == v_legal_inn_t
+			, p_inn_vn == v_legal_inn_vn
+		, p_country == P#COUNTRY
+			, p_country_n == v_legal_country_n
+			, p_country_t == v_legal_country_t
+			, p_country_vn == v_legal_country_vn
+		, p_ipdl == p_ipdl
+			, p_ipdl_n == v_legal_ipdl_n
+			, p_ipdl_t == v_legal_ipdl_t
+			, p_ipdl_vn == v_legal_ipdl_vn
+		, p_doc == P#DOC
+			, p_doc_n == v_legal_doc_n
+			, p_doc_t == v_legal_doc_t
+			, p_doc_vn == v_legal_doc_vn
+		, P_doc_ser == P#DOC.[SER]
+			, P_doc_ser_n == v_legal_doc_ser_n
+			, P_doc_ser_t == v_legal_doc_ser_t
+			, P_doc_ser_vn == v_legal_doc_ser_vn
+		, P_doc_num == P#DOC.[NUM]
+			, P_doc_num_n == v_legal_doc_num_n
+			, P_doc_num_t == v_legal_doc_num_t
+			, P_doc_num_vn == v_legal_doc_num_vn
+		, p_address == P#ADDRESS
+			, p_address_n == v_legal_address_n
+			, p_address_t == v_legal_address_t
+			, p_address_vn == v_legal_address_vn
+		, p_addresses == P#ADDR_PERS
+			, p_addresses_n == v_legal_addresses_n
+			, p_addresses_t == v_legal_addresses_t
+			, p_addresses_vn == v_legal_addresses_vn
+		, P_KOD_OKPO == null
+			, P_KOD_OKPO_n == v_legal_KOD_OKPO_n
+			, P_KOD_OKPO_t == v_legal_KOD_OKPO_t
+			, P_KOD_OKPO_vn == v_legal_KOD_OKPO_vn
+		, P_LONG_NAME == null
+			, P_LONG_NAME_n == v_legal_LONG_NAME_n
+			, P_LONG_NAME_t == v_legal_LONG_NAME_t
+			, P_LONG_NAME_vn == v_legal_LONG_NAME_vn
+		, P_register == null
+			, P_register_n == v_legal_register_n
+			, P_register_t == v_legal_register_t
+			, P_register_vn == v_legal_register_vn
+		, P_ALL_BOSS == null
+			, p_all_boss_n == v_legal_all_boss_n
+			, p_all_boss_t == v_legal_all_boss_t
+			, p_all_boss_vn == v_legal_all_boss_vn		
+		, P_PS_REF == null
+		, P_DOC_ARR == P_DOC_ARR
+			, p_doc_arr_n == v_legal_doc_arr_n
+			, p_doc_arr_t == v_legal_doc_arr_t
+			, p_doc_arr_vn == v_legal_doc_arr_vn
+		, P_mark1 == V_CHECK1
+			, P_mark1_n == v_legal_mark1_n
+			, P_mark1_t == v_legal_mark1_t
+			, P_mark1_vn == v_legal_mark1_vn
+		, p_is_resident == P#RESIDENT
+			, p_is_resident_n == v_legal_is_resident_n
+			, p_is_resident_t == v_legal_is_resident_t
+			, p_is_resident_vn == v_legal_is_resident_vn
+		, p_fatca_info == null
+			, p_fatca_info_n == v_legal_fatca_info_n
+			, p_fatca_info_t == v_legal_fatca_info_t
+			, p_fatca_info_vn == v_legal_fatca_info_vn
+		, p_vids_cl == null
+			, p_vids_cl_n == v_legal_vids_cl_n
+			, p_vids_cl_t == v_legal_vids_cl_t
+			, p_vids_cl_vn == v_legal_vids_cl_vn
+		, p_kio == null
+			, p_kio_n == v_legal_kio_n
+			, p_kio_t == v_legal_kio_t
+			, p_kio_vn == v_legal_kio_vn
+		, p_is_new == is_new
+		, p_egrul == null
+		, p_snils == P_SNILS
+		, p_place_born_ref == P#BORN
+		, p_ctl == null
+		, p_nu_rezident == P_REZIDENT_NU
+		, p_names == P_NAMES
+		, p_assets == P_ASSETS
+	);
+ 
+	if p_info = 'CheckFMS' then
+		P_INVALID_CERT_FMS	:= ::[P207_TERROR_FLAG]([CODE] = 'CERT_NEED_CHECK');
+	end if;
+	
+	Get_Mark(check_invalid_cert, p_invalid_cert);
+	Get_Mark(check_invalid_cert_fms, p_invalid_cert_fms);
+
+	-- !!! При измении значений передаваемых в параметры нельзя забывать делать аналогичные изменения в переменных, соответсвующие параметрам 
+	-- с имененм "[текущий параметр][n/t/vn/f]" (сдвинуты вправо дополнительным оступом)
+	::[IDENTIFY_LEVEL].[LIB].Identify_level_validate(
+		cl == cl
+		, cl_Class == 'CL_PRIV'
+		, vb == v_vb
+		, p_message == P_MESSAGE
+		, p_info == P_INFO
+		, ILtable == V_IDENTIFY_LEVEL
+			, ILtableN == v_ILtable_n
+			, ILtableT == v_ILtable_t
+			, ILtableVn == v_ILtable_vn
+			, ilform == v_ILtable_f
+		, BPtable == V_BUS_PROC
+			, BPtableN == v_BPtable_n
+			, BPtableT == v_BPtable_t
+			, BPtableVn == v_BPtable_vn
+			, bpform == v_BPtable_f
+	);
+ 	
+	if P_MESSAGE = 'DEFAULT' then
+			v_str_plp := 'executor.set_context(''CL_PRIV_EDIT_AUTO_CL_ID'', '''|| V_CL_ID ||''');';
+			::[RUNTIME].[PLP].plp(v_str_plp);
+	end if;
+end;
+
+public procedure executor(
+	cl in out ref [CL_PRIV],
+	P#NAME in out [STRING_100],
+	P#INN in out [STRING_12],
+	P#COUNTRY in out [COUNTRY_REF],
+	P#RESIDENT in out [BOOLEAN],
+	P#PRIVILEGES in out [PRIVILEGE_ARR],
+	P#DATE_PERS in out [DATE],
+	P#MARIGE_STATUS in out [FAMILY_TYPE_REF],
+	P#SEX in out [SEX_REF],
+	P#BORN in out [NAME_CITY_REF],
+	P#ADDR_PERS in out [ADDRESSES],
+	P#TELEFON in out [CONTACTS_ARR],
+	P#DOC in out [CERTIFICATE],
+	P#NOTES in out [MEMO],
+	P#LOW in out [MEMO],
+	P#DISPOSITS in out [STR_DISPOSIT_ARR],
+	P#STATUS in out [PERSON_STAT_REF],
+	P#REGISTR in out [DIG_9],
+	P#INSPECT in out [TAX_INSP_ARR],
+	P#INTER in out ::[CLIENT].[I_NAME]%type,
+	P#ACC_BANK in out [BANKS_ACC_ARR],
+	P#RELATIVES in out [RELATIVES_ARR],
+	P#DECL_FIO in out [DECLENSION_ARR],
+	P#ADDRESS in out [PERSONAL_ADDRESS],
+	V#VIDS_CL in out [CL_CATEGORIE_ARR],
+	V#ERR in out [STRING_32000],
+	P_WELF_HIST in out [WELF_HIST_ARR],
+	P_DOC_ARR in out [CERTIFICATE_ARR],
+	P_MIGR_CARD in out [MIGR_CARD_ARR],
+	P_REZIDENT_NU in out boolean,
+	P_CALC_DATE_END_CERT in out boolean,
+	P_DEPEND_COUNT in out [SHORT2],
+	P_ED_ESTAB in out [ED_ESTAB_ARR],
+	P_WORK_ACTIVITY in out [WORK_BOOK_ARR],
+	P_SOC_PRIV in out [FO_SOC_PRIV_ARR],
+	P_CL_FAMILY in out [STRING_128],
+	P_CL_NAME in out [STRING_128],
+	P_CL_SNAME in out [STRING_128],
+	P_OFFSHORE in ref [OFFSHORES],
+	P_SI_NAME in out [SBRF_NAME],
+	P_constr in boolean default true,
+	P_NAMES in out [NAMES_ARR],
+	P_IPDL in out ref [IPDL_TYPE],
+	P_OKATO_CODE in out [STRING_11],
+	P_INVALID_CERT	in out ref [P207_TERROR_FLAG],
+	V_CHECKS	in out LEGAL_CHECKS_TABLE,
+	P_INVALID_CERT_FMS	in out ref [P207_TERROR_FLAG],
+	P_NO_CITIZENSHIP	in out boolean,
+	P_SNILS in out [SNILS],
+	P_SAVE_DOC_OLD in out boolean,
+	V_STR in out [MEMO]
+) is
+	err	varchar2;
+	x ref [CLIENT];
+	y ref [CL_PRIV];
+	cred ref [PR_CRED];
+	dep ref [DEPN];
+	v_old_name ::[CLIENT].[NAME]%type;
+	v_old_i_name ::[CLIENT].[I_NAME]%type;
+	v_old_date_pers date;
+	v_bp_code		::[BUS_PROCESS].[CODE]%type;
+	v_check_bankrupt boolean := false;
+	v_save_no_bankrup boolean :=false;
+	v_err varchar2(4000);
+	v_end_date date;
+	v_valid_date date;
+	v_str_plp string(2000);
+	v_upd_cat boolean :=false;
+begin
+	v_bp_code := case when V_CONSTRUCT then 'REG_CLIENT' else 'EDIT_CLIENT' end;
+	P#NAME:= trim(P#NAME);
+	
+	if P#NAME is null then
+		err := err||'"Ф.И.О."'||' ';
+	end if;
+	if length(err)>0  then
+		pragma error('Следующие обязательные поля: '||err||'не заполнены!');
+	end if;
+
+	if not(P#DOC.[TYPE].[IDENTITY_CERT]) then
+		pragma error('У основного удостоверения задан тип "'||P#DOC.[TYPE].[NAME]||'", который не является документом, удостоверяющим личность');
+	end if;
+	
+	if P#DATE_PERS is null then
+		for (select cg(1) in ::[CHECK_GUIDE] where cg.[CODE] = 'DATE_BORN' and cg.[BUS_PROCESS].[CODE] = v_bp_code and cg.[CHECK_LEVEL].[0] = 1) loop
+			pragma error ('Дата рождения должна быть заполнена!');
+		end loop;
+	end if;
+	
+	-- Проверка на заполненность гражданства физ. лица
+	if P#COUNTRY is null and not nvl(P_NO_CITIZENSHIP, false) then
+		for rec in ::[CHECK_GUIDE] where rec.[CODE] = 'CP_NATIONALITY' and rec.[BUS_PROCESS].[CODE] = v_bp_code and rec.[CHECK_LEVEL].[0] = 1
+		loop
+			pragma error(rec.[MESS]);
+		end loop;
+	end if;
+	cl.[NO_CITIZENSHIP] := nvl(P_NO_CITIZENSHIP, false);
+	
+	-- Проверка на соответсвие серии и номера документа их маске
+	if not ::[CERTIFIC_TYPE].[LIBR].CheckMask(P#DOC.[TYPE]->[MASK_SERIA], P#DOC.[SER]) then
+		pragma error(::[CERTIFIC_TYPE].[LIBR].GetErrorMessage('SERIA'));
+	end if;
+	if not ::[CERTIFIC_TYPE].[LIBR].CheckMask(P#DOC.[TYPE]->[MASK_NUMBER], P#DOC.[NUM]) then
+		pragma error(::[CERTIFIC_TYPE].[LIBR].GetErrorMessage('NUMBER'));
+	end if;
+	-- Проверка существования клиентов с одинаковыми данными документа, удостоверяющего личность
+	check_docnum_unique
+		(p_this == cl
+		,p_doc == P#DOC
+		,p_bp_code == v_bp_code
+		);
+
+	-- Установка значения реквизита "Наименование"
+	-----------------
+	if not nvl(P_constr, true) then
+		v_old_name := cl.[NAME];
+		v_old_i_name := cl.[I_NAME];
+		v_old_date_pers:= cl.[DATE_PERS];
+	end if;
+	
+	if P_CL_FAMILY is null and P_CL_NAME is null and P_CL_SNAME is null then
+		Div_Name_FIO(P#NAME,P_CL_FAMILY,P_CL_NAME,P_CL_SNAME);
+	end if;
+	
+	if not &equal(cl.[FAMILY_CL],P_CL_FAMILY) or not &equal(cl.[NAME_CL],P_CL_NAME) or not &equal(cl.[SNAME_CL],P_CL_SNAME) then
+		v_check_bankrupt := true;
+		v_save_no_bankrup :=true; 
+	end if;
+	cl.[NAME] := P#NAME;
+	cl.[FAMILY_CL] := P_CL_FAMILY;
+	cl.[NAME_CL] := P_CL_NAME;
+	cl.[SNAME_CL] := P_CL_SNAME;
+	cl.[OKATO_CODE] :=P_OKATO_CODE;
+	
+	-- Установка значения реквизита "ИНН"
+	if not &equal(cl.[INN],P#INN) then
+		v_check_bankrupt := true;
+		v_save_no_bankrup :=true;
+	end if;
+	cl.[INN] := P#INN;
+	if P#INSPECT is not null then
+		cl.[INSPECT] := P#INSPECT;
+	end if;
+	if P#RESIDENT is not null then
+		cl.[IS_RESIDENT] := P#RESIDENT;
+	else
+		cl.[IS_RESIDENT] = P#RESIDENT := (P#COUNTRY = ::[SYSTEM].[COUNTRY]);
+	end if;
+	
+	-- Установка значения реквизита "СНИЛС"
+	if P_SNILS is null then
+		for (select r(r.[MESS]:mess) in ::[CHECK_GUIDE] where r.[CODE] = 'SNILS_REQUIRED' and r.[BUS_PROCESS].[CODE] = v_bp_code and r.[CHECK_LEVEL].[0] = 1) loop
+			pragma error(r.mess);
+		end loop;
+	else
+		v_err := ::[CL_PRIV].[LIB].check_snils(P_SNILS,false,true);
+		if v_err is not null then
+			for	(select r(r.[MESS]:mess) in ::[CHECK_GUIDE] where r.[CODE] = 'SNILS_VALID' and r.[BUS_PROCESS].[CODE] = v_bp_code and r.[CHECK_LEVEL].[0] = 1) loop
+				pragma error(r.mess||': '||v_err);
+			end loop;
+		end if;
+		for	(select r(r.[MESS]:mess) in ::[CHECK_GUIDE] where r.[CODE] = 'SNILS_UNIQUE' and r.[BUS_PROCESS].[CODE] = v_bp_code and r.[CHECK_LEVEL].[0] = 1) loop
+			v_err := null;
+			for (select c(c%id:id, c.[NAME]:name, analytic(row_number(), 'over(order by 1)'):rn) in ::[CL_PRIV] where c != cl and c.[SNILS] = P_SNILS fetch 4) loop
+				v_err := v_err||case when v_err is null then r.mess||':' else ',' end || NL$ || c.name || ' id=' || c.id;
+				if c.rn = 4 then
+					v_err := v_err||NL$||'...';
+				end if;
+			end loop;
+			if v_err is not null then
+				pragma error(v_err);
+			end if;
+		end loop;
+	end if;
+	cl.[SNILS] := P_SNILS;
+
+	--Установка значения реквизита "ПДЛ"
+	cl.[IS_IPDL] := P_IPDL;
+	
+	if ::[PDL_PERSONAL].[LIB].get_pdl_control(cl) and nvl(::[FP_TUNE].[LIB].get_num_value('FAIL_LEVEL_AUTO', null, '0'), 0) = 0 then
+		::[RISK_RESULTS].[LIB].addRisk_FailLevel(cl, ::[FAIL_LEVEL]([CODE] = 'ВЫСОКИЙ'));
+	end if;
+	
+	-- Установка значения реквизита "Гражданство"
+	cl.[COUNTRY] := P#COUNTRY;
+	-- Установка значения реквизита "Регистрационный номер"
+	if nvl(P#REGISTR,0) > 0 then
+		if cl.[REGISTR_NUM] <> P#REGISTR or cl.[REGISTR_NUM] is null then
+			x := ::[CLIENT].[LIB].is_allowed_register_num(cl, P#REGISTR);
+			if x is not null then
+				pragma error ('Регистрационный номер '||to_char(P#REGISTR)||' уже используется '||x.[NAME]|| '. Следующий допустимый регистрационный номер для данного клиента ' || ::[CLIENT].[LIB].get_next_reg_num(cl));
+			end if;
+		::[COUNTERS].[SQ].SetCounter(::[CLIENT].[LIB].get_seq(cl%class, cl.[FILIAL]), P#REGISTR, false, true);
+		cl.[REGISTR_NUM] := P#REGISTR;
+		end if;
+	elsif nvl(P#REGISTR,0) < 0 then
+		pragma error('Регистрационный номер не может быть меньше 0!');
+	end if;
+	-- Установка значения реквизита "Льготы клиента"
+	if not (P#PRIVILEGES is null) then
+		cl.[PRIVILEGES] := P#PRIVILEGES;
+	end if;
+	-- Установка значения реквизита "Интернациональное наименование"
+	cl.[I_NAME] := P#INTER;
+	-- Установка значения реквизита "Семейное положение"
+	cl.[MARIGE_STATUS] := P#MARIGE_STATUS;
+	-- Установка значения реквизита "Пол"
+	cl.[SEX] := P#SEX;
+	-- Установка значения реквизита "Дата рождения"
+	if not &equal(cl.[DATE_PERS],P#DATE_PERS) then
+		v_check_bankrupt := true;
+		v_save_no_bankrup := true;
+	end if;
+	cl.[DATE_PERS] := P#DATE_PERS;
+	-- Установка значения реквизита "Место рождения"
+	cl.[BORN] := P#BORN;
+	-- Установка значения реквизита "Адреса"
+	If P#ADDR_PERS is not null then
+		cl.[ADDRESSES] := P#ADDR_PERS;
+	end if;
+	-- Установка значения реквизита "Контакты для связи"
+	If P#TELEFON is not null then
+		cl.[CONTACTS] := P#TELEFON;
+	end if;
+	-- Установка значения реквизита "Родственники"
+	-------------------------------------------------
+	if P#RELATIVES is not null then
+		--pragma debug(cl.[RELATIVES_CLIENT]);
+		--cl.[RELATIVES_CLIENT]()
+		cl.[RELATIVES_CLIENT] := P#RELATIVES;
+	end if;
+	----------------------------------------------
+	
+	--Сбрасываем кэш при работе в 2MCA DBI, чтобы при программном вызове клиент создался раньше, чем заполнились массивы
+	--#ifdef DBI
+	if p_constr then
+		::[RUNTIME].[SP_CACHE_MGR].cache_flush;
+	end if;
+	--#end_if
+	
+	-- Установка значения реквизита "Примечания"
+	cl.[NOTES] := P#NOTES;
+	-- Установка значения реквизита "Отношение с законом"
+	cl.[LOW] := P#LOW;
+	cl.[REG_STATUS] := P#STATUS;
+	if P#ACC_BANK is not null then
+		cl.[ACC_BANK] := P#ACC_BANK;
+	end if;
+	
+	debug_pipe('   P#DECL_FIO%size(0)='||P#DECL_FIO%size(0),dp);
+	debug_pipe('cl.[DECL_FIO]%size(0)='||cl.[DECL_FIO]%size(0),dp);
+	if P#DECL_FIO is not null then
+		cl.[DECL_FIO] := P#DECL_FIO;
+		debug_pipe('cl.[DECL_FIO]%size(0)='||cl.[DECL_FIO]%size(0),dp);
+	end if;
+	
+	--	Если executor вызывается конструктором без формы, и переданное поле "Действителен до" is null	--
+	if P_CALC_DATE_END_CERT is null and P#DOC.[DATE_END] is null then
+		declare
+			v_pdoc_date_end [DATE];
+			v_pdoc_valid_before [DATE];
+		begin
+			v_pdoc_date_end := P#DOC.[DATE_END]; 
+			v_pdoc_valid_before := P#DOC.[VALID_BEFORE]; 
+			
+			P#DOC.[DATE_END] := Calc_Date_End_Cert (P#DOC, P#DATE_PERS, null, P_NO_CITIZENSHIP);
+			P#DOC.[VALID_BEFORE] := Calc_Date_Valid_Cert(P#DOC.[TYPE], P#DOC.[DATE_END]);
+			-- если обновились даты льготного удостоверения, необходимо обновить категории			
+			if ::[CLIENT].[LIB].type_cert_upd_cat_cl(P#DOC.[TYPE]) 
+				and (v_pdoc_date_end != P#DOC.[DATE_END] or v_pdoc_valid_before != P#DOC.[VALID_BEFORE])
+			then
+				v_upd_cat :=true;	
+			end if;
+		end;
+	end if;
+	
+	-- Сохранить данные старого удостоверения в массив "Доп. удостоверения"
+	if P_SAVE_DOC_OLD and cl.[DOC].[TYPE] is not null and (cl.[DOC].[SER] is not null or cl.[DOC].[NUM] is not null) then
+		if cl.[DOC].[TYPE] = P#DOC.[TYPE]
+			and (cl.[DOC].[SER] = P#DOC.[SER] or (cl.[DOC].[SER] is null and P#DOC.[SER] is null))
+			and (cl.[DOC].[NUM] = P#DOC.[NUM] or (cl.[DOC].[NUM] is null and P#DOC.[NUM] is null))
+		then
+			stdio.put_line_buf('Данные о предыдущем удостоверении не были сохранены, так как не изменились данные основного удостоверения.');	
+		else
+			v_end_date := trunc(case when cl.[DOC].[TYPE] = P#DOC.[TYPE] then least(coalesce(cl.[DOC].[DATE_END], sysdate-1), coalesce(P#DOC.[DATE]-1, sysdate-1), sysdate-1) else cl.[DOC].[DATE_END] end);
+			if v_end_date < cl.[DOC].[DATE] then
+				pragma error('Невозможно сохранить данные предыдущего удостоверения: рассчитанная дата окончания ('||to_char(v_end_date, 'dd.mm.yyyy')||'), меньше даты начала действия');
+			end if;
+			
+			if cl.[DOC].[VALID_BEFORE] is not null then
+				if v_end_date <> cl.[DOC].[DATE] then -- дата окончания паспорта изменилась, значит паспорт перестал действовать в эту дату
+					v_valid_date := null;
+				else -- дата не изменилась, значит паспорт действовал до даты нового паспорта - 1 день
+					v_valid_date := coalesce(P#DOC.[DATE]-1, sysdate-1);
+				end if;
+			end if;
+			
+			cl.[DOC_ARR].[NEW#AUTO]
+				( P#TYPE		== cl.[DOC].[TYPE]			--Тип удостоверения
+				, P#NUM			== cl.[DOC].[NUM]			--Номер
+				, P#SER			== cl.[DOC].[SER]			--Серия
+				, P#WHO			== cl.[DOC].[WHO]			--Кем выдан
+				, P#DATE		== cl.[DOC].[DATE]			--Дата выдачи
+				, P_DATE_END	== v_end_date				--Дата окончания действия
+				, P_DEPART_CODE	== cl.[DOC].[DEPART_CODE]	--Код подразделения
+				, P_BIRTH_PLACE	== cl.[DOC].[BIRTH_PLACE]	--Место рождения
+				, P_PLACE		== cl.[DOC].[PLACE]			--Место выдачи
+				, P_VALID_BEFORE == v_valid_date 			--Действителен по
+				, P_UPD_CAT		== false					--Обновление категории клиента
+				);
+		end if;
+	end if;
+
+	if not v_upd_cat and not v_upd_cat_validator then
+		-- проверяем, меняется ли удостоверение	
+		if cl.[DOC].[TYPE] = P#DOC.[TYPE]
+				and (cl.[DOC].[DATE] = P#DOC.[DATE])
+				and (cl.[DOC].[DATE_END] = P#DOC.[DATE_END])
+				and (cl.[DOC].[VALID_BEFORE] = P#DOC.[VALID_BEFORE])
+		then
+			null;	
+		else	-- меняется
+			if ::[CLIENT].[LIB].type_cert_upd_cat_cl(P#DOC.[TYPE],cl.[DOC].[TYPE]) then -- если относятся к льготникам, то необходимо обновить категорию клиента 
+				v_upd_cat := true;
+			end if;
+		end if;
+	end if;
+	
+	if v_upd_cat or v_upd_cat_validator then -- если требуется обновление категорий по льготникам 	
+		::[CLIENT].[LIB].set_cat_cl_vulnerable_groups(cl,P#DOC,cl.[DOC_ARR]);
+	end if;
+	v_upd_cat_validator :=false;
+	--	Ysuchkova		
+	cl.[DOC] := P#DOC;
+	
+	-- Установка значения реквизита "Адрес"
+	cl.[SET_ADDRESS](P#ADDRESS);
+	
+	cl.[AUDIT].[EDIT] := stdlib.userid;
+	cl.[AUDIT].[DATE_EDIT] := sysdate;
+	cl.[NU_REZIDENT] = P_REZIDENT_NU := nvl(P_REZIDENT_NU,P#RESIDENT);
+	cl.[SI_NAME] := P_SI_NAME;
+	
+	if not(::[FP_TUNE].[LIB].get_bool_value('FO_SYNCH_DEPEND')) then
+		--Количество иждивенцев
+		cl.[DEPEND_COUNT] := P_DEPEND_COUNT;
+	end if;
+	
+	--Образование
+	if not(P_ED_ESTAB is null) then
+		cl.[ED_ESTAB] := P_ED_ESTAB;
+	end if;
+
+	--Трудовая деятельность
+	if not(P_WORK_ACTIVITY is null) then
+		cl.[WORK_ACTIVITY] := P_WORK_ACTIVITY;
+	end if;
+
+	--Социальные льготы
+	if not(P_SOC_PRIV is null) then
+		cl.[SOC_PRIV] := P_SOC_PRIV;
+	end if;
+	
+	-- Дополнительные св-ва	
+	if P_constr or cl.[ADD_PROP]%size(0) = 0 then
+		::[CLIENT_INTERFACE].[PRX_CRED_SRV].make_default_properties
+			( cl.[ADD_PROP]
+			, 'CL_PRIV'
+			, ::[SYSTEM].[OP_DATE]
+			);
+	end if;
+	
+	::[CLIENT].[LIB].check_auto_category(V#VIDS_CL, cl);
+
+	-- Контроль на уникальность ФИО + Дата и место рождения
+	-- проверка по Стоп-листу
+	::[CL_PRIV].[LIB].hook_uya_check_cl_a(cl, false, null);
+	
+	if not &equal(v_snils,P_SNILS) then
+		v_check_bankrupt := true;
+		v_save_no_bankrup :=true;
+	end if;
+	if P_CONSTR or v_check_bankrupt then
+		declare
+			v_msg varchar2(32767);
+			v_info ::[CLIENT].[LIB].ClientBankruptInfo;
+		begin
+			&sp(bankrupt)
+			-- при создании стадиий банкротства, если у клиента таковые были, отключаем рассылку сообщений о них
+			-- рассылка будет выполнена по итогу обработки всех стадий, чтобы исключить рассылку, если клиент был банкротом, но на данный момент уже им не является
+			if P_CONSTR then
+				::[ST_CLIENT].[NEW_AUTO].V_SEND_EVENT := false;
+			end if;
+			if ::[EFRSB_DECISIONS].[LIB].get_client_autodec(cl,v_msg) then
+				if v_msg is not null then
+					stdio.put_line_buf(v_msg);
+				end if;
+			end if;
+			if P_CONSTR then
+				::[ST_CLIENT].[NEW_AUTO].V_SEND_EVENT := null;
+				-- выполним рассылку событий о банкротстве если таковые есть
+				::[ST_CLIENT].[NEW_AUTO].dispatch_bankrupt_event(cl, cl.[STATE_STAGE]);
+			end if;
+			if ::[CLIENT].[LIB].getClientBankruptInfo(cl,sysdate,v_info) then
+				stdio.put_line_buf('Внимание! Клиент проходит процедуру банкротства "'||v_info.kind_limit_name||'" с '||to_char(v_info.date_begin,'dd.mm.yyyy'));
+			elsif v_info.was_bankrupt then
+				stdio.put_line_buf('Внимание! Клиент проходил процедуру банкротства "'||v_info.last_stage.[KIND_LIMIT].[NAME]||'"'||to_char(v_info.last_stage.[DATE_BEGIN],'" с "dd.mm.yyyy')||to_char(v_info.last_stage.[DATE_END],'" по "dd.mm.yyyy')||'.');
+			end if;
+		exception
+			when others then
+				-- Причина перехвата others: при возникновении непредвиденной ошибки необходимо продолжить выполнение операции
+				&rb(bankrupt)
+				stdio.put_line_buf('Ошибка при проверке на банкротство: '||sqlerrm);
+		end;
+	end if;
+
+	if P_CONSTR or v_save_no_bankrup then
+		::[EFRSB_DECISIONS].[LIB].set_state_no_bankrupt(cl);	
+	end if;
+
+	-- Посмотрим, была ли отметка TERRORIST_MANUAL/TERRORIST_EXTREMIST
+	if nvl(::[FP_TUNE].[LIB].get_bool_value('LEGAL_2202_AUTO', null, '0'), false) then
+		declare
+			l_last_check 	ref [P207_TERROR_FLAG];
+		begin
+			mark_2202_exists := false;
+			l_last_check := &prx_legal.CL_CHECK_GET_LAST_RESULT(cl, check_terror);
+			if l_last_check is not null and l_last_check in (terr_manual, extr_manual) then
+				mark_2202_exists := true;
+			end if;
+		end;
+	end if;
+	
+	::[CLIENT_INTERFACE].[PRX_LEGAL].legal_client_execute(cl, v_checks, false);
+	
+	-- Посмотрим родственников клиента и организации в которых они работают
+	if nvl(::[FP_TUNE].[LIB].get_bool_value('LEGAL_2202_AUTO', null, '0'), false) then
+		declare
+			mark_2202_set boolean;
+			l_last_check ref [P207_TERROR_FLAG];
+		begin
+			mark_2202_set := false;
+			l_last_check := &prx_legal.CL_CHECK_GET_LAST_RESULT(cl, check_terror);
+			if l_last_check is not null and l_last_check in (terr_manual, extr_manual) then
+				mark_2202_set := true;
+			end if;
+			-- Запустим проверку, если отметка поменялась
+			if (not mark_2202_exists and mark_2202_set) or (mark_2202_exists and not mark_2202_set) then
+				::[CLIENT_INTERFACE].[PRX_LEGAL].check_terror_related(cl, v_checks);
+			end if;
+		end;
+	end if;
+
+	cl.[OFFSHORE] := P_OFFSHORE;
+	cl.[MODIFY_DATE] := sysdate;
+	::[IDENTIFY_LEVEL].[LIB].Identify_level_execute(cl, V_IDENTIFY_LEVEL, V_BUS_PROC);
+		
+	check_right2stay -- Проверка права пребывания нерезидентов в РФ
+		(p_this == cl
+		,p_country == P#COUNTRY
+		,p_cert == P#DOC
+		,p_resident == P#RESIDENT
+		,p_constructor == P_CONSTR
+		,p_err == err
+		,p_vb_msg == false
+		);
+
+	-- проверка на уникальность
+	if ::[CL_UNIQUE_RULES].[LIB].get_app then
+		declare
+			dupl_tab ::[CL_UNIQUE_RULES].[LIB].CLIENT_TAB;
+		begin
+			::[CL_UNIQUE_RULES].[LIB].find_dup_clients(cl, 1, dupl_tab);
+			if dupl_tab.count > 0 then
+				for i in 1..dupl_tab.count loop
+					stdio.put_line_buf(dupl_tab(i).[NAME] || ', ИНН ' || dupl_tab(i).[INN] || ', Рег.номер ' || dupl_tab(i).[REGISTR_NUM]);
+				end loop;
+				pragma error('Найдено клиентов-дубликатов: ' || dupl_tab.count || '!' || NL$ || 'Список найденных клиентов в буфере сессии.');
+			end if;
+		end;
+	end if;
+
+	::[PERSONAL_ADDRESS].[LIB].set_run_edit_context;
+
+	-- Категория информации
+	::[CATEGORY_INFO].[LIB].GetCategoryInfo(cl,null,null,null,cl.[CATEGORY_INFO]);
+	
+	v_snils := null;
+
+	cl.[CHECK_CLIENT_REQ](::[BUS_PROCESS]([CODE] = 'EDIT_CLIENT'), P_CHECK == 'CONTROL_INN_IP', P_TO_PRODUCT_CODE == 'REG_CL_ORG');
+	cl.[CHECK_CLIENT_REQ](::[BUS_PROCESS]([CODE] = 'EDIT_CLIENT'), P_CHECK == 'CONTROL_NAME_IP', P_TO_PRODUCT_CODE == 'REG_CL_ORG');
+	
+	::[CLIENT_INTERFACE].[PRX_DECLARE].client_changed(cl);
+	
+	v_str_plp := 'executor.set_context(''CL_PRIV_EDIT_AUTO_CL_ID'', null);';
+	::[RUNTIME].[PLP].plp(v_str_plp);
+end;
+PSH_EDIT#AUTO_CP (
+	@name('Наименование')                                            P#NAME               in [SBRF_NAME],
+	@name('ИНН')                                                     P#INN                in [STRING_12],
+	@name('Гражданство')                                             P#COUNTRY            in [COUNTRY_REF],
+	@name('Резидент по валютному законодательству')                  P#RESIDENT           in [BOOLEAN],
+	@name('Льготы клиента')                                          P#PRIVILEGES         in [PRIVILEGE_ARR],
+	@name('Дата рождения')                                           P#DATE_PERS          in [DATE],
+	@name('Семейное положение')                                      P#MARIGE_STATUS      in [FAMILY_TYPE_REF],
+	@name('Пол')                                                     P#SEX                in [SEX_REF],
+	@name('Место рождения')                                          P#BORN               in [NAME_CITY_REF],
+	@name('Адрес физ.лица')                                          P#ADDR_PERS          in [ADDRESSES],
+	@name('Контакты для связи')                                      P#TELEFON            in [CONTACTS_ARR],
+	@name('Удостоверение')                                           P#DOC                in [CERTIFICATE],
+	@name('Примечания')                                              P#NOTES              in [MEMO],
+	@name('Отношение с законом')                                     P#LOW                in [MEMO],
+	@name('Характер отношений с банком')                             P#DISPOSITS          in [STR_DISPOSIT_ARR],
+	@name('Статус зарегистрированного лица')                         P#STATUS             in [PERSON_STAT_REF],
+	@name('Регистрационный номер')                                   P#REGISTR            in [DIG_9],
+	@name('Налоговая инспекция')                                     P#INSPECT            in [TAX_INSP_ARR],
+	@name('Интернациональное наименование')                          P#INTER              in [SBRF_NAME],
+	@name('Счета в банках')                                          P#ACC_BANK           in [BANKS_ACC_ARR],
+	@name('Родственники')                                            P#RELATIVES          in [RELATIVES_ARR],
+	@name('Склонение ФИО по падежам')                                P#DECL_FIO           in [DECLENSION_ARR],
+	@name('Адрес')                                                   P#ADDRESS            in [PERSONAL_ADDRESS],
+	@name('Финансовое положение')                                    P_WELF_HIST          in [WELF_HIST_ARR]    default null,
+	@name('Доп. удостоверения')                                      P_DOC_ARR            in [CERTIFICATE_ARR]  default null,
+	@name('Миграционная карта')                                      P_MIGR_CARD          in [MIGR_CARD_ARR]    default null,
+	@name('Налоговый резидент')                                      P_REZIDENT_NU        in [BOOLEAN]          default null,
+	@name('Дополнительные свойства')                                 P#ADD_PROP           in [PROPERTIES_ARR]   default null,
+	@name('Расчёт даты окончания действия удостоверения')            P_CALC_DATE_END_CERT in [BOOLEAN]          default null,
+	@name('Активы')                                                  P_ASSETS             in [ASSETS_ARR]       default null,
+	@name('Количество иждивенцев')                                   P_DEPEND_COUNT       in [SHORT2]           default null,
+	@name('Образование')                                             P_ED_ESTAB           in [ED_ESTAB_ARR]     default null,
+	@name('Трудовая деятельность')                                   P_WORK_ACTIVITY      in [WORK_BOOK_ARR]    default null,
+	@name('Социальные льготы')                                       P_SOC_PRIV           in [FO_SOC_PRIV_ARR]  default null,
+	@name('Доходы / расходы')                                        P_INCOME             in [INCOME_ARR]       default null,
+	@name('Фамилия клиента')                                         P_CL_FAMILY          in [STRING_128]       default null,
+	@name('Имя клиента')                                             P_CL_NAME            in [STRING_128]       default null,
+	@name('Отчество клиента')                                        P_CL_SNAME           in [STRING_128]       default null,
+	@name('Принадлежность к офшорной зоне')                          P_OFFSHORE           in [OFFSHORES_REF]    default null,
+	@name('Краткое интернациональное наименование')                  P_SI_NAME            in [SBRF_NAME]        default null,
+	@name('Допустимые наименования')                                 P_NAMES              in [NAMES_ARR]        default null,
+	@name('ПДЛ')                                                     P_IPDL               in [IPDL_TYPE_REF]    default null,
+	@name('Код ОКАТО')                                               P_OKATO_CODE         in [STRING_11]        default null,
+	@name('Проверка по списку недействительных удостоверений')       P_INVALID_CERT       in [P207_TERR_FL_REF] default null,
+	@name('Связи с другими клиентами')                               P_LINKS_OTHER        in [LINKS_CL_ARR]     default null,
+	@name('Проверка по реестру "Паспортные данные" ГУВМ МВД России') P_INVALID_CERT_FMS   in [P207_TERR_FL_REF] default null,
+	@name('Без гражданства')                                         P_NO_CITIZENSHIP     in [BOOLEAN]          default null,
+	@name('СНИЛС')                                                   P_SNILS              in [SNILS]            default null,
+	@name('Сохранить данные старого удостоверения')                  P_SAVE_DOC_OLD       in [BOOLEAN]          default null
+) is
+
+validate is
+	pAdds string(32000);
+begin
+	debug_pipe('>P_MESSAGE.P_INFO='||P_MESSAGE||'.'||P_INFO||'   P#DECL_FIO%size(0)='||P#DECL_FIO%size(0),dp);
+	if P_MESSAGE = 'DEFAULT' then
+		::[RUNTIME].[STORAGE_MGR].init_temp_table('LIST_DOMA');
+		V_CL_ID := this;
+		v_upd_cat_validator :=false;		
+		P#NAME := this.[NAME];
+		P#INN := this.[INN];
+		P#COUNTRY := this.[COUNTRY];
+		P#RESIDENT := this.[IS_RESIDENT];
+		P#PRIVILEGES := this.[PRIVILEGES];
+		P#DATE_PERS := this.[DATE_PERS];
+		P#MARIGE_STATUS := this.[MARIGE_STATUS];
+		P#SEX := this.[SEX];
+		P#BORN := this.[BORN];
+		P#ADDR_PERS := this.[ADDRESSES];
+		P#TELEFON := this.[CONTACTS];
+		P#DOC := this.[DOC];
+		P#NOTES := this.[NOTES];
+		P#LOW := this.[LOW];
+		P#DISPOSITS := this.[DISPOSITS];
+		P#STATUS := this.[REG_STATUS];
+		P#REGISTR := this.[REGISTR_NUM];
+		P#INSPECT := this.[INSPECT];
+		P#INTER := this.[I_NAME];
+		P#ACC_BANK := this.[ACC_BANK];
+		P#RELATIVES := this.[RELATIVES_CLIENT];
+		P#DECL_FIO := this.[DECL_FIO];
+		P_WELF_HIST := this.[WELF_HIST];
+		P_DOC_ARR := this.[DOC_ARR];
+		P_MIGR_CARD := this.[MIGR_CARD];
+		P_REZIDENT_NU := this.[NU_REZIDENT];
+		P#ADD_PROP := this.[ADD_PROP];
+		P_ASSETS := this.[ASSETS];
+		P_DEPEND_COUNT := this.[DEPEND_COUNT];
+		P_ED_ESTAB := this.[ED_ESTAB];
+		P_WORK_ACTIVITY := this.[WORK_ACTIVITY];
+		P_SOC_PRIV := this.[SOC_PRIV];
+		P_INCOME := this.[INCOME];
+		P_CL_FAMILY := this.[FAMILY_CL];
+		P_CL_NAME := this.[NAME_CL];
+		P_CL_SNAME := this.[SNAME_CL];
+		P_OFFSHORE := this.[OFFSHORE];
+		P_SI_NAME := this.[SI_NAME];
+		P_NAMES := this.[NAMES];
+		P_IPDL := this.[IS_IPDL];
+		P_OKATO_CODE := this.[OKATO_CODE];
+		P_LINKS_OTHER := this.[LINKS_OTHER];
+		P_NO_CITIZENSHIP := this.[NO_CITIZENSHIP];
+		P_SNILS := this.[SNILS];
+	
+		V#VIDS_CL := this.[VIDS_CL];
+		V_LOAN_HISTORYS := this.[LOAN_HISTORYS];
+		V_DOCS := this.[DOCS];
+
+		P_CALC_DATE_END_CERT := false;
+		pragma IF_DEF( DEPO_INST );
+			n1 := 0 ;
+			::[RUNTIME].[COMP_OBJ].p_make_table( t1, n1, '', this%class, this, '', '', this%class );
+		pragma END_IF;
+		::[PERSONAL_ADDRESS].[LIB].set_run_edit_context('1');
+	end if;
+
+	::[CL_PRIV].[PSH_EDIT#AUTO_CP].validator(P_MESSAGE, P_INFO,
+		this,
+		false,
+		P#NAME,
+		P#INN,
+		P#COUNTRY,
+		P#RESIDENT,
+		P#PRIVILEGES,
+		P#DATE_PERS,
+		P#MARIGE_STATUS,
+		P#SEX,
+		P#BORN,
+		P#ADDR_PERS,
+		P#TELEFON,
+		P#DOC,
+		P#NOTES,
+		P#LOW,
+		P#DISPOSITS,
+		P#STATUS,
+		P#REGISTR,
+		P#INSPECT,
+		P#INTER,
+		P#ACC_BANK,
+		P#RELATIVES,
+		P#DECL_FIO,
+		P#ADDRESS,
+		V#VIDS_CL,
+		V#ERR,
+		P_WELF_HIST,
+		V#CERT_REF,
+		V_CERT_REF,
+		P_REZIDENT_NU,
+		P_DEPEND_COUNT,
+		P_ED_ESTAB,
+		P_WORK_ACTIVITY,
+		P_SOC_PRIV,
+		P_CL_FAMILY,
+		P_CL_NAME,
+		P_CL_SNAME,
+		V_ORG_MAY_GIVE,
+		V_WHO_V,
+		P_OFFSHORE,
+		P_SI_NAME,
+		P_NAMES,
+		P_IPDL,
+		P_OKATO_CODE,
+		P_INVALID_CERT,
+		v_checks,
+		P_DOC_ARR,
+		V_CITY_MAY_GIVE,
+		P_INVALID_CERT_FMS,
+		P_NO_CITIZENSHIP,
+		P_SNILS,
+		P_SAVE_DOC_OLD,
+		P_ASSETS,
+		V_STR,
+		V_CREATE_ES
+		);
+
+	--------------------------------------------------------------------------
+	::[HOOK_BANK].[CL_CHECK_REQS](
+		P_METH		== &METHOD$CLASS || '.' || &METHOD$SNAME	--Операция
+		,P_CALL		== p_message			--Тип вызова
+		,P_OP_INFO	== p_info				--Вид изменения
+		,P_CLIENT	== this					--Клиент, ссылка
+		,P_CL_PRIV	== this					--Физическое лицо
+		,P_CL_ORG	== null					--Юридическое лицо
+		,P_ADDS		== pAdds				--Дополнительные параметры
+		,P_ADDRESS	== P#ADDR_PERS			--Адреса
+		,P_DOC		== P#DOC				--Удостоверение
+		,P_DOCS		== P_DOC_ARR			--Доп. удостоврения
+		,P_REGISTER	== null					--Регистрация
+		,P_LINKS_OTHER	== null				--Связи с другими клиентами
+		,P_ALL_BOSS		== null				--Должностные лица
+		,P_VB			== V_VB				--Клиент-скрипт
+		);
+	debug_pipe('<P_MESSAGE.P_INFO='||P_MESSAGE||'.'||P_INFO||'   P#DECL_FIO%size(0)='||P#DECL_FIO%size(0),dp);
+end;
+
+execute is
+P_ADDS		[STRING_32000];
+attr_str	[STRING_32000];
+begin
+	debug_pipe('>Тело P#DECL_FIO%size(0)='||P#DECL_FIO%size(0),dp);
+	::[CL_PRIV].[PSH_EDIT#AUTO_CP].executor(
+		this,
+		P#NAME,
+		P#INN,
+		P#COUNTRY,
+		P#RESIDENT,
+		P#PRIVILEGES,
+		P#DATE_PERS,
+		P#MARIGE_STATUS,
+		P#SEX,
+		P#BORN,
+		P#ADDR_PERS,
+		P#TELEFON,
+		P#DOC,
+		P#NOTES,
+		P#LOW,
+		P#DISPOSITS,
+		P#STATUS,
+		P#REGISTR,
+		P#INSPECT,
+		P#INTER,
+		P#ACC_BANK,
+		P#RELATIVES,
+		P#DECL_FIO,
+		P#ADDRESS,
+		V#VIDS_CL,
+		V#ERR,
+		P_WELF_HIST,
+		P_DOC_ARR,
+		P_MIGR_CARD,
+		P_REZIDENT_NU,
+		P_CALC_DATE_END_CERT,
+		P_DEPEND_COUNT,
+		P_ED_ESTAB,
+		P_WORK_ACTIVITY,
+		P_SOC_PRIV,
+		P_CL_FAMILY,
+		P_CL_NAME,
+		P_CL_SNAME,
+		P_OFFSHORE,
+		P_SI_NAME,
+		false,
+		P_NAMES,
+		P_IPDL,
+		P_OKATO_CODE,
+		P_INVALID_CERT,
+		v_checks,
+		P_INVALID_CERT_FMS,
+		P_NO_CITIZENSHIP,
+		P_SNILS,
+		P_SAVE_DOC_OLD,
+		V_STR
+		);
+
+	debug_pipe('Тело P#DECL_FIO%size(0)='||P#DECL_FIO%size(0),dp);		
+
+	attr_str := ::[CLIENT].[LIB].FORM_STR_CHANGES(this, t1);
+
+pragma IF_DEF( DEPO_INST );
+	::[CLIENT_INTERFACE].[PRX_FP].create_adm_doc( this, t1 ); -- Журналирование изменений клиента депозитария
+pragma END_IF;
+		
+	[AUDIT].[EDIT] := stdlib.userid;
+	[AUDIT].[DATE_EDIT] := sysdate;
+
+	if attr_str is not null then
+		::[RUNTIME].[STR].set_par(P_ADDS, 'ATTR_STR', attr_str);
+	end if;
+	::[RUNTIME].[STR].set_par(P_ADDS, 'NAME_OPER', &METHOD$SNAME);
+	
+	--------------------------------------------------------------------------
+	::[HOOK_BANK].[CL_CHECK_REQS](
+		P_METH		== &METHOD$CLASS || '.' || &METHOD$SNAME	--Операция
+		,P_CALL		== 'EXECUTE'			--Тип вызова
+		,P_OP_INFO	== null					--Вид изменения
+		,P_CLIENT	== this					--Клиент, ссылка
+		,P_CL_PRIV	== this					--Физическое лицо
+		,P_CL_ORG	== null					--Юридическое лицо
+		,P_ADDS		== P_ADDS				--Дополнительные параметры
+		,P_ADDRESS	== null					--Адреса
+		,P_DOC		== null					--Удостоверение
+		,P_DOCS		== null					--Доп. удостоврения
+		,P_REGISTER	== null					--Регистрация
+		,P_LINKS_OTHER	== null				--Связи с другими клиентами
+		,P_ALL_BOSS		== null				--Должностные лица
+		,P_VB			== V_VB				--Клиент-скрипт
+	);
+	if V_CREATE_ES then
+		::[CLIENT_INTERFACE].[PRX_PP].create_agreement_client(this);
+	end if;	
+	debug_pipe('<Тело P#DECL_FIO%size(0)='||P#DECL_FIO%size(0),dp);
+	
+	::[AC_FIN].[PSH_AFTER_AC_FAM].check_cl_stoplist(this);	-- PSB VRI 22/09/2025 CFT-2440 Стоп-Лист. Справочник физических лиц - добавление контролей на фамилию+Дату рождения	 -- updated CHANGE_SHORT_NAME PSB_AFTER_AC_FAM->PSH_AFTER_AC_FAM 25/09/25	
+end;
+end;
+end;

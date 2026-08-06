@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ViewPresentation classId="AC_FIN" shortName="VW_CRIT_PSH_MON_AVER_TAIL">
+    <Properties>
+        <Ordering>
+            <Column alias="C_DATE_OP" type="desc"/>
+        </Ordering>
+        <MethodFilter>PSH_AVG_MONTH_01</MethodFilter>
+    </Properties>
+    <Columns>
+        <Column alias="C_NAME_2" referenceId="1">
+            <Name>Владелец счета</Name>
+            <Resizeable>true</Resizeable>
+            <Width>27</Width>
+            <Navigation>
+                <Transition>auto</Transition>
+            </Navigation>
+        </Column>
+        <Column alias="C_INN" referenceId="1">
+            <Name>ИНН</Name>
+            <Align>center</Align>
+            <Resizeable>true</Resizeable>
+            <Width>10</Width>
+            <Navigation>
+                <Transition>auto</Transition>
+            </Navigation>
+        </Column>
+        <Column alias="C_DATE_OP" referenceId="0">
+            <Name>Дата открытия</Name>
+            <Align>center</Align>
+            <DateFormat>Default(dd/MM/yyyy)</DateFormat>
+            <Resizeable>true</Resizeable>
+            <Width>13</Width>
+        </Column>
+        <Column alias="C_SALDO_1" referenceId="0">
+            <Name>Среднемесячный остаток Рубли</Name>
+            <Align>right</Align>
+            <NumberPrecision>2</NumberPrecision>
+            <Resizeable>true</Resizeable>
+            <Width>13</Width>
+        </Column>
+        <Column alias="C_ACTUAL_ACCOUNTANT_NAME" referenceId="0">
+            <Name>Финансовые счета # ID</Name>
+            <Resizeable>true</Resizeable>
+            <Width>21</Width>
+        </Column>
+    </Columns>
+</ViewPresentation>

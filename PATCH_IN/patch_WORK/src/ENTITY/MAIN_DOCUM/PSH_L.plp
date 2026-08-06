@@ -1,0 +1,103 @@
+class MAIN_DOCUM;
+
+@name('[ПСБ] Библиотека')
+library PSH_L is
+public function md_date(md ref [main_docum]) return date is
+dt date;
+cl varchar2(16);
+idd varchar2(128);
+begin
+  cl:=md%class;
+  idd:=md%id;
+ 
+ -- begin pl/sql
+ select min(a.time) into dt from aud.ibs_osh a where a.obj_id=idd and a.class_id=cl;
+ -- end pl/sql
+ return dt;
+end;
+
+-->> 22/11/2024 RV Функция получения кол-ва секунд из настройки "PSB_COT" на день недели создания документа
+-- Функция для возврата СОТ (в сек.) из настроек дня недели по дате создания документа
+public function cut_off(md ref [main_docum]) return number is
+dt DATE_TIME;
+cd varchar2(16);
+pr_gr ref [PROPERTY_GRP];
+ret_dt number;
+begin
+	if md.[DATE_REC] is null then return null; end if;
+	dt := md.[DATE_REC];
+	cd := trunc(md.[DATE_REC] - trunc(md.[DATE_REC], 'DAY') + 1, 0);
+	pr_gr := ::[PROPERTY_GRP]([CODE] = cd);
+	ret_dt := to_number(to_char(to_date(::[FP_TUNE].[LIB].get_str_value('PSB_COT', 
+														::[FP_TUNE].[LIB].set_canons('PROPERTY_GRP', pr_gr, 'BRANCH', md.[FILIAL], 'AC_FIN', md.[ACC_DT])
+														)
+														, 'HH24:MI:SS'),'sssss'));
+	return ret_dt;
+end;
+
+public function cut_off_opt(md ref [main_docum]) return number is
+	cd varchar2(16);
+	pr_gr ref [PROPERTY_GRP];
+begin
+	for (select x(x.[DATE_REC]	:c_date_rec
+				 ,x.[FILIAL]	:c_filial
+				 ,x.[ACC_DT]	:c_acc_dt
+				 )
+		 in ::[MAIN_DOCUM]
+		 where x = md
+		)
+	loop
+		if x.c_date_rec is null then
+			return null;
+		else
+			cd := trunc(x.c_date_rec - trunc(x.c_date_rec, 'DAY') + 1, 0);
+			pr_gr := ::[PROPERTY_GRP]([CODE] = cd);
+			return to_number(
+						to_char(
+							to_date(::[FP_TUNE].[LIB].get_str_value('PSB_COT'
+																	,::[FP_TUNE].[LIB].set_canons('PROPERTY_GRP', pr_gr, 'BRANCH', x.c_filial, 'AC_FIN', x.c_acc_dt)
+																	)
+									,'hh24:mi:ss')
+								,'sssss')
+							);
+		end if;
+	end loop;
+	raise NO_DATA_FOUND;
+end;
+
+public function cut_off_opt(p_date_rec [MAIN_DOCUM].[DATE_REC]%type, p_filial [MAIN_DOCUM].[FILIAL]%type, p_acc_dt [MAIN_DOCUM].[ACC_DT]%type) return number is
+	cd varchar2(16);
+	pr_gr ref [PROPERTY_GRP];
+begin
+	if p_date_rec is null then
+		return null;
+	else
+		cd := trunc(p_date_rec - trunc(p_date_rec, 'DAY') + 1, 0);
+		pr_gr := ::[PROPERTY_GRP]([CODE] = cd);
+		return to_number(
+					to_char(
+						to_date(::[FP_TUNE].[LIB].get_str_value('PSB_COT'
+																,::[FP_TUNE].[LIB].set_canons('PROPERTY_GRP', pr_gr, 'BRANCH', p_filial, 'AC_FIN', p_acc_dt)
+																)
+								,'hh24:mi:ss')
+							,'sssss')
+						);
+	end if;
+end;
+
+
+-- Получение забалансового символа
+public function GetSK_andZBS(P_DOC ref [MAIN_DOCUM]) return string(2000) is 
+ExStr string(2000);
+begin
+	for sk in P_DOC.[SUM_KSPL]
+	loop
+		ExStr:=ExStr||sk.[1].[1];
+		if sk.[OFF_SYMB] is not null then
+				ExStr:=ExStr||'['||sk.[OFF_SYMB].[1]||']';
+		end if;
+		ExStr:=ExStr||';';
+	end loop;
+	return trim(ExStr,';');
+end;
+end;

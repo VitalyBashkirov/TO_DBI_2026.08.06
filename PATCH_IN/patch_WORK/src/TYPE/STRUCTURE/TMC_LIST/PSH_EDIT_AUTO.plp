@@ -1,0 +1,433 @@
+class TMC_LIST;
+
+@name('[ПСБ] Изменить (служебная)')
+@tag('CREATED')
+method PSH_EDIT_AUTO is
+PSH_EDIT_AUTO (
+	@name('Мат. счет поставщик')                                              P_ACC_MAT_SUP      in [TMC_ACC_MAT_REF],
+	@name('Материальный счет')                                                P_ACC_MAT          in [TMC_ACC_MAT_REF],
+	@name('Количество')                                                       P_QUANT            in [SUMMA_16_6],
+	@name('Цена')                                                             P_PRICE            in [SUMMA_16_6],
+	@name('Норма')                                                            P_NORMA            in [SUPER_SUMMA],
+	@name('Обоснование')                                                      P_BASIS            in [STRING_100],
+	@name('Мат. счет получатель')                                             P_ACC_MAT_REC      in [TMC_ACC_MAT_REF],
+	@name('Коэффициент')                                                      P_IND_PRICE        in [SUPER_SUMMA],
+	@name('Местонахождение')                                                  P_PLACE            in [TMC_PLACE_REF],
+	@name('Статья расхода')                                                   P_RASHOD           in [TMC_RASHOD_REF],
+	@name('Сумма операции')                                                   P_ALL_SUMMA        in [SUMMA],
+	@name('Сумма НДС')                                                        P_NDS_SUMMA        in [SUMMA],
+	@name('Пользователь')                                                     P_USER             in [USER_REF],
+	@name('Сумма балансовая')                                                 P_BAL_SUMMA        in [SUMMA],
+	@name('Ставка НДС')                                                       P_NDS              in [PRC12P6],
+	@name('Группа получатель')                                                P_GRUPPA_REC       in [TMC_GRUP_REF],
+	@name('Сумма накладных расходов')                                         P_SUM_RASH         in [SUMMA],
+	@name('НДС  в том числе')                                                 P_NDS_KIND         in [BOOLEAN],
+	@name('Сумма таможенных расходов')                                        P_SUM_TAMOG        in [SUMMA],
+	@name('Ставка налога с продаж')                                           P_NSP              in [PRC12P6],
+	@name('Сумма налога с продаж')                                            P_NSP_SUMMA        in [SUMMA],
+	@name('Вид деятельности')                                                 P_KIND_BANK        in [BOOLEAN],
+	@name('Шифр амортизации')                                                 P_SHIFR_DEPR       in [TMC_SHIFR_REF],
+	@name('Сумма переоценки')                                                 P_IND_SUMMA        in [SUMMA],
+	@name('Налог с продаж в том числе')                                       P_NSP_KIND         in [BOOLEAN],
+	@name('Инвентарный номер')                                                P_INV_NUMB         in [STRING_16],
+	@name('Группа поставщик')                                                 P_GRUPPA_SUP       in [TMC_GRUP_REF],
+	@name('Внесистемный учет')                                                P_UN_SYSTEM        in [BOOLEAN],
+	@name('Счет учета поставляющего мат/счета')                               P_SUP_MAIN         in [AC_FIN_REF],
+	@name('Счет учета получающего мат/счета')                                 P_REC_MAIN         in [AC_FIN_REF],
+	@name('Счет амортизации поставляющего мат/счета')                         P_SUP_DEPR         in [AC_FIN_REF],
+	@name('Счет амортизации получающего мат/счета')                           P_REC_DEPR         in [AC_FIN_REF],
+	@name('Счет фонда переоценки поставляющего мат/счета')                    P_SUP_ESTIM        in [AC_FIN_REF],
+	@name('Счет фонда переоценки получающего мат/счета')                      P_REC_ESTIM        in [AC_FIN_REF],
+	@name('Счет расчетов с дебитороми и кредиторами')                         P_ACC_CLIENT       in [AC_FIN_REF],
+	@name('Счет капитальных вложений')                                        P_ACC_CAPITAL      in [AC_FIN_REF],
+	@name('Наименование')                                                     P_NAME             in [SBRF_NAME],
+	@name('Базовый экземпляр')                                                P_BASE_LIST        in [STRING_16],
+	@name('Счет расходов')                                                    P_ACC_RASHOD       in [AC_FIN_REF],
+	@name('Сумма на счете с НДС')                                             P_NDS_IN_SUM       in [BOOLEAN],
+	@name('Счет реализации')                                                  P_ACC_REALIZE      in [AC_FIN_REF],
+	@name('Внебалансовый счет')                                               P_ACC_UN_BAL       in [AC_FIN_REF],
+	@name('Заводской номер')                                                  P_ZAV_NUMB         in [STRING_32000],
+	@name('Сумма операции в валюте')                                          P_VAL_SUMMA        in [SUMMA],
+	@name('Группа амортизации')                                               P_NAL_GR_DEPR      in [TMC_GR_DEPR_REF],
+	@name('Примечание')                                                       P_PRIM             in [STRING_100],
+	@name('Способ начисления амортизации')                                    P_NAL_METHOD       in [ONE_FROM_THREE],
+	@name('Срок полезного использования')                                     P_PER_EXPL         in [SHORT4],
+	@name('Шифр ОКОФ')                                                        P_OKOF             in [TMC_OKOF_REF],
+	@name('Коэффициент ускорения')                                            P_USCORENIE        in [PRC12P6],
+	@name('Сумма без НДС')                                                    P_CLI_SUMMA        in [SUMMA],
+	@name('Страна происхождения')                                             P_COUNTRY          in [COUNTRY_REF],
+	@name('Номер таможенной декларации')                                      P_NUM_DECL         in [STRING_40],
+	@name('Класс ТМЦ')                                                        P_TMC_CLASS        in [TMC_CLASS_REF],
+	@name('Группа амортизации GAAP')                                          P_GR_GAAP          in [TMC_GR_GAAP_REF],
+	@name('Востановительная стоимость для налогообложения')                   P_NAL_SUMMA        in [SUMMA],
+	@name('Сумма амортизации')                                                P_DEPR_SUMMA       in [SUMMA],
+	@name('Сумма налоговой амортизации')                                      P_NAL_DEPR_SUMMA   in [SUMMA],
+	@name('Комплектующая')                                                    P_COMP             in [TMC_COMP_REF],
+	@name('Норма для налогообложения')                                        P_NAL_NORMA        in [SUPER_SUMMA],
+	@name('Вид временной выдачи')                                             P_GIVE_TYPE        in [TMC_TEMP_REF],
+	@name('Операции с ГСМ')                                                   P_OPER_CARS        in [GSM_OPER_REF],
+	@name('Карточка автомобиля')                                              P_CARS             in [CARS_REF],
+	@name('Марка ГСМ')                                                        P_GSM_SORT         in [GSM_SORT_REF],
+	@name('Срок полезного использования для налогообложения')                 P_NAL_PER_EXPL     in [SHORT4],
+	@name('Коэффициент ускорения для НУ')                                     P_NAL_USCORENIE    in [PRC12P6],
+	@name('Таблица счетов')                                                   P_TAB_ACC          in [TMC_DPT_ACC_ARR],
+	@name('Целевое назначение договора')                                      P_DOG_PURPOSE      in [TMC_DOG_PUR_REF],
+	@name('Таблица доп. параметров')                                          P_TAB_PARAM        in [TMC_PARAM_ARR],
+	@name('Дополнительная сумма НДС')                                         P_ADD_NDS_SUMMA    in [SUMMA],
+	@name('Базовая стоимость для НУ')                                         P_NAL_BASE_SUMMA   in [SUMMA],
+	@name('Движение мат.счета. Ссылка')                                       P_MOVE_REF         in [TMC_MOVE_REF],
+	@name('Статья бюджета расходов')                                          P_BUD_EXP_ART      in [TMC_RASH_ST_REF],
+	@name('Межценовая разница')                                               P_PRICE_DIF_KIND   in [BOOLEAN],
+	@name('Признак передачи по справедливой стоимости')                       P_FAIR_COST_SIGN   in [BOOLEAN],
+	@name('Стоимость балансовая')                                             P_BAL_ST           in [SUMMA],
+	@name('Распределение ТМЦ')                                                P_TMC_DISTR        in [UU_TMC_DISTR_ARR],
+	@name('Экспертная оценка')                                                P_EXPERT           in [TMC_EXPERT_REF],
+	@name('Ликвидационная стоимость')                                         P_LIQUID_SUMMA     in [SUMMA],
+	@name('Общие затраты на демонтаж')                                        P_DISMANTLING_COST in [SUMMA],
+	@name('Сумма процентного расхода на демонтаж (дисконтированная)')         P_DISMANTLING_DISC in [SUMMA],
+	@name('Сумма увеличения стоимости матсчета при вводе затрат на демонтаж') P_DISMANTLING_RISE in [SUMMA],
+	@name('Первичное признание стоимости ДАПП или СНН')                       P_FIRST_REPRICE    in [BOOLEAN],
+	@name('Сумма возможной продажи ДАПП или СНН')                             P_SUM_PLAN_REALIZE in [SUMMA],
+	@name('Дата окончания начисления амортизации')                            P_END_DEPR         in [DATE],
+	@name('Затраты на продажу')                                               P_SELL_COST        in [SUMMA],
+	@name('Срок продажи более 1 года')                                        P_SELL_MORE_1_YEAR in [BOOLEAN],
+	@name('Номинальная стоимость')                                            P_NOMINAL_SUMMA    in [SUMMA],
+	@name('Сумма НДС номинальной стоимости')                                  P_NOMINAL_NDS_SUM  in [SUMMA],
+	@name('Процентная ставка')                                                P_DELAY_PAY_PRC    in [PERCENT],
+	@name('Код вида товара')                                                  P_TYPE_GOODS       in [TMC_TYPE_GOO_REF],
+	@name('Счетно-сортировальная машина')                                     P_CCM              in [BOOLEAN],
+	@name('Периодичность начисления процентов')                               P_DELAY_PAY_PERIOD in [PERIODS_OPER_REF],
+	@name('Чистая цена продажи')                                              P_CLEAR_PRICE_SUMM in [SUMMA],
+	@name('Дата начала периода отсрочки')                                     P_DELAY_PAY_BEG    in [DATE],
+	@name('Дата окончания периода отсрочки')                                  P_DELAY_PAY_END    in [DATE],
+	@name('Чистая возможная цена продажи')                                    P_CLEAR_SELL_PRICE in [SUMMA],
+	@name('Сумма увеличения резерва под обесценение')                         P_REZERV_DEVAL     in [SUMMA],
+	@name('Прослеживаемый  товар')                                            P_TRACE_GOODS      in [BOOLEAN],
+	@name('Объект  залога')                                                   P_ZALOG_BODY       in [ZALOG_BODY_REF],
+	@name('Карточка выдачи ОН')                                               P_PM_AREND_OUT_REF in [PM_AREND_OUT_REF],
+	@name('Комплектующие')                                                    P_TAB_COMP         in [TMC_COMP_ARR],
+	@name('Накопленный убыток от обесценения, признанный в составе расходов') P_DEVAL_RASH       in [SUMMA],
+	@name('Накопленный убыток от обесценения, списанный за счет переоценки')  P_DEVAL_PRICE      in [SUMMA],
+	@name('Хоздоговор, по которому создан данный экземпляр ТМЦ')              P_HOZ_DOG          in [NUMBER]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_ACC_MAT_SUP := this.[ACC_MAT_SUP];
+	P_ACC_MAT := this.[ACC_MAT];
+	P_QUANT := this.[QUANT];
+	P_PRICE := this.[PRICE];
+	P_NORMA := this.[NORMA];
+	P_BASIS := this.[BASIS];
+	P_ACC_MAT_REC := this.[ACC_MAT_REC];
+	P_IND_PRICE := this.[IND_PRICE];
+	P_PLACE := this.[PLACE];
+	P_RASHOD := this.[RASHOD];
+	P_ALL_SUMMA := this.[ALL_SUMMA];
+	P_NDS_SUMMA := this.[NDS_SUMMA];
+	P_USER := this.[USER];
+	P_BAL_SUMMA := this.[BAL_SUMMA];
+	P_NDS := this.[NDS];
+	P_GRUPPA_REC := this.[GRUPPA_REC];
+	P_SUM_RASH := this.[SUM_RASH];
+	P_NDS_KIND := this.[NDS_KIND];
+	P_SUM_TAMOG := this.[SUM_TAMOG];
+	P_NSP := this.[NSP];
+	P_NSP_SUMMA := this.[NSP_SUMMA];
+	P_KIND_BANK := this.[KIND_BANK];
+	P_SHIFR_DEPR := this.[SHIFR_DEPR];
+	P_IND_SUMMA := this.[IND_SUMMA];
+	P_NSP_KIND := this.[NSP_KIND];
+	P_INV_NUMB := this.[INV_NUMB];
+	P_GRUPPA_SUP := this.[GRUPPA_SUP];
+	P_UN_SYSTEM := this.[UN_SYSTEM];
+	P_SUP_MAIN := this.[SUP_MAIN];
+	P_REC_MAIN := this.[REC_MAIN];
+	P_SUP_DEPR := this.[SUP_DEPR];
+	P_REC_DEPR := this.[REC_DEPR];
+	P_SUP_ESTIM := this.[SUP_ESTIM];
+	P_REC_ESTIM := this.[REC_ESTIM];
+	P_ACC_CLIENT := this.[ACC_CLIENT];
+	P_ACC_CAPITAL := this.[ACC_CAPITAL];
+	P_NAME := this.[NAME];
+	P_BASE_LIST := this.[BASE_LIST];
+	P_ACC_RASHOD := this.[ACC_RASHOD];
+	P_NDS_IN_SUM := this.[NDS_IN_SUM];
+	P_ACC_REALIZE := this.[ACC_REALIZE];
+	P_ACC_UN_BAL := this.[ACC_UN_BAL];
+	P_ZAV_NUMB := this.[ZAV_NUMB];
+	P_VAL_SUMMA := this.[VAL_SUMMA];
+	P_NAL_GR_DEPR := this.[NAL_GR_DEPR];
+	P_PRIM := this.[PRIM];
+	P_NAL_METHOD := this.[NAL_METHOD];
+	P_PER_EXPL := this.[PER_EXPL];
+	P_OKOF := this.[OKOF];
+	P_USCORENIE := this.[USCORENIE];
+	P_CLI_SUMMA := this.[CLI_SUMMA];
+	P_COUNTRY := this.[COUNTRY];
+	P_NUM_DECL := this.[NUM_DECL];
+	P_TMC_CLASS := this.[TMC_CLASS];
+	P_GR_GAAP := this.[GR_GAAP];
+	P_NAL_SUMMA := this.[NAL_SUMMA];
+	P_DEPR_SUMMA := this.[DEPR_SUMMA];
+	P_NAL_DEPR_SUMMA := this.[NAL_DEPR_SUMMA];
+	P_COMP := this.[COMP];
+	P_NAL_NORMA := this.[NAL_NORMA];
+	P_GIVE_TYPE := this.[GIVE_TYPE];
+	P_OPER_CARS := this.[OPER_CARS];
+	P_CARS := this.[CARS];
+	P_GSM_SORT := this.[GSM_SORT];
+	P_NAL_PER_EXPL := this.[NAL_PER_EXPL];
+	P_NAL_USCORENIE := this.[NAL_USCORENIE];
+	P_TAB_ACC := this.[TAB_ACC];
+	P_DOG_PURPOSE := this.[DOG_PURPOSE];
+	P_TAB_PARAM := this.[TAB_PARAM];
+	P_ADD_NDS_SUMMA := this.[ADD_NDS_SUMMA];
+	P_NAL_BASE_SUMMA := this.[NAL_BASE_SUMMA];
+	P_MOVE_REF := this.[MOVE_REF];
+	P_BUD_EXP_ART := this.[BUD_EXP_ART];
+	P_PRICE_DIF_KIND := this.[PRICE_DIF_KIND];
+	P_FAIR_COST_SIGN := this.[FAIR_COST_SIGN];
+	P_BAL_ST := this.[BAL_ST];
+	P_TMC_DISTR := this.[TMC_DISTR];
+	P_EXPERT := this.[EXPERT];
+	P_LIQUID_SUMMA := this.[LIQUID_SUMMA];
+	P_DISMANTLING_COST := this.[DISMANTLING_COST];
+	P_DISMANTLING_DISC := this.[DISMANTLING_DISC];
+	P_DISMANTLING_RISE := this.[DISMANTLING_RISE];
+	P_FIRST_REPRICE := this.[PSH_FIRST_REPRIC];
+	P_SUM_PLAN_REALIZE := this.[SUM_PLAN_REALIZE];
+	P_END_DEPR := this.[END_DEPR];
+	P_SELL_COST := this.[SELL_COST];
+	P_SELL_MORE_1_YEAR := this.[SELL_MORE_1_YEAR];
+	P_NOMINAL_SUMMA := this.[NOMINAL_SUMMA];
+	P_NOMINAL_NDS_SUM := this.[NOMINAL_NDS_SUM];
+	P_DELAY_PAY_PRC := this.[DELAY_PAY_PRC];
+	P_TYPE_GOODS := this.[TYPE_GOODS];
+	P_CCM := this.[CCM];
+	P_DELAY_PAY_PERIOD := this.[DELAY_PAY_PERIOD];
+	P_CLEAR_PRICE_SUMM := this.[CLEAR_PRICE_SUMM];
+	P_DELAY_PAY_BEG := this.[DELAY_PAY_BEG];
+	P_DELAY_PAY_END := this.[DELAY_PAY_END];
+	P_CLEAR_SELL_PRICE := this.[CLEAR_SELL_PRICE];
+	P_REZERV_DEVAL := this.[REZERV_DEVAL];
+	P_TRACE_GOODS := this.[TRACE_GOODS];
+	P_ZALOG_BODY := this.[ZALOG_BODY];
+	P_PM_AREND_OUT_REF := this.[PM_AREND_OUT_REF];
+	P_TAB_COMP := this.[TAB_COMP];
+	P_DEVAL_RASH := this.[DEVAL_RASH];
+	P_DEVAL_PRICE := this.[DEVAL_PRICE];
+	P_HOZ_DOG := this.[HOZ_DOG];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+begin
+	-- Установка значения реквизита "Мат. счет поставщик"
+	[ACC_MAT_SUP] := P_ACC_MAT_SUP;
+	-- Установка значения реквизита "Материальный счет"
+	[ACC_MAT] := P_ACC_MAT;
+	-- Установка значения реквизита "Количество"
+	[QUANT] := P_QUANT;
+	-- Установка значения реквизита "Цена"
+	[PRICE] := P_PRICE;
+	-- Установка значения реквизита "Норма"
+	[NORMA] := P_NORMA;
+	-- Установка значения реквизита "Обоснование"
+	[BASIS] := P_BASIS;
+	-- Установка значения реквизита "Мат. счет получатель"
+	[ACC_MAT_REC] := P_ACC_MAT_REC;
+	-- Установка значения реквизита "Коэффициент"
+	[IND_PRICE] := P_IND_PRICE;
+	-- Установка значения реквизита "Местонахождение"
+	[PLACE] := P_PLACE;
+	-- Установка значения реквизита "Статья расхода"
+	[RASHOD] := P_RASHOD;
+	-- Установка значения реквизита "Сумма операции"
+	[ALL_SUMMA] := P_ALL_SUMMA;
+	-- Установка значения реквизита "Сумма НДС"
+	[NDS_SUMMA] := P_NDS_SUMMA;
+	-- Установка значения реквизита "Пользователь"
+	[USER] := P_USER;
+	-- Установка значения реквизита "Сумма балансовая"
+	[BAL_SUMMA] := P_BAL_SUMMA;
+	-- Установка значения реквизита "Ставка НДС"
+	[NDS] := P_NDS;
+	-- Установка значения реквизита "Группа получатель"
+	[GRUPPA_REC] := P_GRUPPA_REC;
+	-- Установка значения реквизита "Сумма накладных расходов"
+	[SUM_RASH] := P_SUM_RASH;
+	-- Установка значения реквизита "НДС  в том числе"
+	[NDS_KIND] := P_NDS_KIND;
+	-- Установка значения реквизита "Сумма таможенных расходов"
+	[SUM_TAMOG] := P_SUM_TAMOG;
+	-- Установка значения реквизита "Ставка налога с продаж"
+	[NSP] := P_NSP;
+	-- Установка значения реквизита "Сумма налога с продаж"
+	[NSP_SUMMA] := P_NSP_SUMMA;
+	-- Установка значения реквизита "Вид деятельности"
+	[KIND_BANK] := P_KIND_BANK;
+	-- Установка значения реквизита "Шифр амортизации"
+	[SHIFR_DEPR] := P_SHIFR_DEPR;
+	-- Установка значения реквизита "Сумма переоценки"
+	[IND_SUMMA] := P_IND_SUMMA;
+	-- Установка значения реквизита "Налог с продаж в том числе"
+	[NSP_KIND] := P_NSP_KIND;
+	-- Установка значения реквизита "Инвентарный номер"
+	[INV_NUMB] := P_INV_NUMB;
+	-- Установка значения реквизита "Группа поставщик"
+	[GRUPPA_SUP] := P_GRUPPA_SUP;
+	-- Установка значения реквизита "Внесистемный учет"
+	[UN_SYSTEM] := P_UN_SYSTEM;
+	-- Установка значения реквизита "Счет учета поставляющего мат/счета"
+	[SUP_MAIN] := P_SUP_MAIN;
+	-- Установка значения реквизита "Счет учета получающего мат/счета"
+	[REC_MAIN] := P_REC_MAIN;
+	-- Установка значения реквизита "Счет амортизации поставляющего мат/счета"
+	[SUP_DEPR] := P_SUP_DEPR;
+	-- Установка значения реквизита "Счет амортизации получающего мат/счета"
+	[REC_DEPR] := P_REC_DEPR;
+	-- Установка значения реквизита "Счет фонда переоценки поставляющего мат/счета"
+	[SUP_ESTIM] := P_SUP_ESTIM;
+	-- Установка значения реквизита "Счет фонда переоценки получающего мат/счета"
+	[REC_ESTIM] := P_REC_ESTIM;
+	-- Установка значения реквизита "Счет расчетов с дебитороми и кредиторами"
+	[ACC_CLIENT] := P_ACC_CLIENT;
+	-- Установка значения реквизита "Счет капитальных вложений"
+	[ACC_CAPITAL] := P_ACC_CAPITAL;
+	-- Установка значения реквизита "Наименование"
+	[NAME] := P_NAME;
+	-- Установка значения реквизита "Базовый экземпляр"
+	[BASE_LIST] := P_BASE_LIST;
+	-- Установка значения реквизита "Счет расходов"
+	[ACC_RASHOD] := P_ACC_RASHOD;
+	-- Установка значения реквизита "Сумма на счете с НДС"
+	[NDS_IN_SUM] := P_NDS_IN_SUM;
+	-- Установка значения реквизита "Счет реализации"
+	[ACC_REALIZE] := P_ACC_REALIZE;
+	-- Установка значения реквизита "Внебалансовый счет"
+	[ACC_UN_BAL] := P_ACC_UN_BAL;
+	-- Установка значения реквизита "Заводской номер"
+	[ZAV_NUMB] := P_ZAV_NUMB;
+	-- Установка значения реквизита "Сумма операции в валюте"
+	[VAL_SUMMA] := P_VAL_SUMMA;
+	-- Установка значения реквизита "Группа амортизации"
+	[NAL_GR_DEPR] := P_NAL_GR_DEPR;
+	-- Установка значения реквизита "Примечание"
+	[PRIM] := P_PRIM;
+	-- Установка значения реквизита "Способ начисления амортизации"
+	[NAL_METHOD] := P_NAL_METHOD;
+	-- Установка значения реквизита "Срок полезного использования"
+	[PER_EXPL] := P_PER_EXPL;
+	-- Установка значения реквизита "Шифр ОКОФ"
+	[OKOF] := P_OKOF;
+	-- Установка значения реквизита "Коэффициент ускорения"
+	[USCORENIE] := P_USCORENIE;
+	-- Установка значения реквизита "Сумма без НДС"
+	[CLI_SUMMA] := P_CLI_SUMMA;
+	-- Установка значения реквизита "Страна происхождения"
+	[COUNTRY] := P_COUNTRY;
+	-- Установка значения реквизита "Номер таможенной декларации"
+	[NUM_DECL] := P_NUM_DECL;
+	-- Установка значения реквизита "Класс ТМЦ"
+	[TMC_CLASS] := P_TMC_CLASS;
+	-- Установка значения реквизита "Группа амортизации GAAP"
+	[GR_GAAP] := P_GR_GAAP;
+	-- Установка значения реквизита "Востановительная стоимость для налогообложения"
+	[NAL_SUMMA] := P_NAL_SUMMA;
+	-- Установка значения реквизита "Сумма амортизации"
+	[DEPR_SUMMA] := P_DEPR_SUMMA;
+	-- Установка значения реквизита "Сумма налоговой амортизации"
+	[NAL_DEPR_SUMMA] := P_NAL_DEPR_SUMMA;
+	-- Установка значения реквизита "Комплектующая"
+	[COMP] := P_COMP;
+	-- Установка значения реквизита "Норма для налогообложения"
+	[NAL_NORMA] := P_NAL_NORMA;
+	-- Установка значения реквизита "Вид временной выдачи"
+	[GIVE_TYPE] := P_GIVE_TYPE;
+	-- Установка значения реквизита "Операции с ГСМ"
+	[OPER_CARS] := P_OPER_CARS;
+	-- Установка значения реквизита "Карточка автомобиля"
+	[CARS] := P_CARS;
+	-- Установка значения реквизита "Марка ГСМ"
+	[GSM_SORT] := P_GSM_SORT;
+	-- Установка значения реквизита "Срок полезного использования для налогообложения"
+	[NAL_PER_EXPL] := P_NAL_PER_EXPL;
+	-- Установка значения реквизита "Коэффициент ускорения для НУ"
+	[NAL_USCORENIE] := P_NAL_USCORENIE;
+	-- Установка значения реквизита "Целевое назначение договора"
+	[DOG_PURPOSE] := P_DOG_PURPOSE;
+	-- Установка значения реквизита "Дополнительная сумма НДС"
+	[ADD_NDS_SUMMA] := P_ADD_NDS_SUMMA;
+	-- Установка значения реквизита "Базовая стоимость для НУ"
+	[NAL_BASE_SUMMA] := P_NAL_BASE_SUMMA;
+	-- Установка значения реквизита "Движение мат.счета. Ссылка"
+	[MOVE_REF] := P_MOVE_REF;
+	-- Установка значения реквизита "Статья бюджета расходов"
+	[BUD_EXP_ART] := P_BUD_EXP_ART;
+	-- Установка значения реквизита "Межценовая разница"
+	[PRICE_DIF_KIND] := P_PRICE_DIF_KIND;
+	-- Установка значения реквизита "Признак передачи по справедливой стоимости"
+	[FAIR_COST_SIGN] := P_FAIR_COST_SIGN;
+	-- Установка значения реквизита "Стоимость балансовая"
+	[BAL_ST] := P_BAL_ST;
+	-- Установка значения реквизита "Экспертная оценка"
+	[EXPERT] := P_EXPERT;
+	-- Установка значения реквизита "Ликвидационная стоимость"
+	[LIQUID_SUMMA] := P_LIQUID_SUMMA;
+	-- Установка значения реквизита "Общие затраты на демонтаж"
+	[DISMANTLING_COST] := P_DISMANTLING_COST;
+	-- Установка значения реквизита "Сумма процентного расхода на демонтаж (дисконтированная)"
+	[DISMANTLING_DISC] := P_DISMANTLING_DISC;
+	-- Установка значения реквизита "Сумма увеличения стоимости матсчета при вводе затрат на демонтаж"
+	[DISMANTLING_RISE] := P_DISMANTLING_RISE;
+	-- Установка значения реквизита "Первичное признание стоимости ДАПП или СНН"
+	[PSH_FIRST_REPRIC] := P_FIRST_REPRICE; -- updated CHANGE_QUALIFIER FIRST_REPRICE->PSH_FIRST_REPRIC 13/10/25
+	-- Установка значения реквизита "Сумма возможной продажи ДАПП или СНН"
+	[SUM_PLAN_REALIZE] := P_SUM_PLAN_REALIZE;
+	-- Установка значения реквизита "Дата окончания начисления амортизации"
+	[END_DEPR] := P_END_DEPR;
+	-- Установка значения реквизита "Затраты на продажу"
+	[SELL_COST] := P_SELL_COST;
+	-- Установка значения реквизита "Срок продажи более 1 года"
+	[SELL_MORE_1_YEAR] := P_SELL_MORE_1_YEAR;
+	-- Установка значения реквизита "Номинальная стоимость"
+	[NOMINAL_SUMMA] := P_NOMINAL_SUMMA;
+	-- Установка значения реквизита "Сумма НДС номинальной стоимости"
+	[NOMINAL_NDS_SUM] := P_NOMINAL_NDS_SUM;
+	-- Установка значения реквизита "Процентная ставка"
+	[DELAY_PAY_PRC] := P_DELAY_PAY_PRC;
+	-- Установка значения реквизита "Код вида товара"
+	[TYPE_GOODS] := P_TYPE_GOODS;
+	-- Установка значения реквизита "Счетно-сортировальная машина"
+	[CCM] := P_CCM;
+	-- Установка значения реквизита "Периодичность начисления процентов"
+	[DELAY_PAY_PERIOD] := P_DELAY_PAY_PERIOD;
+	-- Установка значения реквизита "Чистая цена продажи"
+	[CLEAR_PRICE_SUMM] := P_CLEAR_PRICE_SUMM;
+	-- Установка значения реквизита "Дата начала периода отсрочки"
+	[DELAY_PAY_BEG] := P_DELAY_PAY_BEG;
+	-- Установка значения реквизита "Дата окончания периода отсрочки"
+	[DELAY_PAY_END] := P_DELAY_PAY_END;
+	-- Установка значения реквизита "Чистая возможная цена продажи"
+	[CLEAR_SELL_PRICE] := P_CLEAR_SELL_PRICE;
+	-- Установка значения реквизита "Сумма увеличения резерва под обесценение"
+	[REZERV_DEVAL] := P_REZERV_DEVAL;
+	-- Установка значения реквизита "Прослеживаемый  товар"
+	[TRACE_GOODS] := P_TRACE_GOODS;
+	-- Установка значения реквизита "Объект  залога"
+	[ZALOG_BODY] := P_ZALOG_BODY;
+	-- Установка значения реквизита "Карточка выдачи ОН"
+	[PM_AREND_OUT_REF] := P_PM_AREND_OUT_REF;
+	-- Установка значения реквизита "Накопленный убыток от обесценения, признанный в составе расходов"
+	[DEVAL_RASH] := P_DEVAL_RASH;
+	-- Установка значения реквизита "Накопленный убыток от обесценения, списанный за счет переоценки"
+	[DEVAL_PRICE] := P_DEVAL_PRICE;
+	-- Установка значения реквизита "Хоздоговор, по которому создан данный экземпляр ТМЦ"
+	[HOZ_DOG] := P_HOZ_DOG;
+end;
+end;
+end;

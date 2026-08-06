@@ -1,0 +1,207 @@
+class LEGAL_161P;
+
+@import_plsql(true)
+@this(create_on_start:=true,assert_null:=false)
+@name('[ПСБ] Проверка ИНН по противолегализационным перечням')
+@tag('COPIED')
+method PSH_INN_CHECK is
+PSH_INN_CHECK (
+	@name('ИНН') P_INN in [STRING_12]
+) is
+
+execute is
+pragma macro (xl,'::[OOXML].[API_XL]');
+xl_tmpl 		blob := empty_blob();
+v_CurrentUser ref [USER];
+res			string(32767);
+
+begin
+	::[SHABLON_DOC].[LIB_OOXML].load_blob('INN_CHECK', xl_tmpl, null, null, null, null);
+	if xl_tmpl is null then pragma error('Не найден шаблон отчета'); end if;		
+	if not &xl.open_file(xl_tmpl) then pragma error('Ошибка при открытии печатной формы шаблона');	end if;	
+
+	&xl.Open_Sheet(1);
+	
+	&xl.put(12,5, to_char(sysdate, 'dd.MM.yyyy'));
+	
+	v_CurrentUser := ::[USER].[LIB].userid();
+	&xl.put(13,5, v_CurrentUser.[NAME]);
+	
+	&xl.put(15,5, P_INN);
+	&xl.put(16,5, '____________________');
+	
+	--Реестр ЗСК
+	declare
+		zsk_date	[DATE];
+	begin
+		select x(max(x.[SOURCE_IMPORT].[LIST_DATE])) in ::[KYC_LIST_RISKS] into zsk_date;
+		&xl.put(20,5, to_char(zsk_date, 'dd.MM.yyyy'));
+	end;
+	
+	declare
+		typ_code	string(40);
+		risk_date	string(40);
+	begin
+		for (
+			select z(
+			z  								: c_id
+			,z.[RISK_LEVEL].[0] 			: c_risk
+			,z.[REASONS].[TYPOLOGY].[CODE]	: c_code
+			,z.[REASONS].[TYPOLOGY].[NAME]	: c_name
+			,z.[RISK_DATE]					: c_risk_date
+			,z.[DATE_EXCLUDE]				: c_date_ex			
+						
+			) in ::[KYC_LIST_RISKS] all
+			where  P_INN = z.[INN]
+			and z.[RISK_DATE] = (select kcr(max(kcr.[RISK_DATE])) in ::[KYC_LIST_RISKS] where kcr.[INN] = z.[INN])
+		)loop
+			risk_date := to_char(z.c_risk_date, 'dd.MM.yyyy');
+			if z.c_date_ex is not null then  
+		     	res:= 'Низкий';
+		     	&xl.Set_Format_Range(20,7,20,7, p_fillId == &xl.get_fill_back_color('C6E0B4'));
+			elsif z.c_risk=1 then  
+		   		res:= 'Средний';
+		   		&xl.Set_Format_Range(20,7,20,7, p_fillId == &xl.get_fill_back_color('FFE699'));
+			elsif z.c_risk=2 then  
+		   		res:= 'Высокий';
+		   		&xl.Set_Format_Range(20,7,20,7, p_fillId == &xl.get_fill_back_color('FFB7B7'));
+			end if;  		
+			if z.c_code is not null then
+		    	typ_code := typ_code || z.c_code || ', ';
+		    end if;
+		end loop;
+		if res = 'Средний' and typ_code is not null then
+			&xl.Set_Format_Range(20,7,20,7, p_fillId == &xl.get_fill_back_color('F8CBAD'));
+		end if;
+		if res is not null then
+			res := res || ', типологии ' || nvl(typ_code, 'нет, ') || risk_date;
+		else
+			res := 'не установлено совпадение с перечнем';
+			&xl.Set_Format_Range(20,7,20,7, p_fillId == &xl.get_fill_back_color('C6E0B4'));
+		end if;
+		&xl.put(20,7, res);
+	end;
+	
+	--Реестр отказов 764-П
+	declare
+		deny_date	[DATE];
+	begin
+		select x(max(x.[UPDATED])) in ::[DENY_LIST] into deny_date;
+		&xl.put(22,5, to_char(deny_date, 'dd.MM.yyyy'));
+	end;
+	
+	declare
+		x ref [DENY_LIST];
+		i integer;
+	begin
+		locate x in ::[DENY_LIST] where x.[MEMBER].[INN] = P_INN and x%statename = 'Действует' and rownum = 1;
+		res := 'Отказ в совершении операции';
+		i := 1;
+		for (
+		select x(x.[DENY_CODE] : deny_code,
+				 x.[DENY_DATE] : deny_date) 
+		in ::[DENY_LIST] where x.[MEMBER].[INN] = P_INN and x%statename = 'Действует' order by x.[DENY_DATE] desc)
+		loop
+			if mod(i, 2) = 1 then
+				res := res || ', ' || NL$ || x.deny_code || ' - ' || to_char(x.deny_date, 'dd.MM.yyyy');
+			else
+				res := res || ', ' || x.deny_code || ' - ' || to_char(x.deny_date, 'dd.MM.yyyy');
+			end if;
+			i := i + 1;
+		end loop;
+		&xl.Set_Format_Range(22,7,22,7, p_fillId == &xl.get_fill_back_color('FFB7B7'));
+	exception when NO_DATA_FOUND then
+		res := 'не установлено совпадение с перечнем';
+		&xl.Set_Format_Range(22,7,22,7, p_fillId == &xl.get_fill_back_color('C6E0B4'));
+	end;
+	&xl.put(22,7, res);
+	
+	--Организации и физ. лица, по которым принято решение МВК о замораживании счетов
+	declare
+		freeze_date	[DATE];
+	begin
+		select x(greatest(max(x.[DATE_DECISION]), max(x.[UNFREEZE_DATE]))) in ::[FREEZE_LIST] into freeze_date;
+		&xl.put(24,5, to_char(freeze_date, 'dd.MM.yyyy'));
+	end;
+	
+	declare
+		x ref [FREEZE_LIST];
+	begin
+		locate x in ::[FREEZE_LIST] where x.[INN] = P_INN and rownum = 1;
+		res := 'установлено совпадение с перечнем';
+		&xl.Set_Format_Range(24,7,24,7, p_fillId == &xl.get_fill_back_color('FFB7B7'));
+	exception when NO_DATA_FOUND then
+		res := 'не установлено совпадение с перечнем';
+		&xl.Set_Format_Range(24,7,24,7, p_fillId == &xl.get_fill_back_color('C6E0B4'));
+	end;
+	&xl.put(24,7, res);
+	
+	--Перечень организаций и физических лиц, связанных с террористами
+	declare
+		terror_date	[DATE];
+	begin
+		select x(max(x.[SOURCE_IMPORT].[LIST_DATE])) in ::[TERRORS] into terror_date;
+		&xl.put(28,5, to_char(terror_date, 'dd.MM.yyyy'));
+	end;
+	
+	declare
+		x ref [TERRORS];
+	begin
+		locate x in ::[TERRORS] where x.[ND] = P_INN and rownum = 1;
+		res := 'установлено совпадение с перечнем';
+		&xl.Set_Format_Range(28,7,28,7, p_fillId == &xl.get_fill_back_color('FFB7B7'));
+	exception when NO_DATA_FOUND then
+		res := 'не установлено совпадение с перечнем';
+		&xl.Set_Format_Range(28,7,28,7, p_fillId == &xl.get_fill_back_color('C6E0B4'));
+	end;
+	&xl.put(28,7, res);
+	
+	--Перечень ООН
+	declare
+		blacklist_date	[DATE];
+	begin
+		select x(max(x.[SOURCE_IMPORT].[LIST_DATE])) in ::[BLACKLIST] where x.[SOURCE_IMPORT].[TYPE_CHECK].[CODE] = 'LIST_OON' into blacklist_date;
+		&xl.put(31,5, to_char(blacklist_date, 'dd.MM.yyyy'));
+	end;
+	
+	declare
+		x ref [BLACKLIST];
+	begin
+		locate x in ::[BLACKLIST] where x.[INN] = P_INN and rownum = 1;
+		res := 'установлено совпадение с перечнем';
+		&xl.Set_Format_Range(31,7,31,7, p_fillId == &xl.get_fill_back_color('FFB7B7'));
+	exception when NO_DATA_FOUND then
+		res := 'не установлено совпадение с перечнем';
+		&xl.Set_Format_Range(31,7,31,7, p_fillId == &xl.get_fill_back_color('C6E0B4'));
+	end;
+	&xl.put(31,7, res);
+	
+	--Список организаций с признаками нелегальной деятельности
+	declare
+		list_date	[DATE];
+	begin
+		select x(max(x.[IN_FAIL].[LIST_DATE])) in ::[PSH_BLACK_UL] into list_date;
+		&xl.put(33,5, to_char(list_date, 'dd.MM.yyyy'));
+	end;
+	
+	declare
+		ul ref [PSH_BLACK_UL];
+	begin
+		locate ul in ::[PSH_BLACK_UL] where ul.[INN] = P_INN and rownum = 1 and nvl(ul.[ISKL], false) = false;
+		res := 'установлено совпадение с перечнем';
+		&xl.Set_Format_Range(33,7,33,7, p_fillId == &xl.get_fill_back_color('FFB7B7'));
+	exception when NO_DATA_FOUND then
+		res := 'не установлено совпадение с перечнем';
+		&xl.Set_Format_Range(33,7,33,7, p_fillId == &xl.get_fill_back_color('C6E0B4'));
+	end;
+	&xl.put(33,7, res);
+	
+	&xl.put(38,1, v_CurrentUser.[CASTA].[VALUE]);
+	&xl.put(38,8, v_CurrentUser.[NAME]);
+	
+	
+	&xl.finish(xl_tmpl);
+	[OOXML]::[API_ORSA].putReport2RunExtProc(xl_tmpl,'xlsx','Проверка ИНН ' || P_INN || ' по перечням');
+end;
+end;
+end;

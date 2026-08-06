@@ -1,0 +1,1486 @@
+class TMC_DOCUM;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Откатить (отладка)')
+@tag('COPIED')
+method PSH_UNDO_DOCUM is
+pragma include(::[TMC_IMPORT].[SLIB]);
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma include(::[RUNTIME].[MACRO_LIB]);
+tune_nal_last_depr_before_conv date;
+tune_last_depr_before_conv date;
+tune_use_zav_num_arr boolean;
+tune_change_nal_per_expl boolean;
+tune_use_average_nds boolean;
+tune_include_in_nal boolean;
+tune_calc_nal_amo_close_acc boolean; -- признак расчета налоговой амортизации по закрытым при передаче материальным счетам
+tune_multidivisional boolean;
+tune_rice_price boolean; --признак увеличения первоначальной стоимости при удорожании ОС на складе
+num number;
+-- Поиск даты последней амортизации
+-- acc - мат.счет, для которого ведется поиск
+-- doc - откатываемый мат.документ
+function get_date_last_depr(	p_acc ref [AC_MAT],
+								p_doc ref [TMC_DOCUM],
+								p_doc_oper_code ::[TMC_OP_NAME].[CODE]%type default null,
+								p_sign_depr boolean default null) return date is
+ret		date := null;
+doc_oper_code ::[TMC_OP_NAME].[CODE]%type;
+move_oper_code ::[TMC_OP_NAME].[CODE]%type;
+sign_depr boolean;
+tune_448p boolean := ::[FP_TUNE].[LIB].get_bool_value('VHO_448_P');
+begin
+	if p_acc is null then
+		return ret;
+	end if;
+
+	doc_oper_code := nvl(p_doc_oper_code, p_doc.[DOC_NAME_REF].[OPER].[CODE]);
+	sign_depr := nvl(p_sign_depr, nvl(p_Doc.[DOC_NAME_REF].[DEPR], false));
+
+	for move in p_acc.[TAB_MOVE]
+	 where p_doc is null or move.[TMC_DOCUM_REF] <> p_doc
+	 order by move.[NUM_ORD] desc
+	loop
+		move_oper_code := move.[TMC_DOCUM_REF].[DOC_NAME_REF].[OPER].[CODE];
+	    if doc_oper_code='АМОРТИЗАЦИЯ' And nvl(move.[PER_DEPR],0) != 0 Then
+	        if tune_448p = true then
+	        	ret := move.[BEG_DATE];
+	        else	
+	        	ret := move.[AMO_MONTH_DATE];
+	        end if;	        	
+	        exit;
+		end if;
+	    if doc_oper_code='АМОРТИЗАЦИЯ_Н' And nvl(move.[NAL_PER_DEPR],0) != 0 Then
+	        ret := move.[AMO_MONTH_DATE];
+	        exit;
+		end if;
+		if move.[NUM_ORD] = 1 and ret is null and
+		   move_oper_code = 'КОНВЕРТАЦИЯ' And
+	       (doc_oper_code='АМОРТИЗАЦИЯ' Or sign_depr) Then
+			ret := nvl(p_acc.[LAST_CONV], tune_last_depr_before_conv);
+			exit;
+		elsif move.[NUM_ORD] = 1 and ret is null and
+		   move_oper_code = 'КОНВЕРТАЦИЯ' And
+	       (doc_oper_code='АМОРТИЗАЦИЯ_Н') Then
+			ret := nvl(p_acc.[NAL_LAST_CONV], tune_nal_last_depr_before_conv);
+			exit;
+		elsif move.[NUM_ORD] = 1 and ret is null And
+		      move_oper_code != 'АМОРТИЗАЦИЯ_Н' then
+
+			ret := nvl(get_date_last_depr(move.[TMC_LIST].[ACC_MAT_SUP], p_doc), p_acc.[LAST_CONV]);
+			exit;
+		elsIf move_oper_code = 'АМОРТИЗАЦИЯ_Н' And
+	          doc_oper_code = 'АМОРТИЗАЦИЯ_Н' Then
+	        ret := Move.[AMO_MONTH_DATE];
+	        exit;
+	    elsIf move_oper_code = 'АМОРТИЗАЦИЯ_GAAP' And
+	          doc_oper_code = 'АМОРТИЗАЦИЯ_GAAP' Then
+	        ret := Move.[AMO_MONTH_DATE];
+	        exit;
+	    elsif move_oper_code in ('МОНТАЖ','ДОНАЦЕНКА') then
+	    	declare
+	    		prev_move ref [TMC_MOVE] := move.[PREV_MOVE];
+	    	begin 	
+	    		-- Если мат.счет был включен в налоговую амортизацию после увеличения стоимости более 10000
+		    	if (doc_oper_code = 'АМОРТИЗАЦИЯ_Н' or sign_depr)
+		    	 and ::[TMC_IMPORT].[TUNE_PRODUCT].get_include_in_nal
+		    	 and ((prev_move is not null and nvl(move.[NAL_SUMMA], 0) > 0 and nvl(move.[NAL_NORMA],0) > 0
+			     		and nvl(prev_move.[NAL_SUMMA], 0) = 0 and nvl(prev_move.[NAL_NORMA],0) = 0)
+			   	 or prev_move is null) then
+		    		if tune_448p = true then
+	        			ret := move.[BEG_DATE];
+			        else	
+			        	ret := last_day(move.[AMO_MONTH_DATE]);
+			        end if;
+		    	end if;
+		    	-- Если мат.счет был снова включен в амортизацию после монтажа хотя ранее был полностью самортизирован
+		    	if (doc_oper_code = 'АМОРТИЗАЦИЯ' or sign_depr)
+		    	 and prev_move is not null
+		    	 and nvl(::[AC_MAT].[LIB_ACC_MAT].is_full_amo(p_acc, prev_move), false) then
+		    		if tune_448p = true then
+	        			ret := move.[BEG_DATE];
+			        else	
+			        	ret := last_day(move.[AMO_MONTH_DATE]);
+			        end if;
+		    	end if;
+		    	-- Если мат.счет был снова включен в налоговую амортизацию после монтажа хотя ранее был полностью самортизирован
+		    	if (doc_oper_code = 'АМОРТИЗАЦИЯ_Н' or sign_depr)
+		    	 and prev_move is not null
+ 		    	 and nvl(::[AC_MAT].[LIB_ACC_MAT].is_full_amo(p_acc, prev_move, true), false) then
+		    		if tune_448p = true then
+	        			ret := move.[BEG_DATE];
+			        else	
+			        	ret := last_day(move.[AMO_MONTH_DATE]);
+			        end if;
+		    	end if;
+	    	end;
+		end if;
+
+    end loop;
+	return ret;
+end;
+
+procedure set_error(p_tmc in [TMC_ACC_MAT_REF],p_txt in string)
+is
+begin
+	Pragma Error('Откат невозможен.' || Chr(13) ||
+				'мат. счет: ' || p_tmc.[ACC_MAT] || Chr(13) ||
+				'с наименованием: "' || p_tmc.[NAME] || '".' || Chr(13) ||
+				p_txt || '!');
+end;
+
+procedure update_acc_mat(p_tmc in out ref [AC_MAT], p_doc in ref [TMC_DOCUM], p_oper_code in ::[TMC_OP_NAME].[CODE]%type)
+is
+num1 number;
+begin	
+	-- Если массив движений пустой, счет не может быть открыт и цена неопределена
+	select a(count(a)) in p_tmc.[TAB_MOVE] into num1;
+	if num1 = 0 and p_oper_code='ПРИХОД' then
+		p_tmc.[DATE_OP]       := Null; -- Дата открытия
+		p_tmc.[USER_OP]       := Null; -- Открыто пользователем
+		p_tmc.[FIRST_MOVE]    := Null; -- Первое движение
+		p_tmc.[GAAP_LAST_DEPR]:= Null; -- Последняя дата амортизации для GAAP
+		If p_tmc.[QUANT_IN] = 0 And p_tmc.[QUANT_OUT] = 0 Then
+			p_tmc.[PRICE]	:= Null;
+		End If;
+		p_tmc.[DATE_PRIH] := Null; -- дата прихода
+		p_tmc.[NUM_PRIH]  := Null; -- номер приходного док-та
+	
+		if p_tmc.[DATE_EXPL] is not null
+		and p_tmc.[DATE_EXPL] >= p_doc.[DATE_EXEC] then
+			p_tmc.[DATE_EXPL]	:= Null;
+			p_tmc.[NUM_EXPL]	:= Null; -- номер док-та ввода в эксплуатацию
+			p_tmc.[BEG_DEPR]	:= Null; -- Начало амортизации
+			p_tmc.[LAST_DEPR]	:= Null; -- Последняя дата амортизации
+			p_tmc.[NAL_BEG_DEPR]	:= Null; -- Начало амортизации для НУ
+			p_tmc.[NAL_LAST_DEPR]	:= Null; -- Последняя дата амортизации для налогообложения
+			p_tmc.[NAL_END_DEPR]	:= NUll;
+			p_tmc.[NAL_END_EXPL]	:= Null;
+			p_tmc.[NAL_GR_DEPR]		:= null;
+			p_tmc.[LAST_ESTIM]		:= Null; -- Последняя дата амортизации (Переоценка)
+		end if;
+		-- Эти даты при приходе должны быть сброшены в любом случае --
+		p_tmc.[LAST_CONV]	:= Null; -- Последняя дата амортизации до конвертации
+		p_tmc.[NAL_LAST_CONV]	:= null; -- Последняя дата амортизации до конвертации для НУ		
+	-- Если массив движений пустой, счет не может быть открыт и цена неопределена
+	elsIf (num1 = 0) Then -- auto update 25/05/99
+		p_tmc.[DATE_OP]		:= Null; -- Дата открытия
+		p_tmc.[USER_OP]		:= Null; -- Открыто пользователем
+		p_tmc.[FIRST_MOVE]	:= Null; -- Первое движение
+		p_tmc.[BEG_DEPR]	:= Null; -- Начало амортизации
+		p_tmc.[LAST_DEPR]	:= Null; -- Последняя дата амортизации
+		p_tmc.[LAST_CONV]	:= Null; -- Последняя дата амортизации
+		p_tmc.[PER_EXPL]	:= Null;
+				
+		p_tmc.[NAL_BEG_DEPR]	:= null; -- Начало амортизации для НУ
+		p_tmc.[NAL_LAST_DEPR]	:= Null; -- Последняя дата амортизации для налогообложения
+		p_tmc.[NAL_LAST_CONV]	:= null;
+		p_tmc.[NAL_END_DEPR]	:= null;
+		p_tmc.[NAL_GR_DEPR]		:= null;
+		p_tmc.[NAL_PER_EXPL]	:= null;
+		p_tmc.[GAAP_LAST_DEPR]	:= Null; -- Последняя дата амортизации для GAAP
+		p_tmc.[LAST_ESTIM]		:= Null; -- Последняя дата амортизации (Переоценка)
+		p_tmc.[LAST_NALOG]		:= Null; -- Последняя дата амортизации (Налоговая)
+		
+		If p_tmc.[QUANT_IN] = 0 And p_tmc.[QUANT_OUT] = 0 Then
+			p_tmc.[PRICE] := Null;
+		End If;
+		p_tmc.[DATE_PRIH]	:= Null; -- дата прихода
+		p_tmc.[NUM_PRIH]	:= Null; -- номер приходного док-та
+		p_tmc.[DATE_EXPL]	:= Null; -- дата ввода в эксплуатацию
+		p_tmc.[NUM_EXPL]	:= Null; -- номер док-та ввода в эксплуатацию
+	Else
+		p_tmc.[END_DEPR] := p_tmc.[LAST_MOVE].[END_DEPR];
+						
+		if
+				 p_oper_code in ('ПЕРЕДАЧА', 'ПЕРЕДАЧА_ИС')
+			and (p_tmc.[GRUPPA].[KIND_USER].[CODE] in ('СКЛАД', 'ПОДОТЧЕТ', 'ДАПП', 'ВНОД') and p_tmc.[DATE_EXPL] is not null)
+		then
+			declare
+				p_expl number := 0;
+			begin
+				For move In p_tmc.[TAB_MOVE] Order By move.[NUM_ORD]
+				Loop
+					if move.[GRUPPA].[KIND_USER].[CODE] = 'ЭКСПЛ' or (move.[GRUPPA].[KIND_USER].[CODE] = 'ВНОД') then
+						p_expl := greatest(p_expl, 1);
+					end if;
+					if move.[GRUPPA].[KIND_USER].[CODE] = 'ЭКСПЛ' or (move.[GRUPPA].[KIND_USER].[CODE] = 'ВНОД' and move.[GRUPPA].[MODEL].[0] = 1) then
+						p_expl := greatest(p_expl, 2);		
+					end if;
+				End Loop;
+				if p_expl = 0 then -- Очищаем все данные для амортизации
+					p_tmc.[DATE_EXPL]	:= null;
+					p_tmc.[NUM_EXPL]	:= null;
+					
+					p_tmc.[BEG_DEPR]	:= null;
+					p_tmc.[LAST_DEPR]	:= null;
+					p_tmc.[LAST_CONV]	:= null;
+					p_tmc.[END_DEPR]	:= null;
+						
+					p_tmc.[NAL_BEG_DEPR]	:= null;
+					p_tmc.[NAL_LAST_DEPR]	:= null;
+					p_tmc.[NAL_END_DEPR]	:= null;
+					p_tmc.[NAL_END_EXPL]	:= null;
+					p_tmc.[NAL_GR_DEPR]		:= null;
+					p_tmc.[NAL_METHOD].[0] := 3; 	-- проставляем "не начислять", чтобы можно было изменять после отката налоговые даные в списке ТМЦ.
+				elsif p_expl = 1 then -- Очищаем только данные для бухгалтерской амортизации
+					p_tmc.[BEG_DEPR]	:= null;
+					p_tmc.[LAST_DEPR]	:= null;
+					p_tmc.[LAST_CONV]	:= null;
+					p_tmc.[END_DEPR]	:= null;				
+				elsif p_expl = 2 then
+					null;
+				end if;				
+			end;
+		end if;		
+		-- Переопределим учетный счет и полный мат/счет
+		p_tmc.[INIT_USER_ACC];
+		p_tmc.[INIT_FULL_ACC];
+		-- Обновление текущих данных на мат.счете
+		p_tmc.[UPDATE_DATA];
+		p_tmc.[UN_SYSTEM] := p_tmc.[LAST_MOVE].[GRUPPA].[UN_SYSTEM];  --RP0612368 возврат на счете признака "Внесистемный учёт" с прошлой группы (необходимо при откате "Передачи во внесистемный учет")
+		
+		if tune_use_average_nds or p_oper_code = 'ОТРАЖЕНИЕ_НДС' then
+			p_tmc.[NDS_RATE] := ::[AC_MAT].[LIB_ACC_MAT].get_average_nds(p_tmc);
+		end if;
+	End If;
+	
+	-- Если массив движений пустой или еще есть ТМЦ, счет не может быть закрыт
+	If (num1 = 0) Or p_tmc.[LAST_MOVE].[QUANT]>0 Then
+		p_tmc.[DATE_CLOSE]	:= Null;
+		p_tmc.[USER_CLOSE]	:= Null;
+	End if;
+
+end;
+
+procedure check_children_in_fil(p_doc in ref [TMC_DOCUM])
+is
+doc p_doc%type;
+highest_depart ref [DEPART] := ::[DEPART].[LIB].get_high(::[SYSTEM].[VARIABLES].OurDepart);
+doc_depart ref [DEPART];
+begin
+	begin
+		locate doc in ::[TMC_DOCUM]
+			where doc.[MAT_DOCUM] = p_doc
+				and doc.[DEPART] not in
+				&depart_tree_sel_n(highest_depart);
+		doc_depart := ::[DEPART].[LIB].get_high(doc.[DEPART]);
+		pragma error('Найден документ №'||doc.[DOCUMENT_NUM]||' от '||to_char(doc.[DATE_DOC], 'DD/MM/YYYY')||','
+					||NL$||'созданный по данному документу'
+					||NL$||'в филиале '||doc_depart.[CODE]||' "'||doc_depart.[NAME]||'"'
+					||NL$||'Откат невозможен!');
+	exception
+		when NO_DATA_FOUND then
+			null;
+	end;
+end;
+
+procedure WorkObMatAcc( pDoc	ref [TMC_DOCUM]
+					)
+is
+acc ref [TMC_ACC_MAT];
+HozDog ref [AUR_DOCUM];
+vDocTypeArendaOper	ref [TMC_DOC_NAME];
+vDocTypeArendaFin	ref [TMC_DOC_NAME];
+begin
+	&debug('	--< WorkObMatAcc',0)
+	&debug('		HOZ_DOG state = '||Lib.State_name(pDoc.[HOZ_DOG_REF]%State,pDoc.[HOZ_DOG_REF]%Class),0)
+	-- если возврат, то добавляем в массив кап вложений
+	if pDoc.[HOZ_DOG_REF] is not null
+		and pDoc.[DOC_NAME_REF].[SIGN_OB_MAT_ARR]
+		and upper(pDoc.[DOC_NAME_REF].[OPER].[CODE]) = 'ВОЗВРАТ' then
+		
+		for list in pDoc.[LIST_TMC]
+		loop
+			Begin
+				Locate acc In pDoc.[HOZ_DOG_REF].[OB_MAT_ACC_ARR]
+				 Where acc.[ACC_MAT] = list.[ACC_MAT_SUP];
+			Exception
+				When NO_DATA_FOUND Then
+					if list.[ACC_MAT_SUP] is not null then
+						if pDoc.[HOZ_DOG_REF]%state != 'WORK' then
+							pragma error ('Обработка документа невозможна, так как связанный хозяйственный договор в состоянии '|| Lib.State_name(pDoc.[HOZ_DOG_REF]%State,pDoc.[HOZ_DOG_REF]%Class));
+						end if;	
+						::[VHO_INTERFACE].[PRX_TMC].TMC_ACC_MAT_NEW_AUTO(list.[ACC_MAT_SUP], pDoc.[HOZ_DOG_REF].[OB_MAT_ACC_ARR]);
+					end if;	
+			End;
+			
+				
+		end loop;
+	-- если документ списания, то добавляем в объекты кап. вложений договора из первого движения	(т.к. нет ссылки на хоз. договор)			
+	elsif pDoc.[DOC_NAME_REF].[SIGN_OB_MAT_ARR]
+		and upper(pDoc.[DOC_NAME_REF].[OPER].[CODE]) = 'СПИСАНИЕ' then
+		
+		for list in pDoc.[LIST_TMC]
+		loop
+			HozDog := list.[ACC_MAT_SUP].[FIRST_MOVE].[TMC_DOCUM_REF].[HOZ_DOG_REF];
+			&debug('		Хоз дог из первого движения = '||HozDog%id,0)
+			begin
+				Locate acc In HozDog.[OB_MAT_ACC_ARR]
+				Where acc.[ACC_MAT] = list.[ACC_MAT_SUP];
+
+			Exception
+				When NO_DATA_FOUND Then
+					if HozDog is not null and list.[ACC_MAT_SUP] is not null then
+						if HozDog%state != 'WORK' then
+							pragma error ('Обработка документа невозможна, так как связанный хозяйственный договор первого движения в состоянии '|| Lib.State_name(HozDog%State,HozDog%Class));
+						end if;	
+						
+						::[VHO_INTERFACE].[PRX_TMC].TMC_ACC_MAT_NEW_AUTO(list.[ACC_MAT_SUP], HozDog.[OB_MAT_ACC_ARR]);
+					end if;	
+			end;				
+		end loop;	
+					
+			
+	--если приход или выдача, то наоборот удаляем	
+	elsif pDoc.[HOZ_DOG_REF] is not null
+		and pDoc.[DOC_NAME_REF].[SIGN_OB_MAT_ARR]
+		and upper(pDoc.[DOC_NAME_REF].[OPER].[CODE]) in ('ПРИХОД', 'ВЫДАЧА') then
+		
+		for list in pDoc.[LIST_TMC]
+		loop
+			begin
+				&debug('		TMC ID='||list%id,0)
+				vDocTypeArendaOper	:= ::[FP_TUNE].[LIB].get_ref_value ('TMC_DOC_DEF', ::[FP_TUNE].[LIB].set_canons('TMC_GRUP', list.[GRUPPA_SUP] , '<BP_TMC_PROC>', 'BEG_OPER_AREND'));		
+				&debug('		TMC_DOC_DEF(BEG_OPER_AREND) = '||vDocTypeArendaOper.[CODE],0)
+				vDocTypeArendaFin	:= ::[FP_TUNE].[LIB].get_ref_value ('TMC_DOC_DEF', ::[FP_TUNE].[LIB].set_canons('TMC_GRUP', list.[GRUPPA_SUP] , '<BP_TMC_PROC>', 'BEG_FIN_AREND'));		
+				&debug('		TMC_DOC_DEF(BEG_FIN_AREND) = '||vDocTypeArendaFin.[CODE],0)
+				if not (pDoc.[DOC_NAME_REF] in (vDocTypeArendaOper, vDocTypeArendaFin) and pDoc.[HOZ_DOG_REF]%state = 'FORM') then
+					if pDoc.[HOZ_DOG_REF]%state != 'WORK' then
+						pragma error ('Обработка документа невозможна, так как связанный хозяйственный договор в состоянии '|| Lib.State_name(pDoc.[HOZ_DOG_REF]%State,pDoc.[HOZ_DOG_REF]%Class));
+					end if;					
+					
+					&debug('		pDoc.[HOZ_DOG_REF].[OB_MAT_ACC_ARR] = '||pDoc.[HOZ_DOG_REF].[OB_MAT_ACC_ARR],0)
+					&debug('		pDoc.[HOZ_DOG_REF].[OB_MAT_ACC_ARR]%size = '||pDoc.[HOZ_DOG_REF].[OB_MAT_ACC_ARR]%size(null),0)
+					&debug('		массив объектов кап. вложений не зачищаем',0)
+
+				end if;
+			exception
+				when NO_DATA_FOUND then
+					null;	
+			end;				
+		end loop;
+	end if;
+	&debug('	--> WorkObMatAcc',0)
+end;
+
+procedure clear_tmc(fact ref [FACTURA_DOC])
+is
+begin
+	for serv in fact.[SERV_LIST] loop
+		serv.[TMC_LIST_REF] := null;
+	end loop;
+	fact.[DOCUMENT] := null;
+end;
+
+procedure StatusAccRealize(pDoc ref [TMC_DOCUM], business_oper ref [PATTERN_DOC]) is
+	sCode_TMC_REAL_SPIS ::[TIP_ACC].[COD]%type := 'TMC_REAL_SPIS';
+	sCode_TMC_REALIZE	::[TIP_ACC].[COD]%type := 'TMC_REALIZE';
+	bUse_TMC_REAL_SPIS  boolean := false;
+	bUse_TMC_REALIZE  	boolean := false;
+	
+	P#ACC_MAT_SUP ref [AC_MAT];
+	V#SUP_DEPART ref [DEPART];
+	V#FILIAL ref [BRANCH];
+	P#KIND_BANK	boolean; --банковская деятельность
+	P#ACC_REALIZE  [AC_FIN_REF];
+	is_group_acc boolean; -- признак группового счета
+
+	--проверим используется ли тип счета in_tip_acc в шаблонах бизнес операции in_business_oper
+	function CheccAccInBO(in_tip_acc ref [TIP_ACC],	 in_business_oper ref [PATTERN_DOC]) return boolean is
+		tmp number;
+	begin
+		select sel(1)
+		in in_business_oper.[PATTERN_ARRAY] all
+		where (sel.[DOC].[DOC].[KL_DT] = in_tip_acc	or sel.[DOC].[DOC].[KL_KT] = in_tip_acc)
+		fetch 1
+		into tmp;
+		return true;
+	exception when NO_DATA_FOUND then
+		return false;
+	end;
+
+begin
+
+	-- проверяем использование счета реализации в БО (в системе заведено два типа счета реализации)
+	bUse_TMC_REAL_SPIS := CheccAccInBO(::[TIP_ACC]([COD]=sCode_TMC_REAL_SPIS), business_oper);
+	bUse_TMC_REALIZE := CheccAccInBO(::[TIP_ACC]([COD]=sCode_TMC_REALIZE), business_oper);
+	
+	for list in pDoc.[LIST_TMC] loop
+		P#ACC_MAT_SUP   := list.[ACC_MAT_SUP]; -- Счет-поставщик
+		V#SUP_DEPART	:= pDoc.[SUP_DEPART_REF];    -- Поставщик (Подразделение)
+		V#FILIAL		:= V#SUP_DEPART.[FILIAL];    -- филиал
+		P#KIND_BANK		:= P#ACC_MAT_SUP.[LAST_MOVE].KIND_BANK;
+		
+		-- Счет реализации
+		if bUse_TMC_REAL_SPIS then P#ACC_REALIZE := P#ACC_MAT_SUP.GET_FIN_ACC(sCode_TMC_REAL_SPIS, is_group_acc, P#KIND_BANK, V#FILIAL); end if;
+		if bUse_TMC_REALIZE   then P#ACC_REALIZE := P#ACC_MAT_SUP.GET_FIN_ACC(sCode_TMC_REALIZE, is_group_acc, P#KIND_BANK, V#FILIAL); end  if;
+		
+		--помечаем счет к закрытию
+		if P#ACC_REALIZE is not null then
+			if is_group_acc then
+				null;
+			else
+				::[VHO_INTERFACE].[PRX_TMC].AC_FIN_TO_CLOSE( P#ACC_REALIZE 	--Ссылка на помечаемый фин. счет
+															,false			--Пометить к закрытию
+															);
+			end if;
+		end if;
+	end loop;
+	
+end;
+
+procedure StatusAccSupMain(pDoc ref [TMC_DOCUM]) is
+	md ref [MAIN_DOCUM];
+begin
+	&debug('анализ папки в мат документе, чтобы пометить к закрытию TMC_MAIN',0)
+	for doc in pDoc.[IN_FOLDER].[DOCS_IN_FOLD] loop
+		&debug('  документ в папке: '|| doc.[NUM] || ', в соответствующем шаблоне проводки счет по кредиту = '||doc.[PATT_REF].[DOC].[DOC].[KL_KT].[COD],0)
+		if doc.[PATT_REF].[DOC].[DOC].[KL_KT].[COD] = 'SUP_MAIN' then
+				md := doc.[DOCUMENT];
+				if md.[ACC_KT] is not null then
+					&debug('  снимаем пометку к к закрытию '||md.[ACC_KT].[MAIN_V_ID],0)
+					::[VHO_INTERFACE].[PRX_TMC].AC_FIN_TO_CLOSE( md.[ACC_KT] 	--Ссылка на помечаемый фин. счет
+															,false			--Пометить к закрытию
+															);
+				end if;
+		end if;
+	end loop;
+end;
+PSH_UNDO_DOCUM (
+	@name('Дополнительные параметры') P_ADDS in [STRING_32000] default null
+) is
+
+validate is
+Begin
+	If P_MESSAGE='DEFAULT' Then		
+		-- если мат документ связан с подотчетными лицами, то запрещаем откатывать
+		declare
+			pl ref [PL];
+			adv_rep ref [PL_ADV_REP];
+		begin
+			for v_rashod in ::[PL_RASHOD] all
+			where v_rashod.[TMC_DOCUM] = this
+			loop
+				adv_rep := v_rashod%parent([PL_ADV_REP]);
+				pl := adv_rep%parent([PL]);
+				pragma error('Невозможно откатить документ, так как данный документ связан с расходом '||v_rashod.[NAME]||' подотчетного лица '||pl.[USER].[NAME]||'! Необходимо удалить расход!');
+			end loop;
+		end;	
+		If StdLib.UserId.[DEPART].[FILIAL]!=[DOCUMENT_USER].[FILIAL] and nvl (::[FP_TUNE].[LIB].get_bool_value('VHO_USE_CENTRAL_WORK'), false) = false Then
+			Pragma Error('Документ №'||this.[DOCUMENT_NUM]||' от '||to_char(this.[DATE_DOC], 'DD/MM/YYYY')||', созданный в другом филиале (отделении) откатывать нельзя!');
+		ElsIf This%State='BEGIN' Then
+			Pragma Error('Документ №'||this.[DOCUMENT_NUM]||' от '||to_char(this.[DATE_DOC], 'DD/MM/YYYY')||' в состоянии "Формируемый" откатить нельзя!');
+		ElsIf [DOC_NAME_REF].[OPER].[CODE]='КОНВЕРТАЦИЯ' Then
+			Pragma Error('Документ №'||this.[DOCUMENT_NUM]||' от '||to_char(this.[DATE_DOC], 'DD/MM/YYYY')||' с мат/операцией "КОНВЕРТАЦИЯ" откатывать нельзя!!!');
+		elsif [MAT_DOCUM] is not null and [DOC_NAME_REF].[OPER].[CODE]='СПИСАНИЕ' then
+			pragma error ('По документу создан документ прихода номер : ' || this.[MAT_DOCUM].[DOCUMENT_NUM] || '. Откат невозможен!');
+		End If;
+	End If;
+End;
+
+execute is
+/*********************************************************************
+Назначение: Откат материального документа
+*********************************************************************/
+/*
+ *     Дата        Автор       BFS         Описание
+ * ----------   -----------	----------- ---------------------------------------------------
+ * 14.09.2012	akuzmin		BS00211803	Добавлено удаление объектов кап. вложений при откате. Добалено удаление ссылок связи возврата и выдачи.
+ * 10.10.2012   apopov      BS00462375  Удаление/добавление экземпляра объекта кап.вложения через интерфейс. Добавлено добавление объектов кап. вложений при откате возврата.
+ * 17.07.2013	akuzmin		BS00483723	При откате движения амортизации с изменением налоговой премии у всех следующих движений изменяется налоговая премия на модуль этой разницы
+ 										Удален кусок кода, который затирал период амортизации при откате.
+ * 21.10.2013	akuzmin		BS00562529  Добавлены ветки обработки реквизита NAL_BASE_SUMMA в случае отката амортизации со след. движением "Передача"
+ 							BS00562496 	--------									
+ * 20.12.2013	eroshenko	BS00636725	В процедуру	update_acc_mat добавлено обновление даты окончания начисления амортиазции с последнего движения.
+ * 26.02.2014	akuzmin		BS00788625	Изменена логика обработки объектов кап. вложений в функции WorkObMatAcc. Теперь можно откатывать документы "ПРИХОД" и "СПИСАНИЕ".
+ * 08.04.2014	akuzmin		BS00825793	В случае добавления объекта кап. вложений в функции WorkObMatAcc проверяется на непусту ссылка мат.счета
+ * 22.05.2014	akuzmin		BS00149197	При откате документа прихода у получателя очищается дата окончания начисления бух.амортизации
+ * 16.08.2019   belov		RP0612368   Смена признака "Внесистемный учёт" при откате перемещения мат.счета
+ * 10.01.2020   nikaev    	RP0618449	[VHO_INTERFACE].[PRX_TMC].AUR_DOCUM_Calc_summa вызывается только при непустом значении this.[HOZ_DOG_REF]
+ * 04.03.2020   sokolov		RP0620425	В процедуре WorkObMatAcc удален цикл очистки массива кап. вложений.
+ * 19.03.2020   nikaev		RP0621117	Добавлен параметр P_ADDS; для исключения рекурсивного вызова операции UNDO_DOCUM, в обработку документа в статусе "Обработанный"(END)
+ 										добавлен учет доппараметра NOT_ROLLBACK_CALC.
+ * 22.09.2020   nikaev		RP0627387	Добавлена установка значения по умолчанию для переменной vEsf.
+ * 05.10.2020	asokolov	RP0623149	Добавлена проверка состояния 'FROM_SED' и вызов ошибки.
+ * 11.12.2020	nikaev		RP0630241	Процедура [VHO_INTERFACE].[PRX_TMC].rollback_calc вызывается со вторым параметром, равным TRUE (флаг уменьшения суммы договора при необходимости).
+ * 21.12.2020	sokolov		RP0626014	Добавлена процедура StatusAccSupMain и ее вызов.
+ * 25.03.2021	sokolov		RP0621922   Добавлен блок проверки реквизита [PARENT_CAL_OP] и последующая зачистка V_HOZ_DOG.
+ * 28.01.2022	nikaev		RP0642167	Добавлен контроль на допустимость выполнения операции в прошлой дате, плюс по уровню проверки TMC_DOC_CHECK_OD.
+ * 14.02.2022   sokolov     RP0646550   Добавлен учет массива комплектующих на экземпляре тмц.
+ * 26.10.2022   nikaev      RP0655499   Вызов [TMC_NUM].[LIB].numstr_to_arr выполняется среди прочих операций для операций РЕМОНТ.
+*/
+
+V_TMC   [TMC_ACC_MAT_REF];
+V_DOCUM [DOCUMENT_REF];
+V_FOLD  [FOLDER_PAY_REF];
+V_COMP  [TMC_COMP_REF];
+V_OPER_CODE [TMC_OP_NAME].[CODE]%Type;
+V_PREV  [TMC_MOVE_REF]; -- Предыдущее движение
+V_NEXT  [TMC_MOVE_REF]; -- Последующее движение
+V_PREV_DEPR Date;
+V_STORNO Boolean:=False;-- Признак наличия сторнированных документов
+V_HOZ_DOG	ref [AUR_DOCUM];
+----- необходимо для отката амортизации с изменением налоговой премии ----
+V_ETALON_TMC ref [AC_MAT] := null; -- "эталонный" мат счет. Необходим для отката амортизиции с пустым списком ТМЦ.
+								-- Если текущий мат. счет = эталону, то в данном мат счете не изменяем сумму нал. премии
+------------------------------------------------------------------------
+
+vTuneVhoAppPayDeliv  boolean := nvl(::[FP_TUNE].[LIB].get_bool_value('VHO_APP_PAY_DELIV',null, false),false);
+vEsf boolean := false;
+vCalendarNotRollback	ref [CALENDAR_CALC];
+Begin
+	&sp(UNDO_DOCUM)
+	
+	&debug('BEGIN',0)
+	&debug('	P_ADDS='||P_ADDS,0)
+	&debug('	ID='||this%id,0)
+	&debug('	STATE='||this%state,0)
+
+	--Проверим возможность вставки в прошлом
+	if [IN_FOLDER] is null and this%state in ('PROVE','END') then --документ проведенный или обработанный
+		&debug('>1',0)
+		declare
+			vDate	date;
+		begin
+			&debug('Документ без папки, в состоянии '||this%state,0)
+			vDate := this.[DATE_PROVE];
+			&debug('vDate(1) ='||to_char(vDate,'dd.mm.yyyy'),0)
+			if vDate is null then
+				--смотрим дату движения по любому матсчету
+				for (select x(x.[ACC_MAT_REC].[TAB_MOVE].[BEG_DATE] : BEG_DATE)
+						 in this.[LIST_TMC]
+					  where x.[ACC_MAT_REC].[TAB_MOVE].[TMC_DOCUM_REF] = this
+					  		fetch 1)
+				loop
+					&debug('Смотрим дату движения по любому матсчету',0)
+					vDate := x.BEG_DATE;
+					&debug('vDate(2) ='||to_char(vDate,'dd.mm.yyyy'),0)
+					exit;
+				end loop;
+			end if;
+			
+			if not ::[VHO_INTERFACE].[PRX_TMC].MAY_IN_PAST(vDate, 'MAIN_DOCUM', P_GENTLY == true/*Не генерировать исключение*/) then
+				&debug('Допустима вставка в прошлом',0)
+        
+				::[TMC_DOCUM].[LIB].TmcDocCheckOd(this, 'TMC_DOC_CHECK_OD'); 
+			end if;
+		end;
+	end if;
+	&debug('>2',0)
+	if this.[PARENT_CAL_OP] is not null then
+		&debug('>3',0)
+		for calc in ::[CALENDAR_CALC] collections
+			where calc = this.[PARENT_CAL_OP]
+			fetch 1
+		loop
+			&debug('>4',0)
+			V_HOZ_DOG := calc%parent(::[AUR_DOCUM]);
+			if
+			   calc.[HOZ_OPER] = ::[FP_TUNE].[LIB].get_ref_value ('IFRS16_HOZ_OPER',
+						::[FP_TUNE].[LIB].set_canons('VID_DOGOVOR', V_HOZ_DOG.[VID_DOG] , '<BP_IFRS16>', 'REVAL_AREND'),'0')
+						
+			then
+				pragma error ('Для отката документа необходимо откатить операцию ' || calc.[HOZ_OPER].[NAME] || ' в календаре закрытий договора №'
+						|| V_HOZ_DOG.[NUM_DOG] || ' от '
+						|| to_char(V_HOZ_DOG.[DATE_BEGIN],'dd.mm.yyyy') || ' (id ' || V_HOZ_DOG || ')'
+				);
+			end if;
+			exit;
+		end loop;
+
+	end if;
+
+	V_HOZ_DOG := null;
+	&debug('>5 This%State='||This%State,0)
+	If This%State = 'FORM' Then
+		This%State := 'BEGIN';
+	ElsIf This%State = 'PROVE' Then --проведенный
+	
+		-- Выберем все связанные календари
+		for v_calend in ::[CALENDAR_CALC] all
+		 where v_calend.[TMC_DOCUM_REF] = this
+		   and v_calend%state = 'PROV'
+		loop
+			v_calend%state := 'FACT';
+		end loop;
+		
+		-- Пересчитаем суммы договора
+		for (select x(x	:	hozDog) in [AUR_DOCUM]
+				where exists (select c(c) in ::[CALENDAR_CALC] all
+								where c.[TMC_DOCUM_REF] = this
+									and c%collection in (x.[CALEND_PAY], x.[CALEND_CLOSE])
+							)
+			)
+		loop
+			::[VHO_INTERFACE].[PRX_TMC].AUR_DOCUM_Calc_summa(x.hozDog);
+		end loop;									
+		-----------------------------------------	
+
+		-- potapenko 27/01/04
+		-- Если используется признак "Учет ГСМ"
+		If this.[DOC_NAME_REF].[CARS] Then
+			for list in this.[LIST_TMC] fetch 1
+			loop
+				::[TMC_INTERFACE].[PRX_GSM].CARS_rb_fld_opers(list.[CARS], list.[OPER_CARS]);
+				exit;
+			end loop;
+		End If;
+	
+		[DATE_PROVE] := Null; -- Дата проводки
+		[USER_PROVE] := Null; -- Проведено пользователем
+		This%State := 'END';            -- Изменим состояние мат/документа
+	ElsIf This%State = 'CONFIRM' then --подтвержденный
+		if this.[DATE_EXEC] is not null Then
+			-- Если есть папка платежей
+			If [IN_FOLDER] Is Not Null and [IN_FOLDER]%State != 'PROVE' Then
+				If [HOZ_DOG_REF] Is Not Null And [HOZ_DOG_REF]%State='CLOSE' Then
+					Pragma Error('Откат невозможен. Хоз/договор №' ||V_HOZ_DOG.[NUM_DOG] || ' от '
+					|| to_char(V_HOZ_DOG.[DATE_BEGIN],'dd.mm.yyyy') || ' (id ' || V_HOZ_DOG || ') закрыт.');
+				End If;
+				For V_DOC In [IN_FOLDER].[DOCS_IN_FOLD]
+				Loop
+					V_DOCUM := V_DOC.[DOCUMENT];
+					-- Проверяем документ на проводку
+					if v_docum%class = 'MAIN_DOCUM' then
+						::[VHO_INTERFACE].[PRX_TMC].Main_Docum_To_Return(v_docum, 'Документ не подтвержден', false);
+						v_docum%state := 'FORM';
+					end if;
+				End Loop;
+			End If;
+			This%State := 'END';
+		else
+			this%state := 'FORM';
+		end if;
+	ElsIf This%State = 'END' Then --обработанный
+		&debug('>5.1 обработанный',0)
+		null; --Не лицензировано SED_DOCUMENT
+		-- declare
+		-- 	t12rec ref [SED_T12];
+		-- begin
+		-- 	&debug('>5.2',0)
+		-- 	locate t12rec in ::[SED_T12] where t12rec.[DOCUMENT_REF] = this;
+		-- 	&debug('>5.3',0)
+		-- 	pragma error ('Выбранный материальный документ связан с товарной накладной № ' ||t12rec.[NUM] ||'.'||
+		-- 		' Для выполнения отката по данному документу необходимо удалить товарную накладную в справочнике "СЭД. Документы"');
+		-- exception when no_data_found then
+		-- 	&debug('>5.4',0)
+		-- 	null;
+		-- end;
+		&debug('>5.5',0)
+		--if vTuneVhoAppPayDeliv then
+		--	for pay in this.[LIST_PAY]
+		--	loop
+		--		pay.[SIGN_CONN] := false;
+		--		pay.[SUM_CONN] := 0;
+		--		pay.[NDS_SUM_CONN] := 0;
+		--		&debug('>	5.6',0)
+		--	end loop;
+		--end if;
+		
+		-- Если использовался договор
+		-- Выберем все связанные календари
+		::[RUNTIME].[STR].get_par(P_ADDS, 'NOT_ROLLBACK_CALC', vCalendarNotRollback);
+		&debug('>5.7',0)
+		for v_calend in ::[CALENDAR_CALC] all
+			where v_calend.[TMC_DOCUM_REF] = this
+			  and (vCalendarNotRollback is null or v_calend != vCalendarNotRollback)
+		loop
+			&debug('>	5.8',0)
+			V_HOZ_DOG := v_calend%Parent;
+			If V_HOZ_DOG%State='CLOSE' Then
+				Pragma Error('Откат невозможен. Хоз/договор №' ||V_HOZ_DOG.[NUM_DOG] || ' от '
+					|| to_char(V_HOZ_DOG.[DATE_BEGIN],'dd.mm.yyyy') || ' (id ' || V_HOZ_DOG || ') закрыт.');
+			End If;
+			::[VHO_INTERFACE].[PRX_TMC].unconn_calc(v_calend);
+			v_calend.[FOLDER] := null;	-- Удалим ссылку на папку
+			if v_calend%state != 'PLAN' then
+				::[VHO_INTERFACE].[PRX_TMC].rollback_calc(v_calend, true);
+			end if;	
+			::[VHO_INTERFACE].[PRX_TMC].calc_delete_auto(v_calend);
+		end loop;
+		&debug('>5.9',0)
+		
+		
+		--если на документе проставлен признак заполнять/удалять массив кап. вложений, то обрабатываем
+		if this.[DOC_NAME_REF].[SIGN_OB_MAT_ARR] then
+			&debug('>5.10',0)
+			WorkObMatAcc(this);	
+		end if;
+		
+		&debug('>5.11',0)
+		if this.[DOC_NAME_REF].[DEPR] and this.[DOC_NAME_REF].[OPER].[CODE] not in ('АМОРТИЗАЦИЯ','АМОРТИЗАЦИЯ_Н') then
+			&debug('>5.12',0)
+			this.[BEG_DATE] := null;
+			this.[END_DATE] := null;
+		end if;
+		
+		-- если были накладные расходы и их не надо было включать в стоимоть до обработки, то удаляем их из сумм списка ТМЦ
+		&debug('>5.13',0)
+		if not nvl(this.[ADD_COSTS], false) then
+			&debug('>5.14',0)
+			::[TMC_DOCUM].[LIB].undo_add_rash(this);
+		end if;
+		
+		if this.[HOZ_DOG_REF] is not null then
+			&debug('>5.15',0)
+			::[VHO_INTERFACE].[PRX_TMC].AUR_DOCUM_Calc_summa(this.[HOZ_DOG_REF]);
+		end if;
+
+		-- potapenko 27/01/04
+		-- Если используется признак "Учет ГСМ"
+		If this.[DOC_NAME_REF].[CARS] Then
+			&debug('>5.16',0)
+			UNDO_GSM_OPER;
+		End If;
+	
+		-- Если есть папка платежей
+		If [IN_FOLDER] Is Not Null Then
+			&debug('>5.17',0)
+			For V_DOC In [IN_FOLDER].[DOCS_IN_FOLD]
+			Loop
+				V_DOCUM := V_DOC.[DOCUMENT];
+				
+				If V_DOCUM.[STORNO_DOC] Is Null And V_DOCUM.[CORRECTION_DOC] Is Null Then
+					-- Удаляем документ из массива
+					If V_DOCUM%Class = 'MAIN_DOCUM' And V_DOCUM%State = 'PROV' then
+						Pragma Error('Откат невозможен.' || Chr(13) ||
+									'Состояние документа в папке платежей ' || '"' || V_DOCUM%Statename || '".');
+						&rb(UNDO_DOCUM)
+					end if;
+					::[VHO_INTERFACE].[PRX_TMC].DOC_IN_FOLD_DELETE_AUTO(V_DOC);
+					-- Удаляем сам документ
+					If V_DOCUM%State != 'DELETED' Then
+						V_DOCUM.[DELETE#AUTO];
+					End If;
+				else
+					V_STORNO := True;
+				End If;
+			End Loop;
+
+			-- Запомним папку
+			V_FOLD := [IN_FOLDER];
+			--Удаляем ссылку на папку
+			[IN_FOLDER] := Null;
+			-- uralov папка удаляется в операции UNDO_DOCUMS
+		End If;
+		
+		&debug('>5.18',0)
+		V_OPER_CODE := this.[DOC_NAME_REF].[OPER].[CODE];
+		
+		tune_nal_last_depr_before_conv := ::[TMC_IMPORT].[TUNE_PRODUCT].get_nal_last_depr_before_conv;
+		tune_last_depr_before_conv := ::[TMC_IMPORT].[TUNE_PRODUCT].get_last_depr_before_conv;
+		tune_use_zav_num_arr := ::[TMC_IMPORT].[TUNE_PRODUCT].get_use_zav_num_arr;
+		tune_change_nal_per_expl := ::[TMC_IMPORT].[TUNE_PRODUCT].get_change_nal_per_expl;
+		tune_use_average_nds := ::[TMC_IMPORT].[TUNE_PRODUCT].get_use_average_nds;
+		tune_include_in_nal := ::[TMC_IMPORT].[TUNE_PRODUCT].get_include_in_nal;
+		tune_calc_nal_amo_close_acc := ::[TMC_IMPORT].[TUNE_PRODUCT].get_calc_nal_amo_close_acc;
+		tune_multidivisional := ::[TMC_IMPORT].[TUNE_PRODUCT].get_multidivisional;
+		tune_rice_price := ::[TMC_IMPORT].[TUNE_PRODUCT].get_rice_price;
+		
+		-- Проверим на связанные документы в других филиалах
+		if tune_multidivisional then
+			&debug('>5.19',0)
+			check_children_in_fil(this);
+		end if;
+
+		-- Перебираем все элементы массива движений порожденные откатываемым документом
+		For V_LAST In TMC_MOVE all
+		 Where V_LAST.[TMC_DOCUM_REF] = this
+		 order by V_LAST%collection, V_LAST.[NUM_ORD] desc -- добавлена сортировка для коллекции,
+		 												   -- чтобы обрабатывались движения из одной таблицы движения akuzmin BS00562529, BS00562496
+		loop
+			&debug('>	5.20',0)
+			-- Определяем родительский материальный счет
+			V_TMC := V_LAST%Parent;
+			-- Проверяем, последнее ли это движение по счету
+			If V_TMC.[LAST_MOVE] != V_LAST And V_TMC.[LAST_MOVE].[TMC_DOCUM_REF] != this Then
+				&debug('>	5.21',0)
+				If V_OPER_CODE = 'АМОРТИЗАЦИЯ_Н' And
+					V_LAST.[BEG_DATE]<V_TMC.[NAL_LAST_DEPR] Then
+					set_error(V_TMC,'Это не последняя амортизация для налогооблажения');
+				ElsIf V_OPER_CODE = 'АМОРТИЗАЦИЯ_GAAP' And
+					V_LAST.[BEG_DATE]<V_TMC.[GAAP_LAST_DEPR] Then
+					set_error(V_TMC,'Это не последняя амортизация GAAP');
+				elsif V_OPER_CODE = 'НОРМА' then
+					declare
+						last_change ref [TMC_MOVE];
+					begin
+						locate last_change in V_TMC.[TAB_MOVE]
+						 where last_change.[NUM_ORD] > V_LAST.[NUM_ORD]
+						   and last_change.[TMC_DOCUM_REF].[DOC_NAME_REF].[OPER].[CODE] = V_OPER_CODE;
+						pragma error('Это не последнее измение параметров амортизации!');
+					exception
+						when NO_DATA_FOUND then
+							null;
+					end;
+				ElsIf V_OPER_CODE Not In ('АМОРТИЗАЦИЯ_Н','АМОРТИЗАЦИЯ_GAAP') Then
+					set_error(V_TMC,'Движение порожденное данным документом не является последним');
+				End If;
+			End If;
+			
+			&debug('>	5.22',0)
+			-- Проверяем не останется ли у нас меньше чем затребовано
+			If (V_TMC.[LAST_MOVE].[KIND_MOL]='ПРИХОД' Or V_TMC.[LAST_MOVE].[KIND_DEPART]='ПРИХОД')
+			 And V_TMC.[LAST_MOVE].[QUANT]-V_TMC.[LAST_MOVE].[MOVE]<V_TMC.[QUANT_OUT]
+			 And SubStr(V_OPER_CODE,1,11) != 'АМОРТИЗАЦИЯ' Then
+			 	&debug('>	5.23',0)
+				set_error(V_TMC,'Эатребовано больше чем останется после отката');
+			End If;
+			-- Если откатывается документ начислявший амортизацию
+			If nvl(V_LAST.[PER_DEPR], 0) != 0
+				Or nvl(V_LAST.[NAL_PER_DEPR], 0) != 0
+				Or SubStr(V_OPER_CODE,1,11)='АМОРТИЗАЦИЯ'
+			Then
+				&debug('>	5.24',0)
+				If V_LAST.[PER_DEPR] != 0 Or V_OPER_CODE = 'АМОРТИЗАЦИЯ' Then
+					V_PREV_DEPR := Get_Date_Last_Depr(V_TMC, This, 'АМОРТИЗАЦИЯ');
+					V_TMC.[LAST_DEPR] := Nvl(V_PREV_DEPR, V_TMC.[LAST_CONV]);
+				ElsIf V_LAST.[NAL_PER_DEPR] != 0 Or V_OPER_CODE = 'АМОРТИЗАЦИЯ_Н' Then
+				    V_PREV_DEPR := Get_Date_Last_Depr(V_TMC, This, 'АМОРТИЗАЦИЯ_Н');
+					v_tmc.[NAL_LAST_DEPR] := nvl(v_prev_depr, v_tmc.[NAL_LAST_CONV]);
+				ElsIf V_LAST.[GAAP_PER_DEPR] > 0 Or V_OPER_CODE = 'АМОРТИЗАЦИЯ_GAAP' Then
+					V_TMC.[GAAP_LAST_DEPR] := Nvl(V_PREV_DEPR, V_TMC.[BEG_DEPR] - To_Number(To_Char(V_TMC.[BEG_DEPR],'DD')));
+				End If;
+				
+				
+				/*
+					суть этого приседания в следующем: после изменения налоговой премии у всех следующих движений
+					она остается неизменной после отката документа амортизации. Здесь мы находим ту разницу налоговой пермии,
+					которая начислилась документом и вычитам/добавляем её у всех следующих движений.
+				*/	
+					
+					
+			
+					&debug('>	5.25',0)
+					if V_TMC%id <> V_ETALON_TMC%id or V_ETALON_TMC is null then
+						&debug('>	5.26',0)
+						V_ETALON_TMC := V_TMC;
+						
+						-- если вставляем движение амортизации с увеличением налоговой премии в середину таблицы, то для всех след движений увеличим налоговую премию
+						-- для начала найдем последние порожденное движение данным документом
+						declare
+							last_doc_depr_move ref [TMC_MOVE]; -- последнее движение амортизации, порожденное данным документом
+							prev_move ref [TMC_MOVE]; -- движение перед движениями порожденными док-ом амортизацтт
+							delta_nal_prem [SUMMA];
+						begin
+							locate last_doc_depr_move in V_TMC.[TAB_MOVE]
+							where last_doc_depr_move.[TMC_DOCUM_REF] = this
+							order by last_doc_depr_move.[NUM_ORD] desc;
+							&debug('>	5.27',0)
+							begin				
+								-- ищем разницу налоговой премии с последним движением до амортизации
+								locate prev_move in V_TMC.[TAB_MOVE]
+								where prev_move.[NUM_ORD] < last_doc_depr_move.[NUM_ORD]
+								and prev_move.[TMC_DOCUM_REF] != this
+								order by prev_move.[NUM_ORD] desc;
+								
+								delta_nal_prem := prev_move.[NAL_PREM] - last_doc_depr_move.[NAL_PREM];
+								
+									-- для всех следующих движений добавим эту разницу в налоговую премию.
+									-- Почему не присваиваем эту нал премию всем след движениям? на всякий случай, вдруг в след движениях тоже будет изменяться налоговая премия
+									for v_move in V_TMC.[TAB_MOVE]
+										where v_move.[NUM_ORD] > last_doc_depr_move.[NUM_ORD]
+										and v_move.[TMC_DOCUM_REF] != this  -- на всякий случай, это же амортизация :-)
+										order by v_move.[NUM_ORD]
+									loop
+										&debug('	Для движения с ид = '||v_move%id||' увеличим нал премию на = '||delta_nal_prem,0)
+										&debug('Старое значение = '||v_move.[NAL_PREM],0)
+										v_move.[NAL_PREM] := v_move.[NAL_PREM] + delta_nal_prem;
+										&debug('	Установили значение = '||v_move.[NAL_PREM],0)
+									end loop;
+								
+							exception
+								when NO_DATA_FOUND then
+									null;	
+							end;
+							
+						exception
+							when NO_DATA_FOUND then
+								&debug('>	5.28',0)
+								null;	
+						end;	
+					end if;	
+					
+					&debug('>	5.29',0)
+					if nvl(::[FP_TUNE].[LIB].get_bool_value('1B580011'), false) = true
+						and this.[DOC_NAME_REF].[OPER].[CODE] like '%АМОРТИЗАЦИЯ%'
+						and this.[DOC_NAME_REF].[TYPE_SUP].[CODE] like '%АФПП%' then
+							&debug('>	5.30',0)
+							for v_calend in ::[CALENDAR_CALC] all
+								where v_calend.[TMC_DOCUM_REF] = this
+							loop
+								&debug('>		5.31',0)
+								V_HOZ_DOG := v_calend%Parent;
+								If V_HOZ_DOG%State='CLOSE' Then
+									Pragma Error('Откат невозможен. Хоз/договор №' ||V_HOZ_DOG.[NUM_DOG] || ' от '
+										|| to_char(V_HOZ_DOG.[DATE_BEGIN],'dd.mm.yyyy') || ' (id ' || V_HOZ_DOG || ') закрыт.');
+								elsif V_HOZ_DOG.[CALEND_CLOSE] = v_calend%collection then
+									::[VHO_INTERFACE].[PRX_TMC].unconn_calc(v_calend);
+									v_calend.[FOLDER] := null;	-- Удалим ссылку на папку
+									if v_calend%state != 'PLAN' then
+										::[VHO_INTERFACE].[PRX_TMC].rollback_calc(v_calend, true);
+									end if;	
+									::[VHO_INTERFACE].[PRX_TMC].calc_delete_auto(v_calend);
+								end if;
+							end loop;
+					end if;
+				
+				-- Если откатывается документ начислявший амортизацию по налогообложению, GAAP или МСФО
+				&debug('>	5.32',0)
+				If V_OPER_CODE In ('АМОРТИЗАЦИЯ_Н','АМОРТИЗАЦИЯ_GAAP') Then
+					-- Обработаем таблицу движения
+					&debug('>	5.33',0)
+					V_PREV:=Null; V_NEXT:=Null;
+					If V_LAST.[NUM_ORD]>1 And V_TMC.[LAST_MOVE]!=V_LAST Then
+						&debug('>	5.34',0)
+						For V#MOVE In V_TMC.[TAB_MOVE]
+						 Order By V#MOVE.[NUM_ORD]
+						Loop
+							&debug('>		5.35',0)
+							If V#MOVE.[NUM_ORD]=V_LAST.[NUM_ORD]-1 Then
+								V_PREV := V#MOVE;
+							ElsIf V#MOVE.[NUM_ORD]=V_LAST.[NUM_ORD]+1 Then
+								V_NEXT := V#MOVE;
+								V_PREV.[END_DATE]:=V_NEXT.[BEG_DATE]-1;
+							End If;
+							If V#MOVE.[NUM_ORD]>V_LAST.[NUM_ORD] Then
+								V#MOVE.[NUM_ORD] := V#MOVE.[NUM_ORD]-1; -- Номер по порядку
+								If V_OPER_CODE = 'АМОРТИЗАЦИЯ_Н' Then
+									V#MOVE.[NAL_PER_DEPR] := 0; -- Сумма начисленнгой амортизации
+									
+									if V#MOVE.[NAL_ALL_DEPR] > 0 then							
+										V#MOVE.[NAL_ALL_DEPR] := V#MOVE.[NAL_ALL_DEPR] - V_LAST.[NAL_PER_DEPR]; -- Сумма общей амортизации
+									end if;		
+									if V_LAST.[MOVE_UP_NAL_SUM] is not null
+										----> костыль BS00562529, BS00562496
+										and V#MOVE.[TMC_DOCUM_REF].[DOC_NAME_REF].[OPER].[CODE] != 'ПЕРЕДАЧА'
+										and nvl(V#MOVE.[NAL_BASE_SUMMA], 0) > 0 then
+										-----<
+										V#MOVE.[NAL_BASE_SUMMA] := V#MOVE.[NAL_BASE_SUMMA] + V_LAST.[NAL_PER_DEPR];
+									end if;
+									---> костыль BS00562529, BS00562496
+									if nvl(V#MOVE.[PREV_MOVE].[NAL_PER_DEPR] + V#MOVE.[PREV_MOVE].[NAL_ALL_DEPR] + V#MOVE.[PREV_MOVE].[NAL_SUMMA], 0) = 0 then
+										V#MOVE.[NAL_BASE_SUMMA] := V#MOVE.[NAL_SUMMA] - V#MOVE.[NAL_PREM];
+									end if;	
+									-----<
+									V#MOVE.[NAL_NORMA] := V_PREV.[NAL_NORMA]; -- при начислении нелинейным методом меняется норма. При вставке в середину нужно поменять все назад
+								ElsIf V_OPER_CODE = 'АМОРТИЗАЦИЯ_GAAP' Then
+									V#MOVE.[GAAP_PER_DEPR] := 0; -- Сумма начисленнгой амортизации
+									V#MOVE.[GAAP_ALL_DEPR] := V#MOVE.[GAAP_ALL_DEPR] - V_LAST.[GAAP_PER_DEPR]; -- Сумма общей амортизации
+								Else
+									V#MOVE.[INIT_ADD_REQ](V_PREV);
+								End If;
+							End If;
+						End Loop;
+					ElsIf V_TMC.[LAST_MOVE]!=V_LAST Then
+						&debug('>	5.36',0)
+						For V#MOVE In V_TMC.[TAB_MOVE]
+						 Order By V#MOVE.[NUM_ORD]
+						Loop
+							&debug('>		5.37',0)
+							V#MOVE.[NUM_ORD] := V#MOVE.[NUM_ORD]-1; -- Номер по порядку
+							If V_OPER_CODE = 'АМОРТИЗАЦИЯ_Н' Then
+								V#MOVE.[NAL_PER_DEPR] := 0; -- Сумма начисленнгой амортизации
+								V#MOVE.[NAL_ALL_DEPR] := 0; -- Сумма общей амортизации
+							ElsIf V_OPER_CODE = 'АМОРТИЗАЦИЯ_GAAP' Then
+								V#MOVE.[GAAP_PER_DEPR] := 0; -- Сумма начисленнгой амортизации
+								V#MOVE.[GAAP_ALL_DEPR] := 0; -- Сумма общей амортизации
+							End If;
+						End Loop;
+					End If;
+					&debug('>	5.38',0)
+					If V_TMC.[NAL_BEG_DEPR]>V_TMC.[NAL_LAST_DEPR] Then
+						&debug('>	5.39',0)
+						V_TMC.[NAL_LAST_DEPR] := trunc(V_TMC.[NAL_BEG_DEPR],'MM')-1;
+					End If;
+					if tune_calc_nal_amo_close_acc then
+						&debug('>	5.40 Уберем начисленную амортизацию НУ у последующих мат. счетов',0)
+						-- Уберем начисленную амортизацию НУ у последующих мат. счетов
+						::[AC_MAT].[CALC_AMO_LIB].add_nal_depr_to_next_acc(V_TMC, - V_LAST.[NAL_PER_DEPR]);
+					end if;
+									
+					
+				End If;
+			elsif V_OPER_CODE = 'НОРМА' then
+				&debug('>	5.41',0)
+				V_PREV := V_LAST.[PREV_MOVE];
+				for move in V_TMC.[TAB_MOVE]
+				 where move.[NUM_ORD] > V_LAST.[NUM_ORD]
+				 order by move.[NUM_ORD]
+				loop
+					&debug('>		5.42',0)
+					if move.[NUM_ORD] = V_LAST.[NUM_ORD] + 1 then
+						V_PREV.[END_DATE]	:= move.[BEG_DATE] - 1;
+						move.[PREV_MOVE]	:= V_PREV;
+					end if;
+					move.[NUM_ORD]		:= move.[NUM_ORD] - 1;
+					move.[PER_EXPL]		:= V_PREV.[PER_EXPL];
+					move.[NORMA]		:= V_PREV.[NORMA];
+					move.[USCORENIE]	:= V_PREV.[USCORENIE];
+					move.[NAL_PER_EXPL] := V_PREV.[NAL_PER_EXPL];
+					move.[NAL_NORMA]	:= V_PREV.[NAL_NORMA];
+					move.[NAL_USCORENIE]:= V_PREV.[NAL_USCORENIE];
+				end loop;
+			End If;
+			
+			&debug('>	5.43',0)
+			--если установлен признак увеличения первоначальной цены при удорожании ОС на складе(nmatveeva 18/10/11)
+			if tune_rice_price
+				and V_TMC.[GRUPPA].[KIND_USER].[CODE] = 'СКЛАД'
+				and V_OPER_CODE in ('ДОНАЦЕНКА','МОНТАЖ','ПРИХОД','ДЕМОНТАЖ')
+			then
+					&debug('>	5.44',0)
+					V_PREV := V_TMC.[LAST_MOVE].[PREV_MOVE];
+					V_TMC.[PRICE] := V_PREV.[PRICE];
+			end if;
+			
+			
+			V_TMC.[LAST_MOVE] := Null; -- Забываем последнее движение
+			If V_TMC.[FIRST_MOVE]=V_LAST Then V_TMC.[FIRST_MOVE]:=Null; End If;
+			
+			&debug('>	5.45',0)
+			if ((V_OPER_CODE = 'МОНТАЖ' and V_TMC = V_LAST.[TMC_LIST].[ACC_MAT_REC])
+			 or V_OPER_CODE = 'ДОНАЦЕНКА') then
+			 	&debug('>	5.46',0)
+			 	declare
+			 		v_prev_move ref [TMC_MOVE] := V_LAST.[PREV_MOVE];
+			 	begin
+					-- Если было включение в налоговый учет
+					if tune_include_in_nal
+					 and (v_prev_move is not null and nvl(V_LAST.[NAL_SUMMA], 0) > 0 and nvl(V_LAST.[NAL_NORMA],0) > 0
+					     and nvl(v_prev_move.[NAL_SUMMA], 0) = 0 and nvl(v_prev_move.[NAL_NORMA],0) = 0)
+					 or v_prev_move is null then
+						&debug('>	5.47',0)
+						V_TMC.[NAL_BEG_DEPR] := null;
+						V_TMC.[NAL_END_DEPR] := null;
+						V_TMC.[NAL_END_EXPL] := null;
+						V_TMC.[NAL_LAST_DEPR] := null;
+						V_TMC.[NAL_METHOD].[0] := 3;
+						V_TMC.[NAL_GR_DEPR] := null;
+					end if;
+
+					if nvl(::[AC_MAT].[LIB_ACC_MAT].is_full_amo(V_TMC, v_prev_move), false) then
+						&debug('>	5.47',0)
+						V_TMC.[LAST_DEPR]		:= get_date_last_depr(V_TMC, null, 'АМОРТИЗАЦИЯ', true);
+					end if;
+					if V_TMC.[NAL_METHOD].[0] != 3
+					 and nvl(::[AC_MAT].[LIB_ACC_MAT].is_full_amo(V_TMC, v_prev_move, true), false) then
+						&debug('>	5.48',0)
+						V_TMC.[NAL_LAST_DEPR]	:= get_date_last_depr(V_TMC, null, 'АМОРТИЗАЦИЯ_Н', true);
+					end if;
+					if tune_change_nal_per_expl and V_TMC.[NAL_METHOD].[0] != 3 then
+						if nvl(::[AC_MAT].[LIB_ACC_MAT].is_full_amo(V_TMC, v_prev_move, true), false) then
+							&debug('>	5.49',0)
+							V_TMC.[NAL_END_DEPR] := last_day(V_TMC.[NAL_LAST_DEPR]);
+						else
+							&debug('>	5.50',0)
+							V_TMC.[NAL_END_DEPR] := add_months(V_TMC.[NAL_END_DEPR], -(V_LAST.[NAL_PER_EXPL] - v_prev_move.[NAL_PER_EXPL]));
+						end if;
+					end if;
+				end;
+			end if;
+			
+			&debug('>	5.51',0)
+			if V_LAST.[TMC_LIST] is not null then
+				&debug('>	5.52',0)
+				::[TMC_PARAM].[LIB].del_(	V_LAST.[TMC_LIST].[TAB_PARAM],
+											::[TMC_ATTRIBUTES].[VARS].SUM_ESTIM_DOHOD
+										);
+										
+				::[TMC_PARAM].[LIB].del_(	V_LAST.[TMC_LIST].[TAB_PARAM],
+											::[TMC_ATTRIBUTES].[VARS].SUM_ESTIM_RASHOD
+										);										
+			end if;
+
+			if V_LAST.[TMC_DOCUM_REF].[DOC_NAME_REF].[OPER].[CODE]='ВОЗВРАТ'
+			 and V_LAST%parent = V_LAST.[TMC_LIST].[ACC_MAT_REC] then
+			 	&debug('>	5.53',0)
+				declare
+					per_beg date;
+					per_end date;
+					per_beg_old date;
+					per_end_old date;
+					agr_per number := 0;
+				begin
+					--Бухгалт. данные:
+					V_LAST.[TMC_LIST].[ACC_MAT_REC].[END_DEPR]:=V_LAST.[TMC_LIST].[ACC_MAT_REC].[LAST_MOVE].[PREV_MOVE].[END_DEPR];
+					--выдача:
+					if V_LAST.[CON_VIDACH_VOZVR].[TMC_LIST].[TAB_PARAM] is not null then
+						::[TMC_PARAM].[LIB].get_period(V_LAST.[CON_VIDACH_VOZVR].[TMC_LIST].[TAB_PARAM], ::[TMC_ATTRIBUTES].[VARS].AMO_STOP_PERIOD, per_beg, per_end);
+					end if;
+					--возврат:
+					if V_LAST.[TMC_LIST].[TAB_PARAM] is not null then
+						::[TMC_PARAM].[LIB].get_period(V_LAST.[TMC_LIST].[TAB_PARAM], ::[TMC_ATTRIBUTES].[VARS].AMO_STOP_PERIOD, per_beg_old, per_end_old);
+					end if;
+					if per_beg_old is not null and per_end_old is not null and
+						per_beg is not null and per_end is not null then						
+						::[TMC_PARAM].[LIB].set_period(	V_LAST.[CON_VIDACH_VOZVR].[TMC_LIST].[TAB_PARAM]
+											,::[TMC_ATTRIBUTES].[VARS].AMO_STOP_PERIOD
+											,per_beg_old
+											,per_end_old);
+						::[TMC_PARAM].[LIB].set_period(	V_LAST.[TMC_LIST].[TAB_PARAM]
+											,::[TMC_ATTRIBUTES].[VARS].AMO_STOP_PERIOD
+											,per_beg
+											,per_end);
+					end if;					
+					
+					--Налоговые данные:					
+					--выдача:
+					if V_LAST.[CON_VIDACH_VOZVR].[TMC_LIST].[TAB_PARAM] is not null then
+						::[TMC_PARAM].[LIB].get_period(V_LAST.[CON_VIDACH_VOZVR].[TMC_LIST].[TAB_PARAM], ::[TMC_ATTRIBUTES].[VARS].NAL_AMO_STOP_PERIOD, per_beg, per_end);
+					end if;
+					--возврат:
+					if V_LAST.[TMC_LIST].[TAB_PARAM] is not null then
+						::[TMC_PARAM].[LIB].get_period(V_LAST.[TMC_LIST].[TAB_PARAM], ::[TMC_ATTRIBUTES].[VARS].NAL_AMO_STOP_PERIOD, per_beg_old, per_end_old);
+					end if;
+					
+					If  per_end_old > per_end Then
+						agr_per := months_between(per_end_old, per_end);
+						V_LAST.[TMC_LIST].[ACC_MAT_REC].[NAL_END_DEPR] := trunc (add_months(V_LAST.[TMC_LIST].[ACC_MAT_REC].[NAL_END_DEPR], agr_per), 'MM');
+					End If;
+					if per_beg_old is not null and per_end_old is not null and
+						per_beg is not null and per_end is not null then						
+						::[TMC_PARAM].[LIB].set_period(	V_LAST.[CON_VIDACH_VOZVR].[TMC_LIST].[TAB_PARAM]
+											,::[TMC_ATTRIBUTES].[VARS].NAL_AMO_STOP_PERIOD
+											,per_beg_old
+											,per_end_old);
+						::[TMC_PARAM].[LIB].set_period(	V_LAST.[TMC_LIST].[TAB_PARAM]
+											,::[TMC_ATTRIBUTES].[VARS].NAL_AMO_STOP_PERIOD
+											,per_beg
+											,per_end);
+					end if;
+					
+				end;
+			end if;
+			--Удаляем реквизит-ссылку на связаный возврат/выдачу в табл движений, чтобы можно было удалить движение BS00211803
+			V_LAST.[CON_VIDACH_VOZVR].[CON_VIDACH_VOZVR]:=null;
+			V_LAST.[CON_VIDACH_VOZVR]:=null;
+			
+			
+			V_LAST.[DELETE#AUTO];      -- Удаляем элемент массива движений
+			
+			&debug('>	5.54',0)
+			/* Стало -- Проставим предыдущие движения и последнее движение */
+			For V#MOVE In V_TMC.[TAB_MOVE] Order By V#MOVE.[NUM_ORD]
+			Loop
+				&debug('>		5.55',0)
+				V#MOVE.[PREV_MOVE] := V_TMC.[LAST_MOVE]; -- Предыдущее движение
+				V_TMC.[LAST_MOVE]  := V#MOVE;            -- Запомним предыдущее в последнем движении
+			End Loop;
+			V_TMC.[LAST_MOVE].[END_DATE] := Null;        -- Почистим дату окончания
+			update_acc_mat(V_TMC, this, v_oper_code);
+			&debug('>	5.56',0)
+		End Loop;
+
+		-- Восстановим количество затребованное, поступающее или блокировку
+		-- Перебираем все элементы списка ТМЦ
+		For V_LIST In [LIST_TMC]
+		Loop
+			&debug('>		5.57',0)
+			select a(count(a)) in V_LIST.[ACC_MAT_REC].[TAB_COMP] into num;
+			If V_OPER_CODE = 'ПЕРЕДАЧА' and (V_LIST.[GRUPPA_SUP].[KIND_USER].[CODE] in ('СКЛАД', 'ПОДОТЧЕТ') and V_LIST.[GRUPPA_REC].[KIND_USER].[CODE] = 'ЭКСПЛ') then
+				&debug('>	5.58',0)
+				V_LIST.[ACC_MAT_REC].[DATE_EXPL] := null;
+			end if;
+			-- Восстановим первоначальную цену
+			&debug('>	5.59 V_OPER_CODE='||V_OPER_CODE,0)
+			If V_OPER_CODE = 'МОНТАЖ' or (V_OPER_CODE = 'ПРИХОД' And V_LIST.[COMP] is not null) Then
+				-- Удалим из комплектующих
+				Begin
+					V_COMP := V_LIST.[COMP];
+					If V_COMP.[QUANT] <= V_LIST.[QUANT] Then
+						V_LIST.[COMP] := null;
+						V_COMP.[DELETE#AUTO];
+					Else
+						V_COMP.[PRICE] := V_COMP.[PRICE] - V_LIST.[BAL_SUMMA] + nvl(V_LIST.[NDS_IN_SUM]*(1-V_LIST.[NDS_KIND])*V_LIST.[NDS_SUMMA],0);-- Стоимость
+						V_COMP.[QUANT] := V_COMP.[QUANT] - V_LIST.[QUANT];    -- Количество
+						V_COMP.[NDS_SUM] := V_COMP.[NDS_SUM] - V_LIST.[NDS_SUMMA];
+						V_LIST.[COMP] := null;
+					End If;
+				End;
+				
+				
+			elsif V_OPER_CODE = 'ДЕМОНТАЖ' then
+			
+				if V_LIST.[COMP] is not null then
+			        V_LIST.[COMP].[PRICE]:=V_LIST.[COMP].[PRICE] + V_LIST.[BAL_SUMMA];-- Стоимость
+			        V_LIST.[COMP].[QUANT]:=V_LIST.[COMP].[QUANT] + V_LIST.[QUANT];-- Количество
+			        V_LIST.[COMP].[NDS_SUM]:=V_LIST.[COMP].[NDS_SUM] + V_LIST.[NDS_SUMMA];
+				else
+					declare
+						comp [TMC_COMP_REF] := null;
+					begin
+						locate comp in V_LIST.[ACC_MAT_SUP].[TAB_COMP]
+						 where comp.[NAME] = V_LIST.[NAME]
+						   and round(comp.[PRICE]/comp.[QUANT],2) = round(V_LIST.[BAL_SUMMA]/V_LIST.[QUANT],2);
+				        COMP.[PRICE] := COMP.[PRICE] + V_LIST.[BAL_SUMMA];-- Стоимость
+				        COMP.[QUANT] := COMP.[QUANT] + V_LIST.[QUANT];-- Количество
+				        COMP.[NDS_SUM] := COMP.[NDS_SUM] + V_LIST.[NDS_SUMMA];
+					exception
+						when NO_DATA_FOUND then
+							declare
+								tmc_misc_par 		ref [TMC_PARAM];
+								str_misc 				varchar2(32000);
+								old_comp_id				varchar2(50);
+								old_comp_place			varchar2(50);
+								old_comp_mol			varchar2(50);
+								old_comp_inv_numb		varchar2(50);
+								old_comp_sh_code		varchar2(50);
+								old_comp_place_ref	ref [TMC_PLACE];
+								old_comp_mol_ref	ref [USER];
+								bal_summa				[SUMMA];
+								nds_summa				[SUMMA];
+								zero_price				varchar2(50);
+							begin
+								begin
+									locate tmc_misc_par in V_LIST.[TAB_PARAM]
+										where tmc_misc_par.[ATTRIBUTE].[CODE] = 'TMC_LIST_MISC';
+									str_misc := tmc_misc_par.[VALUE];
+									::[RUNTIME].[STR].get_par(str_misc, 'COMPL_ID', old_comp_id);
+									::[RUNTIME].[STR].get_par(str_misc, 'COMPL_MOL', old_comp_mol);
+									::[RUNTIME].[STR].get_par(str_misc, 'COMPL_PLACE', old_comp_place);
+									::[RUNTIME].[STR].get_par(str_misc, 'COMPL_INV_NUMB', old_comp_inv_numb);
+									::[RUNTIME].[STR].get_par(str_misc, 'COMPL_SH_CODE', old_comp_sh_code);
+									::[RUNTIME].[STR].get_par(str_misc, 'COMPL_ZERO_PRICE', zero_price);
+									if old_comp_place is not null then
+										begin
+											locate old_comp_place_ref in ::[TMC_PLACE] where to_char(old_comp_place_ref%id) = old_comp_place;
+										exception when no_data_found then
+											null;
+										end;
+									end if;
+									if old_comp_mol is not null then
+										begin
+											locate old_comp_mol_ref in ::[USER] where to_char(old_comp_mol_ref%id) = old_comp_mol;
+										exception when no_data_found then
+											null;
+										end;
+									end if;
+								exception when no_data_found then
+									null;
+								end;
+								if zero_price = 1 then
+									bal_summa := 0;
+									nds_summa := null;
+									V_LIST.[ACC_MAT_SUP].[TAB_COMP].[NEW#AUTO].V_BLOCK_PRICE := true;
+								else
+									bal_summa := V_LIST.[BAL_SUMMA];
+									nds_summa := V_LIST.[NDS_SUMMA];
+								end if;
+								
+								comp := V_LIST.[ACC_MAT_SUP].[TAB_COMP].[NEW#AUTO]( V_LIST.[NAME],
+																				bal_summa,
+																				V_LIST.[QUANT],
+																				nds_summa,
+																				V_LIST.[ACC_MAT_SUP].[NDS_IN_SUM],
+																				null,
+																				old_comp_inv_numb,
+																				old_comp_sh_code,
+																				old_comp_place_ref,
+																				old_comp_mol_ref
+																				);
+								if old_comp_id is not null then
+									Update tmp(tmp.[TMC_COMP_STR_REF] = to_char(comp%id),
+										tmp.[NAME_INV] = replace(tmp.[NAME_INV],'(выполнен демонтаж)','')
+									) in ::[INV_DATA] all where tmp.[TMC_COMP_STR_REF] = old_comp_id;
+									::[TMC_PARAM].[LIB].del_(V_LIST.[TAB_PARAM], ::[TMC_ATTRIBUTES](CODE = 'TMC_LIST_MISC'));
+									::[RUNTIME].[STR].set_par(str_misc, 'COMPL_ID', comp);
+									::[TMC_PARAM].[LIB].ins_ (V_LIST.[TAB_PARAM], ::[TMC_ATTRIBUTES](CODE = 'TMC_LIST_MISC'), str_misc);
+								end if;
+							end;
+														
+							V_LIST.[COMP] := comp;
+							for move in V_LIST.[ACC_MAT_SUP].[TAB_MOVE]
+							 where (move.[TMC_DOCUM_REF].[DOC_NAME_REF].[OPER].[CODE] = 'МОНТАЖ'
+							   or (move.[TMC_DOCUM_REF].[DOC_NAME_REF].[OPER].[CODE] = 'ПРИХОД' and move.[TMC_LIST].[ACC_MAT_REC].[SIGN_COMPL]))
+							   and move.[TMC_LIST].[COMP] is null
+							   and round(move.[OPER_SUMMA]/move.[TMC_LIST].[QUANT]) = round(comp.[PRICE]/comp.[QUANT])
+							   and move.[TMC_LIST].[NAME] = comp.[NAME]
+							 order by move.[NUM_ORD] desc
+							loop
+								stdio.put_line_buf('Комплектующая установлена для движения №'||move.[NUM_ORD]);
+								move.[TMC_LIST].[COMP] := comp;
+								if move.[TMC_DOCUM_REF].[DOC_NAME_REF].[OPER].[CODE] = 'МОНТАЖ' then
+									comp.[NDS_IN_SUM] := move.[TMC_LIST].[NDS_KIND];
+								else
+									comp.[NDS_IN_SUM] := move.[TMC_LIST].[NDS_IN_SUM];
+								end if;
+							end loop;
+					end;
+				end if;
+			elsif V_OPER_CODE = 'ПЕРЕДАЧА' and V_LIST.[ACC_MAT_REC] != V_LIST.[ACC_MAT_SUP]
+				and num > 1 then
+					declare
+						new_comp [TMC_COMP_REF] := null;
+					begin
+						for comp in V_LIST.[ACC_MAT_REC].[TAB_COMP]
+						loop
+							if nvl(comp.[QUANT_OUT],0) > 0 then
+								pragma error('Невозможно передать комплектующую "'||comp.[NAME]||'",'
+											||NL$||'так как она затребована в документе на демонтаж!');
+							end if;
+							new_comp := V_LIST.[ACC_MAT_SUP].[TAB_COMP].[NEW#AUTO]( comp.[NAME],
+																		comp.[PRICE],
+																		comp.[QUANT],
+																		comp.[NDS_SUM],
+																		comp.[NDS_IN_SUM],
+																		null,
+																		comp.[INV_NUMB], -- Инвентарный номер
+																		comp.[SH_CODE], -- Штрих код
+																		::[TMC_COMP].[LIB].PlaceInAcMat(V_LIST.[ACC_MAT_SUP]), -- Местонахождение
+																		::[TMC_COMP].[LIB].MolInAcMat(V_LIST.[ACC_MAT_SUP]) -- МОЛ
+																		);
+							Update tmp(tmp.[TMC_COMP_STR_REF] = to_char(new_comp%id))
+								in ::[INV_DATA] all
+								where tmp.[TMC_COMP_STR_REF] = to_char(comp);
+							comp.[DELETE#AUTO];
+						end loop;
+					end;
+			elsif  V_OPER_CODE = 'ПРИХОД' then
+				V_LIST.[ACC_MAT_REC].[END_DEPR] := null;	
+			elsif V_OPER_CODE='ВЫДАЧА' then
+				declare
+					per_beg date;
+					per_end date;
+					agr_per number := 0;
+				begin
+					V_LIST.[ACC_MAT_SUP].[END_DEPR]:=V_LIST.[ACC_MAT_SUP].[LAST_MOVE].[END_DEPR];
+					::[TMC_PARAM].[LIB].get_period(V_LIST.[TAB_PARAM], ::[TMC_ATTRIBUTES].[VARS].NAL_AMO_STOP_PERIOD, per_beg, per_end);
+					If per_beg is not null and per_end is not null Then
+						agr_per := months_between(per_end,per_beg)+1;
+						V_LIST.[ACC_MAT_SUP].[NAL_END_DEPR] := trunc (add_months(V_LIST.[ACC_MAT_SUP].[NAL_END_DEPR], (-1)*agr_per), 'MM');
+					End If;
+				end;
+			end if;
+
+			-- Восстановим номера удаленные при обработке
+			&debug('>	5.60',0)
+			if tune_use_zav_num_arr
+			 and ((V_OPER_CODE = 'ПЕРЕДАЧА' and V_LIST.[ACC_MAT_REC] != V_LIST.[ACC_MAT_SUP]) or V_OPER_CODE in ('СПИСАНИЕ', 'РАСХОД', 'РЕАЛИЗАЦИЯ', 'МОНТАЖ', 'РЕМОНТ')) then
+				&debug('>	5.61',0)
+				::[TMC_NUM].[LIB].numstr_to_arr(V_LIST.[ZAV_NUMB], V_LIST.[ACC_MAT_SUP].[TAB_NUM]);
+			end if;
+			
+			-- Проверка связи мат счета с другим матсчетом через массив КСЭ.
+			::[TMC_DOCUM].[WORK_DOCUM].CheckCOMPOUND (	 p_oper 		==	V_OPER_CODE			--Код операции
+														,p_currMatAcc	==	V_LIST.[ACC_MAT_SUP]--обрабатываемый мат счет
+														,p_doc			==	THIS				--обрабатываемый документ
+														,p_DateExclude	==	null				--дата исключения, не изменяется
+														,p_undo_doc		==	true
+														);
+			
+			
+			V_LIST.[WORK_DECL];
+			-- Вернем вид использования счета поставщика на место
+			&debug('>	5.62',0)
+			If V_LIST.[ACC_MAT_SUP] Is Not Null Then
+				&debug('>	5.63',0)
+				V_LIST.[ACC_MAT_SUP].[KIND_USER]:=V_LIST.[ACC_MAT_SUP].[GRUPPA].[KIND_USER];
+			End If;
+			-- Вернем старый признак НДС на место
+			If V_OPER_CODE='ПЕРЕДАЧА' And V_LIST.[ACC_MAT_SUP]=V_LIST.[ACC_MAT_REC] Then
+				&debug('>	5.64',0)
+				V_LIST.[ACC_MAT_SUP].[NDS_IN_SUM]:= V_LIST.[NDS_KIND];
+			End If;
+			
+			If V_OPER_CODE='СПИСАНИЕ' then
+				&debug('>	5.65',0)
+				Update tmp(tmp.[PRICE] = nvl(tmp.[DO_SPIS_PRICE],tmp.[PRICE]),
+			   			   tmp.[QUANT] = nvl(tmp.[DO_SPIS_QUANT],tmp.[QUANT]),
+						   tmp.[NDS_SUM] = nvl(tmp.[DO_SPIS_NDS_SUM],tmp.[NDS_SUM])
+						) in V_LIST.[ACC_MAT_SUP].[TAB_COMP];
+						
+				Update tmp(tmp.[DO_SPIS_PRICE] = null,
+				   tmp.[DO_SPIS_QUANT] = null,
+				   tmp.[DO_SPIS_NDS_SUM] = null
+										) in V_LIST.[ACC_MAT_SUP].[TAB_COMP];
+			end if;
+		End Loop;
+	
+		-- Если использовалась доверенность
+		If [TRUST_DOCUM_REF] Is Not Null Then
+			&debug('>	5.66',0)
+			
+			-- Удалим из сопроводительного документа откатываемый материальный документ
+			For RR In [TRUST_DOCUM_REF].[ACCOMPANY_DOC]
+			Loop
+				If RR = This Then
+					RR.[DELETE#AUTO];
+				End If;
+			End Loop;
+			--откатить доверенность
+			if nvl(This.[DOC_NAME_REF].[TRUST_DOC_CLOSE], false) And This.[TRUST_DOCUM_REF]%State != 'GIVE' Then
+				::[VHO_INTERFACE].[PRX_TMC].Rollback_dov(This.[TRUST_DOCUM_REF]);	--update PRX_TMC 19/10/11 (nmatveeva)
+				Stdio.put_line_buf ('Откат доверенности №' || This.[TRUST_DOCUM_REF].[DOCUMENT_NUM] || 'прошёл успешно' );
+			End If;
+		End If;
+
+		-- Забудем про обработку документа
+		[SUM_DEPR]  := 0;     -- Сумма начисленной амортизации
+		[DATE_EXEC] := Null;  -- Дата обработки
+		[USER_EXEC] := Null;  -- Обработано пользователем
+		This%State  := 'FORM';-- Состояние мат/документа 'Сформированный'
+		
+		&debug('>	5.67',0)
+		--Откатить все счета-фактуры, связанные с документом
+		for (select RefConn(
+			  conn : id
+			, RefConn : Fact
+			, RefConn.[INITION] : Inition
+			)
+			in ::[FACTURA_DOC], (::[TMC_FACT_CONN] all : conn)
+			where conn.[VALUE] = to_char(THIS%ID)
+			    and RefConn.[CONN]=conn%collection
+			    and RefConn%state='ACTIVE'
+			order by RefConn.[INITION] asc)
+		loop				
+			&debug('>		5.68',0)
+			if ::[VHO_INTERFACE].[PRX_TMC].isSedFacturaReadOnly(p_sf==RefConn.Fact) then
+				vEsf := true;
+				clear_tmc(RefConn.Fact);
+				::[VHO_INTERFACE].[PRX_TMC].del_conn(this%class, this%id, RefConn.Fact.[CONN]);
+			end if;
+		end loop;
+		
+		if not vEsf then
+			&debug('>	5.69',0)
+			::[VHO_INTERFACE].[PRX_TMC].Info_Lib_Delete_Factura(This%class, This%Id, false);
+		end if;
+	End If;
+	
+	&debug('>6',0)
+	if nvl(this.[DOC_NAME_REF].[CLOSE_ACC_REAL],false) then --проставлен признак закрытия счетов выбытия(реализации)
+		--надо вернуть состояние счета
+		&debug('>6.1 надо вернуть состояние счета',0)
+		StatusAccRealize(this, this.[DOC_NAME_REF].[BUSS]);
+	end if;
+	
+	declare
+		str_misc_mark varchar2(50);
+	begin
+		&debug('>7',0)
+		::[RUNTIME].[STR].get_par(this.[MISC], 'MARK_CLOSE_SUP_MAIN', str_misc_mark);
+		if str_misc_mark = 1 then -- при создании мат документа в операции "!Переход на новый порядок учета запасов по 448-П" установлен признак "Закрывать счета 610"
+			&debug('>7.1 при создании мат документа в операции "!Переход на новый порядок учета запасов по 448-П" установлен признак "Закрывать счета 610"',0)
+			StatusAccSupMain(this);
+		end if;
+	end;
+
+	for tmc_list in this.[LIST_TMC] loop
+		&debug('>8',0)
+		for comp in tmc_list.[TAB_COMP] loop
+			&debug('comp = '||comp%id||' ACC_MAT_REC.PLACE = '||tmc_list.[ACC_MAT_REC].[PLACE],0)
+			comp.[PLACE] := tmc_list.[ACC_MAT_REC].[PLACE]; --Обновление местонахождения у комплектующих	
+		end loop;
+	end loop;
+	
+	&debug('>9',0)
+	
+	this.[DATE_PROVE]:=null;
+	
+	&debug('END',0)
+End;
+end;
+end;

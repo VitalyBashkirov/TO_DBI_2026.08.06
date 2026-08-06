@@ -1,0 +1,904 @@
+class PSH_LOCAL_JOB;
+
+@import_plsql(true)
+@name('[ПСБ] Библиотека')
+@tag('COPIED')
+library PSH_LIB is
+
+pragma macro (lj_lib,'::[PSH_LOCAL_JOB].[PSH_LIB]'); -- updated CHANGE_QUALIFIER CFB_LOCAL_JOB->PSB_LOCAL_JOB 22/10/22 -- updated CHANGE_QUALIFIER PSB_LOCAL_JOB->PSH_LOCAL_JOB 09/10/25 -- updated CHANGE_SHORT_NAME PSB_LIB->PSH_LIB 14/10/25
+pragma macro ('xml','[XML_DB]');
+p_date date;
+p_date1 date;
+cnt integer;
+n integer;
+v_instance_name		varchar2(100);
+
+public Procedure IMP_VAL_CBRF is
+str_clob CLOB;
+req   utl_http.req;
+resp  utl_http.resp;
+
+doc &xml.DOMDocument;
+Element &xml.DOMElement;
+rootNode &xml.DOMNode;
+node &xml.DOMNode;
+node1 &xml.DOMNode;
+nodeList &xml.DOMNodeList;
+nodeList1 &xml.DOMNodeList;
+map			&xml.DOMNamedNodeMap;
+parser 			&xml.Parser;
+fragment varchar2(32000);
+item XMLTYPE;
+elem &xml.DOMElement;
+CharCode  string;
+Value string;
+Nominal string;
+date1 string;
+rc			ref [RECONT_CUR_LIST];
+ft_m 		 ref [FT_MONEY];
+base_curr ref [DIC_INT_CUR];
+v_cnt		number;
+v_text		varchar2(32000);
+
+
+begin
+
+	if [CALENDAR].CHECK_DATE('HOLIDAYS', sysdate) then
+		return;
+	end if;
+
+	
+	select x(x.INSTANCE_NAME)
+	in v$instance%rowtype
+	into v_instance_name;
+
+	/*if v_instance_name != 'IBSO' then
+		return;
+	end if;*/
+
+	select x(count(1))
+	in ::[RECONT_CUR_LIST]
+	where x.[DATE_BEGIN] < [system].[OP_DATE]+1
+	and x.[CURRENCY]!=101159967   --.[CUR_SHORT]!='BYR'
+	into v_cnt;
+    
+	if v_cnt = 0 then
+		return;
+	end if; 
+	
+	
+	select t(min(t.[DATE_BEGIN])) in  ::[RECONT_CUR_LIST] all where t.[CURRENCY]!=101159967 into p_date1 ; 
+	--p_date := [system].[OP_DATE]+1;  
+	--p_date := to_date('15.04.2023','dd.mm.yyyy');
+	p_date := [CALENDAR].next_date('WORK', '0', p_date1)+1;
+	
+	-- CFT-1318
+	if TO_CHAR(p_date, 'DY') = 'ВС' then /* если воскресенье, то вторник :-) */
+		p_date := p_date + 2;
+	end if;
+	-- CFT-1318
+	
+    begin 
+      UTL_HTTP.set_body_charset ('windows-1251');
+      req := utl_http.begin_request ('http://www.cbr.ru/scripts/XML_daily.asp?date_req='||to_char(p_date, 'dd/mm/yyyy'));
+      resp := utl_http.get_response(req); utl_http.read_text(resp, str_clob); utl_http.end_response(resp); utl_http.close_persistent_conns;
+ 	exception
+	   when OTHERS then return;
+	  end;              
+
+   --debug_pipe(str_clob,0);
+  parser := &xml.newParser;
+  &xml.parseCLOB(parser, str_clob);
+  dbms_lob.freetemporary(str_clob);
+  doc := &xml.getDocument(parser);
+
+   if &xml.IsNull(doc) then
+				pragma error('Ошибка разбора XML');
+   else
+	Element:=&xml.getDocumentElement(doc);
+	
+    date1 := &xml.getAttribute(Element,'Date');
+    &lj_lib.write_log('RECONT','Курсы на '||date1);
+ --   debug_pipe('Курсы на '||date1 ,0);	
+     if to_date(date1,'dd.mm.yyyy')<=p_date1 then --[system].[OP_DATE] then        
+       return;
+     end if;
+    
+	nodeList := &xml.getChildrenByTagName(Element, 'Valute');
+    cnt := &xml.getLength(nodeList );
+	for i in 0 .. cnt - 1
+	loop	
+      	nodeList1 := &xml.getChildNodes(&xml.item(nodeList ,i));
+		if not &xml.IsNull(nodeList1) then
+			for j in 0..&xml.getLength(nodeList1)-1 loop
+			   node:=&xml.item(nodeList1, j);
+			  -- debug_pipe (&xml.getNodeName(node)|| '== '||&xml.getNodeValue(&xml.getFirstChild(node))  ,0);
+			
+			   case &xml.getNodeName(node) of
+			    :'Value' :	Value:= &xml.getNodeValue(&xml.getFirstChild(node));		
+			    :'Nominal' : Nominal:= &xml.getNodeValue(&xml.getFirstChild(node));
+			    :'CharCode' : CharCode:= &xml.getNodeValue(&xml.getFirstChild(node));
+               end;
+             end loop;
+
+              ft_m := ::[FT_MONEY].[LIB].Get_money(CharCode);
+              if ft_m is null then
+					debug_pipe('Валюты '||CharCode ||' не найдено в справочнике FT_MONEY');
+              else
+
+		               locate rc in ::[RECONT_CUR_LIST] where rc.[CURRENCY] = ft_m;
+		               begin
+		             --  debug_pipe('Найден  '||CharCode ||' '||Value||' '||Nominal,0);
+		              	rc.[RATE_NEW]:= to_number(replace(Value,',','.'));
+		             	rc.[UNIT_NEW]:= to_number(Nominal);
+			            rc.[DATE_BEGIN] := to_date(date1,'dd.mm.yyyy');
+			            commit;	            --*/
+					exception when NO_DATA_FOUND then
+					    --    debug_pipe('Не найден  '|| CharCode,0);
+						    rc := ::[RECONT_CUR_LIST].[NEW#AUTO](
+								  	   ft_m,			
+								       to_number(Value),
+								       to_number(Nominal),
+								       to_date(date1,'dd.mm.yyyy')
+								  );
+								  commit;
+								 --*/ 			
+					end;			
+
+
+	           end if;	
+			
+		end if;	
+
+	end loop;
+   &xml.freeParser(parser);
+	select x(count(1))
+	in ::[RECONT_CUR_LIST]
+	where x.[DATE_BEGIN] <= [system].[OP_DATE] 
+	and x.[CURRENCY]!=101159967   --.[CUR_SHORT]!='BYR'
+	into v_cnt;
+	
+	if v_cnt > 0 then
+	
+			v_text :=
+				'<html>
+				<style type="text/css">
+				table {
+				 background: #ffffff; /* цвет фона */
+				 border: 1px #ff0000 solid; /* стиль рамки */
+				 border-collapse: collapse ; /* убирание задвоенности рамки */
+				}
+				td {
+				 border: 1px #000000 solid; /* стиль рамки ячеек */
+				 padding: 0.2em;
+				 font-size: small;
+				 font-family: Calibri;
+				}
+				th {
+				 background: #e0e0e0;
+				 border: 1px #000000 solid; /* стиль рамки заголовков */
+				 padding: 0.2em;
+				 font-family: Calibri;
+				}
+				
+				</style>'||v_instance_name||'<br><br>
+				';				
+					select x(count(1))
+					in ::[RECONT_CUR_LIST]
+					where x.[DATE_BEGIN] > [system].[OP_DATE] 
+					and x.[CURRENCY]!=101159967   --.[CUR_SHORT]!='BYR'
+					into v_cnt;
+
+               if v_cnt = 0 then 
+                 v_text := v_text || '<p><font color="red">отсутствует файл</font></p>';
+               else 
+				 v_text := v_text || '<p><font color="red">Неудачная загрузка курсов</font></p>
+				                     <table>
+									  <tr>
+									    <th> Код </th>
+									    <th> Валюта </th>
+									    <th> Текущий курс </th>
+									    <th> Новый курс </th>
+									    <th> Дата </th>
+									  </tr>';
+				
+					
+						for
+					(	select x(x%rowtype)
+						in VW_CRIT_RECONT_CUR_LIST%rowtype
+						where  x.c_1!='BYR' 
+						and x.c_5<=[system].[OP_DATE]
+						
+						order by x.c_1
+					)
+					loop
+						v_text := v_text || '<tr><td>'||x.c_1||'</td><td>'||x.c_2||'</td><td>'||x.c_3||'</td><td>'||x.c_4||'</td><td>'||to_char(x.c_5,'dd/mm/yyyy')||'</td>';
+					end loop;
+			
+					v_text := v_text || '</table></html>';
+               end if;
+	::[FP_INTERFACE].[PRX_PCORE].Send_Mail(
+		--[SMTP_MAIL].Send_Mail(
+			 ::[PSH_EMAIL_RASSIL]([PSH_EMAIL_COD] = 'IMP_VAL_CBRF').[PSH_EMAIL_ADRES] --'sobolev@pshb.ru;slopuhov@pshb.ru;asankulov@pshb.ru' --Башкиров В.Г. 16.01.2025
+			,'ЗОД. Загрузка курсов. Не успех ('||v_instance_name||')'
+			,v_text
+			,p_isHtml == true
+			);
+			--*/
+	else
+		v_text :=
+'<html>
+<style type="text/css">
+table {
+ background: #ffffff; /* цвет фона */
+ border: 1px #ff0000 solid; /* стиль рамки */
+ border-collapse: collapse ; /* убирание задвоенности рамки */
+}
+td {
+ border: 1px #000000 solid; /* стиль рамки ячеек */
+ padding: 0.2em;
+ font-size: small;
+ font-family: Calibri;
+}
+th {
+ background: #e0e0e0;
+ border: 1px #000000 solid; /* стиль рамки заголовков */
+ padding: 0.2em;
+ font-family: Calibri;
+}
+
+</style>'|| --v_instance_name||'<br><br>
+'Курсы загружены успешно <br><br>
+
+<table>
+  <tr>
+    <th> Код </th>
+    <th> Валюта </th>
+    <th> Текущий курс </th>
+    <th> Новый курс </th>
+    <th> Дата </th>
+  </tr>';
+
+		for
+		(	select x(x%rowtype)
+			in VW_CRIT_RECONT_CUR_LIST%rowtype
+			where  x.c_1!='BYR' 
+			order by x.c_1
+		)
+		loop
+			v_text := v_text || '<tr><td>'||x.c_1||'</td><td>'||x.c_2||'</td><td>'||x.c_3||'</td><td>'||x.c_4||'</td><td>'||to_char(x.c_5,'dd/mm/yyyy')||'</td>';
+		end loop;
+
+		v_text := v_text || '</table></html>';
+		::[FP_INTERFACE].[PRX_PCORE].Send_Mail(
+		--[SMTP_MAIL].Send_Mail(
+			 ::[PSH_EMAIL_RASSIL]([PSH_EMAIL_COD] = 'IMP_VAL_CBRF').[PSH_EMAIL_ADRES] --'sobolev@pshb.ru;slopuhov@pshb.ru;asankulov@pshb.ru' --Башкиров В.Г. 16.01.2025
+			,'ЗОД. Загрузка курсов. Успех ('||v_instance_name||')'
+			,v_text
+			,p_isHtml == true
+			);--*/
+	end if;	
+   end if;
+end;
+
+
+
+public Procedure IMP_MTE_CBRF is
+str_clob CLOB;
+req   utl_http.req;
+resp  utl_http.resp;
+
+doc &xml.DOMDocument;
+Element &xml.DOMElement;
+rootNode &xml.DOMNode;
+node &xml.DOMNode;
+node1 &xml.DOMNode;
+nodeList &xml.DOMNodeList;
+nodeList1 &xml.DOMNodeList;
+map			&xml.DOMNamedNodeMap;
+parser 			&xml.Parser;
+fragment varchar2(32000);
+item XMLTYPE;
+elem &xml.DOMElement;
+CharCode  string;
+Value string;
+Nominal string;
+date1 string;
+rc			ref [RECONT_CUR_LIST];
+ft_m 		 ref [FT_MONEY];
+base_curr ref [DIC_INT_CUR];
+v_cnt		number;
+v_text		varchar2(32000);
+
+
+begin
+
+	if [CALENDAR].CHECK_DATE('HOLIDAYS', sysdate) then
+		return;
+	end if;
+
+	
+	select x(x.INSTANCE_NAME)
+	in v$instance%rowtype
+	into v_instance_name;
+
+	/*if v_instance_name != 'IBSO' then
+		return;
+	end if;*/
+
+	select x(count(1))
+	in ::[RECONT_CUR_LIST]
+	where x.[DATE_BEGIN] < [system].[OP_DATE]+1
+	and x.[CURRENCY]=9502591   --.[CUR_SHORT]!='BYR'
+	into v_cnt;
+    
+	if v_cnt = 0 then
+		return;
+	end if; 
+	
+	
+	select t(min(t.[DATE_BEGIN])) in  ::[RECONT_CUR_LIST] all where t.[CURRENCY]=9502591 into p_date1 ; 
+	--p_date := [system].[OP_DATE]+1;  
+	--p_date := to_date('15.04.2023','dd.mm.yyyy');
+	p_date := [CALENDAR].next_date('WORK', '0', p_date1)+1;
+
+	-- CFT-1318
+	if TO_CHAR(p_date, 'DY') = 'ВС' then /* если воскресенье, то вторник :-) */
+		p_date := p_date + 2;
+	end if;
+	-- CFT-1318
+   -------------------------------------------------------------------------------
+   begin 
+      UTL_HTTP.set_body_charset ('windows-1251');
+      
+      req := utl_http.begin_request ('http://www.cbr.ru/scripts/xml_metall.asp?date_req1='||to_char(p_date, 'dd/mm/yyyy')||'&date_req2='||to_char(p_date, 'dd/mm/yyyy'));
+      resp := utl_http.get_response(req); utl_http.read_text(resp, str_clob); utl_http.end_response(resp); utl_http.close_persistent_conns;
+     -- debug_pipe(str_clob ,0);	
+ 	exception
+	   when OTHERS then return;
+	  end;              
+
+   --debug_pipe(str_clob,0);
+  parser := &xml.newParser;
+  &xml.parseCLOB(parser, str_clob);
+  dbms_lob.freetemporary(str_clob);
+  doc := &xml.getDocument(parser);
+
+   if &xml.IsNull(doc) then
+				pragma error('Ошибка разбора XML');
+   else
+	 Element:=&xml.getDocumentElement(doc);
+	
+    date1 := &xml.getAttribute(Element,'FromDate');
+
+ 
+     if to_date(date1,'yyyymmdd')<=p_date1 then --[system].[OP_DATE] then        
+       return;
+     end if;
+    &lj_lib.write_log('RECONT','Металл на '||to_char(to_date(date1,'yyyymmdd'),'dd.mm.yy'));
+    
+    
+	nodeList := &xml.getChildrenByTagName(Element, 'Record');
+    cnt := &xml.getLength(nodeList );
+	for i in 0 .. cnt - 1
+	loop	
+				nodeList1 := &xml.getChildNodes(&xml.item(nodeList ,i));
+				map := &xml.getAttributes(&xml.item(nodeList, i));
+				if &xml.getLength(map)>0 then							
+				for i in 0..&xml.getLength(map)-1
+				loop
+					node1 := &xml.item(map, i);
+					if &xml.getNodeName(node1)='Code'  and &xml.getNodeValue(node1)='1' then 
+					--  debug_pipe (i ||'  - '||&xml.getNodeName(node1)||' : "'||&xml.getNodeValue(node1)||'"' ,0);
+                       
+							if not &xml.IsNull(nodeList1) then
+								for j in 0..&xml.getLength(nodeList1)-1 loop
+								   node:=&xml.item(nodeList1, j);			   
+								   if &xml.getNodeName(node)='Buy' then 
+										--   debug_pipe (&xml.getNodeName(node)|| '== '||&xml.getNodeValue(&xml.getFirstChild(node))  ,0);
+										    Value:=&xml.getNodeValue(&xml.getFirstChild(node));
+										    ft_m := ::[FT_MONEY].[LIB].Get_money('XAU');
+										    Nominal:=1;
+									               locate rc in ::[RECONT_CUR_LIST] where rc.[CURRENCY] = ft_m;
+									               begin
+									               debug_pipe('Найден  '||CharCode ||' '||Value||' '||Nominal,0);
+									              	rc.[RATE_NEW]:= to_number(replace(Value,',','.'));
+									             	rc.[UNIT_NEW]:= Nominal;
+										            rc.[DATE_BEGIN] := to_date(date1,'yyyymmdd');
+										            commit;	            
+												exception when NO_DATA_FOUND then
+												    --    debug_pipe('Не найден  '|| CharCode,0);
+													    rc := ::[RECONT_CUR_LIST].[NEW#AUTO](
+															  	   ft_m,			
+															       to_number(Value),
+															       to_number(Nominal),
+															       to_date(date1,'dd.mm.yyyy')
+															  );
+															  commit;
+																		
+												end;			
+								    end if;
+					             end loop;
+					
+								
+							end if;	
+
+					
+					end if;
+				end loop;	
+				end if;
+    end loop;
+   end if;
+    &xml.freeParser(parser);
+	--*/	
+end;
+
+
+
+public Procedure Recont_Acc is
+sald		[SUMMA];
+sald_nt		[SUMMA];
+p_rate	number;
+fp [SORT_OF_RECONT];
+str_msg	varchar2(8000);
+str_tmp varchar2(8000);
+lg_l ref [PSH_LOCAL_JOBS_F]; -- updated CHANGE_QUALIFIER CBF_LOCAL_JOBS_F->PSH_LOCAL_JOBS_F 07/10/25
+cnt integer;
+p_date date;
+begin
+	select x(x.INSTANCE_NAME)
+	in v$instance%rowtype
+	into v_instance_name;
+
+	if v_instance_name != 'IBSO' then
+		return;
+	end if;
+
+
+   -- ::[SYSTEM].[VARIABLES].set_system_vars_by_user(15470352); ::[END_OD_INTERFACE].[PRX_DOCUMENT].trc_set_var_current;
+   -- fp.[0] := 3;
+	p_date := ::[SYSTEM].[OP_DATE] -3;
+    while p_date <= ::[SYSTEM].[OP_DATE]-1
+    loop
+        str_msg:='';
+		for acc in ::[AC_FIN] all where acc.[FINTOOL] != [SYSTEM]::[SYS_MAIN_VAL] and (acc.[RECONT_ACC].[0]!=3 or acc.[RECONT_ACC].[0] is null)
+		loop
+			p_rate	:= ::[DOCUMENT].[LIB_CUR].Get_Rate(acc.[FINTOOL], p_date);			
+			sald 	:= abs(f.a('И'||acc||'СВ',p_date));
+			sald_nt := abs(f.a('И'||acc||'СН',p_date));
+			for (
+				select  rec
+					(	trunc(rec.[DATE])	: c_date
+						--, rec.[SUMMA] 		: c_sum
+						--, rec.[DOC]			: c_doc
+						--, rec.[DT]          : c_dt
+						--, rec.[SUMMA_NAT]   : c_sum_NAT
+						--, rec.[START_SUM_NAT]: c_START_SUM_NAT
+						--, rec.[START_SUM]    : c_START_SUM
+						, rec.[START_SUM] +decode(rec.[DT], '1', -1, 1)*rec.[SUMMA]  : c_end_sum
+						, rec.[START_SUM_NAT]+decode(rec.[DT], '1', -1, 1)*rec.[SUMMA_NAT] : c_end_sum_nat
+					)	
+				in	 ::[RECORDS]						
+					 join (::[AC_FIN]:a)	on 	rec%collection = a.[ARC_MOVE] and a%id=acc			
+					 join (::[MAIN_DOCUM]:d) on d%id=rec.[DOC]
+					all	
+					where	trunc(rec.[DATE]) = p_date and d.[KOD_NAZN_PAY].[KOD_NAZN] ='RECONT'
+						
+	           )	
+			   loop
+				   sald_nt:=abs(rec.c_end_SUM_NAT);
+				   exit;
+			   end loop;
+			if sald_nt - round(p_rate*sald,2)!=0 and to_char(p_date,'dd.mm.yy') not in ('26.11.21','16.12.21') then
+	           str_tmp:=to_char(p_date,'dd.mm.yy')||'  '||acc.[MAIN_V_ID] ||' вход. остаток '||sald_nt ||' не равен переоценке ' || sald|| ' * '|| p_rate||' = '||round(p_rate*sald,2);
+              /* select lg_l(count(1)) in ::[PSH_LOCAL_JOBS_F] all  where lg_l%collection = ::[CFB_LOCAL_JOB]([CODE]='RECONT').[TEXT_LIST] and trunc(lg_l.[DATE_OP])=trunc(SYSDATE) and INSTR(lg_l.[TEXT],str_tmp)>0 -- updated CHANGE_QUALIFIER CBF_LOCAL_JOBS_F->PSH_LOCAL_JOBS_F 07/10/25
+               into cnt;
+	           if cnt = 0 or (cnt<2 and sysdate> trunc(sysdate)+17/24+30/1440)
+		           then		
+		               str_msg:=str_msg||str_tmp||' '||'<BR>'||nl$;	
+		               --debug_pipe(str_msg,0);
+		           end if;--*/
+		           str_msg:=str_msg||str_tmp||' '||'<BR>'||nl$;	  
+	        end if;
+		end loop;
+		   -- if length(str_msg)>1 then &lj_lib.write_log('RECONT',str_msg);  end if;
+		    if length(str_msg)>1 then 
+		    	--[SMTP_MAIL].Send_Mail(
+		    	::[FP_INTERFACE].[PRX_PCORE].Send_Mail(
+					 ::[PSH_EMAIL_RASSIL]([PSH_EMAIL_COD] = 'IMP_VAL_CBRF').[PSH_EMAIL_ADRES] --'sobolev@pshb.ru;' --Башкиров В.Г. 16.01.2025
+					,'Переоценка ('||v_instance_name||')'
+					,str_msg
+					,p_isHtml == true
+					);
+		    null;
+		    end if;
+		p_date := p_date + 1;
+    end loop;
+end;
+
+
+public Procedure OP_DATE is
+P_FILE  integer;
+begin
+	select x(x.INSTANCE_NAME)
+	in v$instance%rowtype
+	into v_instance_name;
+
+	if v_instance_name != 'IBSO' then
+		return;
+	end if;
+
+if  ::[SYSTEM].[OP_DATE]<trunc(sysdate) then 
+      P_FILE := stdio.Open(::[SYSTEM_PARAMS].[GET]('PATH')||'/SMS', 'SMS_'||to_char(sysdate,'yyyymmdd_hh24mi')||'.txt', 'W');
+       -- Соболев С.О.
+       -- stdio.put_line(P_FILE,'+79104287704:Операционный день '||to_char(::[SYSTEM].[OP_DATE],'dd.mm.yyyy')|| ' не переведен!',null,null,stdio.WINTEXT);    
+       
+       -- Башкиров В.Г.
+       stdio.put_line(P_FILE,'+79299726017:Операционный день '||to_char(::[SYSTEM].[OP_DATE],'dd.mm.yyyy')|| ' не переведен!',null,null,stdio.WINTEXT);
+       
+       -- Заернюк Р.В.
+       stdio.put_line(P_FILE,'+79162916835:Операционный день '||to_char(::[SYSTEM].[OP_DATE],'dd.mm.yyyy')|| ' не переведен!',null,null,stdio.WINTEXT);    
+       
+       -- Кузнецов С.Е.
+       stdio.put_line(P_FILE,'+79038819268:Операционный день '||to_char(::[SYSTEM].[OP_DATE],'dd.mm.yyyy')|| ' не переведен!',null,null,stdio.WINTEXT);
+       stdio.close(P_FILE);	
+       
+  -- Башкиров В.Г. 07.11.2024 отключил уволившихся, добавил новых через "[ПСБ] Справочник email рассылки" в ZOD_ERR-ЗОД не переведен
+  /** /
+  ::[FP_INTERFACE].[PRX_PCORE].Send_Mail(
+	 'sobolev@pshb.ru;asankulov@pshb.ru;'
+	,'Внимание'
+	,'Операционный день не переведен'
+	,p_isHtml == true
+	);
+  /**/
+
+	::[FP_INTERFACE].[PRX_PCORE].Send_Mail(
+		 ::[PSH_EMAIL_RASSIL]([PSH_EMAIL_COD] = 'ZOD_ERR').[PSH_EMAIL_ADRES]
+		,'ЗОД. Операционный день не переведен'
+		,'Операционный день не переведен'
+		,'IT@pshb.ru'
+		,false
+		,null
+		);
+end if; 
+end;
+
+
+/*
+public e_self_is_null exception;
+pragma	EXCEPTION_INIT(e_self_is_null, -30625);
+
+
+public function get_tag_val(p_xdata CLOB, p_tag varchar2) return varchar2 is	
+data_xdata XMLTYPE;
+begin
+data_xdata := XMLTYPE(p_xdata);	
+return data_xdata.extract('DATA/EVENT/PARAMS/PARAM[@PARAM_CODE = ''UID'']/text()').GETSTRINGVAL();
+exception when e_self_is_null then	
+	return ' - ';
+end;
+
+
+public Procedure CHANGE_DOC is
+cnt integer;
+str_msg MEMO_BIG;
+dt date;
+begin
+cnt := 0;
+str_msg := '';
+dt:=::[RUNTIME].[CALENDAR].next_date('HOLIDAYS', '0', trunc([SYSTEM].[OP_DATE]-1), -1);
+
+for ( select x(  distinct x.[CLIENT_REF]
+                , cl.[NAME]    :  name
+                ,cl.[DOC].[SER] : ser
+                ,cl.[DOC].[NUM] : num
+                --, x.[value] 	: val
+				--, to_char(x.[DATE_EDIT],'dd.mm.yy'): date_edit
+				)
+			in ::[CL_HIST]  ,  (::[CL_PRIV] all : cl) , (::[VZ_CARDS] all : cd) all
+			  where x.[QUAL] like 'DOC.%'
+			  and trim(x.[value])>' '
+			  and x.[DATE_EDIT] >= dt
+			  and x.[CLIENT_REF]=cd.[CLIENT]
+			  and x.[CLIENT_REF]=cl
+			
+ 	)
+ loop
+      str_msg:=str_msg||'<BR>'||x.name||' Новый документ: '||x.ser||' '||x.num; cnt:=cnt+1;
+ end loop;
+
+   	 if cnt >0 then      	
+   	   [SMTP_MAIL].send_mail('cards@cfb.ru' ,'Изменения документов c '||to_char(dt,'dd.mm.yyyy'),str_msg ,null, true, true);
+   	   &lj_lib.write_log('CHANGE_DOC_LOG',str_msg);
+   	 end if;
+
+end;
+
+
+public Procedure JOB_STATE is
+cnt integer;
+str_msg	varchar2(4000) :='Ошибки работы джобов: ';
+flg boolean :=false;
+begin
+	if  ::[PSH_LOCAL_JOB].[CFB_LIB].is_it_work_db = true then -- updated CHANGE_QUALIFIER CFB_LOCAL_JOB->PSB_LOCAL_JOB 22/10/22 -- updated CHANGE_QUALIFIER PSB_LOCAL_JOB->PSH_LOCAL_JOB 09/10/25
+		for ( select a1 (a1.name : name ) in ::[SYSTEM_JOBS] all  where a1.JOB is not NULL
+and DECODE(a1.QUEUE,3,DECODE(a1.JOB_STATE,0,DECODE(a1.FAILURES,0,'Работает',null,'Работает','Ошибка выполнения'),1,'Активно',2,'Активно',3,'Активно',4,'Блокировано',6,'Остановлено'),DECODE(a1.FAILURES,0,DECODE(a1.EXECUTE,'1','Блокировано',DECODE(a1.JOB,0,'Остановлено',DECODE(a1.START_TIME,null,'Работает',DECODE(a1.STOP_TIME,null,'Активно','Работает')))),DECODE(INSTR(NVL(a1.INFO,'0'),'APP-DOCUM_RC.HASH_LIB'),0,'Ошибка выполнения','Ошибка ключевания')))  like '%шибк%'
+		)
+		loop
+			--if  a.[NAME] not like '%4599061986%' then
+                         str_msg:=str_msg||NL$||a1.name;
+                         flg:=true;
+			--end if;
+		end loop;
+         if flg then
+               select lg_l(count(1)) in ::[PSH_LOCAL_JOBS_F] all  where lg_l%collection = ::[PSH_LOCAL_JOB]([CODE]='JOB_STATE').[TEXT_LIST] and lg_l.[DATE_OP]>SYSDATE-15/1440 and INSTR(lg_l.[TEXT],str_msg)>0 -- updated CHANGE_QUALIFIER CFB_LOCAL_JOB->PSB_LOCAL_JOB 22/10/22 -- updated CHANGE_QUALIFIER CBF_LOCAL_JOBS_F->PSH_LOCAL_JOBS_F 07/10/25 -- updated CHANGE_QUALIFIER PSB_LOCAL_JOB->PSH_LOCAL_JOB 09/10/25
+               into cnt;
+	           if cnt = 0
+		           then		
+		               ::[PSH_LOCAL_JOB].[CFB_LIB].write_log('JOB_STATE',str_msg); -- updated CHANGE_QUALIFIER CFB_LOCAL_JOB->PSB_LOCAL_JOB 22/10/22 -- updated CHANGE_QUALIFIER PSB_LOCAL_JOB->PSH_LOCAL_JOB 09/10/25
+		           end if;
+
+		
+		  end if;
+       end if;
+end;
+*/
+
+/*public procedure WEB_Login_ERROR is
+cnt integer;
+cnt1 integer;
+str string(1000);
+str_msg  MEMO_BIG := '';
+dt date;
+begin
+cnt := 0;
+str_msg := '';
+dt:=::[RUNTIME].[CALENDAR].next_date('HOLIDAYS', '0', trunc([SYSTEM].[OP_DATE]-1), -1);
+--dt:=trunc([SYSTEM].[OP_DATE]);
+--dt:=to_date('21.10.2021','dd.mm.yyyy');
+for ( select x(  
+                 c.[NAME]    :  name
+                ,x.[CREATED] :  dat
+                
+				)
+			in ::[CFB_IBANK2_MSG]  
+			join   (::[CFB_IBANK2] all : i)  on x%COLLECTION=i.[MSGS]
+			join   (::[BANK_CLIENT] all : cl) on cl%id=i%id
+			join (::[client] all : c)  on c%id=cl.[client]
+			all
+           where x.[QUERY_TYPE]='GET_WEB_LOGIN' and x.[STATUS]= -1 and x.[CREATED]>=dt
+ 	)
+ loop
+      str:=x.name||' Дата: '||to_char(x.dat, 'dd.mm.yy hh:mi:ss'); 
+      select lg_l(count(1)) in ::[PSH_LOCAL_JOBS_F] all  where lg_l%collection = ::[PSH_LOCAL_JOB]([CODE]='WEB_LOGIN_ERROR').[TEXT_LIST] and trunc(lg_l.[DATE_OP])>dt  and INSTR(lg_l.[TEXT],str)>0 -- updated CHANGE_QUALIFIER CFB_LOCAL_JOB->PSB_LOCAL_JOB 22/10/22 -- updated CHANGE_QUALIFIER CBF_LOCAL_JOBS_F->PSH_LOCAL_JOBS_F 07/10/25 -- updated CHANGE_QUALIFIER PSB_LOCAL_JOB->PSH_LOCAL_JOB 09/10/25
+         into cnt1;         
+              if cnt1=0 then
+                str_msg:=str_msg||'<BR>'||str; cnt:=cnt+1;
+              end if;
+ end loop;
+
+
+
+   	 if cnt >0 then      	
+   	   &lj_lib.write_log('WEB_LOGIN_ERROR',str_msg);
+   	 end if;
+
+end;
+
+public procedure BK_ERROR is
+cnt integer;
+cnt1 integer;
+str string(1000);
+str_msg  MEMO_BIG := '';
+dt date;
+begin
+cnt := 0;
+str_msg := ' ';
+dt:=::[RUNTIME].[CALENDAR].next_date('HOLIDAYS', '0', trunc([SYSTEM].[OP_DATE]-1), -1);
+--dt:=trunc([SYSTEM].[OP_DATE]);
+--dt:=to_date('21.10.2021','dd.mm.yyyy');
+for ( select x(  
+                 nvl(c.[NAME],' ')    :  name
+                ,x.[CREATED] :  dat
+                ,x.[QUERY_TYPE] : query_type
+                ,x.[ERROR]      : error
+                ,nvl(a.[FIELD_VALUE],' ') : SENDER_FIO
+				)
+			in ::[CFB_IBANK2_MSG]  
+			join   (::[CFB_IBANK2] all : i)  on x%COLLECTION=i.[MSGS]
+			join   (::[BANK_CLIENT] all : cl) on cl%id=i%id
+			left join  (::[CFB_IBANK2_ATR] all : a)  on a%COLLECTION = x.[QUERY_RESAULTS]  and  a.[FIELD_NAME]='SENDER_FIO'
+			left join (::[client] all : c)  on c%id=cl.[client]
+			
+			
+			all
+           where x.[QUERY_TYPE]!='GET_WEB_LOGIN' 
+           and x.[ERROR] is not null
+           --and x.[STATUS]= -1 
+           and x.[CREATED]>=dt
+ 	)
+ loop
+      str:=to_char(x.name)||' Дата: '||to_char(x.dat, 'dd.mm.yy hh:mi:ss')||'   ' ||to_char(x.query_type)||'  '||to_char(x.error)||'  '||to_char(x.SENDER_FIO); 
+      select lg_l(count(1)) in ::[PSH_LOCAL_JOBS_F] all  where lg_l%collection = ::[PSH_LOCAL_JOB]([CODE]='SBP_ERROR').[TEXT_LIST] and trunc(lg_l.[DATE_OP])>=dt  and INSTR(replace(lg_l.[TEXT],' '),replace(str,' '))>0 -- updated CHANGE_QUALIFIER CFB_LOCAL_JOB->PSB_LOCAL_JOB 22/10/22 -- updated CHANGE_QUALIFIER CBF_LOCAL_JOBS_F->PSH_LOCAL_JOBS_F 07/10/25 -- updated CHANGE_QUALIFIER PSB_LOCAL_JOB->PSH_LOCAL_JOB 09/10/25
+         into cnt1;         
+              if cnt1=0 then
+                str_msg:=str_msg||'<BR>'||str; cnt:=cnt+1;
+              end if;
+ end loop;
+
+
+
+   	 if cnt >0 then      	
+   	   &lj_lib.write_log('SBP_ERROR',str_msg);
+   	 end if;
+
+end;
+
+*/
+
+/*
+public Procedure Recont_Acc is
+sald		[SUMMA];
+sald_nt		[SUMMA];
+p_rate	number;
+fp [SORT_OF_RECONT];
+str_msg	varchar2(8000);
+str_tmp varchar2(8000);
+lg_l ref [PSH_LOCAL_JOBS_F]; -- updated CHANGE_QUALIFIER CBF_LOCAL_JOBS_F->PSH_LOCAL_JOBS_F 07/10/25
+cnt integer;
+p_date date;
+begin
+    ::[SYSTEM].[VARIABLES].set_system_vars_by_user(15470352); ::[END_OD_INTERFACE].[PRX_DOCUMENT].trc_set_var_current;
+    fp.[0] := 3;
+	p_date := ::[SYSTEM].[OP_DATE] - 5;
+    while p_date <= ::[SYSTEM].[OP_DATE]-1
+    loop
+        str_msg:='';
+		for acc in ::[AC_FIN] all where acc.[FINTOOL] != [SYSTEM]::[SYS_MAIN_VAL] and (acc.[RECONT_ACC].[0]!=3 or acc.[RECONT_ACC].[0] is null)
+		loop
+			p_rate	:= ::[DOCUMENT].[LIB_CUR].Get_Rate(acc.[FINTOOL], p_date);			
+			sald 	:= abs(f.a('И'||acc||'СВ',p_date));
+			sald_nt := abs(f.a('И'||acc||'СН',p_date));
+			for (
+				select  rec
+					(	trunc(rec.[DATE])	: c_date
+						--, rec.[SUMMA] 		: c_sum
+						--, rec.[DOC]			: c_doc
+						--, rec.[DT]          : c_dt
+						--, rec.[SUMMA_NAT]   : c_sum_NAT
+						--, rec.[START_SUM_NAT]: c_START_SUM_NAT
+						--, rec.[START_SUM]    : c_START_SUM
+						, rec.[START_SUM] +decode(rec.[DT], '1', -1, 1)*rec.[SUMMA]  : c_end_sum
+						, rec.[START_SUM_NAT]+decode(rec.[DT], '1', -1, 1)*rec.[SUMMA_NAT] : c_end_sum_nat
+					)	
+				in	 ::[RECORDS]						
+					 join (::[AC_FIN]:a)	on 	rec%collection = a.[ARC_MOVE] and a%id=acc			
+					 join (::[MAIN_DOCUM]:d) on d%id=rec.[DOC]
+					all	
+					where	trunc(rec.[DATE]) = p_date and d.[KOD_NAZN_PAY].[KOD_NAZN] ='RECONT'
+						
+	           )	
+			   loop
+				   sald_nt:=abs(rec.c_end_SUM_NAT);
+				   exit;
+			   end loop;
+			if sald_nt - round(p_rate*sald,2)!=0 and to_char(p_date,'dd.mm.yy') not in ('26.11.21','16.12.21') then
+	           str_tmp:=to_char(p_date,'dd.mm.yy')||'  '||acc.[MAIN_V_ID] ||' вход. остаток '||sald_nt ||' не равен переоценке '||round(p_rate*sald,2) || ' = '||sald|| ' * '|| p_rate;
+               select lg_l(count(1)) in ::[PSH_LOCAL_JOBS_F] all  where lg_l%collection = ::[PSH_LOCAL_JOB]([CODE]='RECONT').[TEXT_LIST] and trunc(lg_l.[DATE_OP])=trunc(SYSDATE) and INSTR(lg_l.[TEXT],str_tmp)>0 -- updated CHANGE_QUALIFIER CFB_LOCAL_JOB->PSB_LOCAL_JOB 22/10/22 -- updated CHANGE_QUALIFIER CBF_LOCAL_JOBS_F->PSH_LOCAL_JOBS_F 07/10/25 -- updated CHANGE_QUALIFIER PSB_LOCAL_JOB->PSH_LOCAL_JOB 09/10/25
+               into cnt;
+	           if cnt = 0 or (cnt<2 and sysdate> trunc(sysdate)+17/24+30/1440)
+		           then		
+		               str_msg:=str_msg||str_tmp||' '||'<BR>'||nl$;	
+		               --debug_pipe(str_msg,0);
+		           end if;
+	        end if;
+		end loop;
+		    if length(str_msg)>1 then &lj_lib.write_log('RECONT',str_msg);  end if;
+		p_date := p_date + 1;
+    end loop;
+end;
+
+*/
+
+
+-- запись лога выполнения операции
+public procedure write_log (job_name string, str MEMO_BIG) is
+rec ref [PSH_LOCAL_JOB]; -- updated CHANGE_QUALIFIER PSB_LOCAL_JOB->PSH_LOCAL_JOB 09/10/25
+	begin
+     	locate rec in ::[PSH_LOCAL_JOB] where rec.[CODE]=job_name;  -- updated CHANGE_QUALIFIER PSB_LOCAL_JOB->PSH_LOCAL_JOB 09/10/25
+     	rec.[TEXT_LIST].[PSH_CFB_NEW](null,false,false,sysdate,rtrim(ltrim(str))); -- updated CHANGE_SHORT_NAME CFB_NEW->PSH_CFB_NEW 15/10/25
+    exception when OTHERS then  exit;
+	end;	
+	
+--Список Email группы
+public function get_email_list_for_group(job_name string) return string is
+rec ref [PSH_LOCAL_JOB];  -- updated CHANGE_QUALIFIER PSB_LOCAL_JOB->PSH_LOCAL_JOB 09/10/25
+vRet string;
+Begin
+   begin
+     	locate rec in ::[PSH_LOCAL_JOB] where rec.[CODE]=job_name;  -- updated CHANGE_QUALIFIER PSB_LOCAL_JOB->PSH_LOCAL_JOB 09/10/25
+      exception when OTHERS then  exit;
+	end;	
+	for f in rec.[CLIENT_LIST] where f.[EMAIL] loop
+		for (select t(t.[NUMB] :Email) in f.[CLIENT_REF].[CONTACTS] all where t.[TYPE].[CODE] = 'MAIL' and t.[PRIVATE].[CODE] = 'CFB_BANK')
+		loop vRet:=vRet||t.Email||';';end loop;
+	end loop;
+return vRet;	
+
+end;	
+	
+-- рассылка уведомлений
+public  procedure send_info_jobs_email is
+	begin
+		for j in ::[PSH_LOCAL_JOB] all where     exists (select r(1) in j.[TEXT_LIST] all where nvl(r.[EMAIL],false) = false)  -- updated CHANGE_QUALIFIER PSB_LOCAL_JOB->PSH_LOCAL_JOB 09/10/25
+		                                     and exists (select r(1) in j.[CLIENT_LIST] all where nvl(r.[EMAIL],false) = true)
+			loop
+			    for m in j.[TEXT_LIST] all where nvl(m.[EMAIL],false) = false
+				    loop
+				        for u in j.[CLIENT_LIST] all where nvl(u.[EMAIL],false) = true
+					        loop
+					            for c in u.[CLIENT_REF].[CONTACTS] all where c.[TYPE].[CODE] = 'MAIL' and c.[PRIVATE].[CODE] = 'CFB_BANK' and c.[NUMB] is not null
+						            loop
+						                begin
+						                    /* ::[RUNTIME].[SMTP_MAIL].send_mail(c.[NUMB],j.[NAME],m.[TEXT],null, true, true);*/
+						                    ::[FP_INTERFACE].[PRX_PCORE].Send_Mail(c.[NUMB],j.[NAME],m.[TEXT],null, true, true);
+						                    null;
+						                exception when OTHERS then write_log('JOB_SENDMAIL','Ошибка '||j.[NAME]||' '||u.[CLIENT_REF].[NAME]); end;
+						            end loop;
+					        end loop;
+				        m.[EMAIL] := true;
+				    end loop;
+			end loop;
+	end;
+
+
+
+
+public  function is_it_work_db return boolean
+is
+res BOOLEAN DEFAULT FALSE;
+v_instance_name varchar2;
+begin
+	select x(x.INSTANCE_NAME)
+	in v$instance%rowtype
+	into v_instance_name;
+IF v_instance_name='IBSO' THEN res := TRUE; END IF;
+return res;
+end;	
+
+
+
+
+public function GetPhoneNumber
+/*	Функция для получения номера телефона клиента */
+(
+	p_CONTACTS	[CONTACTS_ARR]
+	/*	Массив контактов клиента */
+) return varchar2(100) is 
+	v_ret_value			varchar2(100);
+	v_prev_num_comm		number := null;
+	v_prev_num_own		number := null;
+	v_new_num_comm		number := null;
+	v_new_num_own		number := null;
+begin
+	for(
+		select x(	x.[NUMB]	:	C_NUM, x.[TYPE].[CODE] : C_TYPE_CODE, x.[PRIVATE] : C_PRIVATE)
+		in p_CONTACTS all
+		where x.[TYPE] in (::[COMUNICATION]([CODE] = 'PHONE'), ::[COMUNICATION]([CODE] = 'MOBILEPHONE'))
+		order by  x.[ACTIV] desc -- сначала действующие контакты
+				, x.[PRIVATE].[CODE]
+	)loop
+		v_new_num_comm := coalesce(::[FP_TUNE].[LIB].GET_NUM_VALUE('COMMUNICATION_PRIORITY',::[FP_TUNE].[LIB].SET_CANONS('<COMMUNICATION_TYPE>',to_char(x.C_TYPE_CODE)),'0'),99);
+		v_new_num_own := coalesce(::[FP_TUNE].[LIB].GET_NUM_VALUE('OWNER_COM_PRIORITY',::[FP_TUNE].[LIB].SET_CANONS('OWNER_COM',to_char(x.C_PRIVATE)),'0'),99);
+		if v_prev_num_comm is null or v_prev_num_comm >= v_new_num_comm then
+			if v_prev_num_own is null or v_prev_num_own > v_new_num_own then
+				v_ret_value := x.C_NUM;
+			end if;
+		end if;
+		v_prev_num_comm := v_new_num_comm;
+		v_prev_num_own := v_new_num_own;
+	end loop;
+	return v_ret_value;
+end;
+end;

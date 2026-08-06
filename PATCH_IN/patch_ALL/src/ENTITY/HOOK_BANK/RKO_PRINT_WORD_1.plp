@@ -1,0 +1,350 @@
+class HOOK_BANK;
+
+@optimize(false)
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('РКО. Печать документов WORD (OOXML)')
+@tag('COPIED')
+static method RKO_PRINT_WORD_1 is
+
+@name('Расчетный счет')               public V_ACCOUNT        [ACCNUM];
+@name('ФИО открывателя счетаР')       public V_OPEN_ACC       [SBRF_NAME];
+@name('Должность открывателя счетаР') public V_RANGE_OPEN_ACC [STRING_250];
+@name('Должность открывателя счета')  public V_RANGE_OPEN     [STRING_250];
+@name('ФИО открывателя счета')        public V_OPEN           [STRING_250];
+@name('Выбор окончания')              public V_BANK_END       [STRING_3];
+@name('Действует на основании')       public V_BANK_FOUND     [STRING_400];
+pragma include ('APPAUX_CALLPOINT.COMPILE_LIB');
+
+
+
+--v-- Башкиров В.Г. 15.01.2025 CFT-2906 при заведении адреса с муниц делением в документы на печать и в адрес на карточке тянет без муниципального деления
+  pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+  dp  integer:=0; --управление debug_pipe
+  dp2 integer:=null;	--управление debug_pipe
+  dp3 integer:=0; --управление debug_pipe
+  dp4 integer:=0; --управление debug_pipe
+  dp5 integer:=0; --управление debug_pipe
+  
+  fmt	   string(10):='dd/mm/yyyy';
+  fmt24  string(22):='dd/mm/yyyy HH24:MI:SS';
+  fmtHMS string(22):='dd/mm/yyyy HH24:MI:SS';
+  
+  --ООО "Да Винчи-Акрополь" -- Адрес с муниципальным делением не подтягивается в следующие документы:
+  -- Печать с организации "(ПСБ) печать Word анкеты":
+  --	Акт приема-передачи Системы ДБО.dot
+  --	Акт ввода в эксплуатацию Системы ДБО.dot
+  -- 
+  -- Печать из РКО "Печать документов Word(OOXML) следующие документы:
+  --	1.19.08.2025 ЗАЯВЛЕНИЕ НА ОТКРЫТИЕ РАСЧЕТНОГО СЧЕТА в ПСХ
+  --	1.Заявление на открытие банковского счета
+  --	1.Соглашение о сочетании подписей ПСХБ
+  procedure CFT_2906(
+	P_RKO in out [RKO_REF],
+	P_CONDITION_PROD in out [CONDITION_PRD_R],
+	P_CODE in out [STRING_250],
+	P_DATA in out [STRING_32000]
+	) is
+	-- Реквизиты клиента
+	V_CITY_C		ref [NAMES_CITY];--"Населенный пункт"
+	V_OKATO_C		[STRING_2000];--"ОКАТО_клиент"
+	V_ADRESS_C		[STRING_2000];--"Адрес (клиент)"
+	V_ADRESS_C_POST	[STRING_2000];--"Почтовый адрес (клиент)"
+	
+	-- Шаблон адреса
+	V_ADR_MASK	varchar2(100);
+	IdClient	ref [CLIENT];
+	V_STR	[MEMO];
+	nMun number; 
+	nAddStr number;
+	
+	p_Tag string(250);
+	ExStr string(32000);
+  begin
+	if not (P_CODE like 'К_Адрес%' or P_CODE like 'PODP_KLI_ADR%' or P_CODE like 'PSH_ADRESS_C%') then
+		return; --Не наш случай. Тихо выходим
+	end if;
+
+	-- Возможно Адрес с муниципальным делением
+	if InStr(utils.call_stack,'IBS.Z$HOOK_BANK_RKO_PRINT_WORD_1'||Chr(13)||Chr(10),1,2)>0 then -- 13-CR,10-LF
+		&debug(utils.call_stack,dp)
+		&debug('.CFT_2906 -- Повторный вызов. Выходим',dp)
+		return;
+	end if;
+
+	&debug('.CFT_2906 -- > P_RKO           ='||P_RKO,dp)
+	&debug('.CFT_2906 -- > P_CONDITION_PROD='||P_CONDITION_PROD,dp)
+	&debug('.CFT_2906 -- > P_CODE          ='||P_CODE,dp)
+	&debug('.CFT_2906 -- > P_DATA          ='||P_DATA,dp)
+
+	for (select cl(cl%id : C_ID) in ::[CLIENT] all where cl%id=P_RKO%id) loop
+		IdClient:=cl.C_ID;
+		&debug('.CFT_2906 -- Вместо ссылки на договор РКО передана ссылка на Клиента. Используем её',dp)
+		exit;
+	end loop;
+
+	--Алгоритм закопировано из ::[HOOK_BANK].[DEPN_PRINT_PSH]-Депозиты. Универсальная печать
+	if P_CODE like 'PSH_ADRESS_C%' then
+		p_Tag:=P_CODE;
+	else
+		p_Tag:='PSH_ADRESS_C';
+	end if;
+
+	if IdClient is null then
+		IdClient:=P_RKO.[CLIENT];
+	end if;
+
+	--Получение информации об адресе строкой для отображения в текстовом поле
+	--p_use_addr_struct-Брать структуру адресного деления с адреса
+	if IdClient%class='CL_PRIV' then
+		&debug('.CFT_2906 -- --- Адресов у клиента '||IdClient%class||':'||IdClient.[ADDRESSES]%size(0)||' Для ФЛ берем последовательно REGISTRATION,POST,REAL_LIVE',dp)
+		for ad in var oAd IdClient.[ADDRESSES]
+		where ad.[TYPE].[KOD] is not null
+		ORDER BY
+			CASE 
+			  WHEN      ad.[TYPE].[KOD] = 'REGISTRATION' THEN 1
+			  WHEN      ad.[TYPE].[KOD] = 'POST' THEN 2
+			  WHEN      ad.[TYPE].[KOD] = 'REAL_LIVE' THEN 3
+			--WHEN      ad.[TYPE].[KOD] = 'CORP' THEN 4
+			--WHEN      ad.[TYPE].[KOD] = 'POST' THEN 5
+			--WHEN      ad.[TYPE].[KOD] = 'FACT' THEN 6
+			--WHEN      ad.[TYPE].[KOD] IS NULL THEN 7
+			--WHEN TRIM(ad.[TYPE].[KOD]) = '' THEN 7
+			  ELSE 8  -- для любых других значений
+			END
+		loop
+			ExStr := trim(oAd.[IMP_STR]);
+			/** /
+			if ExStr is null then
+				ExStr := ::[PERSONAL_ADDRESS].[API_LIB].get_address_str(oAd, p_use_addr_struct == true);
+				&debug(substr('.CFT_2906 -- '||P_TAG||' '||oAd.[TYPE].[KOD]||'='||LF$||ExStr,1,4000),dp)
+				nMun	:=instr(ExStr,'Муниципаль');
+				nAddStr	:=instr(ExStr,'Адрес строкой: ');
+				if nMun<nAddStr then
+					ExStr:=substr(ExStr,nAddStr+length('Адрес строкой: '));
+					&debug(substr('.CFT_2906 -- .get_address_str='||ExStr,1,4000),dp)
+				end if;
+			end if;
+			/**/
+			&debug(substr(IdClient%class||' '||ad.[TYPE].[KOD]||' Адрес строкой:'||ExStr,1,4000),dp)
+			if ExStr is not null then goto Ext; end if;
+		end loop;
+	else
+		&debug('.CFT_2906 -- --- Адресов у клиента '||IdClient%class||':'||IdClient.[ADDRESSES]%size(0)||' Для ЮЛ берем последовательно CORP,POST,FACT',dp)
+		for ad in var oAd IdClient.[ADDRESSES]
+		where ad.[TYPE].[KOD] is not null
+		ORDER BY
+			CASE 
+			--WHEN      ad.[TYPE].[KOD] = 'REGISTRATION' THEN 1
+			--WHEN      ad.[TYPE].[KOD] = 'POST' THEN 2
+			--WHEN      ad.[TYPE].[KOD] = 'REAL_LIVE' THEN 3
+			  WHEN      ad.[TYPE].[KOD] = 'CORP' THEN 4
+			  WHEN      ad.[TYPE].[KOD] = 'POST' THEN 5
+			  WHEN      ad.[TYPE].[KOD] = 'FACT' THEN 6
+			--WHEN      ad.[TYPE].[KOD] IS NULL THEN 7
+			--WHEN TRIM(ad.[TYPE].[KOD]) = '' THEN 7
+			  ELSE 8  -- для любых других значений
+			END
+		loop
+			ExStr := trim(oAd.[IMP_STR]);
+			/** /
+			if ExStr is null then
+				ExStr := ::[PERSONAL_ADDRESS].[API_LIB].get_address_str(oAd, p_use_addr_struct == true);
+				&debug(substr('.CFT_2906 -- '||P_TAG||' '||oAd.[TYPE].[KOD]||'='||LF$||ExStr,1,4000),dp)
+				nMun	:=instr(ExStr,'Муниципаль');
+				nAddStr	:=instr(ExStr,'Адрес строкой: ');
+				if nMun<nAddStr then
+					ExStr:=substr(ExStr,nAddStr+length('Адрес строкой: '));
+					&debug(substr('.CFT_2906 -- .get_address_str='||ExStr,1,4000),dp)
+				end if;
+			end if;
+			/**/
+			&debug(substr(IdClient%class||' '||ad.[TYPE].[KOD]||' Адрес строкой:'||ExStr,1,4000),dp)
+			if ExStr is not null then  goto Ext; end if;
+		end loop;
+	end if;
+
+	if ExStr is null then
+		-- Используем другой дистрибутивный расчет Адреса клиента
+		::[DEPN_INTERFACE].[PRX_CLIENT].GetAddressClient
+		(	IdClient
+			,V_ADR_MASK
+			,V_CITY_C
+			,V_ADRESS_C
+			,V_ADRESS_C_POST
+			,V_OKATO_C
+		);
+		&debug('.CFT_2906 -- IdClient           ='||IdClient,       dp2)
+		&debug('.CFT_2906 -- V_ADR_MASK         ='||V_ADR_MASK     ,dp2)
+		&debug('.CFT_2906 -- V_CITY_C.SHORT_NAME='||V_CITY_C.[SHORT_NAME],dp2)
+		&debug('.CFT_2906 -- V_ADRESS_C         ='||V_ADRESS_C     ,dp2)
+		&debug('.CFT_2906 -- V_ADRESS_C_POST    ='||V_ADRESS_C_POST,dp2)
+		&debug('.CFT_2906 -- V_OKATO_C          ='||V_OKATO_C      ,dp2)
+		V_STR := substr(coalesce(V_ADRESS_C,V_ADRESS_C_POST,V_CITY_C.[SHORT_NAME])||' ОКАТО:'||V_OKATO_C||' V_ADR_MASK:'||V_ADR_MASK,1,4000);
+		&debug(substr('.CFT_2906 -- Дистрибутивный .GetAddressClient:'||V_STR,1,4000),dp)
+
+		if V_STR is not null then
+			ExStr:=V_STR;
+			&debug(substr('.CFT_2906 -- Берем Дистрибутивный:'||ExStr,1,4000),dp)
+		end if;
+	end if;
+
+	<<Ext>>
+	ExStr := replace(ExStr,' ,',','); --ExStr := replace(replace(ExStr,' ,',','),', ',',');
+	ExStr := replace(ExStr,' .','.'); --ExStr := replace(replace(ExStr,' .','.'),'. ','.');
+	ExStr := replace(ExStr,chr(10),' '); -- Закладки Word не умеют работать
+	ExStr := replace(ExStr,chr(13),' '); -- с переводом строки, возвратом коретки
+	::[HOOK_BANK].[EXP_GET_PR_ADDR].DelDublSpace(ExStr);
+	ExStr := trim(rtrim(ExStr,','));
+	&debug(substr('.CFT_2906 -- '||ExStr,1,4000),dp)
+
+	if ExStr is not null then P_DATA:=ExStr; end if;
+	&debug('.CFT_2906 -- < P_DATA('||length('P_DATA')||')='||P_DATA,dp)
+  end;
+--^-- Башкиров В.Г. 15.01.2025 CFT-2906
+
+function get_month(v_str varchar2) return varchar2 is
+v_res varchar2;
+begin
+   select x(decode(v_str, '01', 'Января',
+	'02', 'Февраля',
+	'03', 'Марта',
+	'04', 'Апреля',
+	'05', 'Мая',
+	'06', 'Июня',
+	'07', 'Июля',
+	'08', 'Августа',
+	'09', 'Сентября',
+	'10', 'Октября',
+	'11', 'Ноября',
+	'12', 'Декабря', '' )) in dual%rowtype into v_res;
+	return v_res;
+end;
+RKO_PRINT_WORD_1 (
+	@name('Договор РКО')                        P_RKO            in     [RKO_REF],
+	@name('Дополнительные условия по договору') P_CONDITION_PROD in     [CONDITION_PRD_R],
+	@name('Печатный код')                       P_CODE           in     [STRING_250],
+	@name('Значение для печатного кода')        P_DATA           in out [STRING_32000]
+) is
+
+execute is
+ref_user	ref [USER];
+ref_casta   ref[CASTA];
+v_sex		varchar2(50);
+v_basis     varchar2(400);
+
+v_date		date;
+
+
+
+begin
+begin
+	select x(x.[ACCOUNT].[USER_OP]) in ::[RKO] all where x%id=p_rko and rownum=1 into ref_user;
+	select x(x.[NAME], x.[CASTA].[VALUE]) in ::[USER] where x%id=ref_user into V_OPEN_ACC, V_RANGE_OPEN_ACC;
+	V_RANGE_OPEN := V_RANGE_OPEN_ACC;	
+	V_OPEN := V_OPEN_ACC;
+	select x( x.[CASTA]) in ::[USER] where x%id=ref_user into ref_casta;	
+	V_RANGE_OPEN_ACC:=nvl([CASE_GRAM].[LIB].get_case(ref_casta.[DECL_CAST]), V_RANGE_OPEN_ACC);
+	V_OPEN_ACC:=nvl([CASE_GRAM].[LIB].get_case(ref_user.[CL_PRIV_REF].[DECL_FIO]), V_OPEN_ACC);	
+exception when NO_DATA_FOUND then 
+	V_OPEN_ACC:='';
+	V_RANGE_OPEN_ACC:='';
+
+end;
+begin
+	select x(x.[CL_PRIV_REF].[SEX].[CODE]) in ::[USER] where x%id=ref_user into v_sex;
+	if v_sex='Ж' then
+		V_BANK_END:='ей';
+	else
+	    V_BANK_END:='его';
+	end if;
+	exception when NO_DATA_FOUND then 
+		V_BANK_END:='ей';
+end;
+begin
+select x(x.[BY_RIGHT].[DECLENSIONS].[NAME]) in ::[USER] where x%id=ref_user and
+	x.[BY_RIGHT].[DECLENSIONS].[CASE_GR].[CODE]='Р' and x.[BY_RIGHT].[DECLENSIONS]%id in 
+	(select x(max(x.[BY_RIGHT].[DECLENSIONS]%id)) in ::[USER] where x%id=ref_user and
+	x.[BY_RIGHT].[DECLENSIONS].[CASE_GR].[CODE]='Р') and rownum =1 into v_basis;
+	  
+	V_BANK_FOUND:=v_basis;
+exception when NO_DATA_FOUND then 
+	V_BANK_FOUND:='';
+end;
+
+    
+	if P_CODE='БалансовыйСчет' then
+		P_DATA:= substr(P_RKO.[ACCOUNT].[MAIN_V_ID], 1, 5);
+	elsif P_CODE='ФИООткывателяСчетаР' then
+		P_DATA:=V_OPEN_ACC;	
+	elsif P_CODE='ДолжностьОткрР' then
+		P_DATA:=V_RANGE_OPEN_ACC;
+	elsif P_CODE='ДолжностьОткывателя' then
+		P_DATA:=V_RANGE_OPEN;	
+	elsif P_CODE='ФИООткывателя' then
+		P_DATA:=V_OPEN;
+	elsif P_CODE='Б_ВыборОкончания' then
+	    P_DATA:=V_BANK_END;
+	elsif P_CODE='Б_ОснованиеДействия' then
+		if SYS_CONTEXT(user_context, 'V_BATCH') then
+	  	  P_DATA:=V_BANK_FOUND;   
+		end if;   
+	elsif P_CODE='К_ДолжностьРуководит' then	
+	      if SYS_CONTEXT(user_context, 'V_BATCH') then
+	      	 P_DATA:=SYS_CONTEXT(user_context, 'V_BANK_CHIEF_RANGE_R');
+	     else
+	         P_DATA:=SYS_CONTEXT(user_context, 'V_CL_CHIEF_RANGE_R1');	 
+	      end if;	
+	elsif P_CODE='К_ДолжностьРуковод_1' then
+	      if SYS_CONTEXT(user_context, 'V_BATCH') then
+	      	 P_DATA:=SYS_CONTEXT(user_context, 'V_CL_CHIEF_RANGE_I');
+	      end if; 
+	elsif (P_CODE='К_ДолжностьРуководит' and SYS_CONTEXT(user_context, 'V_CL_CHIEF_RANGE_Z') is not null) then
+	      if SYS_CONTEXT(user_context, 'V_BATCH') then
+	      	 P_DATA:=SYS_CONTEXT(user_context, 'V_CL_CHIEF_RANGE_Z');
+	      end if;  
+         
+	elsif P_CODE='Б_ДолжностьРуковод_1' then
+	      if SYS_CONTEXT(user_context, 'V_BATCH') then
+	      	 P_DATA:=null;
+	      end if;       
+	elsif P_CODE='Б_ФИОРуководителя1' then
+	      if SYS_CONTEXT(user_context, 'V_BATCH') then
+	      	 P_DATA:=null;
+	      end if;        
+	elsif P_CODE='К_ФИОРуководителя' then
+	      if SYS_CONTEXT(user_context, 'V_BATCH') then
+	      	 P_DATA:=SYS_CONTEXT(user_context, 'V_CL_BUH_NAME');
+	      end if; 
+	elsif P_CODE='К_ОснованиеДействия' then
+	   --   if SYS_CONTEXT(user_context, 'V_BATCH') then
+	      	 P_DATA:=SYS_CONTEXT(user_context, 'V_CLIENT_FOUND');
+	   --   end if;                
+	elsif P_CODE='ДатаДок' then
+	    P_DATA:=SYS_CONTEXT(user_context, 'V_DATE_AGREED');	    
+	    if (length(P_DATA) < 6 and (SYS_CONTEXT(user_context, 'V_BATCH'))) then
+	        P_DATA:='"____" ____________ 20 ____';
+	    else
+	        v_date:=sysdate;
+	        P_DATA:=to_char(v_date, 'dd')||' '||get_month(to_char(v_date, 'mm'))||' '||to_char(v_date, 'yyyy')||' г.';
+	    end if;
+
+	end if;	
+
+	-- Башкиров В.Г. 15.01.2025 CFT-2906 при заведении адреса с муниц делением в документы на печать и в адрес на карточке тянет без муниципального деления
+	-- Для замены P_CODE 'К_Адрес%' или 'PODP_KLI_ADR%' на 'PSH_ADRESS_C' - Где возможен Адрес с муниципальным делением
+	-- 
+	--ООО "Да Винчи-Акрополь" -- Адрес с муниципальным делением не подтягивается в следующие документы:
+	-- Печать с организации "(ПСБ) печать Word анкеты":
+	--	Акт приема-передачи Системы ДБО.dot
+	--	Акт ввода в эксплуатацию Системы ДБО.dot
+	-- 
+	-- Печать из РКО "Печать документов Word(OOXML) следующие документы:
+	--	1.19.08.2025 ЗАЯВЛЕНИЕ НА ОТКРЫТИЕ РАСЧЕТНОГО СЧЕТА в ПСХ
+	--	1.Заявление на открытие банковского счета
+	--	1.Соглашение о сочетании подписей ПСХБ
+
+	CFT_2906(P_RKO,P_CONDITION_PROD,P_CODE,P_DATA);
+end;
+end;
+end;

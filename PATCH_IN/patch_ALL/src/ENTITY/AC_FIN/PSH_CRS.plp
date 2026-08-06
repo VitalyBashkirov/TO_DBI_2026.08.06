@@ -1,0 +1,493 @@
+class AC_FIN;
+
+@import_plsql(true)
+@name('[ПСБ] CRS')
+method PSH_CRS is
+v_use_gravis boolean;
+
+/**
+ * Функция выполняет транслитерацию по ГОСТ Р 7.0.34-2014
+ *
+ * @param P_STR строка кирилицы для транслитерации
+ * @return varchar2(2000) - транслитерированная строка
+ */
+function translete_simple
+			(
+				P_STR			string(4000)
+			)
+	return	string
+is
+	s string(2000);
+begin
+	s := P_STR;
+	s := upper(s);
+	s := standard.replace(s,  '№', 'N');
+	s := standard.replace(s,  'Ё', 'YO');
+	s := standard.replace(s,  'Ж', 'ZH');
+	s := standard.replace(s,  'Й', 'J');
+	s := standard.replace(s,  'Х', 'X');
+	s := standard.replace(s,  'Ч', 'CH');
+	s := standard.replace(s,  'Ш', 'SH');
+	s := standard.replace(s,  'Щ', 'SHH');
+	s := standard.replace(s,  'Ъ', '');
+	s := standard.replace(s,  'Ь', '');
+	s := standard.replace(s,  'Ю', 'YU');
+	s := standard.replace(s,  'Я', 'YA');
+	s := standard.translate
+			( s	,'УКЕНГЗФЫВАПРОЛДЭСМИТБЦ'
+				,'UKENGZFYVAPROLDESMITBC'
+			);
+	
+	return s;
+end;
+
+/**
+ * Функция выполняет транслитерацию по ГОСТ Р 7.79-2000(Б)
+ *
+ * @param P_STR строка для транслитерации
+ * @param p_lat_to_rus признак необходимости транслитерации на кириллицу
+ * @return varchar2(2000) - транслитерированная строка
+ * 
+ * В соответствии с документом "РЕКОМЕНДАЦИИ ПО ЗАПОЛНЕНИЮ ЭЛЕКТРОННЫХ
+ * ФОРМАТОВ ПРЕДСТАВЛЕНИЯ ОРГАНИЗАЦИЯМИ
+ * ФИНАНСОВОГО РЫНКА ИНФОРМАЦИИ,
+ * ПРЕДУСМОТРЕННОЙ ПОЛОЖЕНИЕМ, УТВЕРЖДЕННЫМ
+ * ПОСТАНОВЛЕНИЕМ ПРАВИТЕЛЬСТВА РОССИЙСКОЙ
+ * ФЕДЕРАЦИИ ОТ 16.06.2018 № 693"
+ * Внесены правки по транслитерации знаков "Ъ" и "Ь":
+ * - При транслитерации с кириллицы на латиницу знаки пропускаются
+ * - Транслитерация с латиницы на кириллицу этих знаков происходит в соответствии с ГОСТ 7.79-2000(Б) 
+ */
+public function translete_7_79_B
+			(
+				P_STR				string(4000)
+				, p_lat_to_rus		boolean default false
+				, p_change_slash	boolean default false
+			)
+	return	string
+is
+	v_str string(4000);
+	v_str_part string(4000);
+	v_symb varchar2(1);
+	v_len integer;
+	j integer;
+	v_exist_lower boolean;
+	
+	function translete_7_79_B_part 
+			(
+				P_STR_PART		string(4000)
+				, p_exist_lower boolean default false
+				, p_lat_to_rus	boolean default false
+				, p_change_slash	boolean default false
+			)
+	return string 
+	is
+		s string(4000);
+	begin
+		if trim(P_STR_PART) is null then
+			return null;
+		end if; 
+		s := P_STR_PART;
+		if p_lat_to_rus then
+			s := standard.replace(s,  '№', 'N');
+		end if;
+		s := standard.replace(s, case when p_lat_to_rus then 'SHH' else 'Щ' end, case when p_lat_to_rus then 'Щ' else case when p_exist_lower then 'Shh' else 'SHH' end end);
+		s := standard.replace(s, case when p_lat_to_rus then 'shh' else 'щ' end, case when p_lat_to_rus then 'щ' else 'shh' end);
+		if p_lat_to_rus then
+			s := standard.replace(s, 'Shh', 'Щ');
+			s := standard.replace(s, 'SHh', 'Щ');
+		end if;
+		s := standard.replace(s, case when p_lat_to_rus then 'YO' else 'Ё' end, case when p_lat_to_rus then 'Ё' else case when p_exist_lower then 'Yo' else 'YO' end end);
+		s := standard.replace(s, case when p_lat_to_rus then 'yo' else 'ё' end, case when p_lat_to_rus then 'ё' else 'yo' end);
+		s := standard.replace(s, case when p_lat_to_rus then 'ZH' else 'Ж' end, case when p_lat_to_rus then 'Ж' else case when p_exist_lower then 'Zh' else 'ZH' end end);
+		s := standard.replace(s, case when p_lat_to_rus then 'zh' else 'ж' end, case when p_lat_to_rus then 'ж' else 'zh' end);
+		s := standard.replace(s, case when p_lat_to_rus then 'CZ' else 'Ц' end, case when p_lat_to_rus then 'Ц' else case when p_exist_lower then 'Cz' else 'CZ' end end);
+		s := standard.replace(s, case when p_lat_to_rus then 'cz' else 'ц' end, case when p_lat_to_rus then 'ц' else 'cz' end);
+		s := standard.replace(s, case when p_lat_to_rus then 'CH' else 'Ч' end, case when p_lat_to_rus then 'Ч' else case when p_exist_lower then 'Ch' else 'CH' end end);
+		s := standard.replace(s, case when p_lat_to_rus then 'ch' else 'ч' end, case when p_lat_to_rus then 'ч' else 'ch' end);
+		s := standard.replace(s, case when p_lat_to_rus then 'SH' else 'Ш' end, case when p_lat_to_rus then 'Ш' else case when p_exist_lower then 'Sh' else 'SH' end end);
+		s := standard.replace(s, case when p_lat_to_rus then 'sh' else 'ш' end, case when p_lat_to_rus then 'ш' else 'sh' end);
+		if v_use_gravis then
+			s := standard.replace(s, case when p_lat_to_rus then '``' else 'ъ' end, case when p_lat_to_rus then 'ъ' else '' end);
+			s := standard.replace(s, case when p_lat_to_rus then 'Y`' else 'Ы' end, case when p_lat_to_rus then 'Ы' else 'Y`' end);
+			s := standard.replace(s, case when p_lat_to_rus then 'y`' else 'ы' end, case when p_lat_to_rus then 'ы' else 'y`' end);
+			s := standard.replace(s, case when p_lat_to_rus then 'E`' else 'Э' end, case when p_lat_to_rus then 'Э' else 'E`' end);
+			s := standard.replace(s, case when p_lat_to_rus then 'e`' else 'э' end, case when p_lat_to_rus then 'э' else 'e`' end);
+		else
+			s := standard.replace(s, case when p_lat_to_rus then '''''' else 'ъ' end, case when p_lat_to_rus then 'ъ' else '' end);
+			s := standard.replace(s, case when p_lat_to_rus then 'Y''' else 'Ы' end, case when p_lat_to_rus then 'Ы' else 'Y''' end);
+			s := standard.replace(s, case when p_lat_to_rus then 'y''' else 'ы' end, case when p_lat_to_rus then 'ы' else 'y''' end);
+			s := standard.replace(s, case when p_lat_to_rus then 'E''' else 'Э' end, case when p_lat_to_rus then 'Э' else 'E''' end);
+			s := standard.replace(s, case when p_lat_to_rus then 'e''' else 'э' end, case when p_lat_to_rus then 'э' else 'e''' end);
+		end if;
+		s := standard.replace(s, case when p_lat_to_rus then 'YU' else 'Ю' end, case when p_lat_to_rus then 'Ю' else case when p_exist_lower then 'Yu' else 'YU' end end);
+		s := standard.replace(s, case when p_lat_to_rus then 'yu' else 'ю' end, case when p_lat_to_rus then 'ю' else 'yu' end);
+		s := standard.replace(s, case when p_lat_to_rus then 'YA' else 'Я' end, case when p_lat_to_rus then 'Я' else case when p_exist_lower then 'Ya' else 'YA' end end);
+		s := standard.replace(s, case when p_lat_to_rus then 'ya' else 'я' end, case when p_lat_to_rus then 'я' else 'ya' end);
+		
+		if p_lat_to_rus then
+			s := standard.replace(s, 'Yo', 'Ё');
+			s := standard.replace(s, 'Zh', 'Ж');
+			s := standard.replace(s, 'Cz', 'Ц');
+			s := standard.replace(s, 'Ch', 'Ч');
+			s := standard.replace(s, 'Sh', 'Ш');
+			s := standard.replace(s, 'Yu', 'Ю');
+			s := standard.replace(s, 'Ya', 'Я');
+			s := standard.replace(s, 'KH', 'Х');
+			s := standard.replace(s, 'Kh', 'Х');
+			s := standard.replace(s, 'kh', 'х');
+		else
+			s := standard.replace(s, 'Ъ', '');
+		end if;
+		
+		if v_use_gravis then
+			s := standard.replace(s, case when p_lat_to_rus then '`' else 'ь' end, case when p_lat_to_rus then 'ь' else '' end);
+		else
+			s := standard.replace(s, case when p_lat_to_rus then '''' else 'ь' end, case when p_lat_to_rus then 'ь' else '' end);
+		end if;
+		
+		if not p_lat_to_rus then
+			s := standard.replace(s, 'Ь', '');
+		end if;
+		
+		s := standard.translate(s,	case when p_lat_to_rus then 'ABVGDEZIJKLMNOPRSTUFXHCQWYabvgdezijklmnoprstufxhcqwy' else 'АБВГДЕЗИЙКЛМНОПРСТУФХабвгдезийклмнопрстуфх' end,
+									case when p_lat_to_rus then 'АБВГДЕЗИЙКЛМНОПРСТУФХХЦЩЫЫабвгдезийклмнопрстуфххцщыы' else 'ABVGDEZIJKLMNOPRSTUFXabvgdezijklmnoprstufx' end);
+	
+		if p_change_slash then
+			s := standard.replace(s, '/', '|');
+		end if;
+		return s;
+	end;
+begin
+	if P_STR is null then
+		return null;
+	end if;
+	if p_lat_to_rus then
+		return translete_7_79_B_part(P_STR, p_lat_to_rus == p_lat_to_rus, p_change_slash == p_change_slash);
+	else
+		v_len := length(P_STR);
+		v_str := null;
+		v_str_part := null;
+		v_exist_lower := false;
+		j := 0; 
+		for i in 1..v_len loop
+			v_symb := substr(P_STR, i, 1);
+			j := j+1;
+			if regexp_like(v_symb, '[[:alpha:]]') then
+				v_str_part := v_str_part || v_symb;
+				if j > 1 and not v_exist_lower and lower(v_symb) = v_symb then
+					v_exist_lower := true;
+				end if;
+			else
+				v_str_part := translete_7_79_B_part(v_str_part, v_exist_lower, p_lat_to_rus, p_change_slash);
+				if p_change_slash then
+					v_symb := standard.replace(v_symb, '/', '|');
+				end if;
+				v_str := v_str || v_str_part || v_symb;
+				j := 0;
+				v_str_part := null;
+				v_exist_lower := false;
+			end if; 
+		end loop;
+		if v_str_part is not null then
+			v_str_part := translete_7_79_B_part(v_str_part, v_exist_lower, p_lat_to_rus, p_change_slash);
+			v_str := v_str || v_str_part;
+		end if;
+		return v_str;
+	end if;
+end;
+PSH_CRS (
+	@name('Дата') P_DATE in [DATE] default null
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATE := [SYSTEM]::[OP_DATE];
+end if;
+-- End initialization of parameters and variables
+declare
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma macro (xl,'::[OOXML].[API_XL]');
+iFmt1		integer;
+iFmt2		integer;
+iRow		number;
+nRow		number;
+nPrc	  	number;
+iBorder		integer;
+dop			varchar2;
+xl_tmpl 		blob := empty_blob();
+p_priv 		ref		[CL_PRIV];
+
+begin
+	
+	if P_MESSAGE = 'DEFAULT' then
+		P_DATE := ::[SYSTEM].[OP_DATE];
+	end if; --*/
+
+	if P_MESSAGE = 'VALIDATE' then
+		if P_INFO = 'OK' then
+	   		--::[SHABLON_DOC].[LIB_OOXML].xl_init;
+     		::[SHABLON_DOC].[LIB_OOXML].load_blob('PSB_CRS', xl_tmpl, null, null, null, null);
+		 	if xl_tmpl is null then pragma error('Не найден шаблон отчета'); end if;		
+	 	 	if not &xl.open_file(xl_tmpl) then pragma error('Ошибка при открытии печатной формы шаблона');	end if;	--*/
+	 	 
+		 	&xl.Open_Sheet(1);			
+		 	--&xl.RenameSheet(1,to_char(P_DATE,'dd.mm.yy')); 	 						
+			
+			iRow := 4;
+			nRow := 0;
+			
+			iFmt1 := &xl.Get_numFmt ('###0');
+			iFmt2 := &xl.Get_numFmt ('#,##0.00');
+			iBorder := &xl.get_border(p_top==&xl.xl_b_thin, p_bottom==&xl.xl_b_thin, p_left==&xl.xl_b_thin, p_right==&xl.xl_b_thin);
+		
+			for (
+			        select d( d%id  : c_id
+			                 ,d.[MAIN_V_ID] : c_MAIN_V_ID	
+			                 ,d.[DATE_OP] : c_DATE_OP
+			                 ,d.FINTOOL.CUR_SHORT : c_CUR_SHORT
+			                 ,F.a('И'||d%id||'В',P_DATE) : c_fa
+			                 ,case when d.[DATE_OP] >= to_date('20.07.2018','dd.mm.yyyy') then 2
+			                  else 1
+			                 end : c_kat
+			                 
+			                 ,case when d.[DATE_CLOSE] is not null then 'ClosedAccount'
+			                       when d.[DATE_LAST] < to_date('01.01.2023','dd.mm.yyyy') then 'DormantAccount'
+			                       else 'Open'
+			                   end : c_state
+			                 ,d.[CLIENT_V].[COUNTRY].[ALFA_2] : c_code_alfa2
+			                 ,d.[CLIENT_V]->(CL_PRIV)FAMILY_CL ||','||d.[CLIENT_V]->(CL_PRIV)NAME_CL||','||d.[CLIENT_V]->(CL_PRIV)SNAME_CL :c_FIO
+			                 ,replace(d.[CLIENT_V].[INN],'6449011425','') :c_inn
+			                 ,d.[CLIENT_V]->(CL_PRIV)FAMILY_CL  : c_tr_family_cl
+			                 ,d.[CLIENT_V]->(CL_PRIV)NAME_CL  : c_tr_name_cl
+			                 ,d.[CLIENT_V]->(CL_PRIV)[DATE_PERS] : c_date_pers
+			                 ,d.[CLIENT_V]->(CL_PRIV)[BORN].NAME: c_born
+			                 ,d.[CLIENT_V]->(CL_PRIV)[BORN].COUNTRY.[ALFA_2] : c_born_code
+			                 ,[VIEWFUN].GetAddress(d.[CLIENT_V], 'ALL', 'REGISTRATION') : c_address
+			                 ,d.[DATE_LAST] : d_last
+			                 ,d.[DATE_CLOSE] : c_DATE_CLOSE
+			                 )
+							
+								 in ::[AC_FIN]
+								where
+								(substr(d.[MAIN_V_ID],1,3) in ('426')or substr(d.[MAIN_V_ID],1,5) in ('40820'))							
+								and d.[CLIENT_V].[IS_RESIDENT] = '0'
+								and (d.[DATE_CLOSE]  is null or d.[DATE_CLOSE] > to_date('01.01.2023','dd.mm.yyyy'))
+								
+						order by 1
+							
+			)loop
+			
+		--	if d.d_last > to_date('01.01.2023','dd.mm.yyyy') then 
+				iRow :=	iRow + 1;
+				nRow := nRow + 1;
+				
+				
+				&xl.put(iRow,1, nRow);      
+				&xl.put(iRow,2, 'СЧЁТ');
+		        &xl.put(iRow,3, 'OBAN');
+		        &xl.put(iRow,4, d.c_MAIN_V_ID);      
+		        &xl.put(iRow,5, to_char(d.c_DATE_OP, 'dd.mm.yyyy'));      
+		        &xl.put(iRow,6, d.c_kat);      
+		        &xl.put(iRow,7, d.c_state);      
+		        &xl.put(iRow,8, d.c_fa);      
+		        &xl.put(iRow,9, d.c_CUR_SHORT);   		        
+		       nPrc:=0;
+			   for (  select n(f.[SUMMA] : c_summa) in [DEPOSIT_PRIV]  join  ( [FACT_OPER] all f )  on  f%collection = n.[LIST_PAY] and f.[OPER]=2052216 --?
+			                   where n.ACCOUNT=d.c_id and f.[DATE] >= to_date('01.01.2018', 'dd.mm.yyyy')
+			                   		
+				 )     
+					   loop 			   
+					    	
+					    	nPrc:=nPrc+n.c_summa;
+					   end loop;
+		
+		       if nPrc>0 then
+		       
+		        &xl.put(iRow,12, nPrc); 
+		        &xl.put(iRow,13, d.c_CUR_SHORT);
+		       end if; 
+		       
+		        &xl.put(iRow,18, 1);
+		        
+		        &xl.put(iRow,19, d.c_code_alfa2);      
+		        &xl.put(iRow,25, d.c_inn);
+		        &xl.put(iRow,26, 'OECD202');
+		        &xl.put(iRow,27, ',,'||translete_simple(d.c_tr_family_cl)||',Given_Name,,,,,'||translete_simple(d.c_tr_name_cl)||',Family_Name,,,');
+		        &xl.put(iRow,28, d.c_FIO);
+		        &xl.put(iRow,29, to_char(d.c_date_pers,'dd.mm.yyyy')||','||d.c_born||','||','||d.c_born_code);
+		        &xl.put(iRow,35, d.c_address);
+
+		--	end if;     
+				
+			end loop;
+
+		-- Юридические лица --
+		&xl.Open_Sheet('Счета ЮЛ (СБОЮЛ)');
+			iRow := 4;
+			nRow := 0;
+			
+			iFmt1 := &xl.Get_numFmt ('###0');
+			iFmt2 := &xl.Get_numFmt ('#,##0.00');
+			iBorder := &xl.get_border(p_top==&xl.xl_b_thin, p_bottom==&xl.xl_b_thin, p_left==&xl.xl_b_thin, p_right==&xl.xl_b_thin);
+			
+			for (
+			        select d( d%id  : c_id
+			                 ,d.[MAIN_V_ID] : c_MAIN_V_ID	
+			                 ,d.[DATE_OP] : c_DATE_OP
+			                 ,d.FINTOOL.CUR_SHORT : c_CUR_SHORT
+			                 ,F.a('И'||d%id||'В',P_DATE) : c_fa
+			                 ,case when d.[DATE_OP]>to_date('20.07.2018','dd.mm.yyyy') then 2
+			                  else 1
+			                 end : c_kat
+			                 
+			                 ,case when d.[DATE_CLOSE] is not null then 'ClosedAccount'
+			                       when d.[DATE_LAST]< to_date('20.07.2018','dd.mm.yyyy') then 'DormantAccount'
+			                       else 'Open'
+			                   end : c_state
+			                 ,d.[CLIENT_V].[COUNTRY].[ALFA_2] : c_code_alfa2
+			             	 ,d.[CLIENT_V]->(CL_ORG)NAME :c_name
+			             	 ,d.[CLIENT_V]->(CL_ORG)SI_NAME :si_name -- 07052024
+			                 ,replace(d.[CLIENT_V].[INN],'6449011425','') :c_inn
+			                 ,d.[CLIENT_V]->(CL_ORG)[COUNTRY].[ALFA_2] : c_code
+			                 ,[VIEWFUN].GetAddress(d.[CLIENT_V], 'ALL', 'CORP') : c_address
+			              --   ,::[CLIENT].[PSB_LIB_P].GetAddressRef(d.[CLIENT_V].[ADDRESSES], null, 'CORP' ).[IMP_STR]: adr_imps
+			                 ,d.[DATE_LAST] : d_last
+			                 )
+							
+								 in ::[AC_FIN]
+								where d.[CLIENT_V]%class = 'CL_ORG'
+							--	and d.[CLIENT_V].[IS_RESIDENT] = '0'
+								and d.[CLIENT_V].[REGISTR_NUM] in ('21094','21100','21156','21160','21167')
+						order by 1
+							
+			)loop
+			
+			--if d.d_last > to_date('01.01.2023','dd.mm.yyyy') then 
+				iRow :=	iRow + 1;
+				nRow := nRow + 1;
+				
+				&xl.put(iRow,1, nRow);      
+				&xl.put(iRow,2, 'СЧЁТ');
+		        &xl.put(iRow,3, 'OTHER');
+		        &xl.put(iRow,4, d.c_MAIN_V_ID);      
+		        &xl.put(iRow,5, to_char(d.c_DATE_OP, 'dd.mm.yyyy'));      
+		        &xl.put(iRow,7, d.c_kat);      
+		        &xl.put(iRow,8, d.c_state);      
+		        &xl.put(iRow,11, d.c_fa);      
+		        &xl.put(iRow,12, d.c_CUR_SHORT);      
+		       nPrc:=0;
+			   for (  select n(f.[SUMMA] : c_summa) in [DEPOSIT_ORG]  join  ( [FACT_OPER] all f )  on  f%collection = n.[LIST_PAY] and f.[OPER]=2052255 -- Выплата учтенных процентов код- ВЫПЛ_УЧТ_ПР_ДЕП
+			                   where n.ACCOUNT=d.c_id and f.[DATE] > to_date('01.01.2018', 'dd.mm.yyyy') 
+				 )     
+					   loop 			   
+					    	
+					    	nPrc:=nPrc+n.c_summa;
+					   end loop;
+		
+		       if nPrc>0 then
+		       
+		        &xl.put(iRow,12, nPrc); 
+		        &xl.put(iRow,13, d.c_CUR_SHORT);
+		       end if; 
+		       
+		        &xl.put(iRow,29, 1); 
+		        &xl.put(iRow,31, d.c_code_alfa2);
+		        &xl.put(iRow,37, d.c_inn);      
+		        &xl.put(iRow,41, 'OECD206');
+		        &xl.put(iRow,44, d.si_name); 
+		        &xl.put(iRow,45, d.c_name);
+		        &xl.put(iRow,50, d.c_address);
+		     -- &xl.put(iRow,50, ::[DOCUM_RC].[SWIFT_RUR].TRANSLETERATE(d.c_address));
+			--end if;
+				
+			end loop;
+			
+			
+			--< БЕНЕФИЦИАР Бенефициарный владелец
+			for (
+			        select d( cl%id  : c_id
+			                 ,cl.[COUNTRY].[ALFA_2] : c_code_alfa2
+			                 ,cl->(CL_PRIV)FAMILY_CL ||','||cl->(CL_PRIV)NAME_CL||','||cl->(CL_PRIV)SNAME_CL :c_FIO
+			                 ,cl.[INN] :c_inn
+			                 ,cl->(CL_PRIV)FAMILY_CL  : c_tr_family_cl
+			                 ,cl->(CL_PRIV)NAME_CL  : c_tr_name_cl
+			                 ,cl->(CL_PRIV)[DATE_PERS] : c_date_pers
+			                 ,cl->(CL_PRIV)[BORN].NAME: c_born
+			                 ,cl->(CL_PRIV)[BORN].COUNTRY.[ALFA_2] : c_born_code
+			                 ,[VIEWFUN].GetAddress(cl, 'ALL', 'REGISTRATION') : c_address	
+			                 
+						     ,f.[MAIN_V_ID] : c_MAIN_V_ID	
+			                 ,f.[DATE_OP] : c_DATE_OP
+                             ,f.FINTOOL.CUR_SHORT : c_CUR_SHORT
+			                 ,[RUNTIME].F.a('И'||d%id||'В',P_DATE) : c_fa
+			                 ,case when f.[DATE_OP]>to_date('20.07.2018','dd.mm.yyyy') then 2
+			                  else 1
+			                 end : c_kat
+			                 
+			                 ,case when f.[DATE_CLOSE] is not null then 'ClosedAccount'
+			                       when f.[DATE_LAST]< to_date('20.07.2018','dd.mm.yyyy') then 'DormantAccount'
+			                       else 'Open'
+			                   end : c_state
+		                 
+			                 )
+							
+								 in ::[LINKS_CL]
+									join (::[CL_PRIV] cl)	on  d.[PARTNER]= cl and cl.[IS_RESIDENT] = '0' and  d.[VID_LINK] = ::[CL_LINK]([CODE] = 'БЕНЕФИЦИАР')
+									join (::[CL_ORG]  o ) 	on  o.LINKS_OTHER=d%collection  
+									join (::[AC_FIN]  f ) 	on  f.[CLIENT_V]=o and substr(f.[MAIN_V_ID],1,5) in ('40807')	 all
+								
+									
+								
+						order by 1
+							
+			)loop
+			
+		--	if d.d_last > to_date('01.01.2023','dd.mm.yyyy') then 
+				iRow :=	iRow + 1;
+				nRow := nRow + 1;
+				
+				&xl.put(iRow,1, nRow);
+				&xl.put(iRow,2, 'СЧЁТ');
+		        &xl.put(iRow,3, 'OTHER');
+		        &xl.put(iRow,4, d.c_MAIN_V_ID);      
+		        &xl.put(iRow,5, to_char(d.c_DATE_OP, 'dd.mm.yyyy'));   
+		        
+		        &xl.put(iRow,7, d.c_kat);      
+		        &xl.put(iRow,8, d.c_state);      
+		        &xl.put(iRow,11, d.c_fa);      
+		        &xl.put(iRow,12, d.c_CUR_SHORT);      
+		           
+				
+		-----------------------		
+		     
+		        &xl.put(iRow,31, d.c_code_alfa2);      
+		        &xl.put(iRow,37, d.c_inn);
+		        &xl.put(iRow,41, 'OECD202');
+		        &xl.put(iRow,44, ',,'||translete_simple(d.c_tr_family_cl)||',Given_Name,,,,,'||translete_simple(d.c_tr_name_cl)||',Family_Name,,,');
+		        &xl.put(iRow,45, d.c_FIO);--*/
+		      --  &xl.put(iRow,29, to_char(d.c_date_pers,'dd.mm.yyyy')||','||d.c_born||','||','||d.c_born_code);
+		      --  &xl.put(iRow,50, d.c_address);
+		        
+		--	end if;     
+			end loop;
+			--> БЕНЕФИЦИАР Бенефициарный владелец
+						
+			
+		&xl.finish(xl_tmpl);
+		[OOXML]::[API_ORSA].putReport2RunExtProc(xl_tmpl,'xlsx','CRS_ф5- '||to_char(P_DATE,'mm_yy')||' ');														
+
+		end if; -- p_info
+	end if; -- p_messge
+End;
+end;
+
+execute is
+
+begin
+ null;							
+end;
+end;
+end;

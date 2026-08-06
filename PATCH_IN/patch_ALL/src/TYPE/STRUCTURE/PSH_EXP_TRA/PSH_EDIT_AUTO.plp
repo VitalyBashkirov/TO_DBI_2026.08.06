@@ -1,0 +1,52 @@
+class PSH_EXP_TRA;
+
+@generate_ansi_joins(true)
+@name('[ПСБ] Изменить')
+@tag('EXP_SWIFT')
+method PSH_EDIT_AUTO uses PSH_NEW_AUTO is
+PSH_EDIT_AUTO (
+	@name('Приоритет')                                  P_PRIORITY    in [NUM10],
+	@name('Наименование или часть наименования (рус.)') P_NAME_RUS    in [NAME],
+	@name('Полное наименование (англ.)')                P_NAME_ENG    in [NAME],
+	@name('Сокращенное наименование (англ.)')           P_SH_NAME_ENG in [NAME],
+	@name('Тип адресного объекта')                      P_TYPE_OBJ    in [SHORT1],
+	@name('Примечание')                                 P_NOTE        in [MEMO]
+) is
+
+validate is
+oExpTransTao [PSH_EXP_TRA]; -- updated CHANGE_QUALIFIER EXP_TRANS_TAO->PSH_EXP_TRANS_TA 08/10/25 -- updated CHANGE_QUALIFIER PSH_EXP_TRANS_TA->PSH_EXP_TRA 08/10/25
+begin
+	if p_message = 'DEFAULT' then
+		oExpTransTao := this;
+		P_PRIORITY := oExpTransTao.[PRIORITY];
+		P_NAME_RUS := oExpTransTao.[NAME_RUS];
+		P_NAME_ENG := oExpTransTao.[NAME_ENG];
+		P_SH_NAME_ENG := oExpTransTao.[SH_NAME_ENG];
+		P_TYPE_OBJ := oExpTransTao.[TYPE_OBJ];
+		P_NOTE := oExpTransTao.[NOTE];
+	end if;
+
+	declare
+		vThis ref [PSH_EXP_TRA]; -- updated CHANGE_QUALIFIER EXP_TRANS_TAO->PSH_EXP_TRANS_TA 08/10/25 -- updated CHANGE_QUALIFIER PSH_EXP_TRANS_TA->PSH_EXP_TRA 08/10/25
+	begin
+		if this is not null then
+			vThis := this;
+			&BASE$SETVARS;
+			&BASE$VALIDATE(vThis);
+			&BASE$GETVARS;
+		end if;
+	end;
+end;
+
+execute is
+	vThis ref [PSH_EXP_TRA]; -- updated CHANGE_QUALIFIER EXP_TRANS_TAO->PSH_EXP_TRANS_TA 08/10/25 -- updated CHANGE_QUALIFIER PSH_EXP_TRANS_TA->PSH_EXP_TRA 08/10/25
+begin
+	if this is not null then
+		vThis := this;
+		&BASE$SETVARS;
+		vThis := &BASE$EXECUTE(vThis);
+	end if;
+	::[PSH_EXP_TRA].[PSH_L].del_cash; -- updated CHANGE_QUALIFIER EXP_TRANS_TAO->PSH_EXP_TRANS_TA 08/10/25 -- updated CHANGE_QUALIFIER PSH_EXP_TRANS_TA->PSH_EXP_TRA 08/10/25 -- updated CHANGE_SHORT_NAME L->PSH_L 14/10/25
+end;
+end;
+end;

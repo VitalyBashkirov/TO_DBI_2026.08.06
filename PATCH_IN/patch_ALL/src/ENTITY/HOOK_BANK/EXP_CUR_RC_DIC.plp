@@ -1,0 +1,80 @@
+class HOOK_BANK;
+
+@this(plsql_lock:=false)
+@generate_ansi_joins(true)
+@name('[ПСБ]. ДБО. Контроль валютного перевода (Документа РЦ) Перевод адреса')
+@tag('EXP_SWIFT')
+static method EXP_CUR_RC_DIC is
+EXP_CUR_RC_DIC (
+	@name('Транспортный документ (BCD_CUR_ORDER)') P_BC_DOC_REF in     [BC_DOC_REF],
+	@name('Сообщение об ошибке')                   P_ERR_DESC   out    [MEMO],
+	@name('Ссылка на Документ РЦ')                 P_DOCRC_REF  in out [DOCUM_RC_REF]
+) is
+
+execute is
+/*********************************************************************
+Назначение:
+Возможность контроля созданного объекта АБС (из транспортного документа)
+параметры:
+	Ссылка на транспортный документ
+	Сообщение об ошибке (типа MEMO) (in/out)
+	Обобщенная ссылка на объект
+	Наименование класса объекта (строка)
+*********************************************************************/
+dp number:=0;	--управление debug_pipe
+acc ref [AC_FIN];
+type_doc ref [TYPE_DOC_RC];
+part ref [CL_PART];
+opt string(1);
+sw5x [SWIFT_5X];
+oDocumRc [DOCUM_RC];
+oDocumRcPayer [REQ_PART];
+oMd [MAIN_DOCUM];
+md ref [MAIN_DOCUM];
+begin
+	::[PSH_EXP_TRA].[PSH_L].dbg(::[RUNTIME].[UTILS].call_stack,dp);
+	::[PSH_EXP_TRA].[PSH_L].dbg('Транспортный документ (BCD_CUR_ORDER) '||P_BC_DOC_REF,dp);
+	::[PSH_EXP_TRA].[PSH_L].dbg('Сообщение об ошибке '||P_ERR_DESC,dp);
+	::[PSH_EXP_TRA].[PSH_L].dbg('Ссылка на Документ РЦ '||P_DOCRC_REF,dp);
+
+	oDocumRc := P_DOCRC_REF;
+	md := oDocumRc.[MAIN_DOC]%id;
+	oMd := md;
+	acc := oMd.[ACC_DT];
+	oDocumRcPayer := oDocumRc.[PAYER];
+
+	::[PSH_EXP_TRA].[PSH_L].dbg('>'||oDocumRcPayer.[NAME],dp);
+
+	for tdrc in ::[TYPE_DOC_RC]
+	where tdrc.[NUM_CODE]=oDocumRc.[TYPE_DOC]
+	loop
+		type_doc := tdrc;
+		exit;
+	end loop;
+
+	part := oDocumRcPayer.[PART_REF];
+	opt := oDocumRcPayer.[OPTION_CL];
+
+	::[PSH_EXP_TRA].[PSH_L].dbg('Получение реквизитов клиента через DOCUM_RC.SWIFT_DOC_LIB.get_req_cl',dp);
+	sw5x:=::[DOCUM_RC].[SWIFT_DOC_LIB].get_req_cl(
+		acc,
+		type_doc,
+		part,
+		opt);
+
+	::[PSH_EXP_TRA].[PSH_L].dbg('<sw5x.OPTION_CL.Опция:'||sw5x.[OPTION].[OPT],dp);
+	::[PSH_EXP_TRA].[PSH_L].dbg('<sw5x.Банк:'||sw5x.[BANK].[NAME],dp);
+	::[PSH_EXP_TRA].[PSH_L].dbg('<sw5x.Счет:'||sw5x.[ACC],dp);
+	::[PSH_EXP_TRA].[PSH_L].dbg('<sw5x.Наименование:'||sw5x.[NAME],dp);
+
+	if oDocumRcPayer.[NAME] is null or oDocumRcPayer.[NAME]<>sw5x.[NAME] then
+		::[PSH_EXP_TRA].[PSH_L].dbg('Сохраним sw5x.Наименование в Документе РЦ',dp);
+		P_DOCRC_REF.[PAYER].[NAME]:=sw5x.[NAME];
+	end if;
+	
+	if oMd.[DOCUMENT_DATE] is null then --Башкиров В.Г. 14.10.2024 Обработка документа, созданного раньше текущего операционного дня - проверьте даты сформированных проводок
+		P_DOCRC_REF.[MAIN_DOC].[DOCUMENT_DATE] := sysdate;
+	end if;
+end;
+end;
+end;

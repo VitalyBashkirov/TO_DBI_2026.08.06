@@ -1,0 +1,39 @@
+class KASSA_V;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Заявление на размен Word')
+@tag('COPIED')
+method PSH_RAZMEN_WRD is
+
+@name('Данные для вывода') public V_DATA [STRING_32000];
+@name('Исходный договор')  public V_DOG  [KASSA_V_REF];
+
+csOperDay		const date 				:= ::[SYSTEM].[OP_DATE];
+-- собссно заполнение инфой
+Function GetPrdInfo(p_info varchar2(100), iDog ref [KASSA_V]) return varchar2(32000) is
+Begin
+	-- шаблон
+	if p_info = 'REPORTFILE' then
+ 		return 'ПСХ_Заявл_размен.doc';
+ 	elsif p_info = 'REPORTPATH' then
+ 		return  ::[SYSTEM_PARAMS].[GET]('PATH_PRINT_DOC', true);
+ 	elsif p_info like 'DATE_OD%' then
+		return to_char(csOperDay,'DD.MM.YYYY');
+	end if;
+	
+End;
+PSH_RAZMEN_WRD return [STRING_1] is
+
+validate is
+-- проверка
+Begin
+	if p_message = 'DEFAULT' or p_info = '%PLPCALL%' then
+		V_DOG := this;
+				
+	elsif p_message = 'VALIDATE' then
+		V_DATA := trim(GetPrdInfo(p_info, V_DOG));
+	end if;
+End;
+end;
+end;

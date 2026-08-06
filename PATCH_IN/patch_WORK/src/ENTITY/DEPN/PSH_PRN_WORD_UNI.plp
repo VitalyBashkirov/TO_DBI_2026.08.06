@@ -1,0 +1,303 @@
+class DEPN;
+
+@name('[ПСБ] Печать WORD универсальная')
+@tag('COPIED')
+static method PSH_PRN_WORD_UNI is
+
+@name('Данные для вывода')              public V_DATA                [STRING_32000];
+@name('Кэшированные значения вычпаров') public V_CASH       table of [PRINT_CASH_VAL];
+@name('Путь к отчету')                  public V_REPORTPATH          [STRING_32000];
+@name('Файл отчета')                    public V_REPORTFILE          [STRING_32000];
+@name('Количество вычпаров')            public V_NUM                 [SHORT4];
+
+/* Дата     Автор        BFS         Описание
+* -------- ----------   ----------- ---------------------------------------------------
+* 15.10.13 areshetnikov	BS00563144	Изменен алгоритм поиска переменных типа DocVariable и DocProperty в колонтитулах документа
+* 17.03.14 khasenov		BS00809500	В клиент-скрипте удален лишний вызов GetData для получения значения поля.
+* 16.05.14 khasenov		BS00827906	В клиент-скрипте изменен алгоритм вычисления значения поля.
+* 24.03.15 akhmadiev	RP0218863	Произведена оптимизация клиент-скрипта путем уменьшения количества обращений к серверной валидации.
+* 23.06.15 poljakova	RP0277319	В клиент-скрипте добавлен SetWordVisible при нажатии на ОК.
+*/
+
+pragma include ([RUNTIME]::[MACRO_LIB]);
+pragma include ([DEBUG_TRIGGER]::[MACRO_LIB]);
+
+c_fields_number		const number := 1000;
+type Rec_Tags is record
+	(ResourceOper	string
+	,Value			varchar2(32000));
+type TAB_Tags is table of Rec_Tags index by string;
+
+t_DopTags	TAB_Tags;	-- Локальные тэги
+t_Tags		TAB_Tags;	-- Все тэги
+
+-- Добавление ресурса для дополнительного тэга
+public procedure AddDopTag (p_TagName string, p_Resource string, p_Value varchar2(32000) default null) is 
+	TagName		p_TagName%type	:= upper(p_TagName);
+begin
+	if TagName is null then
+		pragma error('Не задано название тэга для печати');
+	end if;
+
+	if t_DopTags.exists(TagName) then
+		pragma error('Дублирование добавления дополнительного тэга '||p_TagName);
+	end if;
+	
+	if p_Value is null and p_Resource is null then
+		pragma error('Для тэга "'||p_TagName||'" не указаны ресурс и значение');
+	end if;
+	
+	t_DopTags(TagName).ResourceOper	:= p_Resource;
+	t_DopTags(TagName).Value		:= p_Value;
+end;
+
+function GetValue(p_TagName string, p_Resource string, p_Depn ref [DEPN], p_Date DATE, p_AddPar varchar2(32000) default null) return varchar2(32000)
+is
+	RetVal		GetValue%type;
+	TagName		p_TagName%type	:= upper(p_TagName);
+	ResourceTag	p_Resource%type;
+	
+begin
+	&debug('GetValue...', 1)
+	&debug('p_TagName: '||p_TagName, 1)
+	&debug('p_Resource: '||p_Resource, 1)
+	&debug('p_Depn: '||p_Depn, 1)
+	&debug('p_Date: '||to_char(p_Date, 'dd/mm/yyyy'), 1)
+	&debug('p_AddPar: '||p_AddPar, 1)
+	
+	if TagName is null then
+		return null;
+	end if;
+	
+	if t_Tags.exists(TagName) then
+		RetVal		:= t_Tags(TagName).Value;
+		ResourceTag	:= t_Tags(TagName).ResourceOper;
+	end if;
+	
+	if RetVal is null then
+		&nvl(ResourceTag, p_Resource)
+		
+		&debug('Получение значения тэга из Точки Расширения', 1)
+		RetVal	:= [HOOK]::[DEPN_PRINT]
+			(P_TAG		== p_TagName		-- Тэг для печати
+			,P_RESOURCE	== ResourceTag		-- Ресурс
+			,P_DEPN		== p_Depn			-- Депозит
+			,P_DATE		== p_Date			-- Дата
+			,P_ADD_PAR	== p_AddPar);		-- Доп. параметры
+	end if;
+	
+	&debug('GetValue. Возвращаем: '||RetVal, 1)
+	return RetVal;
+	
+exception when others then
+	&debug('GetValue. Ошибка: '||RetVal, 1)
+	pragma error('Ошибка получения значения тэга "'||p_TagName||'": '||&sqlerrm2str);
+end;
+
+-- Перенос значений из дополнительной таблицы тэгов в таблицу тэгов
+procedure SetExtTagTable
+is
+	Indx	string;
+begin
+	if t_DopTags.count = 0 then
+		return;
+	end if;
+	
+	Indx	:= t_DopTags.first;
+	while Indx is not null
+	loop
+		if not t_Tags.exists(Indx) then
+			t_Tags(Indx)	:= t_DopTags(Indx);
+		end if;
+		
+		Indx	:= t_DopTags.next(Indx);
+	end loop;
+end;
+
+procedure InitializTag(p_Depn ref [DEPN], p_Date DATE, p_AddPar varchar2(32000))
+is
+begin
+	-- Очистка таблицы тэгов
+	t_Tags.delete;
+	
+	-- Заполнение Общих тэгов
+	--t_Tags('TagName').ResourceOper
+	--t_Tags('TagName').Value
+	
+	-- Перенос значений из дополнительной таблицы тэгов в таблицу тэгов
+	SetExtTagTable;
+
+	--Очистка дополнительной таблицы тэгов
+	t_DopTags.delete;
+end;
+
+
+procedure GetReport(
+	P_REPORTPATH	in out varchar2(32000),
+	P_REPORTFILE	in out varchar2(32000),
+	P_FILE_NAME_IN	in varchar2(512),
+	P_SHABLON		in ref [SHABLON_DOC])
+is
+	vBegName		integer;
+	vData		varchar(32000);
+begin
+	if P_FILE_NAME_IN is null then
+		if P_SHABLON is null then
+			pragma error('Не задан шаблон для печати документа');
+		end if;
+		vData	:= P_SHABLON.[NAME];
+	else
+		vData	:= P_FILE_NAME_IN;
+	end if;
+	vBegName	:= instr(vData, '\', -1, 1);
+	if vBegName > 0 then
+		P_REPORTPATH	:= substr(vData, 1, vBegName);
+		P_REPORTFILE	:= substr(vData, vBegName + 1);
+	else
+		P_REPORTPATH	:= [SYSTEM_PARAMS]::[GET]('PATH_PRINT_DOC');
+	end if;
+	if vData is null then
+		pragma error('Не определен шаблона для печати');
+	end if;
+end;
+PSH_PRN_WORD_UNI (
+	@name('Шаблон печати')                   P_SHABLON       in     [SHABLON_DOC_REF],
+	@name('Депозит')                         P_DEPN          in ref [DEPN],
+	@name('Дата печати')                     P_DATE          in     [STRING_128],
+	@name('Ресурсы тэгов')                   P_RESOURCE      in     [STRING_128],
+	@name('Доп. параметры')                  P_ADD_PAR       in     [STRING_32000]    default null,
+	@name('Полное имя шаблона')              P_FILE_NAME_IN  in     [FILE$PATH]       default null,
+	@name('Полное имя файла для сохранения') P_FILE_NAME_OUT in     [FILE$PATH]       default null
+) is
+
+validate is
+begin
+	&debug('**************************', 1)
+	&debug('p_info: '||p_info, 1)
+	
+	if &Validate_Mes then
+		V_DATA	:= null;
+		
+		if p_info = '%PLPCALL%' then
+			&debug('P_SHABLON: '||P_SHABLON.[NAME], 1)
+			&debug('P_FILE_NAME_IN: '||P_FILE_NAME_IN, 1)
+			&debug('P_DEPN: '||P_DEPN, 1)
+			&debug('P_DATE: '||P_DATE, 1)
+			&debug('P_ADD_PAR: '||P_ADD_PAR, 1)
+			&debug('P_FILE_NAME_OUT: '||P_FILE_NAME_OUT, 1)
+			-- Инициализация тэгов
+			InitializTag(P_DEPN, to_date(P_DATE), P_ADD_PAR);
+			GetReport(V_REPORTPATH,V_REPORTFILE,P_FILE_NAME_IN,P_SHABLON);
+			for i in 1..c_fields_number loop
+				V_CASH(i) := null;
+			end loop;
+		elsif p_info = 'GETVALUES' then
+			for i in 1..V_NUM loop
+				if upper(V_CASH(i).NAME) like '%DOCVARIABLE%'  or upper(V_CASH(i).NAME) like  '%DOCPROPERTY%' then
+					V_CASH(i).VALUE := GetValue
+										(p_TagName	==	upper(trim(regexp_substr(
+									                    		trim (V_CASH(i).NAME),
+									                    		'\s+[[:alnum:]_]*\s+',
+									                            1)))
+										,p_Resource	== P_RESOURCE
+										,p_Depn		== P_DEPN
+										,p_Date		== to_date(P_DATE)
+										,p_AddPar	== P_ADD_PAR);
+				else
+					V_CASH(i).VALUE := GetValue
+										(p_TagName	== V_CASH(i).NAME
+										,p_Resource	== P_RESOURCE
+										,p_Depn		== P_DEPN
+										,p_Date		== to_date(P_DATE)
+										,p_AddPar	== P_ADD_PAR);
+				end if;
+				if trim(nvl(V_CASH(i).VALUE, '')) = '' then
+					if upper(V_CASH(i).RESULT) like '%DOCVARIABLE%'  or upper(V_CASH(i).RESULT) like  '%DOCPROPERTY%' then
+						V_CASH(i).VALUE := GetValue
+											(p_TagName	==
+															upper(trim(regexp_substr(
+										                                trim (V_CASH(i).RESULT),
+										                                '\s+[[:alnum:]_]*\s+',
+										                                1)))
+											,p_Resource	== P_RESOURCE
+											,p_Depn		== P_DEPN
+											,p_Date		== to_date(P_DATE)
+											,p_AddPar	== P_ADD_PAR);
+					else
+						V_CASH(i).VALUE := GetValue
+											(p_TagName	== V_CASH(i).RESULT
+											,p_Resource	== P_RESOURCE
+											,p_Depn		== P_DEPN
+											,p_Date		== to_date(P_DATE)
+											,p_AddPar	== P_ADD_PAR);
+					end if;
+				end if;
+			end loop;
+			
+		elsif p_info in ('REPORTPATH', 'REPORTFILE') then
+			declare
+				BegName		integer;
+			begin
+				if P_FILE_NAME_IN is null then
+
+					if P_SHABLON is null then
+						pragma error('Не задан шаблон для печати документа');
+					end if;
+
+					V_DATA	:= P_SHABLON.[NAME];
+				
+				else
+					V_DATA	:= P_FILE_NAME_IN;
+				end if;
+				
+				BegName	:= instr(V_DATA, '\', -1, 1);
+				
+				if p_info = 'REPORTPATH' then
+					if BegName > 0 then
+						V_DATA	:= substr(V_DATA, 1, BegName);
+					else
+						V_DATA	:= [SYSTEM_PARAMS]::[GET]('PATH_PRINT_DOC');
+					end if;
+				else
+					if BegName > 0 then
+						V_DATA	:= substr(V_DATA, BegName + 1);
+					end if;
+				end if;
+				
+				if V_DATA is null then
+					pragma error('Не определен шаблона для печати');
+				end if;
+			end;
+		elsif upper(p_info) like '%DOCVARIABLE%'  or upper(p_info) like  '%DOCPROPERTY%' then
+			&debug('sfdsfdsf',0)
+			&debug('Tag  = ' || upper(trim(regexp_substr(
+                                trim(p_info),
+                                '\s+[[:alnum:]_]*\s+',
+                                1))) , 0 )
+
+                   V_DATA := GetValue
+					(p_TagName	==
+									upper(trim(regexp_substr(
+				                                trim (p_info),
+				                                '\s+[[:alnum:]_]*\s+',
+				                                1)))
+					,p_Resource	== P_RESOURCE
+					,p_Depn		== P_DEPN
+					,p_Date		== to_date(P_DATE)
+					,p_AddPar	== P_ADD_PAR);
+
+			
+		else
+			-- Значение Тэгов
+			V_DATA := GetValue
+					(p_TagName	== p_info
+					,p_Resource	== P_RESOURCE
+					,p_Depn		== P_DEPN
+					,p_Date		== to_date(P_DATE)
+					,p_AddPar	== P_ADD_PAR);
+		end if;
+	end if;
+	&debug('p_info:'||p_info||' <V_DATA: '||V_DATA, 1)
+end;
+end;
+end;

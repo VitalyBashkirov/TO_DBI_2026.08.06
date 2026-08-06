@@ -1,0 +1,1219 @@
+class DM_DAYDOCS;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] ДД. Документы дня (отключены pragma error)')
+@tag('COPIED')
+method PSH_DAY_DOCS is
+
+@name('Операция')                public V_OPER       [DOG_OPER_REF];
+@name('Обработанные ПФИ')        public V_PROCESS_DM [DM_PROC_ARR];
+@name('Бухгалтерские документы') public V_DO_BUH     [BOOLEAN];
+@name('Документы СВУ')           public V_DO_SVU     [BOOLEAN];
+pragma include([STOCK].[MSG]);
+PRAGMA include(::[DOG_BROCKER].[SLIB]);
+
+--Башкиров В.Г. 25.03.2026 CFT-3831
+	dp number:=0;		--управление debug_pipe
+	dp1 number:=null;	--управление debug_pipe
+public function FpTuneOk
+/*Проверить значение на принадлежность Настройки.*/
+(
+	code varchar2(30)
+		/*код настройки*/
+	,separator string(1)
+		/*резделитель, если настроек несколько (по умолчнанию ',')*/
+	,chech_val varchar2(512)
+		/*проверяемое значенеие*/
+)
+/* true - если значение из настройки
+false - если нет */
+return boolean is
+	pragma restrict_references(get_str_value, wnds);
+	strTune string(1024);
+	ret_bool boolean:=false;
+begin
+	if separator is null then
+		separator:=',';
+	end if;
+
+	strTune:=trim(::[FP_TUNE].[LIB].get_str_value(code, null, '0'));
+	debug_pipe('.FtTuneOk -- '||code||'='||strTune||' Ищем '||chech_val||' separator='||separator,dp1);
+
+	if strTune is not null then
+		debug_pipe('.FtTuneOk -- (0) strTune='||strTune,dp1);
+		strTune:=trim(strTune, separator);
+		debug_pipe('.FtTuneOk -- (1) strTune='||strTune,dp1);
+		
+		if strTune is not null then
+			strTune:=separator||strTune||separator;
+			debug_pipe('.FtTuneOk -- (2) strTune='||strTune,dp1);
+			
+			chech_val:=trim(chech_val);
+			debug_pipe('.FtTuneOk -- (3) chech_val='||chech_val,dp1);
+			if length(chech_val)>0
+			then
+				chech_val:=trim(chech_val,separator);
+				debug_pipe('.FtTuneOk -- (4) chech_val='||chech_val,dp1);
+				if chech_val is not null then
+					chech_val:=separator||chech_val||separator;
+					debug_pipe('.FtTuneOk -- (5) chech_val='||chech_val,dp1);
+					if instr(strTune,chech_val)>0 then
+						debug_pipe('.FtTuneOk -- (6) ЕСТЬ в настройке',dp1);
+						ret_bool:=true;
+					end if;
+				end if;
+			end if;
+		end if;
+	end if;
+	if ret_bool then
+		debug_pipe('.FtTuneOk -- '||code||'='||strTune||' Ищем '||chech_val||' < TRUE',dp);
+	else
+		debug_pipe('.FtTuneOk -- '||code||'='||strTune||' Ищем '||chech_val||' < false',dp1);
+	end if;
+	return ret_bool;
+end;
+
+--#include DM_SDELKA.IS_BIRJ
+
+V_Our_Branch	ref [BRANCH] :=::[SYSTEM].[VARIABLES].OurBranch;
+V_Our_Bank	ref [CLIENT] :=::[SYSTEM].[VARIABLES].Ourbank;
+V_OUR_PORT_ID ref [DM_PORT_ID] := ::[DM_DAYDOCS].[SLIB].GetOurPortId;
+
+procedure fill_bas_docs(p_prod ref [DM_DAYDOCS]
+						,p_prod_date date
+						,p_oper	ref [DOG_OPER]
+						,p_market_pl ref [MARKET_PLACE]
+						,p_mp_sec	ref [MT_SECTIONS]
+						,p_do_deal	boolean
+						,p_do_cli	boolean
+						,p_do_buh	boolean
+						,p_do_svu	boolean
+						,p_arr_dm	number
+						,p_port_id	ref [DM_PORT_ID]
+						,P_BAS_DOC in out FP_BAS_DOC_TABLE
+						,P_VOUCHER_DOC in out SVU_VOUCH_DOC_TABLE
+						) is
+type t_product is table of ref [PRODUCT];
+type t_market_place is table of ref [MARKET_PLACE];
+type t_mt_sec is table of ref [MT_SECTIONS];
+
+dogs			t_product;
+markets			t_market_place;
+mt_sec 			t_mt_sec;
+
+prefix				string;
+v_nazn				[MEMO];
+prev_str	string;	
+new_str		string;	
+dop_market	varchar2(16);
+v_prod 		string;
+v_market 	string;
+begin
+
+	dogs.delete;
+	markets.delete;
+	mt_sec.delete;
+	
+	if p_market_pl is not null then
+		&dmess('По торговой площадке '||p_market_pl.[NAME]||' и секции '||p_mp_sec.[NAME]);
+		select distinct sd(
+					sd.[DOG]		: dog,
+					sd.[MARKET]		: market,
+					sd.[MT_SEC]		: mt_sec
+				)
+		in ::[DM_SDELKA] all
+		where	sd.[FILIAL] = V_Our_Branch
+				--Биржевая сделка
+				and &is_birj_all(sd.[CATEGORY])
+				and sd%state = 'ARRANGE'
+				and sd.[MARKET] = p_market_pl -- для ТП продукта ДД ПФИ
+				and sd.[MT_SEC] = p_mp_sec
+				-- продукт ДД у нас должен обрабатывать либо дилерские операции
+				-- (в т.ч и при работе через внешнего брокера): тогда Инвестор - наш банк
+				-- либо брокерские (Клиентские) сделки: тогда Инвестор - НЕ наш банк (на будущее),
+				-- либо и то и другое. Клиентские договоры отличаются по PORT_ID
+				and (p_do_deal and sd.[INVESTOR] = V_Our_Bank
+				-- Не берем ранее успешнообработанные записи за дату p_prod_date
+				and not exists (select y(1) in ::[DM_PROC] all
+								where y%collection = p_arr_dm
+								and y.[OPER] = p_oper
+								and (y.[DFT] = sd.[DERIVATIVE] or (y.[DFT] is null and &is_std(sd.[CATEGORY])))
+								and y.[DATE_OP] = p_prod_date
+								-- пока обрабатываем только свои сделки
+								-- обрабатываем только нужную позицию
+								and y.[INVESTOR] = V_Our_Bank
+								and y.[PORT_ID] = p_port_id
+								and y%state = 'PROCESSED'
+									)
+					or
+					p_do_cli and sd.[DOG_SUBCL] is not null
+					and not exists (select y(1) in ::[DM_PROC] all
+									where y%collection = p_arr_dm
+									and y.[OPER] = p_oper
+									and y.[DFT] = sd.[DERIVATIVE]
+									and y.[DATE_OP] = p_prod_date
+									-- пока обрабатываем только свои сделки
+									-- обрабатываем только нужную позицию
+									and y.[PORT_ID].[DOG] = sd.[DOG_SUBCL]
+									and y%state = 'PROCESSED'
+									)
+								)
+		UNION
+		select distinct ds(
+					dog%id		    	: dog,
+					ds.[MARKET_PLACE]	: market,
+					ds.[SECT]			: mt_sec
+				)
+		in ::[DM_DAY_SUMMARY],(::[DM_DOG_MARKET]:dog) all
+		where	ds.[FILIAL] = V_Our_Branch
+				and ds.[MARKET_PLACE] = p_market_pl -- для ТП продукта ДД ПФИ
+				and ds.[SECT] = p_mp_sec
+				and dog.[MARKET]= ds.[MARKET_PLACE]
+				and dog%state = 'EXEC'
+				and p_do_cli
+				and not exists (select y(1) in ::[DM_PROC] all
+									where y%collection = p_arr_dm
+									and y.[OPER] = p_oper
+									and y.[DFT] = ds.[DM_REF]
+									and y.[DATE_OP] = p_prod_date
+									and y.[INVESTOR] = ds.[DOG_SUBCL].[INVESTOR]
+									and y%state = 'PROCESSED'
+									)									
+		order by sd.[DOG]
+		into	dogs,
+				markets,
+				mt_sec;
+				
+	else
+		&dmess('По всем торговым площадкам');
+		select distinct sd(
+					sd.[DOG]		: dog,
+					sd.[MARKET]		: market,
+					sd.[MT_SEC]		: mt_sec
+				)
+		in ::[DM_SDELKA] all
+		where	sd.[FILIAL] = V_Our_Branch
+				--Биржевая сделка
+				and &is_birj_all(sd.[CATEGORY])
+				and sd%state = 'ARRANGE'
+				-- продукт ДД у нас должен обрабатывать либо дилерские операции
+				-- (в т.ч и при работе через внешнего брокера): тогда Инвестор - наш банк
+				-- либо брокерские (Клиентские) сделки: тогда Инвестор - НЕ наш банк (на будущее),
+				-- либо и то и то, но ТОЛЬКО для КОМИССИЙ.
+				-- Если продукт не имеет этих флагов, то это значит,
+				-- что продукт обрабатывает сальдовые проводки, а поэтому сломается раньше
+				and (p_do_deal and sd.[INVESTOR] = V_Our_Bank
+				-- Не берем ранее успешнообработанные записи за дату p_prod_date
+				and not exists (select y(1) in ::[DM_PROC] all
+								where y%collection = p_arr_dm
+								and y.[OPER] = p_oper
+								and (y.[DFT] = sd.[DERIVATIVE] or (y.[DFT] is null and &is_std(sd.[CATEGORY])))
+								and y.[DATE_OP] = p_prod_date
+								-- пока обрабатываем только свои сделки
+								-- обрабатываем только нужную позицию
+								and y.[INVESTOR] = V_Our_Bank
+								and y.[PORT_ID] = p_port_id
+								and y%state = 'PROCESSED'
+									)
+					or
+					p_do_cli and sd.[DOG_SUBCL] is not null
+					and not exists (select y(1) in ::[DM_PROC] all
+									where y%collection = p_arr_dm
+									and y.[OPER] = p_oper
+									and y.[DFT] = sd.[DERIVATIVE]
+									and y.[DATE_OP] = p_prod_date
+									-- пока обрабатываем только свои сделки
+									-- обрабатываем только нужную позицию
+									and y.[PORT_ID].[DOG] = sd.[DOG_SUBCL]
+									and y%state = 'PROCESSED'
+									)
+								)
+		UNION
+		select distinct ds(
+					dog%id		    	: dog,
+					ds.[MARKET_PLACE]	: market,
+					ds.[SECT]			: mt_sec
+				)
+		in ::[DM_DAY_SUMMARY],(::[DM_DOG_MARKET]:dog) all
+		where	ds.[FILIAL] = V_Our_Branch
+				and dog.[MARKET]= ds.[MARKET_PLACE]
+				and dog%state = 'EXEC'
+				and p_do_cli
+				and not exists (select y(1) in ::[DM_PROC] all
+									where y%collection = p_arr_dm
+									and y.[OPER] = p_oper
+									and y.[DFT] = ds.[DM_REF]
+									and y.[DATE_OP] = p_prod_date
+									and y.[INVESTOR] = ds.[DOG_SUBCL].[INVESTOR]
+									and y%state = 'PROCESSED'
+									)								
+		order by sd.[DOG]
+		into	dogs,
+				markets,
+				mt_sec;
+				
+
+	end if;
+	
+	prev_str	:= null;
+	for i in 1.. dogs.count loop
+		new_str := dogs(i)%id||mt_sec(i)%id;
+		if prev_str is null or prev_str <> new_str then
+			if p_do_buh then
+				--Заполнение таблицы первичных документов для бухгалтерии
+				if [RUNTIME].[LIB].is_parent('DOG_BROK_EXT', dogs(i)%class) then
+					prefix := 'BROK_EXT';
+				else
+					prefix := 'BIRJ';
+				end if;
+				
+				v_nazn	:= [FG_DOCUMENT].[LIB_BAS_DOC].get_base_doc(
+															&METHOD$CLASS||'.'||&METHOD$SNAME||'.'||prefix,
+															p_prod_date
+														);
+				P_BAS_DOC(i).[DATE_OP] 	:= p_prod_date;
+				P_BAS_DOC(i).[PROD] 	:= dogs(i);
+				P_BAS_DOC(i).[TEXT_NAZN]:= v_nazn;
+				P_BAS_DOC(i).[MARKET] 	:= markets(i);	
+				P_BAS_DOC(i).[MT_SEC] 	:= mt_sec(i);	
+			end if;
+			
+			if p_do_svu then
+				--Заполнение таблицы подтверждающих документов для СВУ
+				P_VOUCHER_DOC(i).[DATE_VOUCHER] := p_prod_date;
+				P_VOUCHER_DOC(i).[PROD] 	:= dogs(i);
+				P_VOUCHER_DOC(i).[MARKET] 	:= markets(i);
+				
+				-- восстановление значения параметра P_VOUCHER_DOC индивидуально для конкретного пользователя
+				v_prod := P_VOUCHER_DOC(i).[PROD].[NUM_DOG];
+				v_market :=P_VOUCHER_DOC(i).[MARKET].[CODE];
+				P_VOUCHER_DOC(i).[NUM_VOUCHER]:= nvl(::[DEFVALS].[SLIB].RestoreStr(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_VOUCHER_DOC'||v_prod||v_market),'');
+				
+				P_VOUCHER_DOC(i).[TYPE_VOUCHER]:= ::[DM_SDELKA].[LIB_SVU].get_def_voucher('DM_DAYDOCS'
+						,p_prod
+						,::[TYPE_OPER_NS]([CODE]='DM_FIN')
+						,markets(i)
+						,mt_sec(i)
+						,V_Our_Branch
+						,null);												
+			end if;	
+			prev_str := new_str;
+		end if;
+	end loop;
+end;
+
+--определяем относится ли секция да подуктах ДД по ПФИ к рынку FORTS
+public function is_FORTS (p_proc_arr [DM_PROC_ARR], p_oper ref [DOG_OPER], p_prod_date [DATE]) return boolean is
+b_birj boolean;
+begin
+	--проверяем, что все ПФИ, предназначенные к обработке операцией относятка к рынку FORTS
+	for (select x(	x%id				: ID_
+					,x.[DFT]			: PFI_
+					,x.[DFT].[CATEGORY]			: CATEGORY
+					) in ::[DM_PROC] collections
+		where x%collection = p_proc_arr
+		and x.[OPER] = p_oper
+		and x.[DATE_OP] = p_prod_date
+		order by x.[INVESTOR], x.[DFT]
+	)
+	loop
+		if b_birj is null then
+			if &is_birj(x.CATEGORY) then
+				b_birj:=true;
+			else
+				b_birj:=false;
+			end if;
+		else
+			if &is_birj(x.CATEGORY) and b_birj then
+				b_birj:=true;
+			else
+				b_birj:=false;
+			end if;
+		end if;
+		exit when b_birj = false;
+	end loop;
+	return b_birj;
+end;
+
+
+procedure check_PROCESS_POS (p_daydocs	ref [DM_DAYDOCS]) is
+V_OurPortId ref [DM_PORT_ID];
+v_row [DM_PROC];
+V_OPER_NUM number;
+V_OPER_TYPE ref [TYPE_OPER_NS];
+tbl [DM_PROC]%rowtable;
+i integer;
+v_arr [DM_PROC_ARR];
+V_SVU_ONLY boolean;
+
+	procedure body_of_loop(V_PORT_ID ref [DM_PORT_ID], V_DFT ref [DM_DERIVATIVES]) is
+	begin
+		if V_SVU_ONLY and not ::[DM_DAYDOCS].[SLIB].is_dm_svu_on(V_DFT, V_PORT_ID) then
+			--Формирование документов СВУ запрещены для этого инструмента
+			return;
+		end if;
+
+		--Башкиров В.Г. 25.03.2026 CFT-3831
+		if FpTuneOk('PSH_DM_DERIVATIVES_IS_NOT',null,V_DFT.[CODE]) then
+			debug_pipe('.check_PROCESS_POS.body_of_loop -- ПФИ '||V_DFT.[CODE]||' ИСКЛЮЧЕН из обработки',dp);
+			return;
+		end if;
+
+		v_row:=null;
+		v_row%init;
+		v_row%id:=next_value('SEQ_ID');
+		v_row%collection:=v_arr;
+		v_row.[PORT_ID]:=V_PORT_ID;
+		v_row.[INVESTOR]:=V_PORT_ID.[INVESTOR];
+		v_row.[DFT]:=V_DFT;
+		v_row.[DATE_OP]:=p_daydocs.[DATE_BEGIN];
+		v_row.[OPER]:=V_OPER;
+		v_row.[NUM]:=V_OPER_NUM;
+		v_row.[OPER_TYPE]:=V_OPER_TYPE;
+		if V_DFT is null then
+			v_row.[NOTE] := 'Обработка стандартизированных ПФИ';
+		end if;
+		
+		i:=nvl(i,0)+1;
+		tbl%init(v_row,true,i);		
+			
+	end;
+	
+begin
+	if V_OPER is null then
+		return;
+	end if;
+	
+	V_OurPortId:=::[DM_DAYDOCS].[SLIB].GetOurPortId;
+	v_arr:=p_daydocs.[PROCESS_DM];
+	select x(x.[NUM],x.[OPER_TYPE]) in p_daydocs.[OPER]
+	where x=V_OPER
+	into V_OPER_NUM,V_OPER_TYPE;
+	tbl%init;
+	i:=0;
+	--Если в данной операции нужны только документы СВУ, то перед добавлением обрабатываемой
+	--записи в массив DM_PROC нужно проверить доступность СВУ для этого инструмента
+	V_SVU_ONLY:=nvl(p_daydocs.[DO_SVU],false) and not nvl(p_daydocs.[DO_BUH],false);
+	--AND Внимание! Теперь появились клиентский сделки, следовательно, обработка позиции нас может интересовать
+	--в разрезе признака "свой/чужой"
+	for(select distinct x(x.[PROCESS_DM].[PORT_ID]:PORT_ID,
+						x.[PROCESS_DM].[DFT]:DFT
+						) in ::[DM_DAYDOCS]
+		where x.[DATE_BEGIN] = p_daydocs.[DATE_BEGIN]
+		and x.[PROCESS_DM].[OPER_TYPE] in (::[TYPE_OPER_NS]([CODE]='DM_POS'), ::[TYPE_OPER_NS]([CODE]='DM_STD'))
+		and x.[PROCESS_DM].[DATE_OP]=p_daydocs.[DATE_BEGIN]
+		and x.[PROCESS_DM]%state in ('PROCESSED','NO_MOVE')
+		and (p_daydocs.[MARKET] is null or p_daydocs.[MARKET]=x.[MARKET] and p_daydocs.[MT_SEC]=x.[MT_SEC])
+		and (p_daydocs.[DO_OWN] and x.[PROCESS_DM].[PORT_ID]=V_OurPortId
+			or
+			p_daydocs.[DO_CLI] and x.[PROCESS_DM].[PORT_ID]<>V_OurPortId
+			)
+		minus
+		select distinct x(x.[PORT_ID]:PORT_ID,
+						x.[DFT]:DFT
+						) in v_arr
+		where x.[DATE_OP] = p_daydocs.[DATE_BEGIN]
+		and x.[OPER] = V_OPER
+		--and x.[PORT_ID]=V_OurPortId
+		and (p_daydocs.[DO_OWN] and x.[PORT_ID]=V_OurPortId
+			or
+			p_daydocs.[DO_CLI] and x.[PORT_ID]<>V_OurPortId
+			)
+		)
+	loop
+		body_of_loop(x.PORT_ID, x.DFT);
+	end loop;
+
+	for i in 1 .. tbl%ID.count loop
+		&dmess('tbl%ID(i) = '||tbl%ID(i));
+		&dmess('tbl%collection(i) = '||tbl%collection(i));
+	end loop;
+
+	insert into ::[DM_PROC]
+		for i in 1 .. tbl%ID.count loop
+		x(x%id = tbl%ID(i),
+			x%collection = tbl%collection(i),
+			x%class = 'DM_PROC',
+			x%state = 'PREPARE', --Начальное состояние
+			x%rowtype('nosys') = tbl%rowtype('nosys',i)
+			);	
+end;
+
+procedure m2p(s varchar2)
+is
+begin
+	debug_pipe(s,0);
+end;
+
+procedure save_voucher_doc (P_VOUCHER_DOC in SVU_VOUCH_DOC_TABLE)
+is
+	v_prod string;
+	v_market string;
+	v_num_voucher string;
+	
+	i integer;	
+begin
+	i := P_VOUCHER_DOC.first;
+
+		while i is not null loop
+			v_prod := P_VOUCHER_DOC(i).[PROD].[NUM_DOG];
+			v_market :=P_VOUCHER_DOC(i).[MARKET].[CODE];
+			v_num_voucher := P_VOUCHER_DOC(i).[NUM_VOUCHER];
+			
+			&dmess('v_prod :='||v_prod);
+			&dmess('v_market :='||v_market);
+			&dmess('v_num_voucher :='||v_num_voucher);
+			
+	 	-- сохранение значения v_num_voucher индивидуально для конкретного пользователя
+	 		::[DEFVALS].[SLIB].SaveStr(stdlib.userid, &METHOD$CLASS, &METHOD$SNAME,'P_VOUCHER_DOC'||v_prod||v_market,v_num_voucher);
+
+			i := P_VOUCHER_DOC.next(i);
+	end loop;
+end;
+
+function FOLDER_OPEN_AUTONOM_TRANS(
+						  P_DATE [DATE] default null,
+						  P_PROV_ALL [BOOLEAN] default null,
+						  P_OUT_DT_KT [BOOLEAN] default null
+						) return ref [FOLDER_PAY] is	
+pragma autonomous_transaction;
+v_folder 	ref [FOLDER_PAY];					
+begin
+	v_folder := ::[FP_INTERFACE].[PRX_FOLDER_PAY].NEW#AUTO(P_DOCUMENT_DATE==P_DATE,
+		                                                            P_DOCUMENT_USER==stdlib.userid,
+		                                                            P_DO_PROV_ALL==P_PROV_ALL,
+		                                                            P_CAN_OUT_DT_KT == P_OUT_DT_KT);
+	commit;
+	return v_folder;
+end;
+
+public procedure process_group(
+									P_DAYDOCS ref [DM_DAYDOCS],
+									P_OPER ref [DOG_OPER],
+									P_FOLDER_MAIN_DOC ref [FOLDER_PAY],
+									P_FOLDER_OUTBAL 	ref [FOLDER_PAY],
+									P_FOLDER_SVU 		ref [FOLDER_PAY],
+									P_BEG_DATE date
+									,P_GROUP_NUM		number
+)
+is
+
+type tbl_Fp_bas_doc is table of [FP_BAS_DOC];
+type tbl_SVU_VOUCH_DOC is table of [SVU_VOUCH_DOC];
+i				integer;
+V_DAYDOCS_OBJ [DM_DAYDOCS];
+V_SVU_NDFL_GROUPS number;
+v_max_group_num number;
+l_src_job	varchar2(2048);
+l_ret_job	varchar2(2000);
+s_thread_name varchar(128);
+v_str_prefix string(128);
+
+T_BAS_DOC tbl_Fp_bas_doc;
+T_VOUCHER_DOC tbl_SVU_VOUCH_DOC;
+
+b_thread_process string(16);
+begin
+	::[STOCK].[MSG].Set_WRITE_SECONDS100(true);
+	v_str_prefix:='Поток '||P_GROUP_NUM||': ';
+	::[STOCK].[MSG].Set_DEBUG_PREFIX(v_str_prefix);
+	::[STOCK].[MSG].umess('Старт обработки');
+
+	V_OPER:=P_OPER;
+	V_DAYDOCS_OBJ := P_DAYDOCS;
+	fill_bas_docs(P_DAYDOCS,V_DAYDOCS_OBJ.[DATE_BEGIN], P_OPER, V_DAYDOCS_OBJ.[MARKET], V_DAYDOCS_OBJ.[MT_SEC], V_DAYDOCS_OBJ.[DO_OWN], V_DAYDOCS_OBJ.[DO_CLI], V_DAYDOCS_OBJ.[DO_BUH], V_DAYDOCS_OBJ.[DO_SVU], V_DAYDOCS_OBJ.[PROCESS_DM], V_OUR_PORT_ID, T_BAS_DOC, T_VOUCHER_DOC);
+			
+		
+	--Сохранить данные первичных документов из грида в массив
+		
+	if V_DAYDOCS_OBJ.[DO_BUH] then
+		::[DM_DAYDOCS].[LIB_DOCS].clear_bas_doc();
+		i := T_BAS_DOC.first;
+		while i is not null loop
+			&dmess('i = '||i);
+			&dmess('T_BAS_DOC(i) = '||T_BAS_DOC(i)%id);
+			::[DM_DAYDOCS].[LIB_DOCS].add_bas_doc(T_BAS_DOC(i));
+			i := T_BAS_DOC.next(i);
+		end loop;
+	end if;
+		
+	if V_DAYDOCS_OBJ.[DO_SVU] then
+		::[DM_DAYDOCS].[LIB_DOCS].clear_svu_vouch_doc();
+		i := T_VOUCHER_DOC.first;
+		while i is not null loop
+			&dmess('i = '||i);
+			&dmess('T_VOUCHER_DOC(i) = '||T_VOUCHER_DOC(i)%id);
+			::[DM_DAYDOCS].[LIB_DOCS].add_vouch_doc(T_VOUCHER_DOC(i));
+			i := T_VOUCHER_DOC.next(i);
+		end loop;
+	end if;
+	
+		--обрабатываем одну пару Инвестор+ПФИ.
+		::[PAT_ISSUE_NS].[LIB_FIN].clear_cache;
+		::[PAT_ISSUE_NS].[LIB_SVU].clear_cache;
+		::[PAT_ISSUE_NS].[SLIB].set_nulls();
+		::[DM_SDELKA].[GLIB].set_nulls();
+		::[DM_SDELKA].[LIB_GR].clear_cache;
+		::[DM_SDELKA].[LIB_SVU].clear_cache;
+		--Отложенное формирование документов
+		::[PAT_ISSUE_NS].[SLIB].use_cached_insert := true;	
+			-- Зачистка таблицы связи документов и сводных сумм
+		::[PAT_ISSUE_NS].[LIB_SVU].docs_sums := null;
+
+		b_thread_process:=::[FP_CONST_THREAD].[SLIB].get_const('THREAD_PROCESS');
+
+				
+		--AND Теперь заполненные виртуальные таблицы используются и бух. документами, и документами СВУ
+		::[DM_DAYDOCS].[LIB_DOCS].Fill_virtual_tables_2Thread(V_DAYDOCS_OBJ,P_OPER,P_GROUP_NUM);
+			
+	 	
+		--ОБЩИЙ БЛОК ОБРАБОТКИ И ФОРМИРОВАНИЯ ДОКУМЕНТОВ (БУХГАЛТЕРИЯ И СВУ)
+		::[DM_DAYDOCS].[LIB_DOCS].Process(V_DAYDOCS_OBJ,P_OPER,P_FOLDER_OUTBAL,P_FOLDER_MAIN_DOC,P_FOLDER_SVU);
+
+		--Вставка изменений в базу. В том числе и экземпляров DOG_OPER
+		--Обработанные ПФИ будут позже обновлены, после завершения всех потоков
+
+		::[STOCK].[MSG].umess('Запись результатов в базу');	
+		::[DM_DAYDOCS].[LIB_DOCS].dumpProcThread2db(P_GROUP_NUM);
+		::[DM_DAYDOCS].[LIB_DOCS].dumpOperRevalue2db;
+		--Это вставка новых элементов DM_REVALUE в массивы переоценок
+		::[DM_SDELKA].[LIB_GR].dump2db;
+		--Это вставка новых элементов DM_SVU_REVALUE в массивы переоценок СВУ
+		::[DM_SDELKA].[LIB_SVU].dump2db;
+			
+		if V_DAYDOCS_OBJ.[DO_BUH] then
+			--Сальдируем еще не документы, а элементы виртуальных таблиц
+			::[PAT_ISSUE_NS].[LIB_FIN].DOCS_SUM_BUH(P_FOLDER_OUTBAL, true);--сальдировать по всем сделкам
+			::[PAT_ISSUE_NS].[LIB_FIN].DOCS_SUM_BUH(P_FOLDER_MAIN_DOC, true); --сальдировать по всем сделкам
+			::[PAT_ISSUE_NS].[LIB_FIN].dump2db;
+		end if;	
+		if V_DAYDOCS_OBJ.[DO_SVU] then
+			&dmess('[DO_SVU]');		
+			--Сальдируем еще не документы, а элементы виртуальных таблиц
+			::[PAT_ISSUE_NS].[LIB_SVU].DOCS_SUM_SVU(P_FOLDER_SVU);
+			::[PAT_ISSUE_NS].[LIB_SVU].dump2db;
+			&dmess('BEFORE dm_add_sums_in_docs');		 			
+			::[PAT_ISSUE_NS].[LIB_SVU].dm_add_sums_in_docs();
+			::[PAT_ISSUE_NS].[LIB_SVU].docs_sums.delete;
+			::[PAT_ISSUE_NS].[LIB_SVU].docs_sums_t.delete;	
+		end if;	
+					
+		-- Чистим кэши
+		::[PAT_ISSUE_NS].[LIB_FIN].clear_cache;
+		::[PAT_ISSUE_NS].[LIB_SVU].clear_cache;
+		::[PAT_ISSUE_NS].[SLIB].use_cached_insert := null;
+
+	::[STOCK].[MSG].umess('Окончание обработки');	
+	::[STOCK].[MSG].Set_WRITE_SECONDS100(false);	
+end;
+
+procedure process_thread(P_DAYDOCS [DM_DAYDOCS],
+						 P_PROC_DM ref [DM_PROC] ,
+						 P_OPER ref [DOG_OPER],
+						 P_FOLDER_MAIN_DOC ref [FOLDER_PAY],
+						 P_FOLDER_OUTBAL 	ref [FOLDER_PAY],
+						 P_FOLDER_SVU 		ref [FOLDER_PAY], 
+						 P_BEG_DATE date)
+is
+pragma macro(nvl,'coalesce( to_char( [1], ''TM9'' ), ''null'')', substitute);
+v_max_group_num number;
+l_src_job	varchar2(2048);
+l_ret_job	varchar2(2000);
+s_thread_name varchar(128);
+i integer;
+begin
+	::[STOCK].[MSG].Set_WRITE_SECONDS100(true);	
+	--Проверка включенности приложения, если указана настройка >0
+	::[DM_DAYDOCS].[LIB_THREAD].check_application;
+		
+	--AND Проверить незавершенный предыдущий запуск
+	--формируем имя для потока: Короткое имя операции#Клиентские#Собственные
+	--сначала проверяем есть ли запущенные сразу с обеими признаками. 
+	s_thread_name := &METHOD$SNAME||'#1#1';
+	::[DM_DAYDOCS].[LIB_THREAD].check_previous(s_thread_name); 
+	
+	if 	P_DAYDOCS.[DO_CLI] = true and P_DAYDOCS.[DO_OWN] = true then
+		null;--уже проверяли
+	else
+		s_thread_name := &METHOD$SNAME||'#'||bool_char(P_DAYDOCS.[DO_CLI],'1','0','0')||'#'||bool_char(P_DAYDOCS.[DO_OWN],'1','0','0');
+		::[DM_DAYDOCS].[LIB_THREAD].check_previous(s_thread_name); 
+	end if;	
+
+	begin
+		::[STOCK].[MSG].umess('Начало многопоточной обработки');	
+		v_max_group_num:=::[DM_FORTS_GROUPS].[FILL_GROUPS](P_DAYDOCS%id,P_PROC_DM,P_OPER); --Реальное количество групп обработки, не превышающее DM_SD_FORTS_GROUPS
+		::[FP_CONST_THREAD].[SLIB].set_const('1', 'THREAD_PROCESS', 'Признак запуска многопотоковой обработки', s_thread_name);
+		commit;--заполненные данные необходимо зафиксировать.
+
+		::[DM_DAYDOCS].[LIB_DOCS].SetNulls;
+		::[DM_DAYDOCS].[LIB_DOCS].Fill_virtual_tables_Proc(P_DAYDOCS,P_PROC_DM,P_OPER);		
+		
+		if v_max_group_num=0 then
+			pragma error('Количество потоков по обработке равно нулю');
+		end if;	
+		
+		::[STOCK].[MSG].umess('Количество потоков '||v_max_group_num);
+		--Запускаем текстовые задания для каждой группы
+
+		l_src_job:='declare'
+			||LF$||'	v_group_num		number;'
+			||LF$||'Begin';
+		if ::[STOCK].[MSG].is_debug then
+			l_src_job:=l_src_job
+				||LF$||'	::[STOCK].[MSG].SetSessionLevel(10);'
+				||LF$||'	::[STOCK].[MSG].set_is_debug(true);'
+				||LF$||'	::[DM_DAYDOCS].[START_MONITOR](true);';
+		end if;
+					
+		l_src_job:=l_src_job
+			||LF$||'	for iPart in 0 .. prm.stream_cnt - 1 loop'
+			||LF$||'		if iPart=prm.stream_num then'
+			||LF$||'			v_group_num:=iPart+1;'
+			||LF$||'			::[DM_DAYDOCS].[DAY_DOCS].process_group'
+			||LF$||'					('
+			||LF$||'					P_DAYDOCS=='||&nvl(P_DAYDOCS%id)
+			||LF$||'					,P_OPER=='||&nvl(P_OPER%id)
+			||LF$||'					,P_FOLDER_MAIN_DOC=='||&nvl(P_FOLDER_MAIN_DOC%id)
+			||LF$||'					,P_FOLDER_OUTBAL=='||&nvl(P_FOLDER_OUTBAL%id)
+			||LF$||'					,P_FOLDER_SVU=='||&nvl(P_FOLDER_SVU%id)
+			||LF$||'					,P_BEG_DATE=='||'to_date('''||to_char(P_BEG_DATE, 'dd/mm/yyyy')||''', ''dd/mm/yyyy'')'
+			||LF$||'					,P_GROUP_NUM==v_group_num'
+			||LF$||'					);'
+			||LF$||'		end if;'
+			||LF$||'	end loop;'
+			||LF$||'exception when ::[RUNTIME].[MESSAGE].APP_EXCEPTION then'
+			||LF$||'	debug_pipe(''Ошибка обработки потока ''||to_char(v_group_num,''TM9'')||'' ''||::[RUNTIME].[PRINTFUN].SQLERRM_INF,0);'
+				||LF$||'End;';
+		
+		&dmess('запуск заданий:');--||l_src_job||'"');
+		/* Текст задания - программный код на языке PL/Plus или PL/SQL.
+			В тексте задания должны использоваться параметры потоков: prm.stream_cnt - количество потоков в группе; prm.stream_num - номер потока, который может принимать значения от 0 до (prm.stream_cnt - 1).
+			Если указано больше одной группы, то тексте задания должен использоваться prm.stream_grp - идентификатор группы.
+			Для совместимости оставлена возможность использовать подстановочные подстроки P$S$G, P$S$C, P$S$N которые заменяются соответственно на prm.stream_grp, prm.stream_cnt, prm.stream_num.
+			Следует учитывать, что программный код на PL/Plus дополнительно обогащается внутри функции, поэтому максимально возможная размерность передаваемого кода будет меньше, чем 32000 символов.
+			Следует учитывать, что текст на PL/Plus компилируется в PL/SQL и скомпилированный код может быть больше, чем код на PL/Plus, поэтому максимально возможная размерность передаваемого кода может быть меньше, чем 32000 символов.
+		*/
+		l_ret_job := ::[TEXT_JOBS].[APP_LIB].run_streams_wait
+				( P_PLPLUS_text 	== l_src_job
+				, P_STREAM_COUNT	== v_max_group_num
+				, p_name			== s_thread_name
+				);
+		::[STOCK].[MSG].umess('Конец работы потоков');					
+		if l_ret_job is not null then
+			--если какой либо поток завершился с ошибкой, то необходимо откатить всех инвесторов+ПФИ из ошибочного потока, которые могли быть обработаны в соседних потоках 
+			::[STOCK].[MSG].umess('Потоки завершились с ошибкой: '||l_ret_job);
+			for	(select r(r:job_ref)
+				in ::[TEXT_JOBS] all
+				where
+					upper(r.[NAME]) like upper(s_thread_name)||'%'
+			)
+		loop
+			::[STOCK].[MSG].umess('Удаляем поток с ошибкой: '||r.job_ref);
+			-- Удаляем задания, которых нет в массиве ссылок
+			::[TEXT_JOBS].[APP_LIB].del_job(r.job_ref);
+		end loop;
+		end if;
+		--Проверка на то, что все Пфи+Инвестор  обработались без ошибок
+		declare
+		type t_delete_proc is table of string(2500) index by string(16);
+		tbl_delete_proc t_delete_proc;
+		str_idx string(16);
+		r_DAYDOCS ref [DM_DAYDOCS];
+		r_DM_PROC ref [DM_PROC];
+		o_DM_PROC [DM_PROC];
+		begin 
+		&dmess('Проверка на то, что все Пфи+Инвестор  обработались без ошибок');
+			for(select x(x.[PROC_DM]:PROC_DM,
+						x.[PROC_NOTE]:PROC_NOTE
+			) in ::[DM_PROC_THREAD] all
+					where x.[USER_ID] = stdlib.userid
+					and (x.[PROC_STATE] = 'ERROR' or x.[PROC_STATE] is null)
+					and exists(select y(1) in ::[DM_PROC_THREAD] all
+								where y.[USER_ID] = stdlib.userid
+									and (y.[PROC_STATE] is not null and y.[PROC_STATE] <> 'ERROR') 
+									and y.[PROC_DM] = x.[PROC_DM]
+					)
+			) 
+			loop
+				&dmess('Нашли ПФИ '||to_char(x.PROC_DM)||' для отката');
+				str_idx := to_char(x.PROC_DM);
+				if tbl_delete_proc.exists(str_idx) then
+					tbl_delete_proc(str_idx):= tbl_delete_proc(str_idx)||';'||x.PROC_NOTE;
+				else
+					tbl_delete_proc(str_idx):= x.PROC_NOTE;
+				end if; 
+			end loop;
+			&dmess('Нашли всего ПФИ для отката'||tbl_delete_proc.count);
+			if tbl_delete_proc.count > 0 then
+				r_DAYDOCS := P_DAYDOCS%id;
+				str_idx := tbl_delete_proc.first;
+				while str_idx is not null
+				loop
+					::[STOCK].[MSG].umess('удаляем неполностью обработанные ПФИ: '||str_idx);
+					r_DM_PROC:=to_number(str_idx);
+					r_DM_PROC%state:='PROCESSED';
+					o_DM_PROC:=r_DM_PROC;
+					::[DM_DAYDOCS].[SLIB].Cancel_process(P_DAYDOCS,o_DM_PROC,P_OPER,true);
+					str_idx := tbl_delete_proc.next(str_idx);
+				end loop;
+			--В таблице заменяем у всех элементов с необработанным DM_PROC статус и сообщение
+				for(select x(x:x_ID,
+							x.[PROC_DM]:PROC_DM
+				) in ::[DM_PROC_THREAD] all
+						where x.[USER_ID] = stdlib.userid
+				) 
+				loop
+					str_idx := to_char(x.PROC_DM);
+					if tbl_delete_proc.exists(str_idx) then
+						x.x_ID.[PROC_STATE] :='ERROR'; 
+						x.x_ID.[PROC_NOTE] :=tbl_delete_proc(str_idx); 
+					end if;
+				end loop;
+			end if;
+		end;
+		::[DM_DAYDOCS].[LIB_DOCS].dumpProcMain2db(P_DAYDOCS);
+		::[FP_CONST_THREAD].[SLIB].clear_const('THREAD_PROCESS', s_thread_name);
+	exception when ::[RUNTIME].[MESSAGE].APP_EXCEPTION then
+		::[STOCK].[MSG].umess('Удаляем операцию и очищаем массив обработанных ПФИ');
+		delete x in ::[DM_PROC] where x%collection=P_DAYDOCS.[PROCESS_DM] and x.[OPER] = P_OPER;
+		
+		delete x in ::[DOG_OPER] where x=P_OPER;
+		::[FP_CONST_THREAD].[SLIB].clear_const('THREAD_PROCESS', s_thread_name);
+	end;
+	--необходимо востановить порядок документов в папках
+	if P_FOLDER_MAIN_DOC is not null then
+		i:=0;
+		for(select x(x:x_id,
+					x.[NUM]:num,
+					x.[DOCUMENT]:DOC
+		) in
+			::[DOC_IN_FOLD] collections
+			where x%collection = P_FOLDER_MAIN_DOC.[DOCS_IN_FOLD]
+			order by x.[NUM], x.[DOCUMENT]
+		)loop
+			i:=i+1;
+			x.x_id.[NUM]:=i;	
+		end loop;
+	end if;
+	if P_FOLDER_OUTBAL is not null then
+		i:=0;
+		for(select x(x:x_id,
+					x.[NUM]:num,
+					x.[DOCUMENT]:DOC					
+		) in
+			::[DOC_IN_FOLD] collections
+			where x%collection = P_FOLDER_OUTBAL.[DOCS_IN_FOLD]
+			order by x.[NUM], x.[DOCUMENT]
+		)loop
+			i:=i+1;
+			x.x_id.[NUM]:=i;	
+		end loop;
+	end if;	
+	if P_FOLDER_SVU is not null then
+		i:=0;
+		for(select x(x:x_id,
+					x.[NUM]:num,
+					x.[DOCUMENT]:DOC					
+		) in
+			::[DOC_IN_FOLD] collections
+			where x%collection = P_FOLDER_SVU.[DOCS_IN_FOLD]
+			order by x.[NUM], x.[DOCUMENT]
+		)loop
+			i:=i+1;
+			x.x_id.[NUM]:=i;	
+		end loop;
+	end if;		
+
+	::[STOCK].[MSG].umess('Окончание многопоточной обработки');	
+	::[STOCK].[MSG].Set_WRITE_SECONDS100(false);	
+
+end;
+PSH_DAY_DOCS (
+	@name('Экземпляр из массива обработки ПФИ')   P_PROC_DM     in          [DM_PROC_REF],
+	@name('Первичные учетные документы операции') P_BAS_DOC     in table of [FP_BAS_DOC],
+	@name('Подтверждающие документы СВУ')         P_VOUCHER_DOC in table of [SVU_VOUCH_DOC]
+) is
+
+validate is
+V_DM_SD_FORTS_GROUPS number;
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	V_PROCESS_DM := this.[PROCESS_DM];
+	V_DO_BUH := this.[DO_BUH];
+	V_DO_SVU := this.[DO_SVU];
+end if;
+-- End initialization of parameters and variables
+begin
+	if p_message = 'DEFAULT' then		
+		-- проверка возможности запуска этой операции
+		
+		[CHECK_OPER_START](::[TYPE_OPER_NS]([CODE]='DM_FIN'));
+		V_DM_SD_FORTS_GROUPS:= nvl(::[FP_TUNE].[LIB].get_num_value('DM_SD_FORTS_GROUPS', null, '0'),0);
+
+		V_OUR_PORT_ID := ::[DM_DAYDOCS].[SLIB].GetOurPortId;
+
+		V_OPER:=::[DM_DAYDOCS].[GET_LAST_OP]([OPER],[DATE_BEGIN],::[TYPE_OPER_NS]([CODE]='DM_FIN'));
+		--Заполнение массива PROCESS_DM записями обрабатываемых ПФИ
+		check_PROCESS_POS(this);
+
+&dmess('V_OPER='||V_OPER||' PROCESS_DM='||[PROCESS_DM]);		
+		
+		--Заполнение данных для грида первичных учетных документов и подтверждающих документов СВУ.
+		fill_bas_docs(this, this.[DATE_BEGIN], V_OPER, this.[MARKET], this.[MT_SEC], this.[DO_OWN], this.[DO_CLI], V_DO_BUH, V_DO_SVU, this.[PROCESS_DM], V_OUR_PORT_ID, P_BAS_DOC, P_VOUCHER_DOC);
+		&dmess('P_BAS_DOC.count = '||P_BAS_DOC.count);
+		&dmess('P_VOUCHER_DOC.count = '||P_VOUCHER_DOC.count);
+		
+	elsif p_message = 'VALIDATE' then
+		null;
+	end if;
+end;
+end;
+
+execute is
+/*********************************************************************
+Назначение:
+
+kaigorodtseva, последнее изменение 6 Апрель 2010 г.
+*********************************************************************/
+
+i				integer;
+folder_main_doc ref [FOLDER_PAY];
+folder_outbal 	ref [FOLDER_PAY];
+folder_svu 		ref [FOLDER_PAY];
+pfi 			ref [DM_DERIVATIVES];
+account 		ref [AC_FIN];
+cnt_days_close  integer;
+cnt_reg			integer;
+CPDM_B_CODE_pos_num	integer;
+CPDM_B_CODE_pos		integer;
+n_start_pos 		integer;
+n_find_pos		integer;
+B_CODE_pos_num	integer;
+B_CODE_pos		integer;
+
+v_cnt number;
+V_DM_SD_FORTS_GROUPS number;
+b_is_FORTS boolean;
+
+begin
+	-- проверка возможности запуска этой операции
+	[CHECK_OPER_START](::[TYPE_OPER_NS]([CODE]='DM_FIN'));
+	
+	--Установка блокировок
+	if [DO_BUH] then
+		::[DM_DAYDOCS].[TRY_LOCK]('DM_FIN', true);
+	end if;
+	if [DO_SVU] then
+		::[DM_DAYDOCS].[TRY_LOCK]('DM_SVU', true);
+	end if;
+
+	V_DM_SD_FORTS_GROUPS:= nvl(::[FP_TUNE].[LIB].get_num_value('DM_SD_FORTS_GROUPS', null, '0'),0);
+	
+		
+	m2p(' ');
+	m2p('ДОКУМЕНТЫ ДНЯ ЗА ' || to_char(this.[DATE_BEGIN],'dd/mm/yyyy'));
+
+	if V_OPER is null then --Значит экранную форму не поднимали
+		V_OUR_PORT_ID := ::[DM_DAYDOCS].[SLIB].GetOurPortId;
+		V_OPER:=::[DM_DAYDOCS].[GET_LAST_OP]([OPER],[DATE_BEGIN],::[TYPE_OPER_NS]([CODE]='DM_FIN'));
+		--Заполнение массива PROCESS_DM записями обрабатываемых ПФИ
+		check_PROCESS_POS(this);
+
+		fill_bas_docs(this,this.[DATE_BEGIN], V_OPER, this.[MARKET], this.[MT_SEC], this.[DO_OWN], this.[DO_CLI], this.[DO_BUH], this.[DO_SVU], this.[PROCESS_DM], V_OUR_PORT_ID, P_BAS_DOC, P_VOUCHER_DOC);
+	end if;	
+	
+	--Проверка обработанности предыдущих дней по набору ПФИ к обработке этой операции
+	--Башкиров В.Г. 17.10.2024 (отключены pragma error)
+	--this.[CHECK_PREVIOUS](P_PROC_DM,V_OPER);
+	this.[PSH_CHECK_PREVIO](P_PROC_DM,V_OPER); -- updated CHANGE_SHORT_NAME PSB_CHECK_PREVIO->PSH_CHECK_PREVIO 14/10/25
+	
+	--ВНИМАНИЕ!! Запрет выполнения, если как минимум по одному ПФИ не обработана позиция
+	this.[CHECK_POS_OK](P_PROC_DM,V_OPER);
+	b_is_FORTS := is_FORTS(this.[PROCESS_DM], V_OPER,this.[DATE_BEGIN]);
+	
+	&dmess('Проверка на то, что обрабатываем ПФИ на рынке FORTS = '||b_is_FORTS);
+	if V_DM_SD_FORTS_GROUPS<>0 and b_is_FORTS then
+		pragma SET_THIS;
+		
+		--AND Теперь заполненные виртуальные таблицы используются и бух. документами, и документами СВУ
+		--AND Теперь блок формирования бухгалтерских документов выполняется только при включенном режиме DO_BUH
+		--Сохранить данные первичных документов из грида в массив
+		
+		if [DO_BUH] then
+			--первичные документы заполняются в потоках
+			--Чтобы собрать все документы в одну папку, необходимо создать папку самим,
+			--а не ждать, когда это сделает	очередная БО.
+			--kaigorodtseva. Замена точки вызова
+			folder_outbal := FOLDER_OPEN_AUTONOM_TRANS(this.[DATE_BEGIN], True,True);
+				
+			folder_main_doc := FOLDER_OPEN_AUTONOM_TRANS(this.[DATE_BEGIN], True,True);
+			
+		end if;
+		
+		if [DO_SVU] then
+			--Первичные СВУ документы заполняются в потоках
+			folder_svu := FOLDER_OPEN_AUTONOM_TRANS(this.[DATE_BEGIN], True);
+		end if;
+		process_thread(this,P_PROC_DM,V_OPER,folder_main_doc, folder_outbal, folder_svu, this.[DATE_BEGIN]);
+	else
+		::[STOCK].[MSG].Set_WRITE_SECONDS100(true);	
+		::[STOCK].[MSG].umess('Начало однопоточной обработки.');
+		--Отложенное формирование документов
+		::[PAT_ISSUE_NS].[SLIB].use_cached_insert := true;	
+		-- Зачистка таблицы связи документов и сводных сумм
+		::[PAT_ISSUE_NS].[LIB_SVU].docs_sums := null;
+			
+		
+		--AND Теперь заполненные виртуальные таблицы используются и бух. документами, и документами СВУ
+		--AND Теперь блок формирования бухгалтерских документов выполняется только при включенном режиме DO_BUH
+		--Сохранить данные первичных документов из грида в массив
+		
+		if [DO_BUH] then
+			[LIB_DOCS].clear_bas_doc();
+			i := P_BAS_DOC.first;
+			while i is not null loop
+				&dmess('i = '||i);
+				&dmess('P_BAS_DOC(i) = '||P_BAS_DOC(i)%id);
+				[LIB_DOCS].add_bas_doc(P_BAS_DOC(i));
+				i := P_BAS_DOC.next(i);
+			end loop;
+			--Чтобы собрать все документы в одну папку, необходимо создать папку самим,
+			--а не ждать, когда это сделает	очередная БО.
+			--kaigorodtseva. Замена точки вызова
+  		
+			folder_outbal := ::[FP_INTERFACE].[PRX_FOLDER_PAY].NEW#AUTO(P_DOCUMENT_DATE==this.[DATE_BEGIN],
+				                                                        P_DOCUMENT_USER==stdlib.userid,
+				                                                        P_DO_PROV_ALL==True,
+				                                                        P_CAN_OUT_DT_KT == True);
+				
+			folder_main_doc := ::[FP_INTERFACE].[PRX_FOLDER_PAY].NEW#AUTO(P_DOCUMENT_DATE==this.[DATE_BEGIN],
+				                                                          P_DOCUMENT_USER==stdlib.userid,
+				                                                          P_DO_PROV_ALL==True,
+				                                                          P_CAN_OUT_DT_KT == True);
+		end if;
+		
+		if [DO_SVU] then
+			--Блок формирования СВУ документов
+			[LIB_DOCS].clear_svu_vouch_doc();
+			i := P_VOUCHER_DOC.first;
+			while i is not null loop
+				[LIB_DOCS].add_vouch_doc(P_VOUCHER_DOC(i));
+				i := P_VOUCHER_DOC.next(i);
+			end loop;
+	
+			folder_svu := ::[FP_INTERFACE].[PRX_FOLDER_PAY].NEW#AUTO(P_DOCUMENT_DATE==this.[DATE_BEGIN], P_DOCUMENT_USER==stdlib.userid, P_DO_PROV_ALL==True);
+		end if;
+		
+		
+		--AND С целью хоть как-то предотвратить останов из-за нехватки памяти у пользовательской сессии
+		--выполняю полный цикл обработки последовательно по одной паре Инвестор+ПФИ.
+		for(select x(x:PROC_DM
+					) in [PROCESS_DM]
+			where x.[OPER]=V_OPER
+			and x%state in ('PREPARE','CANCELED','ERROR')
+			and (P_PROC_DM is null or x=P_PROC_DM)
+			and x.[DFT] is not null -- not STD
+			)
+		loop
+			::[PAT_ISSUE_NS].[LIB_FIN].clear_cache;
+			::[PAT_ISSUE_NS].[LIB_SVU].clear_cache;
+			::[PAT_ISSUE_NS].[SLIB].set_nulls();
+			::[DM_SDELKA].[GLIB].set_nulls();
+			::[DM_SDELKA].[LIB_GR].clear_cache;
+			::[DM_SDELKA].[LIB_SVU].clear_cache;
+			::[DM_DAYDOCS].[LIB_DOCS].SetNulls;	
+			--Отложенное формирование документов
+			::[PAT_ISSUE_NS].[SLIB].use_cached_insert := true;	
+			
+			--AND Теперь заполненные виртуальные таблицы используются и бух. документами, и документами СВУ
+			[LIB_DOCS].Fill_virtual_tables(this,x.PROC_DM,V_OPER);
+		
+	
+			--ОБЩИЙ БЛОК ОБРАБОТКИ И ФОРМИРОВАНИЯ ДОКУМЕНТОВ (БУХГАЛТЕРИЯ И СВУ)
+			[LIB_DOCS].Process(this,V_OPER,folder_outbal,folder_main_doc,folder_svu);
+				
+			--Вставка изменений в базу. В том числе и экземпляров DOG_OPER
+			[LIB_DOCS].dump2db;
+			--Это вставка новых элементов DM_REVALUE в массивы переоценок
+			::[DM_SDELKA].[LIB_GR].dump2db;
+			--Это вставка новых элементов DM_SVU_REVALUE в массивы переоценок СВУ
+			::[DM_SDELKA].[LIB_SVU].dump2db;
+			
+			if [DO_BUH] then
+				--Сальдируем еще не документы, а элементы виртуальных таблиц
+				::[PAT_ISSUE_NS].[LIB_FIN].DOCS_SUM_BUH(folder_outbal, true);--сальдировать по всем сделкам
+				::[PAT_ISSUE_NS].[LIB_FIN].DOCS_SUM_BUH(folder_main_doc, true); --сальдировать по всем сделкам
+				::[PAT_ISSUE_NS].[LIB_FIN].dump2db;
+			end if;	
+			if [DO_SVU] then
+				&dmess('[DO_SVU]');		
+				--Сальдируем еще не документы, а элементы виртуальных таблиц
+				::[PAT_ISSUE_NS].[LIB_SVU].DOCS_SUM_SVU(folder_svu);
+				::[PAT_ISSUE_NS].[LIB_SVU].dump2db;
+				&dmess('BEFORE dm_add_sums_in_docs');		 			
+				::[PAT_ISSUE_NS].[LIB_SVU].dm_add_sums_in_docs();
+				::[PAT_ISSUE_NS].[LIB_SVU].docs_sums.delete;
+				::[PAT_ISSUE_NS].[LIB_SVU].docs_sums_t.delete;	
+			end if;				
+				
+			-- Чистим кэши
+			::[PAT_ISSUE_NS].[LIB_FIN].clear_cache;
+			::[PAT_ISSUE_NS].[LIB_SVU].clear_cache;
+			::[PAT_ISSUE_NS].[SLIB].use_cached_insert := null;
+		end loop;
+		::[STOCK].[MSG].umess('Конец однопоточной обработки.');
+		::[STOCK].[MSG].Set_WRITE_SECONDS100(false);	
+	end if;
+		
+	-- Стандартизованные ПФИ пока только в бухгалтерии !!!
+	if [DO_BUH] and [DO_STD] then
+		for(select x(x:PROC_DM
+					) in [PROCESS_DM]
+			where x.[OPER]=V_OPER
+			and x%state in ('PREPARE','CANCELED','ERROR')
+			and (P_PROC_DM is null or x=P_PROC_DM)
+			and x.[DFT] is null -- STD
+			)
+		loop
+			[LIB_STD].Process(this, V_OPER, x.PROC_DM, folder_outbal, folder_main_doc, P_BAS_DOC);
+		end loop;
+	end if;
+	
+	if [DO_BUH] then
+		if folder_outbal.[DOCS_IN_FOLD]%size(1) > 0 then
+			V_OPER.[ADD_FOLDER](folder_outbal);
+			--AND ВНИМАНИЕ!! Поскольку исполнение идет по Инвестор+ПФИ
+			--может оказаться, что по разным Инвестор+ПФИ получаются одинаковые документы (корреспондеция и назначение платежа),
+			--которые оказались непросальдированы. Нужен метод, который бы сальдировал уже реальные документы.
+			::[DM_DAYDOCS].[DOCS_SUM].DOCS_SUM_BUH(V_OPER, true);--сальдировать по всем сделкам
+		else
+			[FP_INTERFACE].[PRX_FOLDER_PAY].DELETE#AUTO(folder_outbal);
+			folder_outbal:=null;
+		end if;
+		if folder_main_doc.[DOCS_IN_FOLD]%size(1) > 0 then
+			V_OPER.[ADD_FOLDER](folder_main_doc);
+			--AND ВНИМАНИЕ!! Поскольку исполнение идет по Инвестор+ПФИ
+			--может оказаться, что по разным Инвестор+ПФИ получаются одинаковые документы (корреспондеция и назначение платежа),
+			--которые оказались непросальдированы. Нужен метод, который бы сальдировал уже реальные документы.
+			::[DM_DAYDOCS].[DOCS_SUM].DOCS_SUM_BUH(V_OPER, true);--сальдировать по всем сделкам
+		else
+			[FP_INTERFACE].[PRX_FOLDER_PAY].DELETE#AUTO(folder_main_doc);
+			folder_main_doc:=null;
+		end if;	
+	end if;
+	
+	if [DO_SVU] then
+		if folder_svu.[DOCS_IN_FOLD]%size(1) > 0 then
+			V_OPER.[ADD_FOLDER](folder_svu);
+			--AND ВНИМАНИЕ!! Поскольку исполнение идет по Инвестор+ПФИ
+			--может оказаться, что по разным Инвестор+ПФИ получаются одинаковые документы (корреспондеция и назначение платежа),
+			--которые оказались непросальдированы. Нужен метод, который бы сальдировал уже реальные документы.
+			::[DM_DAYDOCS].[DOCS_SUM].DOCS_SUM_SVU(V_OPER);
+		else
+			[FP_INTERFACE].[PRX_FOLDER_PAY].DELETE#AUTO(folder_svu);
+			folder_svu:=null;
+		end if;		
+	end if;								
+					
+	--если ДД запускаются в режиме по всем контрактам, то необходимо пометить счета по исполненным контрактам согласно настройке DM_CLOSE_ACC_BIRJ
+	--в целях как-то ограничить исполненные контракты, анализируем только последний год
+	cnt_days_close := ::[FP_TUNE].[LIB].get_num_value('DM_CLOSE_ACC_BIRJ');
+	if P_PROC_DM is null and cnt_days_close >= 0 and cnt_days_close < 367 then
+		--что бы зря не бегать по всем контрактам, проверим, что есть хотя бы один регистр настроенные в разрезе [CPDM_B_CODE]
+		select reg(count(reg))
+		in ::[DM_REG_PAT]
+		where reg.[TIP_ACC].[COD] not like '%SVU%'
+		and reg.[FORMAT_STR] like '%[CPDM_B_CODE]%'
+		into cnt_reg;
+		&dmess('cnt_reg = ' || cnt_reg);	
+		if cnt_reg > 0 then
+			for (
+				select x(x%id : id_)
+				in ::[DM_DERIVATIVES]
+				where x.[DATE_EXEC] is not null --у внебиржи DATE_EXEC не заполняем
+				and x.[DATE_EXEC] > ADD_MONTHS(this.[DATE_BEGIN], -12)--последний год
+				and x.[DATE_EXEC] <= this.[DATE_BEGIN] - cnt_days_close --количество дней по настройке
+				and x.[MT_SEC].[MARKET_CODE] != 'СПФИ'
+			)
+			loop
+				pfi := x.id_;
+				&dmess('pfi = ' || pfi.[MARKET_CODE_LONG]);	
+				for (select reg(acc.[ACC] : acc_id,
+								reg.[FORMAT_STR]:FORMAT_STR,
+								acc.[OTHER]:acc_other
+				)
+					in ::[DM_REG_PAT], (::[ACC_LIST] collections : acc)
+					where reg.[ACC_ARR] = acc%collection
+					and reg.[TIP_ACC].[COD] not like '%SVU%'
+					and reg.[FORMAT_STR] like '%[CPDM_B_CODE]%'
+					and instr(acc.[OTHER], '['||to_char(pfi.[B_CODE])||']') > 0
+				)
+				loop
+					account  := reg.acc_id;
+					&dmess('account = ' || account.[MAIN_V_ID]);	
+	
+					--1. определи на какой позиции стоит [CPDM_B_CODE] в строке поиска по справочнику
+					--2. в строке OTHER будем искать совпадения по B_CODE на такой же позиции
+					n_find_pos:=1;
+					CPDM_B_CODE_pos_num:=1;
+					CPDM_B_CODE_pos := instr(reg.FORMAT_STR,'[CPDM_B_CODE]',1);
+					while nvl(n_find_pos,0)<>0
+					loop
+						--ищем вхождение символа '['
+						n_find_pos:=instr(reg.FORMAT_STR,'[',1,CPDM_B_CODE_pos_num);
+						if n_find_pos = CPDM_B_CODE_pos then
+							exit;
+						else
+							CPDM_B_CODE_pos_num:=CPDM_B_CODE_pos_num+1;
+						end if;
+					end loop;
+
+					n_find_pos:=1;
+					B_CODE_pos_num:=1;
+					--ищем на какой позиции в строке acc.[OTHER] начинается параметр с номером CPDM_B_CODE_pos_num
+					B_CODE_pos := instr(reg.acc_other,'[',1,CPDM_B_CODE_pos_num);
+					n_find_pos := instr(reg.acc_other,'['||to_char(pfi.[B_CODE])||']',B_CODE_pos);
+					if B_CODE_pos = n_find_pos then
+						begin
+							::[FP_INTERFACE].[PRX_ACC_FIN].AC_FIN_TO_CLOSE(account, true);
+							&dmess('Счет ' || account.[MAIN_V_ID] || ' помечен к закрытию.');	
+						exception when message.APP_EXCEPTION then
+							if account.[COM_STATUS] = ::[COM_STATUS_PRD]([CODE] = 'CLOSE') then
+								&dmess('Пометка счета ' || account.[MAIN_V_ID] || ' к закрытию невозможна: счет уже закрыт.');
+							else
+								&dmess('Пометка счета ' || account.[MAIN_V_ID] || ' к закрытию невозможна.');
+							end if;
+						end;
+					end if;	 	
+				end loop;
+			end loop;
+		end if;
+	end if;							
+	
+	--Снятие блокировок
+	::[DM_DAYDOCS].[TRY_LOCK]('DM_FIN', false);
+	::[DM_DAYDOCS].[TRY_LOCK]('DM_SVU', false);
+	m2p('ФОРМИРОВАНИЕ ДОКУМЕНТОВ ДНЯ ЗАВЕРШЕНО');
+	
+	-- сохраним настройку DEFVALS P_VOUCHER_DOC
+	&dmess('save_bas_doc(P_VOUCHER_DOC)');	
+	save_voucher_doc(P_VOUCHER_DOC);
+	
+	--Снятие блокировки FP_BROCK_SUM, если она была установлена
+	::[FP_BROCK_SUM].[LIB].lock_fp_brock_sum(false);
+		
+/** / --Башкиров В.Г. 17.10.2024
+exception when message.APP_EXCEPTION then
+	--Снятие блокировок
+	::[DM_DAYDOCS].[TRY_LOCK]('DM_FIN', false);
+	::[DM_DAYDOCS].[TRY_LOCK]('DM_SVU', false);
+	--Снятие блокировки FP_BROCK_SUM, если она была установлена
+	::[FP_BROCK_SUM].[LIB].lock_fp_brock_sum(false);	
+	&dmess('ERROR='||utils.error_stack(true));				
+	raise;
+/**/
+end;
+end;
+end;

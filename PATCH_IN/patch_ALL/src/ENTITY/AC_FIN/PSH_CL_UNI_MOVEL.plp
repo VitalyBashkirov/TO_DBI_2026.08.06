@@ -1,0 +1,84 @@
+class AC_FIN;
+
+@import_plsql(true)
+@name('[ПСБ] Универсальная выписка по списку счетов')
+@tag('COPIED')
+batch method PSH_CL_UNI_MOVEL is
+
+@name('Дата начала периода')        public V_DATE_S            [DATE];
+@name('Дата окончания периода')     public V_DATE_E            [DATE];
+@name('Дополнительно выводить')     public V_ADD_TBL  table of [GRID_TEMPLATE];
+@name('Маска счета корреспондента') public V_COR_MASK          [ACCNUM];
+PSH_CL_UNI_MOVEL is
+
+validate is
+usr ref [user];
+Begin
+	If P_MESSAGE = 'DEFAULT' Then
+		usr:=stdlib.userid;
+		V_DATE_S		:= nvl(::[DEFVALS].[SLIB].RestoreDate(usr, &METHOD$CLASS, &METHOD$SNAME, 'V_DATE_S'),::[SYSTEM].[OP_DATE]);
+		V_DATE_E		:= nvl(::[DEFVALS].[SLIB].RestoreDate(usr, &METHOD$CLASS, &METHOD$SNAME, 'V_DATE_E'),::[SYSTEM].[OP_DATE]);
+	    V_ADD_TBL:=::[AC_FIN].[PSH_CL_UNI_MOVE].makeGrid(V_ADD_TBL); -- updated CHANGE_SHORT_NAME TCB_CL_UNI_MOVE->PSHB_CL_UNI_MOVE 23/01/19 -- updated CHANGE_SHORT_NAME PSHB_CL_UNI_MOVE->PSH_CL_UNI_MOVE 15/10/25
+	    --debug_pipe('V_ADD_TBL.cnt='||V_ADD_TBL.count);
+	    --================================================================
+	    for i in V_ADD_TBL.first..V_ADD_TBL.last loop
+        	V_ADD_TBL(i).[BOOL_1]:= nvl(::[DEFVALS].[SLIB].RestoreBool(stdlib.userid, &METHOD$CLASS, &METHOD$SNAME, 'ATTR'||i), false);
+		end loop;
+	    --================================================================
+	ElsIf P_MESSAGE = 'VALIDATE' Then
+		if P_INFO = 'OK' Then
+			null;
+		elsif P_INFO = 'SaveButton' then
+		    if V_ADD_TBL.first is not null then
+		    	for i in V_ADD_TBL.first..V_ADD_TBL.last loop
+				  ::[DEFVALS].[SLIB].saveBool( stdlib.userid, &METHOD$CLASS, &METHOD$SNAME, 'ATTR'||i, V_ADD_TBL(i).[BOOL_1]);
+				end loop;
+		    end if;
+	   End If;
+	End If;
+End;
+
+execute is
+--	rpt_blob		blob;
+--	rep_id			string;
+	cnt				integer:=0;
+	usr ref [object]:=stdlib.userid;
+	af ::[ac_fin];
+begin
+    ::[DEFVALS].[SLIB].saveDate( usr, &METHOD$CLASS, &METHOD$SNAME, 'V_DATE_S', V_DATE_S);
+    ::[DEFVALS].[SLIB].saveDate( usr, &METHOD$CLASS, &METHOD$SNAME, 'V_DATE_E', V_DATE_E);
+	::[SHABLON_DOC].[LIB_OOXML].xl_init;
+--	::[OOXML].[API_XL].Init_XLS;
+	-- Общие данные отчета
+	::[AC_FIN].[PSH_CL_UNI_MOVE].initRep(V_ADD_TBL,v_date_s,v_date_e,v_cor_mask); -- updated CHANGE_SHORT_NAME TCB_CL_UNI_MOVE->PSHB_CL_UNI_MOVE 23/01/19 -- updated CHANGE_SHORT_NAME PSHB_CL_UNI_MOVE->PSH_CL_UNI_MOVE 15/10/25
+    --stdio.put_line_buf(' Маска <'||V_ACC_MASK||'>');	
+	--debug_pipe('v_turn.[0]='||v_turn.[0]);
+	--debug_pipe('v_filial='||v_filial.[SHORTLABEL]);
+	-- Формирование выписки
+	for i in 1..this.count loop
+	    begin  -- Доступ
+    	select x(x.id) in VW_CRIT_AC_FIN_NUM%rowtype where x.id=this(i)%id into af;
+    	exception when no_data_found then continue;
+    	end;
+
+	    cnt := cnt + 1;
+		--debug_pipe(cnt||'->'||x.code||' D='||nvl(f.a('И'||to_char(x.ac)||'ДВ', v_date_s,v_date_e),0)
+		--	||' K='||nvl(f.a('И'||to_char(x.ac)||'КВ', v_date_s,v_date_e),0)
+		--     );
+		::[AC_FIN].[PSH_CL_UNI_MOVE].DRAW_REPORT(this(i)); -- updated CHANGE_SHORT_NAME TCB_CL_UNI_MOVE->PSHB_CL_UNI_MOVE 23/01/19 -- updated CHANGE_SHORT_NAME PSHB_CL_UNI_MOVE->PSH_CL_UNI_MOVE 15/10/25
+		/* Добавление разрыва страницы */
+		::[AC_FIN].[PSH_CL_UNI_MOVE].pageBreak; -- updated CHANGE_SHORT_NAME TCB_CL_UNI_MOVE->PSHB_CL_UNI_MOVE 23/01/19 -- updated CHANGE_SHORT_NAME PSHB_CL_UNI_MOVE->PSH_CL_UNI_MOVE 15/10/25
+		--
+	end loop;
+	if cnt=0 then
+		pragma error('Не выделено ни одного счета.!');
+	end if;
+	::[AC_FIN].[PSH_CL_UNI_MOVE].finalRep; -- updated CHANGE_SHORT_NAME TCB_CL_UNI_MOVE->PSHB_CL_UNI_MOVE 23/01/19 -- updated CHANGE_SHORT_NAME PSHB_CL_UNI_MOVE->PSH_CL_UNI_MOVE 15/10/25
+	--
+	::[SHABLON_DOC].[LIB_OOXML].xl_finish;
+--	rpt_blob := empty_blob();
+--	::[OOXML].[API_XL].finish(rpt_blob);
+--	rep_id := ::[OOXML].[API_ORSA].putReport2Run(rpt_blob, 'xlsx', &METHOD$NAME);
+End;
+end;
+end;

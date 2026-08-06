@@ -1,0 +1,1082 @@
+Требования для совместимости кода с DBI
+1. DML(Data Manipulation Language) on join
+Операторы update/delete должны быть написаны так, чтобы они модифицировали/удаляли только один источник данных, не генерируя в секции «from» дополнительного объединения с другими немодифицируемыми источниками данных. В операторах update/delete запрещено явное или неявное присоединение немодифицируемых таблиц.
+Неверно
+delete x in ref_doc.[USER_TYPE] where x.[CODE] = 'CR_TUN_ACC_TRANS'
+      Z#USER_TYPE_REF (ref_doc.[USER_TYPE] - [USER_TYPE_REF]) Z#USER_TYPE: delete from (select a1.id from Z#USER_TYPE_REF a1, Z#USER_TYPE a2 where a1.COLLECTION_ID=plp$1$1 and a1.C_VALUE=a2.id and (a2.C_CODE = 'CR_TUN_ACC_TRANS'));
+Верно
+delete x in ref_doc.[USER_TYPE]
+where x = ::[USER_TYPE]([CODE]='CR_TUN_ACC_TRANS')
+      1 Z#USER_TYPE_REF:
+delete from Z#USER_TYPE_REF a1
+          where a1.COLLECTION_ID=plp$2$1
+and a1.C_VALUE = 28179344898;
+Неверно
+update cr(cr.[HIGH_LEVEL_CR] = null) in ::[PR_CRED] all
+where cr.[DATE_BEGIN] > sysdate
+     Z#PR_CRED Z#PRODUCT , «DATE_BEGIN» «PRODUCT»:
+update (	select a1.SN v$n
+,a1.SU v$u
+, nvl(a1.SN,1)+1 u$n
+,rtl.uid$ u$u
+,a1.C_HIGH_LEVEL_CR v$1
+,null u$1
+from Z#PRODUCT a2, Z#PR_CRED a1
+where a1.id=a2.id
+                   and a2.C_DATE_BEGIN > SYSDATE )
+set v$n=u$n, v$u=u$u, v$1=u$1;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Верно
+update cr(cr.[HIGH_LEVEL_CR] = null) in ::[PR_CRED] all where cr%id in (	select p(p%id) in ::[PR_CRED] all
+where p.[DATE_BEGIN] > sysdate) ««» 1 :
+update Z#PR_CRED a1 set a1.SN=nvl(a1.SN,1)+1, a1.SU=rtl.uid$, a1.C_HIGH_LEVEL_CR = null where a1.ID in (	select b1.ID A$1
+from Z#PRODUCT b2, Z#PR_CRED b1 where b1.id=b2.id
+and b2.C_DATE_BEGIN > SYSDATE);
+При использовании неправильных конструкций компилятор выводит предупреждения, например: ?/	» ?
+* 53 update er (er - [HIGH_LEVEL_CR] = null) in : : [PR_CRED] all 54 where er.[DATE BEGIN] > sysdate;
+    55 > ?	—
+    52 ?
+• 53 (EXECUTE [16, 33] PLP-DML.QUERY: Модификация (UPDATE) типа [PR.CRED]?D] all 54 построена на п/рапросе...	 55 05 06 07
+  Стро..?Пезм.-. Ошибка
+?5	2 PLPQML—QUERY Модификация (UPDATE) тип© [PR_CAED] построено на подзолросе
+Необходимо обращать на них внимание.
+er er. ^HIGH_LEVEL_CR] •= uZI)??::[FR_CRED] er.[DATE_BEGIN1 > aysdate;
+2. Системные таблицы и представления ТЯ
+Если таблице ТЯ есть соответствующий метакласс, то обращение должно выполняться именно через метакласс. В случае, если необходимый ТБП отсутствует в модели или не хватает каких-то реквизитов, необходимо обратиться за консультацией в ЦФТ.
+Неверно
+select s (s.[NAME]) in states%rowtype where s.[id] = ref_doc%state into st;
+Верно
+select s (s.[NAME]) in :: [STATES] all where s%id = ref_doc%state into st;
+Допускается обращение к метаданным через системные модификаторы (%statename, %classname,…)но с ограничениями аналогичными вычисляемым реквизитам и UDF (см. пункт 8).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+В коде запроса запрещено в перечне IN указывать прикладные таблицы и таблицы метаданных, однако в колонках запроса можн разыменовывать реквизиты, являющиеся ссылками на метаданные (разыменование будет выполняться аналогично использованию UDF).
+При обращении к метаданным нельзя использовать аналитические функции, иерархические запросы и выполнять join с varray- массивами.
+Обращение к таблицам и представлениям транслятора категорически запрещено. Известные таблицы транслятора:
+1. RTL—ENTRIES
+2. RTL_PARAMETERS
+3. DEPENDENCIES
+4. ERRORS
+5. HOST2PLP
+6. CURSORS
+7. CURSORS_BIND
+8. CURSORS_VIEW
+9. SOURCES
+10. DEPLOYMENT_SUPPLY
+11. HOST_SOURCES
+12. HOST_ERRORS
+3. Псевдоколонки Oracle
+Обращение к псевдоколонкам Oracle OBJECTID, OBJECT_VALUE, ORA_ROWSCN, ROWID, ROWNUM, XMLDATA недопустимо, так как в PostgreSQL их нет. Нужно избегать их использования. Вместо них, если необходимо, нужно писать прикладной код, дублирующий их логику работы, либо вводить в ТБП дополнительные реквизиты (если это не дистрибутивный объект).
+Недопустимо
+select d(d%rowid)
+in	::[F_120_DETAIL]
+where	d.[PARAM] = ref_param
+into tIData;
+Вместо этого, можно использовать, например, такую конструкцию
+select d(d%id)
+in	::[F_120_DETAIL]
+where	d.[PARAM] = ref_param
+into tNData;
+4. Операции-отчеты с использованием Oracle Reports запрещены
+Вместо них следует разрабатывать операции формирующие отчеты по технологии OOXML.
+5. Простые представления запрещены
+Вместо простых представлений необходимо создавать представления PL/Plus.
+6. Приведение к компиляции внешних соединений (outer join) в ANSI SQL
+? Для хранилищ в формате А2 (zip) все новые и модифицируемые операции/представления должны содержать аннотацию @generate_ansi]oins(true). Требование связано с тем, что при наличии или появлении в будущем неявных внешних соединений, возникающих при разыменовывании реквизитов в select-листе, автоматически «разворачивались» компилятором в синтаксис ANSI SQL. Явные внешние соединения, описываемые ранее константой (true), должны быть написаны с использованием синтаксиса ANSI SQL.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+? Для хранилищ в формате А1 (mdb), явные и неявные внешние соединения должны быть написаны с использованием синтаксиса ANSI SQL.
+Требование следует выполнять с учетом особенностей применения (см. ниже).
+Требование применимо для элементов модели, в которых нет внешних соединений старого вида (true). Это связно с тем, что соединения на синтаксисе ANSI не могут использоваться одновременно с соединениями старого вида (true). Компилятор в таком случае выдаст ошибку: «ERROR Deployment: [53, 21] PL/SQL: ORA-25156: внешнее соединение устаревшего вида (+) не может использоваться с соединениями ANSI».
+Пример кода, написанный в старом формате
+for (	select cr(	cr.[NUM_DOG]	: num_dog
+                   , fo.[DATE]	: op_date
+                   , fo.[OPER].[SYS_NAME]	: op_name	-- outer join
+                   , fo.[SUMMA]	: op_sum
+                   ) in ::[PR_CRED], (::[FACT_OPER] all : fo) all where	cr.[DATE_BEGIN] >= op_date
+and cr.[LIST_PAY] = fo%collection(true)	-- outer join
+           order by cr.[NUM_DOG], fo.[DATE] ) loop …
+Пример использования аннотации @generate_ansi_joins(true):
+Пример написания outer join с использованием синтаксиса ANSI SQL в A2
+@generate_ansi_joins(true)	-- ANSI SQL
+...
+for (	select cr(	cr.[NUM_DOG]	: num_dog
+, fo.[DATE]	: op_date
+, fo.[OPER].[SYS_NAME]	: op_name	-- outer join
+, fo.[SUMMA]	: op_sum
+)
+          in	::[PR_CRED]
+left join (::[FACT—OPER] all : fo) on cr.[LIST_PAY] = fo%collection	-- outer join
+all
+          where	cr.[DATE_BEGIN] >= op_date
+          order by cr.[NUM_DOG], fo.[DATE]
+)
+loop …
+В A1 (старый АРМ Администратор Словаря Данных) неявные внешние соединения в синтаксисе ANSI SQL придется писать вручную:
+Синтаксис ANSI SQL
+for (	select cr(	cr.[NUM_DOG]	: num_dog
+, fo.[DATE]	: op_date
+, vid_op.[SYS_NAME]	: op_name
+, fo.[SUMMA]	: op_sum
+                   ) in	::[PR—CRED]
+left join (::[FACT_OPER] all : fo) on cr.[LIST_PAY] = fo%collection	-- outer join
+left join (::[VID_OPER_DOG] all : vid_op) on fo.[OPER] = vid_op	-- outer join
+all
+          where	cr.[DATE_BEGIN] >= op_date
+          order by cr.[NUM_DOG], fo.[DATE] ) loop …
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+7. Ограничение выборки fetch вместо rownum
+Для ограничения выборки вместо псевдоколонки "rownum" следует использовать конструкцию "fetch X".
+вместо конструкции вида
+select p(p)
+in :: [PRICE_LIST] all
+where	p.[CODE] = upper(pCode) and
+          rownum < 2
+into vRef;
+следует писать
+select p(p)
+in ::[PRICE_LIST] all
+where p.[CODE] = upper(pCode) fetch 1
+into vRef;
+Запрещается в подзапросе конструкции exists использовать fetch, так как это приведет к полной выборке по подзапросу, а затем только ограничению строк выборки подзапроса.
+Если встречается безусловный выход из курсора цикла (конструкция exit), то настоятельно следует использовать fetch в курсоре. Это критично для Java, так как СП не будет выбирать по одной строке, он сразу "выдернет" 100 строк из БД. А если разработчиком заложена такая простая конструкция, что ему достаточно первой строки, то надо об этом "сообщить" Java с помощь оператора fetch.
+Пример как нельзя:
+begin
+for (select u(u.[DATE_BEGIN] : C_D1 ,u.[DATE_ENDING] : C_D2 ,u.[DATE_CLOSE] : C_CLOSE ,u.[NUM_DOG] : C_NUM_DOG)
+           in ::[RKO]
+where u.[ACCOUNT] = p_acc_id order by u.[DATE_BEGIN]) loop
+      v_dBeg := u.C_D1;
+      v_dEnd := u.C_D2;
+      v_dColose := u.C_CLOSE;
+v_Num := u.C_NUM_DOG; exit;
+   end loop;
+end;
+Пример исправления:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+begin
+   for (select u(u%rowtype)
+in (select u(u.[DATE_BEGIN] : C_D1 ,u.[DATE_ENDING] : C_D2 ,u.[DATE_CLOSE] : C_CLOSE ,u.[NUM_DOG] : C_NUM_DOG)
+in ::[RKO]
+           where u.[ACCOUNT] = p_acc_id
+           order by u.[DATE_BEGIN])
+fetch 1) loop
+      v_dBeg := u.C_D1;
+      v_dEnd := u.C_D2;
+      v_dColose := u.C_CLOSE;
+      v_Num := u.C_NUM_DOG;
+      exit;
+   end loop;
+end;
+Также следует учитывать особенности работы fetch в отличие от rownum. Агрегатные/оконные функции: sum, min, max, avg, count, listagg и т.д. first_value/last_value/... over ...- обрабатывают весь объем данных, только потом ограничивается количество строк
+Запрос fetchРезультатЗапрос rownumРезультатselect	p(count(p%id)) in ::[PRICE_LIST] all
+fetch 1
+intovCount;79select	p(count(p%id)) in ::[PRICE_LIST] all
+where rownum=1
+into vCount;1
+8. В SQL-запросах использование функций PL/Plus бизнес-логики (UDF - User-Defined Functions) допускается лишь со следующими ограничениями:
+Для операций запрещено использование UDF:
+в запросе верхнего уровня с UNION;
+в подзапросах;
+в выражениях;
+с выражениями в параметрах
+в условии, группировке и сортировке;
+определенных в самой операции.
+Таким образом, разрешается использовать UDF (только определённые в другой операции) только в select-листе запроса верхнего уровня без UNION и без участия в выражениях и без выражений в параметрах.
+Для представлений правила те же, дополнительно будут ограничения функциональности:
+      • не будет работает сортировка по колонке (ошибка не будет выдана);
+      • не будет работать фильтр (будет ошибка выполнения);
+      • для колонки с типом timestamp не определяется тип в IDE, т.е. невозможно штатно задать формат даты;
+      • статистика по вычисляемой колонке с UDF не поддерживается (будет показана ошибка в АРМе Навигатор);
+      • для вычисляемых колонок-массивов, возвращаемых UDF, не поддерживается подсчет точного количества записей;
+• не поддерживается вычисление колонок REF$ (нет корректной диагностики ошибки, представление не будет работать корректно);
+      • не поддерживаются колонки с базовыми типами "OLE" и "TABLE";
+      • не будет работать доступ по реквизиту для вычисляемой колонки.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Пример
+type main is select a( ::[RUNTIME].[F].a_saldo(sysdate, a, a.[RECORDS]) : C_SALDO1,--,	,	..
+       ::[RUNTIME].[F].a(''||a%id) : C_SALDO2,-- -	()
+::[RUNTIME].[F].a(::[AC_FIN].[LIB].getValue(a%id)) : C_SALDO22, -- -	( - UDF)
+       coalesce(::[RUNTIME].[F].a_saldo(sysdate, a, a.[RECORDS]), 0) : C_SALDO2,--
+       (select b(::[RUNTIME].[F].a_saldo(sysdate, b, b.[RECORDS])) in ::[AC_FIN] where b = a) : C_SALDO3 - )	-	-
+in ::[AC_FIN] where ::[RUNTIME].[F].a_saldo(sysdate, a, a.[RECORDS]) > 0 -group by ::[RUNTIME].[F].a_saldo(sysdate, a, a.[RECORDS]) -order by ::[RUNTIME].[F].a_saldo(sysdate, a, a.[RECORDS]) --
+9. XMLType
+Процедурная поддержка объектного типа XMLType реализована на уровне ТЯ.
+Нельзя использовать Oracle XMLType в SQL запросах, так как его в PostgreSQL нет, и поддержки не будет.
+   select a( a.[CODE]
+         ,case when length(a.[DADS]) > 0 then {XmlType(a1.C_DADS).extract('//@count').getNumberVal() } end : CNT
+         ,case when length(a.[DADS]) > 0 then {XmlType(a1.C_DADS).extract('//@interval').getNumberVal() } end : INTRVL
+         ,case when length(a.[DADS]) > 0 then {XmlType(a1.C_DADS).extract('//@method').getStringVal() } end : METHOD1
+         )
+   in [WS_SOAP];
+10. Выборки из представлений VW_CRIT, VW_RPT, VW_SQL
+Представления VW_SQL в DBI не поддерживаются, поэтому обращение к ним запрещено. Допустимы обращения к VW_CRIT, VW_RPT при условии отсутствия в них колонок UDF.
+11. Нельзя использовать макросы подстановки execute и process, так как их поддержки в DBI не будет
+12. Запрещается в ходе новых разработок использование синтаксиса динамических запросов с использованием пакетов DBMS_S QL, RTL.execute_sql, RTL.exec_sql_out, UTILS.open_cursor.
+Вместо них рекомендуется использовать процедуры и функции библиотек ::[RUNTIME].[CALC], ::[RUNTIME].[PLP].
+вместо конструкции вида
+strPlp :=
+          'declare' || NL$ ||
+          'ref_TBP ref [' || p_Class || '] := ' || p_Ref%id || ';' || NL$ ||
+          'begin' || NL$ ||
+          'result := ref_TBP.['||p_Name||'];' || NL$ ||
+          'exception when others then result := null; end;' || NL$;
+strRes := ::[RUNTIME].[PLP].plp_c(strPlp);
+13. Вместо decode следует использовать case.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Несмотря на то, что в ТЯ 7.6.10.10 при включенной опции DBI реализована компиляция decode в case:
+     1. Не любой decode компилятор сможет корректно заменить на case
+     2. В decode может возникнуть неявное приведение типов
+     3. case более универсальная конструкция
+14. Арифметические операции с датами в запросах
+Допускается использовать в запросах арифметические операции дат как с числами, так и с интервалами.
+При вычитании дат необходимо учитывать тип возвращаемого значения (Oracle DATE-DATE = INTEGER, PG TIMESTAMP- TIMESTAMP=INTERVAL)
+Неверно
+select x(to_date('02.11.2023', 'dd.mm.yyyy') - to_date('01.11.2023', 'dd.mm.yyyy'))
+in dual%rowtype
+where to_date('02.11.2023', 'dd.mm.yyyy') - to_date('01.11.2023', 'dd.mm.yyyy') <= 1
+into number;
+Верно
+select x(to_number(to_date('02.11.2023', 'dd.mm.yyyy') - to_date('01.11.2023', 'dd.mm.yyyy'))) in dual%rowtype
+where to_number(to_date('02.11.2023', 'dd.mm.yyyy') - to_date('01.11.2023', 'dd.mm.yyyy')) <= 1 into number;
+При этом необходимо учитывать, что ТЯ автоматически приводит интервал к строке. Приведение интервала к строке в Postgre по умолчанию осуществляется с округлением в меньшую сторону до целого числа дней.
+Внимание! Использование в interval 'MONTH', 'YEAR' приводит к ошибкам. Необходимо использовать либо interval('1', 'DAY') *количество, либо функцию add_months.
+Пример
+where x.[DATE] + interval('1', 'DAY') > p_date
+where x.[DATE] + interval('1', 'DAY')*k > p_date
+15. Временные таблицы
+1) Создание ТБП с признаком "на сессию" и на "транзакцию" выполняется как и раньше. Синтаксис есть в документации А2.
+2) В прикладном коде перед первым обращением к временной таблицы следует вызвать ::[RUNTIME].[STORAGE_MGR]. init_temp_table(p_class_id string);
+Зачем?
+::[RUNTIME].[STORAGE_MGR].init_temp_table нужна для создания временной таблицы в PostgreSQL, т.к. в этой БД временная таблицы создаются в каждой сессии отдельно. Если таблица уже существует, ошибки не будет, т.к. в PG при создании таблицы в синтаксисе есть операнд IF NOT EXIST. Для Oracle эта функция не будет делать ничего, пустышка.
+Для таблицы "на сессию" так же следует её предварительно очистить, так как СП может выделить чужую сессию, где могут остаться данные.
+3) Для таблиц "на сессию" может понадобиться удержать сессию за собой, чтобы СП не отдал её другому. Для этого используются команды
+executor.set_context('LOCK_SESSION', 1 ); --
+executor.set_context('LOCK_SESSION', 0 ); --
+Внимание! удерживайте принудительно сессию только когда это необходимо, т.е. когда не попадаете в случаи из таблицы ниже:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Примеры использования на сессиюПоведениеДля представлений с вычисляемыми колонками, для решения проблемы UDF.
+В операции типа "фильтр" функция отбирает экземпляры по какому-то условию.
+Выполняем выборку, вставляем во временную таблицу, потом в представлении используем эти данные.     В режимах 2MCA_Proxy, 2MCA, DBI операция-фильтр автоматически выполняется перед выборкой данных представления в той же сессии что и выборка данных, т.е. представление отработает корректно.
+     НО! Во временной таблице останутся данные, сессия будет возвращена в пул СП для повторного использования и таким образом данные будут "видны" другой прикладной сессии Данные исчезнут после того как сессия будет закрыта штатно пулом СП либо не штатноДля операций с ЭФ. Данные после введения значений на части контролов выбираются, и помещаются во временную таблицу, затем таблица участвует в дальнейших выборках.     В режимах 2MCA_Proxy, 2MCA, DBI работа формы операции происходит в одной сессии СП-БД, т.е. сама форма отработает корректно
+     НО! Во временной таблице останутся данные и т.д. см. выше
+16. Триггеры
+Триггеры базы данных относятся к серверному коду и возможны к использованию только для Платформы 1 и Платформы 2МСА. Для архитектуры DBI есть возможность использовать операции типа Триггер, но они не совместимы с Платформой 1.
+Поэтому:
+     1. Требуется дублировать реализацию триггеров через операции, при миграции на DBI триггеры в БД будут отключены
+2. Можно отказаться от триггеров и прописать действия в программном коде. Например перенаправить все действия через прикладные функции/процедуры/операции. Это зависит от задачи.
+     3. Если делать операцию-триггер, то поддерживать нужно будет два вида триггеров, пока Платформа 1 не уйдет в небытие.
+В DBI триггер по сути будет операцией и будет иметь java-реализацию, будет вызываться средствами ТЯ при действиях над экземплярами.
+Т.е. при update/insert/delete на SQL такой триггер не сработает, а при изменениях средствами PL+ сработает.
+Поэтому для правильной работы триггеров-операций в DBI необходимо проводить анализ программного кода и:
+     1. либо исключать прямые изменения таблиц в коде;
+     2. либо такие изменения снабжать принудительным выполнением кода из триггера
+Для реализации Oracle необходимо создать операцию триггер (в данном примере это TVR_TRIG), с вызовом ее из триггера Oracle (в данном примере это USR_TVR_TRIG)
+DBIORACLEclass UD_CODE_NAME;
+@target(java := true, plsql := true)
+@before(insert, delete, update)
+@name('Тавр. Триггер')
+trigger TVR_TRIG is
+pragma include (::[RUNTIME].[DEBUG_MACRO]);
+public type gt_rtbl is record(
+    qual	varchar2(100)
+    ,oldv	varchar2(32000)
+    ,newv	varchar2(32000)
+);
+public type gt_tbl is table of gt_rtbl index by varchar2(1000);
+v_tbl	gt_tbl;
+public procedure set_data
+/* Заполнение v_tbl */
+( p_data	gt_tbl
+    /* таблица данных */
+)is
+begin
+    v_tbl := p_data;
+end;CREATE OR REPLACE TRIGGER USR_TVR_TRIG BEFORE INSERT OR DELETE OR UPDATE
+ON Z#UD_CODE_NAME FOR EACH ROW begin declare
+tblZ$UD_CODE_NAME_TVR_TRIG.gt_tbl;
+begin
+if updating('C_FREE_VALUE') then tbl(:OLD.ID).QUAL := 'C_FREE_VALUE'; tbl(:OLD.ID).OLDV := :OLD.C_FREE_VALUE; tbl(:OLD.ID).NEWV := :NEW.C_FREE_VALUE;
+Z$UD_CODE_NAME_TVR_TRIG.set_data(tbl);
+Z$UD_CODE_NAME_TVR_TRIG.checkData('UPDATING'); end if;
+end;
+end;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+public procedure checkData
+/* Проверка значенией */
+(
+   p_event varchar2(128)
+   /* событие */
+) is
+   idx varchar2(100);
+begin
+   idx := v_tbl.first;
+   while idx is not null
+   loop
+&debug('p_event = '||p_event
+         ||'; qual = '||v_tbl(idx).qual
+         ||'; oldv = '||v_tbl(idx).oldv
+         ||'; newv = '||v_tbl(idx).newv
+         ,0
+      )
+      idx := v_tbl.next(idx);
+   end loop;
+end;
+TVR_TRIG (
+   @name('P_EVENT') P_EVENT in [STRING] )is
+execute is
+      idx integer;
+   begin
+      if P_EVENT in ('UPDATING', 'INSERTING', 'DELETING') then &debug('P_EVENT = '||P_EVENT, 0)
+         pragma if_def(java);
+&debug('java ', 0)
+         idx := attrs_list.first;
+         while idx is not null
+         loop
+           v_tbl(idx).qual := attrs_list(idx).QUAL;
+           v_tbl(idx).oldv := attrs_list(idx).OLDV;
+           v_tbl(idx).newv := attrs_list(idx).NEWV;
+           idx := attrs_list.next(idx);
+         end loop;
+         checkData(P_EVENT);
+         pragma end_if;
+         v_tbl.delete;
+      end if;
+   end;
+end;
+end;
+17. Функциональные реквизиты в SQL запросах
+Допустима возможность обращения к полю «Значение» функционального реквизита в select list запроса верхнего уровня (из-за ограничений UDF). Во всех остальных местах недопустимо использование функциональных реквизитов без секции «SQL значение». По возможности, необходимо заполнять секцию «SQL значение» там, где это возможно.
+Если реквизит участвует в условии и у него есть SQL значение, то если это outer join, то вероятнее всего при создании представления будет возникать ошибка:
+ORA-01799: a column may not be outer-joined to a subquery Cause: <expression>(+) <relop> (<subquery>) is not allowed.Action: Either remove the (+) or make a view out of the subquery. In V6 and before, the (+) was just ignored in this case.
+Рекомендация: делать явный join, перенося логику вычисления реквизита прямо в запрос.
+18. Иерархические запросы
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Для реализации иерархических выборок использовался синтаксис «connect by». Начиная с ТЯ 7.6.9.2 для той же цели нужно использовать CTE (WITH [RECURSIVE]) т. к. данная конструкция описана в ANSI SQL и поддержана в PLPLUS.
+Ограничения:
+     1. Иерархические запросы по метаданным под запретом.
+2. Внутри выражения WITH нельзя использовать колонку вышестоящего запроса или колонку таблицы, которая соединяется на уровне конечного запроса with. Например, нельзя сделать колонку-подзапрос, которая зависит от данных основного запроса. Проявляется в SQL в виде ошибки компиляции.
+     3. Порядок выборки данных отличается от connect by.
+     4. Нет аналога nocycle. Ограничение от зацикливания надо указывать в секции where.
+Пример из DEPART.LIB:
+Было
+select d_(d_.ID : D_ID) in (
+     select d(d%id : ID, d.[HIGH] : HIGH) in ::[DEPART] connect by d%id = prior d.[HIGH] start d%id = dep
+) where d_.[HIGH] is null and rownum < 2 into high_dep;
+Стало
+with recursive t(id, high) as (
+    select x(x%id : id, x.[HIGH] : high) in ::[DEPART] where x%id = dep
+    union all
+    select x(x%id : id, x.[HIGH] : high) in ::[DEPART] join (t : t2) on t2.high = x ) select t1(t1.id) in t where t1.high is null fetch 1 into high_dep;
+19. Приведение типов
+У Oracle и PostgreSQL разные:
+      • правила неявного приведения типов данных;
+      • функции явного преобразования типов.
+Поэтому необходимо писать код, в котором используются совместимые типы данных или их явные преобразования.
+Ниже приводятся только основные причины и рекомендации.
+Сложение числа со строкой в общем случае несовместимоLike применим только к строкамOracle
+SQL> select c_code, c_code + 1 from "Z#DEPART" where id =22854243;
+C_CODE	C_CODE+1
+041	42
+PostgreSQL
+cft14=# select c_code, c_code + 1 from "Z#DEPART" where id = 22854243;
+ERROR: operator does not exist: character varying + integerOracle
+SQL> select count(1) from "Z#DOCUMENT" where c_document_num like '11111111%';
+  COUNT?
+       4
+PostgreSQL
+cft14 = # select count(1) from "Z#DOCUMENT" where c_document_num like '1%';
+ERROR: operator does not exist: numeric ~~ unknown
+20. Exceptionloop
+Конструкция Exceptionloop запрещена
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Неверно
+type ac_ref_t is table of ref [AC_FIN];
+ac_ref ac_ref_t;
+begin
+      delete for i in 1..2 exceptionloop
+             c in ::[ACCOUNT] where c = ac_ref(i); end;
+21. Запросы с bind переменными в выражениях group by, distinct..order by запрещены
+Такие запросы необходимо переписать так, чтоб не было bind переменных в выражениях group by, distinct..order by .
+Неверно
+select distinct x( x : c_id )
+in ::[TST_IMP_FMS] all
+order by case when x.[SER] = v_ser then '1' else '0' end
+22. Контексты сессии
+Использование контекстов «USERENV» и «<OWNER>_SYSTEM»(например, «IBS_SYSTEM») запрещено.
+Разрешено использовать только пользовательский контекст (помещать и читать из него).
+executor.set_context('TEST_VAR', value);
+res := sys_context(user_context, 'TEST_VAR');
+23. Системные представления Oracle
+Запрещены обращения к представлениям
+-VW_USER_SESSIONS_1,
+-VW_USER_SESSIONS_2
+-вида "v$", "gv$", "aq$", "dba_", "user_", "all_", "nls_", "mgw_"
+24. XMLQuery
+На текущий момент в PLPlus нет поддержки Oracle XMLQuery. Все существующие варианты использования возможны только через execute immediate.
+executor.set_context('TEST_VAR', value);
+res := sys_context(user_context, 'TEST_VAR');
+25. Вложенные массивы varray (nested table)
+SQL-выборка из varray от record запрещена. Необходимо использовать циклы по таким массивам, либо осуществлять выборку из скалярных, либо объектных типов.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+declare
+   type t_rec is record(a number);
+   type t_tbl is varray(0) of t_rec;
+   tA t_tbl;
+begin
+for (select tb(tb.a : SID)
+in tA) loop
+      null;
+   end loop;
+end;
+declare
+   type t_tbl1 is varray(0) of ref [DEPN];
+   type t_tbl2 is varray(0) of [DEPN_REF];
+   type t_tbl3 is varray(0) of number;
+   type t_tbl4 is varray(0) of [STRING_100];
+   tA1 t_tbl1;
+   tA2 t_tbl2;
+   tA3 t_tbl3;
+   tA4 t_tbl4;
+begin
+   for (select tb(tb.column_value : SID)
+          in tA1) loop
+      rtl.debug_pipe('1', 0);
+   end loop;
+   for (select tb(tb.column_value : SID)
+          in tA2) loop
+      rtl.debug_pipe('1', 0);
+   end loop;
+   for (select tb(tb.COLUMN_VALUE : SID)
+          in tA3) loop
+      rtl.debug_pipe('1', 0);
+   end loop;
+   for (select tb(tb%rowtype)
+          in tA4) loop
+      rtl.debug_pipe(tb.column_value, 0);
+   end loop;
+end;
+26. Идентификация в ТБП по rowid
+Запрещается создавать ТБП с идентификацией экземпляров по rowid.
+27. Пакеты oracle
+  Запрещенный ф-ии/пакеты Oracle  Замена для DBIutils.session_idrtl.session_idmethod_mgr.clear_object_refcin::[RUNTIME].[SYSLIB].clear_object_refcingutl_http::[RUNTIME].[HTTP_MGR]dbms_xmldom, dbms_xmlparser, xrc_xmldom, xrc_xmlparserБиблиотеки прикладного ядра ::[RUNTIME].[XML_DB], ::[RUNTIME].[XML_DOM],:: [RUNTIME].[XT], ::[RUNTIME].[XQ]
+и объектный тип XMLTYPEascii::[RUNTIME].[CHARSET].asciichr::[RUNTIME].[CHARSET].chrutl_url.escape::[RUNTIME].[HTTP_MGR].url_escapeutl_url.unescape::[RUNTIME].[HTTP_MGR].url_unescape
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+28. Кодогенерация операций и представлений
+В архитектуре DBI запрещено из PLPlus кода операций создавать новые операции и представления, менять существующие, удалять операции, вызывать перекомпиляцию.
+29. Прерванная транзакция
+При разработке необходимо учитывать, что исключениями генерируемые БД прерывают транзакцию, не путать с исключениями в процедурном коде (например: NO_DATA_FOUND, TOO_MANY_ROWS, OBJECT_NOT_FOUND). Для продолжения работы с БД необходимо откатить транзакцию на точку сохранения, установленную до возникновения ошибки.
+Конструкция when others перехватывает все исключения , в том числе и генерируемые БД, поэтому &rb или raise обязателен.
+execute is
+    nCnt number;
+begin
+??
+select x(to_number(to_date('02.11.2023', 'dd.mm.yyyy') - to_date('01.11.2023', 'dd.mm.yyyy'))) indual%rowtype
+where to_date('02.11.2023', 'dd.mm.yyyy') - to_date('01.11.2023', 'dd.mm.yyyy') <= 1 (ошибка приведения типов) into nCnt;
+дальше выполняется процедурный код без обращения к БД. Если обратиться к БД, то будет ошибка: current transaction is aborted, commands ignored until end of transaction block
+end;
+execute is
+    nNum number;
+begin
+?.
+begin
+&sp(point1)
+select x(to_number(to_date('02.11.2023', 'dd.mm.yyyy') - to_date('01.11.2023, 'dd.mm.yyyy'))) indual%rowtype
+where to_date('02.11.2023', 'dd.mm.yyyy') - to_date('01.11.2023', 'dd.mm.yyyy') <= 1 (ошибка приведения типов) into nCnt;
+exception
+when others then
+    - для продолжения работы
+    &rb(point1)
+end;
+end;
+30. Oracle JSON
+Для работы с документами формата JSON в архитектуре DBI реализована поддержка только библиотеки ::[RUNTIME]. [LIB_JSON]. Данная библиотека имеет java реализацию.
+Все остальные варианты: объектные типы Oracle (JSON_Object_T, JSON_ELEMENT_T, JSON_Array_T, JSON_KEY_LIST, JSON_SCALAR_T) и PLJSON (чужая реализация под Oracle) не поддерживаются.
+31. Работа с кодировками
+Для выполнения конвертаций различного типа в процедурном коде следует использовать функции библиотеки ::[RUNTIME]. [CHARSET].
+Использование функции convert в процедурном коде запрещается. При использовании функции convert в SQL следует обращать внимание на то, что есть незначительные отличия в работе данной функции в Oracle и PostgreSQL.
+Запрещается использование следующих функций: nchr, asciistr, compose, decompose, dump, unistr, lengthc, length2, length4, substrc, substr2, substr4. Также запрещены все функции NLS_xxx: NLS_INITCAP, NLS_LOWER, NLS_UPPER,, NLS_CHARSET_DECL_LEN, NLS_CHARSET_ID, NLS_CHARSET_NAME, NLSSORT.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+32. Конструкция set_this
+Есть разница в поведении, обусловленная принципиальной разницей в архитектуре (в ТЯ1 есть только кэш экземпляра this, в 2MCA - полноценный разделяемый кэш).
+Рекомендуем следующие способы решения проблемы:
+-избавляться от данной конструкции
+-обрамлять конструкцию прагмой условной компиляции ТЯ1\йБТ (--#ifdef JAVA ... --#endif)
+33. Execute immediate
+Учитывая основные требования регламентов, в случае необходимости использования execute immediate требуется писать запрос таким образом, чтобы он мог одинаково проигрываться в разных средах (Oracle, PG)
+execute immediate 'truncate table Z#DBI_TEST'; Будет работать в Oracle но вызовет ошибку в PG так как имя таблицы не экранировано.
+execute immediate 'truncate table "Z#DBI_TEST"'; Будет работать одинаково и в Oracle и PG.
+execute immediate 'alter session enable parallel dml'; Не будет работать в PG, так как нет поддержки такого синтаксиса
+execute immediate( 'begin :1:= some_function end;') using out v_test; Не будет работать в PG так как синтаксис анонимного блока отличается от синтаксиса Oracle
+34. Пустая строка и null
+В PostgreSQL пустая строка ‘’ не является null (в отличии от oracle)
+Oracle
+SQL> select case when ” is null then 'yes' else 'no' end from dual;
+case
+yes
+PostgreSQL
+cft14=# select case when '' is null then 'yes' else 'no' end;
+case
+no
+Это надо учитывать при написании кода запросов к БД.
+35. Условная компиляция
+Запрещены любые условные компиляции, кроме системных(JAVA/DBI) --#ifdef JAVA ? ? ?
+--#endif
+36. Использование Database Link в прикладном коде
+Функционал доступен только в oracle. Нужно избавляться.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+В качестве альтернативы в ЦФТ_Банк можно использовать варианты:
+1. заменить на вызовы REST/SOAP (Приложения WEB_EXT.CONS_REST, WEB_EXT.CONS_SOAP, WEB_EXT.PROV_REST, WEB_EXT.PROV_SOAP)
+2. или отправку/получение сообщений через адаптер Apache Kafka (Приложение KAFKA_ADAPTER)
+3. или отправку/получение сообщений через Интегратор
+4. или отправку/получение сообщений через библиотеку работы с очередями AQ_LIB
+5. или получение данных SQL-запросами из внешних БД при работе через СП через библиотеку [RUNTIME].[JDBC_ADAPTER]
+37. Интегратор. Синхронное взаимодействие
+В Интеграторе станет невозможным синхронное взаимодействие (в т.ч. в одной транзакции). Вместо него следует использовать асинхронное взаимодействие.
+38. Задания по расписанию
+Для указания интервала запуска поддерживается только выражения, допустимые в PLPlus
+39. Работа с экземплярами справочника "Настройки."
+По причине особенностей кэширования данных, работать с экземплярами справочника "Настройки." следует только посредством процедур/ф-ий ::[FP_TUNE].[LIB].
+Дополнительные требования для сотрудников ЦФТ размещены на странице.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

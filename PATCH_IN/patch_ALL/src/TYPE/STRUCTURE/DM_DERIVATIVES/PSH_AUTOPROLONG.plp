@@ -1,0 +1,32 @@
+class DM_DERIVATIVES;
+
+@name('[ПСБ] Редактировать Автопролонгацию и Даты (служебная)')
+method PSH_AUTOPROLONG is
+PSH_AUTOPROLONG (
+	@name('Автопролонгация')          P_AUTOPROLONG  in [BOOLEAN],
+	@name('Дата начала обращения')    P_DATE_BEG     in [DATE],
+	@name('Дата окончания обращения') P_DATE_EXPIRED in [DATE],
+	@name('Дата исполнения')          P_DATE_EXEC    in [DATE]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_AUTOPROLONG := this.[AUTOPROLONG];
+	P_DATE_BEG := this.[DATE_BEG];
+	P_DATE_EXPIRED := this.[DATE_EXPIRED];
+	P_DATE_EXEC := this.[DATE_EXEC];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+begin
+	this.[AUTOPROLONG]	:=P_AUTOPROLONG;
+	this.[DATE_BEG]		:=P_DATE_BEG;
+	this.[DATE_EXPIRED]	:=P_DATE_EXPIRED;
+	this.[DATE_EXEC]		:=P_DATE_EXEC;
+end;
+end;
+end;

@@ -1,0 +1,1290 @@
+class CLIENT;
+
+@import_plsql(true)
+@name('[ПСБ] Противодействие легализации. Проверка клиентов по спискам ПСХБ (списочная)')
+batch method PSH_CHK_CLIENT_L is
+
+@name('Выполняемые проверки') public V_GRID     table of [CLIENT_CHECKS_G];
+@name('Строка валидации')     public V_DEST_STR          [STRING_32000];
+
+pragma include(::[RUNTIME].[MACRO_LIB]);
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma include(::[LEGAL_STRATEG].[LIB]);
+
+pragma macro(lib, '::[LEGAL_STRATEG].[LIB]');
+pragma macro(WLog, 'v_err := ::[RUNTIME].[STDIO].write_str(v_fh, [1], null, ::[RUNTIME].[STDIO].WINTEXT, true);', substitute);
+
+v_fh		integer;
+v_err		integer;
+cn_check1	constant varchar2(250) := ::[CLIENT_CHECKS]([CODE] = 'TERROR_LIST').[NAME]; --'Проверка на причастность к терроризму';
+cn_check2	constant varchar2(250) := ::[CLIENT_CHECKS]([CODE] = 'FREEZE_LIST').[NAME]; --'Проверка клиентов по списку решений межведомственной комиссии';
+--cn_check3	constant varchar2(250) := ::[CLIENT_CHECKS]([CODE] = 'LIST_WMD').[NAME]; --'Проверка клиентов по перечню лиц, связанных с оружием массового уничтожения';
+cn_check3	constant varchar2(250) := ::[CLIENT_CHECKS]([CODE] = 'LIST_OON').[NAME]; --'Проверка по перечню СБ ООН';
+cn_check4	constant varchar2(250) := ::[CLIENT_CHECKS]([CODE] = 'BLACKLIST').[NAME]; --'Проверка клиентов по списку прочих подозрительных лиц';
+cn_check5	constant varchar2(250) := ::[CLIENT_CHECKS]([CODE] = 'TERR_ADDRESS').[NAME]; --'Проверка на совпадение адреса клиента с адресом террориста';
+cn_check6	constant varchar2(250) := ::[CLIENT_CHECKS]([CODE] = 'STRATEGIC_LIST').[NAME]; --'Проверка юридических лиц по перечню стратегических предприятий РФ';
+
+cod_check1	constant varchar2(40) := ::[CLIENT_CHECKS]([CODE] = 'TERROR_LIST').[CODE]; --'Проверка на причастность к терроризму';
+cod_check2	constant varchar2(40) := ::[CLIENT_CHECKS]([CODE] = 'FREEZE_LIST').[CODE]; --'Проверка клиентов по списку решений межведомственной комиссии';
+--cod_check3	constant varchar2(40) := ::[CLIENT_CHECKS]([CODE] = 'LIST_WMD').[CODE]; --'Проверка клиентов по перечню лиц, связанных с оружием массового уничтожения';
+cod_check3	constant varchar2(40) := ::[CLIENT_CHECKS]([CODE] = 'LIST_OON').[CODE]; --'Проверка по перечню СБ ООН';
+cod_check4	constant varchar2(40) := ::[CLIENT_CHECKS]([CODE] = 'BLACKLIST').[CODE]; --'Проверка клиентов по списку прочих подозрительных лиц';
+cod_check5	constant varchar2(40) := ::[CLIENT_CHECKS]([CODE] = 'TERR_ADDRESS').[CODE]; --'Проверка на совпадение адреса клиента с адресом террориста';
+cod_check6	constant varchar2(40) := ::[CLIENT_CHECKS]([CODE] = 'STRATEGIC_LIST').[CODE]; --'Проверка юридических лиц по перечню стратегических предприятий РФ';
+
+cn_addLegal_TERROR_LIST		constant varchar2(100) := 'Проверка по списку террористов/экстремистов РФ ';
+cn_addLegal_FREEZE_LIST		constant varchar2(100) := 'Противодействие легализации. Проверка клиентов по списку решений межведомственной комиссии';
+--cn_addLegal_LIST_WMD		constant varchar2(100) := 'Групповая проверка клиентов';
+cn_addLegal_LIST_OON		constant varchar2(100) := 'Групповая проверка клиентов';
+cn_addLegal_BLACKLIST		constant varchar2(100) := 'Групповая проверка клиентов';
+cn_addLegal_TERR_ADDRESS	constant varchar2(100) := 'Проверка на совпадение адреса клиента с адресом террориста';
+cn_addLegal_STRATEGIC_LIST	constant varchar2(100) := 'Проверка юридических лиц по перечню стратегических предприятий РФ';
+date_op						constant date := ::[SYSTEM].[OP_DATE];
+
+c_check_freeze_list			const ref [CLIENT_CHECKS] := ::[CLIENT_CHECKS]([CODE] = 'FREEZE_LIST');
+c_check_invalid_cert		const ref [CLIENT_CHECKS] := ::[CLIENT_CHECKS]([CODE] = 'INVALID_CERT');
+c_check_invalid_cert_fms	const ref [CLIENT_CHECKS] := ::[CLIENT_CHECKS]([CODE] = 'INVALID_CERT_FMS');
+type ClRefTableType is varray(0) of number;
+type clTableType is table of ref [CLIENT];
+
+
+type t_recClient is record (client		ref [CLIENT]
+							,num		integer);
+type t_client is table of t_recClient index by varchar2(20);
+v_tabClient	t_client;
+
+type t_recBeneficiar is record (client		ref [CLIENT]
+								,benef		varchar2(100)
+								,num		integer);
+type t_Beneficiar is table of t_recBeneficiar;
+v_tabBeneficiar	t_Beneficiar;
+
+type t_check is table of boolean index by varchar2(100);
+v_check	t_check;
+
+type t_ckeckClient is table of ref [CLIENT];
+v_ckeckClient	t_ckeckClient;
+v_ckeckBenef	t_ckeckClient;
+
+v_fileName	varchar2(50);
+
+type t_recLegal is record (id_req	[REFERENCE]
+							,auto	[BOOLEAN]);
+type t_tblLegal is table of t_recLegal index by varchar2(40);
+
+type t_recPoint is record (	maxLegalList	number
+							,legal			t_tblLegal);
+type t_tblPoint is table of t_recPoint index by varchar2(30);
+v_tblPoint t_tblPoint;
+
+
+procedure fillGrid
+/* Установка логического признака грида */
+				(p_bool	boolean)
+is
+begin
+	for i in V_GRID.first..V_GRID.last
+	loop
+		V_GRID(i).[CHOOSE] := p_bool;
+	end loop;	
+end;
+
+
+procedure init_vars
+/* Инициализация переменных */
+is
+begin
+	v_tabClient.delete;
+	v_tabBeneficiar.delete;
+	v_check.delete;
+	v_ckeckClient.delete;
+	v_ckeckBenef.delete;
+	v_tblPoint.delete;
+end;
+
+procedure fillBeneficiar
+/* Отбор представителей, бенефициаров и учредителей */
+is
+	idx		varchar2(40);
+	idxBen	integer;
+	cl_prev	ref [CLIENT];
+	v_check	boolean;
+begin
+	idx := v_tabClient.first;
+	while idx is not null
+	loop
+		if v_tabClient(idx).client%class <> 'CL_PRIV' then
+			debug_pipe(NL$ || 'По Клиенту: ' || v_tabClient(idx).client.[NAME] || '   ИНН: ' || v_tabClient(idx).client.[INN], 0);
+			v_check := true;
+			for(select c(t.[PARTNER] cl, t.[VID_LINK].[NAME] typ)
+					in ::[CLIENT], (c.[LINKS_OTHER] : t)
+					where c%id = v_tabClient(idx).client%id
+						and t.[PARTNER] is not null
+						and t.[VID_LINK] in (::[CL_LINK]([CODE] = 'БЕНЕФИЦИАР'), ::[CL_LINK]([CODE] = 'ВЫГОДОПРИОБРЕТАТЕЛЬ'), ::[CL_LINK]([CODE] = 'ПРЕДСТАВИТЕЛЬ'))
+						and (t.[DATE_BEG] <= date_op or t.[DATE_BEG] is null)
+						and (t.[DATE_END] >= date_op or t.[DATE_END] is null)
+						and v_tabClient(idx).client%id != t.[PARTNER]%id -- сам клиент не влияет на подконтрольность, даже если есть связь с самим собой
+				union
+				select c(f.[FOUNDER] cl, 'Учредитель' typ)
+					in ::[CL_CORP], (c.[REGISTER].[FOUNDERS] : f)
+					where c%id = v_tabClient(idx).client%id
+						and f.[FOUNDER] is not null
+						and (f.[DATE_BEG] <= date_op or f.[DATE_BEG] is null)
+						and (f.[DATE_END] >= date_op or f.[DATE_END] is null)
+				union
+				select c(r.[FASE] cl, 
+						 case when r.[CHIEF] then coalesce(r.[RANGE].[VALUE], 'Руководитель')
+							  else 'Представитель организации'
+						 end typ)
+				in ::[CL_CORP], (c.[ALL_BOSS] : r)
+				where c%id = v_tabClient(idx).client%id
+					-- and r.[FASE] is not null
+					and (r.[WORK_BEGIN] <= date_op or r.[WORK_BEGIN] is null)
+					and (r.[WORK_END] >= date_op or r.[WORK_END] is null)
+					and (	r.[CHIEF] = true
+						or coalesce(r.[CHIEF], false) = false
+						or	exists (select m(1) in r.[MARK_PERS] where m.[MARK] = ::[MARK_PERS_G]([CODE] = 'ORG_REP'))
+						)
+				union
+				select c(pers.[CLIENT] cl, 'ЕИО' typ)
+					in ::[CL_INFO_REQ]
+					, (c.[OPER_CONTROL] : oper)
+					, (oper.[PERSONNEL]	: pers) all
+					where c.[CLIENT] = v_tabClient(idx).client
+						and (oper.[DATE_BEGIN] <= date_op or oper.[DATE_BEGIN] is null)
+						and (oper.[DATE_END] >= date_op or oper.[DATE_END] is null)
+							
+				order by c.cl
+				)
+				loop
+					if cl_prev is null or cl_prev <> c.cl then   
+						idxBen := v_tabBeneficiar.count + 1;
+						v_tabBeneficiar(idxBen).client := c.cl;
+						v_tabBeneficiar(idxBen).benef := c.typ;
+						v_tabBeneficiar(idxBen).num := idxBen;
+						debug_pipe('      ' || idxBen || '  Добавлен для проверки ' || c.typ || ': ' || c.cl.[NAME] || '   ИНН: ' || c.cl.[INN], 0);
+					end if;
+					cl_prev := c.cl; 
+					v_check := false;
+				end loop;
+	
+			if v_check then
+				debug_pipe('      Отсутствуют представители/бенефициары/учредители', 0);
+			end if;
+		end if;
+		idx := v_tabClient.next(idx);
+	end loop;
+	debug_pipe(NL$ || 'Всего добавлено для проверки представителей/бенефициаров/учредителей: ' || coalesce(idxBen, 0), 0);
+end;
+
+
+procedure fillActive
+/* Отбор клиентов по выбранному режиму "Проверить активных клиентов" */
+is
+n	integer := 0;
+begin
+	for (select cl(cl obj)
+		in ::[CLIENT]
+		where (select acc(count(acc))
+				in ::[AC_FIN]
+				where (acc.[CLIENT_V] = cl
+					or acc.[CLIENT_R] = cl)
+					and acc.[DATE_CLOSE] is null) > 0
+			--and cl%class in ('CL_ORG', 'CL_PRIV')
+		order by cl%class, cl.[NAME]
+		)
+	loop
+		n := n + 1;
+		debug_pipe(n || '  Добавлен для проверки клиент: ' || cl.obj.[NAME] || '   ИНН: ' || cl.obj.[INN], 0);
+		v_tabClient(cl.obj).client := cl.obj;
+		v_tabClient(cl.obj).num := n;
+		if n = 10000 then
+			exit;
+		end if;
+	end loop;
+end;
+
+-->> Для списка "Проверка юридических лиц по перечню стратегических предприятий РФ"
+procedure mark_clear
+	( p_client				ref [CL_CORP]
+	, p_last_check_result	ref [P207_TERROR_FLAG]
+	)
+is
+begin
+	-- Устанавливаем отметку STRAT_CLEAR только в том случае, если она еще не установлена,
+	-- либо, если установлена отметка отличная от STRAT_CLEAR или STRAT_MANUAL
+	if (p_last_check_result is null or p_last_check_result <> &lib.manual) then
+		&add_check_result(p_client, &lib.clear);
+		if p_last_check_result in (&lib.auto,&lib.manual) then
+			debug_pipe(TB$||'Клиент(id='||p_client%id||') "'||p_client.[NAME]||'": Установлена отметка "'||&lib.clear.[CODE]||'"('||&lib.clear.[NAME]||') вместо "'||p_last_check_result.[CODE]||'"('||p_last_check_result.[NAME]||')',0);
+		end if;
+	end if;
+end;
+
+procedure mark_auto(
+	p_client					ref [CL_CORP]
+	, p_last_check_result		ref [P207_TERROR_FLAG]
+	, p_check_strateg_result	integer
+)
+is
+begin
+	if (p_last_check_result is null or p_last_check_result not in (&lib.manual, &lib.uc_manual)) then
+		if p_check_strateg_result = &lib.CLIENT_SUSPECT then
+			&add_check_result(p_client, &lib.auto);
+		elsif p_check_strateg_result = &lib.CLIENT_UNDER_CONTROL then
+			&add_check_result(p_client, &lib.uc_auto);
+		else
+			&add_check_result(p_client, &lib.auto);
+		end if;
+	end if;
+end;
+
+procedure check_strateg
+is
+idx				integer;
+suspect			ref [P207_TERROR_FLAG];	-- Текущая отметка на клиенте
+clients_checked	integer	:= 0;
+clients_suspect	integer	:= 0;
+check_result	integer;
+check_message	varchar2(32000);	
+v_tune_val		boolean;
+begin
+	debug_pipe('Выполнение "Противодействие легализации. Проверка юридических лиц по перечню стратегических предприятий РФ (STRATEGIC_LIST)"'||NL$||NL$,0);
+
+	&lib.clear_cache;
+	v_tune_val := nvl(::[FP_TUNE].[LIB].get_bool_value('207P_CHECK_FOUNDER', ::[FP_TUNE].[LIB].set_canons('CLIENT_CHECKS', ::[CLIENT_CHECKS]([CODE] = 'STRATEGIC_LIST')), '0'), false);
+	
+	idx	:=  v_ckeckClient.first;
+	while idx is not null loop
+		if v_ckeckClient(idx)%class in ('CL_ORG', 'CL_BANK_N') then
+			suspect	:= &last_check_result(v_ckeckClient(idx));
+			check_message := null;
+			begin
+				&sp(check)
+				check_result := &lib.get_suspect_with_text(v_ckeckClient(idx)
+														  , check_message
+														  , v_ckeckClient(idx).[NAME]
+														  , 'CL_CORP'
+														  , v_ckeckClient(idx).[INN]
+														  , v_ckeckClient(idx)->(CL_CORP)[REGISTER].[GOS_REG_NUM_REC]
+														  , v_ckeckClient(idx)->(CL_CORP)[REGISTER].[FOUNDERS]
+														  , v_tune_val
+														  , false);
+				if check_result = &lib.CLIENT_CLEAR then
+					mark_clear( v_ckeckClient(idx), suspect);
+				else
+					debug_pipe(check_message,0);
+					debug_pipe(' ',0);
+					
+					clients_suspect := clients_suspect + 1;
+					mark_auto( v_ckeckClient(idx), suspect, check_result);
+				end if;
+				
+				clients_checked	:= clients_checked + 1;
+				if mod(clients_checked, 500) = 0 then
+					debug_pipe('	Проверено ' || to_char(clients_checked) || ' клиентов', 0);
+					commit;
+				end if;
+			exception when others then
+				--Причина перехвата others: ошибки при проверке и установке отметки на одном клиенте не должны прерывать массовую проверку 
+				&rb(check)
+				debug_pipe('Ошибка при записи! Стек вызовов :' || NL$ || ::[RUNTIME].[UTILS].error_stack||
+															NL$ || 'Текст ошибки :' || NL$ || SQLERRM,0);
+			end;
+		end if;
+		idx	:=  v_ckeckClient.next(idx);
+	end loop;
+	&lib.clear_cache;
+	v_tune_val := null;
+	debug_pipe('Окончание проверки клиентов по перечню стратегических предприятий РФ', 0);
+	debug_pipe('Клиентов проверено: ' || clients_checked, 0);
+	debug_pipe('Найдено совпадений: ' || clients_suspect, 0);
+	
+	debug_pipe('=============================================================================================================================================================================================', 0);
+end;
+--<< Для списка "Проверка юридических лиц по перечню стратегических предприятий РФ"
+
+-->> Для проверки взаимосвязанных клиентов по спсикам: FREEZE_LIST, LIST_OON, LIST_OON 
+procedure fill_variable(	  p_list_code				::[CLIENT_CHECKS].[CODE]%type
+							, p_clear_mark			out ref [P207_TERROR_FLAG]
+                          	, p_mark_auto			out ref [P207_TERROR_FLAG]
+                          	, p_mark_manual			out ref [P207_TERROR_FLAG]
+							, p_uc_mark				out ref [P207_TERROR_FLAG]
+							, p_need_mark			out ref [P207_TERROR_FLAG]
+							, p_mark_auto_check		out ref [P207_TERROR_FLAG]
+							, p_mark_manual_check	out ref [P207_TERROR_FLAG]
+						)
+is
+begin
+	if p_list_code = 'FREEZE_LIST' then
+		p_clear_mark		:= ::[P207_TERROR_FLAG]([CODE] = 'FREEZE_CLEAR');
+		p_need_mark			:= ::[P207_TERROR_FLAG]([CODE] = 'FREEZE_NEED');
+		p_mark_auto			:= ::[P207_TERROR_FLAG]([CODE] = 'FREEZE_AUTO');
+		p_mark_manual		:= ::[P207_TERROR_FLAG]([CODE] = 'FREEZE_MANUAL');
+		p_uc_mark			:= ::[P207_TERROR_FLAG]([CODE] = 'FREEZE_UC_AUTO');
+		p_mark_auto_check 	:= null;
+		p_mark_manual_check := null;
+	elsif p_list_code in ('INVALID_CERT','INVALID_CERT_FMS') then
+		p_clear_mark		:= ::[P207_TERROR_FLAG]([CODE] = 'CERT_CLEAR');
+		p_need_mark			:= ::[P207_TERROR_FLAG]([CODE] = 'CERT_NEED_CHECK');
+		p_mark_auto			:= ::[P207_TERROR_FLAG]([CODE] = 'CERT_AUTO');
+		p_mark_manual		:= ::[P207_TERROR_FLAG]([CODE] = 'CERT_MANUAL');
+		p_uc_mark			:= ::[P207_TERROR_FLAG]([CODE] = 'UC_AUTO');
+		p_mark_auto_check 	:= null;
+		p_mark_manual_check := null;
+	else
+		p_clear_mark		:= ::[P207_TERROR_FLAG]([CODE] = 'CLEAR');
+		p_need_mark			:= ::[P207_TERROR_FLAG]([CODE] = 'NEED');
+		p_mark_auto			:= ::[P207_TERROR_FLAG]([CODE] = 'AUTO');
+		p_mark_manual		:= ::[P207_TERROR_FLAG]([CODE] = 'MANUAL');
+		p_uc_mark			:= ::[P207_TERROR_FLAG]([CODE] = 'UC_AUTO');
+		p_mark_auto_check 	:= ::[P207_TERROR_FLAG]([CODE] = 'AUTO_CHECK');
+		p_mark_manual_check := ::[P207_TERROR_FLAG]([CODE] = 'MANUAL_CHECK');
+	end if;	
+end;					
+
+function get_mark
+	( p_list ref [CLIENT_CHECKS]
+	, p_client ref [CLIENT]
+	)
+	return ref [P207_TERROR_FLAG]
+is
+	v_ret ref [P207_TERROR_FLAG];
+	v_cl_reqs [LEGAL_CHK_CLIENT];
+	v_result ::[CLIENT_CHECKS].[LIB_CONST].Legal_Result_Check;
+begin
+	if p_list = c_check_freeze_list then
+		-- проверка без учета текущей отметки, т.к. запускаем ее только в случае когда отметки на клиенте нет или она равна FREEZE_NEED
+		v_ret := ::[FREEZE_LIST].[LIB].get_new_mark(p_client);
+	elsif p_list in (c_check_invalid_cert, c_check_invalid_cert_fms) then
+		v_ret := ::[CERT_INVALID].[LIB].get_new_mark(p_client,p_list,false);
+	else
+		v_cl_reqs.[CL_REF] := p_client;
+		::[LEGAL_CHK_CLIENT].[LIB].fill_cl_reqs(v_cl_reqs, true);
+		::[CLIENT_CHECKS].[LIB].check_client(
+			 p_list 		-- Вид проверки, которую необходимо выполнить
+			, v_cl_reqs		-- Реквизиты клиента для проверки.
+			, v_result 		-- Результаты проверки	
+			, false 		-- Искать все совпадения.
+			, 1 			-- Выполнять полную проверку, независимо от текущей отметки
+			, 0				-- Степень подробности сообщения (0, null - краткое)
+			, null 			-- Список записей, по которым выполнять проверку, если не задан, проверка выполняется по всему справочнику
+			, '0'			-- Признак вызова проверки при работе с документами, счетами и т.д.
+			, 0				-- Признак проверки взаимосвязанных клиентов
+		);
+		v_ret := v_result.c_mark;
+	end if;	
+	return v_ret;
+end;
+
+
+function get_cl_under_control(p_list ref [CLIENT_CHECKS], p_clients ClRefTableType) return clTableType
+is
+v_ret clTableType;
+begin
+	if p_list = c_check_freeze_list then
+		v_ret := ::[FREEZE_LIST].[LIB].get_clients_under_control(p_clients);
+	else
+		v_ret := ::[BLACKLIST].[LIB_ALL].get_clients_under_control(p_list, p_clients);
+	end if;	
+	return v_ret;
+end;
+
+procedure check_legal_link(v_list ref [CLIENT_CHECKS])
+is
+idx 		integer;
+n	 		integer;
+-- Отметки о неподозрительности клиента
+v_clear_mark		ref [P207_TERROR_FLAG];
+-- Отметки о непроверености клиента
+v_need_mark			ref [P207_TERROR_FLAG];
+-- Отметки о подозрительности с запретом проводки документов
+v_mark_auto			ref [P207_TERROR_FLAG];
+v_mark_manual		ref [P207_TERROR_FLAG];
+-- Отметки о подозрительности с разрешенной проводкой документов
+v_mark_auto_check	ref [P207_TERROR_FLAG];
+v_mark_manual_check	ref [P207_TERROR_FLAG];
+-- Отметки о подозрительности клиента, из за подозрительности связанных клиентов
+v_uc_mark			ref [P207_TERROR_FLAG];
+
+v_mark ref [P207_TERROR_FLAG];
+
+v_ClTbl  ClRefTableType; -- Список подозрительных клиентов
+v_lClTbl clTableType; 	 -- Список подконтрольных клиентов
+
+type MarkTableType is table of ref [CL_CHECK_RESULT];
+v_markTbl ClRefTableType;
+
+begin
+	v_ClTbl%init;
+	v_markTbl%init;
+	
+	fill_variable(v_list.[CODE], v_clear_mark, v_mark_auto, v_mark_manual, v_uc_mark, v_need_mark, v_mark_auto_check, v_mark_manual_check);
+	debug_pipe(NL$ ||'Проверка взаимосвязанных клиентов по списку "' ||v_list.[NAME] || '"', 0);
+	n := 0;
+
+	idx	:=  v_ckeckClient.first;
+	while idx is not null loop
+		
+		v_mark := nvl(::[CL_CHECK_RESULT].[LIB].get_suspect(v_ckeckClient(idx), v_list), v_need_mark);
+		-- FREEZE_LIST: FREEZE_NEED, FREEZE_AUTO или FREEZE_MANUAL
+		-- Для остальных это NEED, AUTO, MANUAL, AUTO_CHECK, MANUAL_CHECK
+		if v_mark in (v_need_mark, v_mark_auto, v_mark_manual, v_mark_auto_check, v_mark_manual_check) then
+			v_ClTbl.extend(1);
+			v_ClTbl(v_ClTbl.last) := v_ckeckClient(idx)%id;
+			v_markTbl.extend(1);
+			v_markTbl(v_markTbl.last) := v_mark%id;
+			n := n + 1;
+			debug_pipe('   ' || n || ' Подозрительный клиент ' || v_ckeckClient(idx).[NAME] || ' (id = ' || v_ckeckClient(idx) || ')', 0);
+		end if;	
+		
+		idx	:=  v_ckeckClient.next(idx);
+	end loop;
+	
+	&debug('Найдено ' || v_ClTbl.count || ' подозрительных или непроверенных клиентов ', 0)
+	-- Составим список только подозрительных клиентов
+	idx := v_ClTbl.first;
+	while idx is not null loop
+		v_mark%id := v_markTbl(idx);
+		
+		-- Непроверенных -> проверим
+		if  v_mark = v_need_mark then
+			v_mark := get_mark(v_list, v_ClTbl(idx));
+			if v_mark is not null then
+				::[CL_CHECK_RESULT].[LIB].add_result(v_ClTbl(idx), v_list, v_mark, &METHOD$NAME, false);
+			end if;
+		end if;		
+		
+		-- Оставим в списке только подозрительных. Остальных уберём из списка.
+		-- FREEZE_LIST: FREEZE_AUTO или FREEZE_MANUAL
+		-- Для остальных это AUTO, MANUAL, AUTO_CHECK, MANUAL_CHECK
+		if v_mark is null or v_mark not in (v_mark_auto, v_mark_manual, v_mark_auto_check, v_mark_manual_check) then
+			v_ClTbl.delete(idx);
+		end if;
+		idx := v_ClTbl.next(idx);
+	end loop;
+	v_markTbl.delete;
+	
+	debug_pipe('Найдено ' || v_ClTbl.count || ' подозрительных клиентов', 0);
+	debug_pipe('Поиск зависимых клиентов', 0);
+	
+	-- Поиск подконтрольных клиентов
+	v_lClTbl := get_cl_under_control(v_list, v_ClTbl);
+	
+	&debug('Найдено ' || v_lClTbl.count || ' зависящих от подозрительных', 0)
+	debug_pipe('Отметка "' || v_uc_mark.[NAME] || '" (' || v_uc_mark.[CODE] || ') проставлена следующим клиентам:',0);
+		
+	idx := v_lClTbl.first;
+	while idx is not null loop
+		v_mark := nvl(::[CL_CHECK_RESULT].[LIB].get_suspect(v_lClTbl(idx), v_list), v_need_mark);
+		
+		-- Непроверенных -> проверим
+		if v_mark = v_need_mark then
+			v_mark := get_mark(v_list, v_lClTbl(idx));
+			::[CL_CHECK_RESULT].[LIB].add_result(v_lClTbl(idx), v_list, v_mark, &METHOD$NAME, false);
+		end if;	
+		
+		-- Чистым -> проставим отметку о подконтрольности
+		if v_mark = v_clear_mark then
+			::[CL_CHECK_RESULT].[LIB].add_result(v_lClTbl(idx), v_list, v_uc_mark, &METHOD$NAME, false);
+			debug_pipe('Клиент id = ' || v_lClTbl(idx)%id || ', ' || v_lClTbl(idx).[NAME], 0);
+		end if;	
+	
+		idx := v_lClTbl.next(idx);
+	end loop;
+	
+	v_ClTbl.delete;
+	v_lClTbl.delete;	
+	
+	debug_pipe('Проверка взаимосвязанных клиентов по списку "' || v_list.[NAME] || '" завершена', 0);
+	commit;
+end;
+--<< Для проверки взаимосвязанных клиентов по спсикам: FREEZE_LIST, LIST_OON, LIST_OON
+
+procedure is_cl_suspect
+/* Выполнение IS_CL_SUSPECT */
+is
+	l_choice	[CASE_BETWEEN_TWO];
+begin
+	l_choice.[0] := 1;	-- только выделенных клиентов
+	begin
+		debug_pipe('Выполнение "Противодействие легализации. Проверка на причастность к терроризму (TERROR_LIST)"'||NL$||NL$,0);
+		::[CLIENT].[IS_CL_SUSPECT].V_MAIN_STREAM := true;
+
+		v_ckeckClient.[IS_CL_SUSPECT](P_CHOICE	== l_choice
+									,P_FILIAL	== null
+									,P_TERR_TAB	== null
+									,P_DIS_INT == false
+									);
+		debug_pipe('=============================================================================================================================================================================================', 0);
+	exception when others then	-- исключение на все возможные ошибки при выполнени операции IS_CL_SUSPECT
+		--&sp/&rb в данном случае не применяем, т.к. в IS_CL_SUSPECT жесткий commit
+		&WLog('[IS_CL_SUSPECT]. Ошибка обработки клиента id = '||v_ckeckClient(1)||', '||::[RUNTIME].[PRINTFUN].SQLERRM_INF)
+	end;
+end;
+
+
+procedure is_cl_freeze
+/* Выполнение IS_CL_FREEZE */
+is
+	l_choice	[CASE_BETWEEN_TWO];
+	v_list		ref [CLIENT_CHECKS];
+begin
+	l_choice.[0] := 1;	-- только выделенных клиентов
+	v_list := ::[CLIENT_CHECKS]([CODE] = 'FREEZE_LIST');
+	begin
+		debug_pipe('Выполнение "Противодействие легализации. Проверка клиентов по списку решений межведомственной комиссии (FREEZE_LIST)"'||NL$||NL$,0);
+		::[CLIENT].[IS_CL_FREEZE].V_MAIN_STREAM := true;
+
+		v_ckeckClient.[IS_CL_FREEZE](P_CHOICE	== l_choice
+									,P_FILIAL	== null
+									,P_TERR_TAB	== null
+									,P_DIS_INT == false
+									);
+		-- Вызов проверки взаимосвязанных клиентов
+		if not nvl(::[FP_TUNE].[LIB].get_bool_value('207P_CHECK_FOUNDER', ::[FP_TUNE].[LIB].set_canons('CLIENT_CHECKS', v_list%id) , '0'), false) then
+			debug_pipe(NL$ || 'Для вида проверки "' || v_list.[NAME] || '" проверка взаимосвязанных клиентов отключена', 0);
+		else
+			check_legal_link(v_list);
+		end if;
+
+		debug_pipe('=============================================================================================================================================================================================', 0);
+	exception when others then	-- исключение на все возможные ошибки при выполнени операции IS_CL_SUSPECT
+		--&sp/&rb в данном случае не применяем, т.к. в IS_CL_FREEZE жесткий commit
+		&WLog('[IS_CL_FREEZE]. Ошибка обработки клиента id = '||v_ckeckClient(1)||', '||::[RUNTIME].[PRINTFUN].SQLERRM_INF)
+	end;
+end;
+
+
+procedure is_cl_suspect_l
+/* Выполнение IS_CL_SUSPECT_L */
+					(p_code	::[CLIENT_CHECKS].[CODE]%type)
+is
+	l_choice	[ONE_FROM_THREE];
+	l_check		::[CLIENT].[IS_CL_SUSPECT_L].CLIENT_CHECKS_G_TABLE;
+	v_list		ref [CLIENT_CHECKS];
+begin
+	l_choice.[0] := 1;	-- только выделенных клиентов
+	v_list := ::[CLIENT_CHECKS]([CODE] = p_code);
+	begin
+		debug_pipe('Выполнение "Противодействие легализации. Проверка клиентов по спискам" ('||p_code||')',0);
+		select c(c%id, c.[NAME], c.[CODE])
+		in ::[CLIENT_CHECKS]
+		where c.[CODE] = p_code
+		into l_check(1)%id, l_check(1).[NAME], l_check(1).[CODE];
+		l_check(1).[CHOOSE] := true;
+
+		::[CLIENT].[IS_CL_SUSPECT_L].V_MAIN_STREAM := true;
+		
+		v_ckeckClient.[IS_CL_SUSPECT_L](P_CHECKS			== l_check
+										,P_CALL_METH		== &METHOD$ID
+										,P_CHOICE_CLIENT	== l_choice
+										,P_BRANCH			== null
+										,P_CHECK_BANK		== null
+										,P_NEED_CHECK		== null
+										,P_MANUAL			== null
+										,P_FULL_LOG			== true
+										,P_LOG2PIPE			== true
+										);
+		-- Вызов проверки взаимосвязанных клиентов
+		if not nvl(::[FP_TUNE].[LIB].get_bool_value('207P_CHECK_FOUNDER', ::[FP_TUNE].[LIB].set_canons('CLIENT_CHECKS', v_list%id) , '0'), false) then
+			debug_pipe(NL$ || 'Для вида проверки "' || v_list.[NAME] || '" проверка взаимосвязанных клиентов отключена', 0);
+		else
+			check_legal_link(v_list);
+		end if;
+
+		debug_pipe('=============================================================================================================================================================================================', 0);
+	exception when others then	-- исключение на все возможные ошибки при выполнени операции IS_CL_SUSPECT
+		--&sp/&rb в данном случае не применяем, т.к. в IS_CL_FREEZE жесткий commit
+		&WLog('[IS_CL_SUSPECT_L]. Ошибка обработки клиента id = '||v_ckeckClient(1)||', '||::[RUNTIME].[PRINTFUN].SQLERRM_INF)
+	end;
+end;
+
+procedure is_addr_suspect
+/* Выполнение IS_ADDR_SUSPECT */
+is
+	l_choice	[ONE_FROM_THREE];
+begin
+	l_choice.[0] := 1;	-- только выделенных клиентов
+	begin
+		debug_pipe('Выполнение "Противодействие легализации. Проверка адреса клиента на совпадение с адресом террориста (TERR_ADDRESS)"'||NL$||NL$,0);
+		::[CLIENT].[IS_ADDR_SUSPECT].V_MAIN_STREAM := true;
+
+		v_ckeckClient.[IS_ADDR_SUSPECT](P_CHOICE	== l_choice
+									,P_FILIAL	== null
+									,P_TERR_TAB	== null
+									,P_LOG2PIPE == true
+									);
+		debug_pipe('=============================================================================================================================================================================================', 0);
+	exception when others then	-- исключение на все возможные ошибки при выполнени операции IS_ADDR_SUSPECT
+		--&sp/&rb в данном случае не применяем, т.к. в IS_CL_SUSPECT жесткий commit
+		&WLog('[IS_ADDR_SUSPECT]. Ошибка обработки клиента id = '||v_ckeckClient(1)||', '||::[RUNTIME].[PRINTFUN].SQLERRM_INF)
+	end;
+end;
+
+
+function GetResultCheck
+/* Результат проверки */
+						(p_client	ref [CLIENT]
+						/* Ссылка на досье клиента */
+						,v_check1 boolean, v_check2 boolean, v_check3 boolean, v_check4 boolean, v_check5 boolean, v_check6 boolean
+						) return [MEMO_4000]
+is
+	l_message	varchar2(128);
+	l_info		varchar2(128);
+	ret_result	[MEMO_4000];
+	cnt			integer := 2;
+	l_CL_CHECK_3	[CLIENT_CHECK_REF];
+begin
+	l_message := 'DEFAULT';
+	l_info := null;
+	
+	-- Проверка только по списку TERROR_LIST
+	if v_check1 then
+		-- "Противодействие легализации. Принятие решения"
+		declare
+			l_RECORD_TYPE	[STRING_100];
+			l_TERROR		[STRING_20];
+			l_CL_NAME		[SBRF_NAME];
+			l_NAME			[STRING_1000];
+			l_DATE_PERS		[DATE];
+			l_GR			[DATE];
+			l_CL_DOC		[MEMO];
+			l_TERR_DOC		[MEMO];
+			l_CL_ADDR_FACT	[MEMO];
+			l_ADRES			[STRING_32000];
+--			l_CL_ADDR_REG	[MEMO];
+--			l_AMR			[STRING_32000];
+			l_CL_INN		[STRING_12];
+			l_ND			[STRING_50];
+			l_DESCRIPT		[STRING_4000];
+			l_ADD_INFO		[STRING_32000];
+			l_CL_BORN		[MEMO];
+			l_MR			[STRING_400];
+			l_TERROR_LIST	[TERRORS_GRID];
+			l_TERR_FLAG		[ONE_FROM_11];
+			l_DOC_STR		[CERTIFICATE];
+			l_OKPO			[STRING_16];
+			l_REGISTER		[REGISTRATION];
+			l_I_NAME		[SBRF_NAME];
+			l_ADDRESS		[PERSONAL_ADDRESS];
+			l_CL_CHECK		[STRING_100];
+			l_CLASS			[STRING_16];
+			l_CL_LONG_NAME	[STRING_500];
+			l_NAME_LAT 		[STRING_1000];
+			type tbl_TERROR_LIST is table of l_TERROR_LIST;
+			t_TERROR_LIST	tbl_TERROR_LIST;
+			l_CL_SNILS			[SNILS];
+			l_TR_SNILS			[STRING_50];			
+		begin
+			p_client => [SUSPECT_DECISION](
+				 P_MESSAGE == l_message
+				,P_INFO == l_info
+				,P_RECORD_TYPE == l_RECORD_TYPE
+				,P_TERROR       == l_TERROR      
+				,P_CL_NAME      == l_CL_NAME     
+				,P_NAME         == l_NAME        
+				,P_DATE_PERS    == l_DATE_PERS   
+				,P_GR           == l_GR          
+				,P_CL_DOC       == l_CL_DOC      
+				,P_TERR_DOC     == l_TERR_DOC    
+				,P_CL_ADDR_FACT == l_CL_ADDR_FACT
+				,P_ADRES        == l_ADRES              
+				,P_CL_INN       == l_CL_INN      
+				,P_ND           == l_ND          
+				,P_DESCRIPT     == l_DESCRIPT    
+				,P_ADD_INFO     == l_ADD_INFO    
+				,P_CL_BORN      == l_CL_BORN     
+				,P_MR           == l_MR          
+				,P_TERROR_LIST  == t_TERROR_LIST 
+				,P_TERR_FLAG    == l_TERR_FLAG   
+				,P_DOC_STR      == l_DOC_STR     
+				,P_OKPO         == l_OKPO        
+				,P_REGISTER     == l_REGISTER    
+				,P_I_NAME       == l_I_NAME      
+				,P_ADDRESS      == l_ADDRESS     
+				,P_CL_CHECK     == l_CL_CHECK    
+				,P_CLASS        == l_CLASS       
+				,P_CL_LONG_NAME == l_CL_LONG_NAME
+				,P_NAME_LAT 	== l_NAME_LAT
+				,P_CL_SNILS		== l_CL_SNILS
+				,P_SNILS		== l_TR_SNILS
+			);
+			
+			if ::[CLIENT].[SUSPECT_DECISION].V_S is not null
+			then
+				ret_result := 'Вид проверки TERROR_LIST, '||::[CLIENT].[SUSPECT_DECISION].V_S;
+				::[CLIENT].[SUSPECT_DECISION].V_S := null;
+			end if;
+			::[CLIENT].[SUSPECT_DECISION].V_VB := null;
+		end;
+	end if;
+	
+	-- Проверка только по спискам: FREEZE_LIST, LIST_WMD, LIST_OON, BLACKLIST
+	while cnt < 7
+	loop
+		if cnt = 2 and v_check2 then
+			l_CL_CHECK_3 := ::[CLIENT_CHECKS]([CODE] = 'FREEZE_LIST');
+--		elsif cnt = 3 and v_check3 then
+--			l_CL_CHECK_3 := ::[CLIENT_CHECKS]([CODE] = 'LIST_WMD');
+		elsif cnt = 3 and v_check3 then
+			l_CL_CHECK_3 := ::[CLIENT_CHECKS]([CODE] = 'LIST_OON');
+		elsif cnt = 4 and v_check4 then
+			l_CL_CHECK_3 := ::[CLIENT_CHECKS]([CODE] = 'BLACKLIST');
+		elsif cnt = 5 and v_check5 then
+			l_CL_CHECK_3 := ::[CLIENT_CHECKS]([CODE] = 'TERR_ADDRESS');
+		elsif cnt = 6 and v_check6 then
+			l_CL_CHECK_3 := ::[CLIENT_CHECKS]([CODE] = 'STRATEGIC_LIST');
+		end if;
+		-- Противодействие легализации. Принятие решения о подозрительности
+		declare
+			l_TERROR_LIST		[GRID_TEMPLATE];
+			l_RECORD_TYPE		[STRING_100];
+			l_TERR_FLAG			[ONE_FROM_THREE];
+			l_CL_NAME			[SBRF_NAME];
+			l_TR_NAME			[STRING_1000];
+			l_CL_DATE_BIRTH		[DATE];
+			l_TR_DATE_BIRTH		[STRING_255];
+			l_CL_DOC			[MEMO_4000];
+			l_TR_DOC			[MEMO_4000];
+			l_CL_ADDR_FACT		[MEMO_4000];
+			l_TR_ADDR_FACT		[STRING_32000];
+			l_CL_ADDR_REG		[MEMO_4000];
+			l_TR_ADDR_REG		[STRING_32000];
+			l_CL_INN			[STRING_32];
+			l_TR_INN			[STRING_32];
+			l_CL_PLACE_BIRTH	[MEMO];
+			l_TR_PLACE_BIRTH	[STRING_4000];
+			l_ADD_INFO			[STRING_32000];
+			l_CL_I_NAME			[SBRF_NAME];
+			l_CL_LONG_NAME		[STRING_500];
+			type tbl_TERROR_LIST is table of l_TERROR_LIST;
+			t_TERROR_LIST	tbl_TERROR_LIST;
+			l_CL_SNILS			[SNILS];
+			l_TR_SNILS			[STRING_50];
+			l_CL_LICENSE  		[LICENCES_ARR];
+			l_CL_OKVED  		[OKVED_PERIOD_ARR];	
+			
+			
+		begin
+			p_client => [SUSPECT_D_ALL]( 
+				 P_MESSAGE 		== l_message
+				,P_INFO 		== l_info
+				,P_CL_CHECK 	== l_CL_CHECK_3
+				,P_TERROR_LIST	== t_TERROR_LIST
+				,P_RECORD_TYPE	== l_RECORD_TYPE
+				,P_TERR_FLAG	== l_TERR_FLAG
+				,P_CL_NAME		== l_CL_NAME
+				,P_TR_NAME		== l_TR_NAME
+				,P_CL_DATE_BIRTH == l_CL_DATE_BIRTH
+				,P_TR_DATE_BIRTH == l_TR_DATE_BIRTH
+				,P_CL_DOC 		== l_CL_DOC
+				,P_TR_DOC		== l_TR_DOC
+				,P_CL_ADDR_FACT	== l_CL_ADDR_FACT
+				,P_TR_ADDR_FACT	== l_TR_ADDR_FACT
+				,P_CL_ADDR_REG	== l_CL_ADDR_REG
+				,P_TR_ADDR_REG	== l_TR_ADDR_REG
+				,P_CL_INN		== l_CL_INN
+				,P_TR_INN		== l_TR_INN
+				,P_CL_PLACE_BIRTH	== l_CL_PLACE_BIRTH
+				,P_TR_PLACE_BIRTH	== l_TR_PLACE_BIRTH
+				,P_ADD_INFO		== l_ADD_INFO
+				,P_CL_I_NAME	== l_CL_I_NAME
+				,P_CL_LONG_NAME	== l_CL_LONG_NAME
+				,P_CL_SNILS		== l_CL_SNILS
+				,P_TR_SNILS		== l_TR_SNILS
+				,P_CL_LICENSE 	== l_CL_LICENSE
+				,P_CL_OKVED		== l_CL_OKVED
+			);
+			
+			if ::[CLIENT].[SUSPECT_D_ALL].V_S is not null
+			then
+				if ret_result is null
+				then
+					ret_result := 'Вид проверки '|| ::[CLIENT_CHECKS]([CODE] = 'FREEZE_LIST').[CODE] ||', '||::[CLIENT].[SUSPECT_D_ALL].V_S;
+				else
+					ret_result := ret_result||NL$||'Вид проверки '|| ::[CLIENT_CHECKS]([CODE] = 'FREEZE_LIST').[CODE] ||', '||::[CLIENT].[SUSPECT_D_ALL].V_S;
+				end if;
+				::[CLIENT].[SUSPECT_D_ALL].V_S := null;
+			end if;
+			::[CLIENT].[SUSPECT_D_ALL].V_VB := null;
+		end;
+		cnt := cnt + 1;
+	end loop;
+	return ret_result;
+end;
+
+
+procedure savePointBeforeCheck
+/* Сохраним ключевые точки ДО проверки (для последующей корректировки) */
+						(p_client	ref [CLIENT]
+						/* Ссылка на досье клиента */
+						)
+is
+	l_maxLegalList	number;
+	idx				::[CLIENT_CHECKS].[CODE]%type;
+	l_tblLegal		t_tblLegal;
+begin
+	&debug(' begin savePointBeforeCheck',0)
+
+	select x(max(x%id))
+	in ::[LEGAL_CL_IN_LIST] all
+	where x.[CLIENT] = p_client
+	into l_maxLegalList;
+	
+	v_tblPoint(p_client).maxLegalList := l_maxLegalList;
+	
+	l_tblLegal.delete;
+	for (select chkRes(chkRes						: chk_id
+						,chkRes.[CHECK_TYPE].[CODE]	: chk_code
+						,chkRes.[CHECK_ADD]			: chk_add)
+		in ::[CL_CHECK_RESULT]
+		where chkRes.[CHECK_OBJ] = p_client
+		order by chkRes.[CHECK_DATE])
+	loop
+		idx := chkRes.chk_code;
+		l_tblLegal(idx).id_req := chkRes.chk_id;
+		
+		if chkRes.chk_code = 'TERROR_LIST' and chkRes.chk_add = cn_addLegal_TERROR_LIST
+			or chkRes.chk_code = 'FREEZE_LIST' and chkRes.chk_add = cn_addLegal_FREEZE_LIST
+			--or chkRes.chk_code = 'LIST_WMD' and chkRes.chk_add = cn_addLegal_LIST_WMD
+			or chkRes.chk_code = 'LIST_OON' and chkRes.chk_add = cn_addLegal_LIST_OON
+			or chkRes.chk_code = 'BLACKLIST' and chkRes.chk_add = cn_addLegal_BLACKLIST
+			or chkRes.chk_code = 'TERR_ADDRESS' and chkRes.chk_add = cn_addLegal_TERR_ADDRESS
+			or chkRes.chk_code = 'STRATEGIC_LIST' and chkRes.chk_add = cn_addLegal_STRATEGIC_LIST
+		then
+			l_tblLegal(idx).auto := true;
+		else
+			l_tblLegal(idx).auto := false;
+		end if;
+	end loop;
+	
+	v_tblPoint(p_client).legal := l_tblLegal;
+end;
+
+
+procedure changeLegal
+/* Корректировка результатов */
+						(p_client	ref [CLIENT]
+						/* Ссылка на досье клиента */
+						)
+is
+	procedure changeLabel(	p_idx			::[CLIENT_CHECKS].[CODE]%type
+							,p_checkType	ref [CLIENT_CHECKS]
+							,p_newFlag		ref [P207_TERROR_FLAG]
+							,p_addCheck		[MEMO]
+						)
+	is
+	begin
+		&debug(' >> changeLabel',0)
+		&debug('	p_idx: '||p_idx,0)
+		
+		for (select chkRes(chkRes				: chk_id
+							,chkRes.[CHECK_ADD]	: chk_add)
+			in ::[CL_CHECK_RESULT]
+			where chkRes.[CHECK_OBJ] = p_client
+				and chkRes.[CHECK_TYPE] = p_checkType
+			order by chkRes.[CHECK_DATE] desc, chkRes%id desc
+			)
+		loop
+			if v_tblPoint(p_client).legal.exists(p_idx)	-- отметка по данному виду проверки присутствовала ранее
+			then
+				-- Если текущий id по данному виду проверки (а он максимальный, т.к. идем по виду проверки по убыванию даты и выходим из цикла на первой итерации)
+				-- отличается от max id "ДО", значит для данного вида проверки была добавлена новая отметка (дополнительно анализируем, что новая отметка автоматическая)
+				if chkRes.chk_id !=  v_tblPoint(p_client).legal(p_idx).id_req
+					and chkRes.chk_add = p_addCheck
+				then											
+					&debug('	Отметка по данному виду проверки присутствовала ранее',0)
+					
+					-- Удаляем новую отметку
+					delete chk in ::[CL_CHECK_RESULT] where chk%id = chkRes.chk_id;
+					
+					if v_tblPoint(p_client).legal(p_idx).auto
+					then
+						&debug('	Результат предыдущей проверки был выполнен автоматически',0)
+						/*
+						У предыдущей отметки (которая является автоматической):
+							- меняем признак "Последняя проверка" = Да;
+							- корректируем дату последнего обновления и дату проверки на текущую;
+							- меняем результат проверки на неподозрительный.
+						*/
+						update chk(	chk.[IS_LAST] = true
+									,chk.[CHECK_DATE] = sysdate
+									,chk.[LAST_DATE_UPD] = sysdate
+									,chk.[CHECK_VAL] = p_newFlag)
+						in ::[CL_CHECK_RESULT]
+						where chk%id = v_tblPoint(p_client).legal(p_idx).id_req;
+						
+					else
+						&debug('	Результат предыдущей проверки был выполнен вручную',0)
+						/*
+						У предыдущей отметки (которая является ручной):
+							- меняем признак "Последняя проверка" = Да;
+							- корректируем дату последнего обновления и дату проверки на текущую.
+						*/
+						update chk(	chk.[IS_LAST] = true
+									,chk.[CHECK_DATE] = sysdate
+									,chk.[LAST_DATE_UPD] = sysdate)
+						in ::[CL_CHECK_RESULT]
+						where chk%id = v_tblPoint(p_client).legal(p_idx).id_req;
+					end if;
+				end if;
+			elsif chkRes.chk_add = p_addCheck
+			then
+				&debug('	Предыдущая проверка отсутствует',0)
+				-- У новой отметки меняем результат проверки на неподозрительный
+				update chk(chk.[CHECK_VAL] = p_newFlag) in ::[CL_CHECK_RESULT] where chk%id = chkRes.chk_id;
+			end if;
+
+			exit;	-- Выходим из цикла (корректируем только последнюю отметку для переданного вида проверки)
+		end loop;
+	end;
+	
+begin
+	&debug(' begin changeLegal',0)
+
+	-- Удалим появившиеся ссылки на клиента в реквизите "Связанные досье клиентов" из справочников TERRORS, LIST_WMD, LIST_OON, BLACKLIST
+	for x in ::[LEGAL_CL_IN_LIST] all
+	where x.[CLIENT] = p_client
+		and x%id > v_tblPoint(p_client).maxLegalList
+	loop
+		x.[DELETE_AUTO];
+	end loop;
+	
+	changeLabel('TERROR_LIST', ::[CLIENT_CHECKS]([CODE] = 'TERROR_LIST'), ::[P207_TERROR_FLAG]([CODE] = 'TERROR_CLEAR'), cn_addLegal_TERROR_LIST);
+	changeLabel('BLACKLIST', ::[CLIENT_CHECKS]([CODE] = 'BLACKLIST'), ::[P207_TERROR_FLAG]([CODE] = 'CLEAR'), cn_addLegal_BLACKLIST);
+	--changeLabel('LIST_WMD', ::[CLIENT_CHECKS]([CODE] = 'LIST_WMD'), ::[P207_TERROR_FLAG]([CODE] = 'CLEAR'), cn_addLegal_LIST_WMD);
+	changeLabel('LIST_OON', ::[CLIENT_CHECKS]([CODE] = 'LIST_OON'), ::[P207_TERROR_FLAG]([CODE] = 'CLEAR'), cn_addLegal_LIST_OON);
+	changeLabel('FREEZE_LIST', ::[CLIENT_CHECKS]([CODE] = 'FREEZE_LIST'), ::[P207_TERROR_FLAG]([CODE] = 'FREEZE_CLEAR'), cn_addLegal_FREEZE_LIST);
+	changeLabel('TERR_ADDRESS', ::[CLIENT_CHECKS]([CODE] = 'TERR_ADDRESS'), ::[P207_TERROR_FLAG]([CODE] = 'ADDR_CLEAR'), cn_addLegal_TERR_ADDRESS);
+	changeLabel('STRATEGIC_LIST', ::[CLIENT_CHECKS]([CODE] = 'STRATEGIC_LIST'), ::[P207_TERROR_FLAG]([CODE] = 'STRAT_CLEAR'), cn_addLegal_STRATEGIC_LIST);
+end;
+PSH_CHK_CLIENT_L (
+	@name('Каталог (путь)') P_PATH          in [STRING_500],
+	@name('Имя файла')      P_FILE_NAME     in [STRING_50],
+	@name('Выбор клиентов') P_CHOICE_CLIENT in [CASE_BETWEEN_TWO]
+) is
+
+validate is
+tuneUser	varchar2(2000);
+begin
+	if p_message = 'DEFAULT'
+	then
+		tuneUser := ::[FP_TUNE].[LIB].get_str_value('PSB_CHK_CLIENT_ALL',null,'0');
+		[CSMD].Init_Form( V_DEST_STR, &METHOD$CLASS, &METHOD$SNAME );
+		if this.count > 1 or instr(','||tuneUser||',', ','||STDLIB.User_Id.[USERNAME]||',') = 0
+		then
+			[CSMD].Disable(V_DEST_STR, 'P_CHOICE_CLIENT');
+		end if;
+
+		V_GRID.delete;
+		V_GRID(V_GRID.count+1).[CHOOSE] := true;
+		V_GRID(V_GRID.count).[NAME] := cn_check1;
+		V_GRID(V_GRID.count).[CODE] := cod_check1;
+
+		V_GRID(V_GRID.count+1).[CHOOSE] := true;
+		V_GRID(V_GRID.count).[NAME] := cn_check2;
+		V_GRID(V_GRID.count).[CODE] := cod_check2;
+
+		V_GRID(V_GRID.count+1).[CHOOSE] := true;
+		V_GRID(V_GRID.count).[NAME] := cn_check3;
+		V_GRID(V_GRID.count).[CODE] := cod_check3;
+
+		V_GRID(V_GRID.count+1).[CHOOSE] := true;
+		V_GRID(V_GRID.count).[NAME] := cn_check4;
+		V_GRID(V_GRID.count).[CODE] := cod_check4;
+
+		V_GRID(V_GRID.count+1).[CHOOSE] := true;
+		V_GRID(V_GRID.count).[NAME] := cn_check5;
+		V_GRID(V_GRID.count).[CODE] := cod_check5;
+
+		V_GRID(V_GRID.count+1).[CHOOSE] := true;
+		V_GRID(V_GRID.count).[NAME] := cn_check6;
+		V_GRID(V_GRID.count).[CODE] := cod_check6;
+
+		v_fileName := &METHOD$SNAME||'_'||::[RUNTIME].[STDLIB].user_id->(::[USER])[USERNAME]||'_'||to_char(sysdate, 'YYYYMMDDHH24MISS')||'.log'; -- уникальность имени на FIO
+		
+		P_PATH := ::[DEFVALS].[SLIB].RestoreStr(::[RUNTIME].[STDLIB].user_id, &METHOD$CLASS, &METHOD$SNAME, 'PSB_CHK_CLIENT_L_PATH');
+		P_FILE_NAME := &METHOD$SNAME||'_'||to_char(sysdate, 'YYYYMMDDHH24MISS')||'.log';
+		
+	elsif p_message = 'VALIDATE'
+	then
+		if p_info = '+'
+		then
+			fillGrid(true);
+		elsif p_info = '-'
+		then
+			fillGrid(false);
+   		end if;
+	end if;
+end;
+
+execute is
+/*
+ * Описание
+ * ---------------------------------------------------------------------------------------
+ * Добавлено логирование списка подозрительных клиентов с сохранением лога на локальную машину.
+ *	Изменен алгоритм проставления отметок подозрительности:
+ *	- по клиентам с ранее установленными вручную отметками, автоматические отметки сохранены не будут;
+ *	- по клиентам без отметок, установленных вручную, будут установлены автоматические отметки о неподозрительности.
+ */
+
+idx			varchar2(40);
+idxCheck	varchar2(250);
+resultChck	[MEMO_4000];
+cnt			integer;
+cnt_suspect	integer;
+resultCheck	[MEMO];
+v_check1	boolean;
+v_check2	boolean;
+v_check3	boolean;
+v_check4	boolean;
+v_check5	boolean;
+v_check6	boolean;
+i			integer;
+idxBen		integer;
+cl_prev		ref [CLIENT];
+v_date_start	[DATE_TIME];
+begin
+	&debug(' begin PSB_CHK_CLIENT_L',0)
+	v_date_start := systimestamp;
+	
+	if nvl(nav.current_form_method_id,0) != &METHOD$ID
+	then
+		pragma error('Метод не предназначен для программного вызова!');
+	end if;
+	
+	if (P_PATH is null or P_FILE_NAME is null)
+		and false
+	then
+		pragma error('Не указан путь/имя для сохранения лог-файла');
+	end if;
+
+	-- Проверим корректность заданных параметров
+	cnt := 0;
+	for i in V_GRID.first..V_GRID.last
+	where V_GRID(i).[CHOOSE] = true
+	loop
+		cnt := cnt+1;
+	end loop;
+	if cnt = 0
+	then
+		pragma error('Не выбрано ни одного вида проверки!');
+	end if;
+
+	begin
+		v_fh := ::[RUNTIME].[STDIO].open(::[SYSTEM_PARAMS].[GET]('PATH',true), v_fileName,'w');
+		&WLog('Начало выполнения операции ['||&METHOD$SNAME||'] '||&METHOD$NAME)
+		&WLog('-------------------------------------------------------------------------------------------------------------')
+	exception when others then
+  		pragma error('Ошибка создания лог-файла');
+	end;
+
+	-- Инициализация
+	init_vars;
+
+	if P_CHOICE_CLIENT.[0] = 1 then
+		i := this.first;
+		while i is not null
+		loop
+			debug_pipe(i || ' Добавлен для проверки Клиент: ' || this(i).[NAME] || '   ИНН: ' || this(i).[INN], 0);
+			v_tabClient(this(i)).client := this(i);
+			v_tabClient(this(i)).num := i;
+			
+			i := this.next(i);
+		end loop;
+	elsif P_CHOICE_CLIENT.[0] = 2	then
+		fillActive;
+	end if;
+	
+	fillBeneficiar;
+	
+	debug_pipe(NL$ || 'Начало проверки по спискам ожидайте.... ', 0);
+	debug_pipe('=============================================================================================================================================================================================', 0);	
+	
+	for i in V_GRID.first..V_GRID.last
+	where V_GRID(i).[CHOOSE] = true
+	loop
+		v_check(V_GRID(i).[NAME]) := true;
+	end loop;
+
+	cnt := 0;
+	idx := v_tabClient.first;
+	while idx is not null
+	loop
+		cnt := cnt+1;
+		v_ckeckClient(cnt) := v_tabClient(idx).client;
+		-- сохраним ключевые точки ДО проверки (для последующей корректировки)
+		--savePointBeforeCheck(v_tabClient(idx).client);
+		idx := v_tabClient.next(idx);
+	end loop;
+
+	idx := v_tabBeneficiar.first;
+	while idx is not null
+	loop
+		cnt := cnt+1;
+		v_ckeckClient(cnt) := v_tabBeneficiar(idx).client;
+		-- сохраним ключевые точки ДО проверки (для последующей корректировки)
+		--savePointBeforeCheck(v_tabClient(idx).client);
+		idx := v_tabBeneficiar.next(idx);
+	end loop;
+
+
+	-- выполним проверки
+	cnt_suspect := 0;
+	resultCheck := 'Списки по которым выполнялась проверка:';
+	idxCheck := v_check.first;
+	while idxCheck is not null
+	loop
+		case idxCheck of
+			:	cn_check1	:	is_cl_suspect;	v_check1 := true;
+			:	cn_check2	:	is_cl_freeze;	v_check2 := true;
+			--:	cn_check3	:	is_cl_suspect_l('LIST_WMD');	v_check3 := true;
+			:	cn_check3	:	is_cl_suspect_l('LIST_OON');	v_check3 := true;
+			:	cn_check4	:	is_cl_suspect_l('BLACKLIST');	v_check4 := true;
+			:	cn_check5	:	is_addr_suspect;  v_check5 := true;
+			:	cn_check6	:	check_strateg;	  v_check6 := true;
+		end;
+		resultCheck := resultCheck||NL$||idxCheck;
+		
+		idxCheck := v_check.next(idxCheck);
+	end loop;
+
+	-- Подсчёт кол-ва подозрительных клиентов
+	idx := v_tabClient.first;
+	while idx is not null
+	loop
+		for (select susp(susp obj)
+			in ::[CL_CHECK_RESULT]
+			where susp.[CHECK_OBJ] = v_tabClient(idx).client
+				and susp.[IS_LAST]
+				and susp.[USER] = stdlib.UserId
+				and susp.[CHECK_TYPE] in (::[CLIENT_CHECKS]([CODE] = 'TERROR_LIST')
+										 ,::[CLIENT_CHECKS]([CODE] = 'FREEZE_LIST')
+										 ,::[CLIENT_CHECKS]([CODE] = 'LIST_OON')
+										 ,::[CLIENT_CHECKS]([CODE] = 'BLACKLIST')
+										 ,::[CLIENT_CHECKS]([CODE] = 'TERR_ADDRESS')
+										 ,::[CLIENT_CHECKS]([CODE] = 'STRATEGIC_LIST')
+										 )
+				and susp.[CHECK_DATE] > v_date_start
+				and susp.[CHECK_VAL] in (::[P207_TERROR_FLAG]([CODE] = 'ADDR_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'ADDR_MANUAL_LINK')
+										,::[P207_TERROR_FLAG]([CODE] = 'BL_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'EXTREMIST_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'EXTR_UC_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'FREEZE_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'FREEZE_UC_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'STRAT_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'STRAT_UC_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'TERRORIST_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'TERR_UC_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'AUTO_CHECK')
+										,::[P207_TERROR_FLAG]([CODE] = 'UC_AUTO')
+										)
+				fetch 1
+		)
+		loop
+			cnt_suspect := cnt_suspect + 1;
+			debug_pipe(cnt_suspect ||' Подозрительный Клиент: ' || susp.obj.[CHECK_OBJ].[NAME] || '   ИНН: ' || susp.obj.[CHECK_OBJ].[INN] ,0); 
+		end loop;
+
+		-- логирование результатов
+		--resultChck := GetResultCheck(v_tabClient(idx).client, v_check1, v_check2, v_check3, v_check4, v_check5, v_check6);
+		
+		/*if resultChck is not null
+		then
+			cnt_suspect := cnt_suspect + 1;
+			if false --v_tabClient(idx).beneficiar is not null
+			then
+				--&WLog('	Бенефициар "'||v_tabClient(idx).client.[NAME]||'", (id='||v_tabClient(idx).client||') для клиента "'||v_tabClient(idx).customer.[NAME]||'"'||NL$||resultChck)
+				--&WLog(v_tabClient(idx).beneficiar||': "'||v_tabClient(idx).client.[NAME]||'", (id='||v_tabClient(idx).client||') для клиента "'||v_tabClient(idx).customer.[NAME]||'"'||NL$||resultChck)
+				&WLog(' ')
+			else
+				&WLog('Клиент: "'||v_tabClient(idx).client.[NAME]||'", (id='||v_tabClient(idx).client||')'||NL$||resultChck)
+				&WLog(' ')				
+			end if;
+		end if;*/
+
+		-- корректировка результатов (отметок) после проверки
+		-- changeLegal(v_tabClient(idx).client);
+	
+		idx := v_tabClient.next(idx);
+	end loop;
+
+	-- Подсчёт кол-ва подозрительных представителей/бенефициаров/учредителей
+	idx := v_tabBeneficiar.first;
+	while idx is not null
+	loop
+		for (select susp(susp obj)
+			in ::[CL_CHECK_RESULT]
+			where susp.[CHECK_OBJ] = v_tabBeneficiar(idx).client
+				and susp.[IS_LAST]
+				and susp.[USER] = stdlib.UserId
+				and susp.[CHECK_TYPE] in (::[CLIENT_CHECKS]([CODE] = 'TERROR_LIST')
+										 ,::[CLIENT_CHECKS]([CODE] = 'FREEZE_LIST')
+										 ,::[CLIENT_CHECKS]([CODE] = 'LIST_OON')
+										 ,::[CLIENT_CHECKS]([CODE] = 'BLACKLIST')
+										 ,::[CLIENT_CHECKS]([CODE] = 'TERR_ADDRESS')
+										 ,::[CLIENT_CHECKS]([CODE] = 'STRATEGIC_LIST')
+										 )
+				and susp.[CHECK_DATE] > v_date_start
+				and susp.[CHECK_VAL] in (::[P207_TERROR_FLAG]([CODE] = 'ADDR_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'ADDR_MANUAL_LINK')
+										,::[P207_TERROR_FLAG]([CODE] = 'BL_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'EXTREMIST_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'EXTR_UC_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'FREEZE_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'FREEZE_UC_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'STRAT_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'STRAT_UC_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'TERRORIST_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'TERR_UC_AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'AUTO')
+										,::[P207_TERROR_FLAG]([CODE] = 'AUTO_CHECK')
+										,::[P207_TERROR_FLAG]([CODE] = 'UC_AUTO')
+										)
+				fetch 1
+		)
+		loop
+			cnt_suspect := cnt_suspect + 1;
+			debug_pipe(cnt_suspect || ' Подозрительный ' || v_tabBeneficiar(idx).benef || ': ' || susp.obj.[CHECK_OBJ].[NAME] || '   ИНН: ' || susp.obj.[CHECK_OBJ].[INN] ,0);
+		end loop;
+		idx := v_tabBeneficiar.next(idx);
+	end loop;
+
+	
+	debug_pipe(NL$ || 'Итого проверено клиентов/представителей/бенефициаров/учредителей - ' || (v_tabClient.count + v_tabBeneficiar.count) ||NL$||
+			'Из них найдено подозрительных: '||cnt_suspect, 0);
+	
+	&WLog('-------------------------------------------------------------------------------------------------------------')
+	resultCheck := resultCheck||NL$||
+		'Итого проверено клиентов/представителей/бенефициаров/учредителей - ' || (v_tabClient.count)||NL$||
+		'Из них найдено подозрительных: '||cnt_suspect;
+	&WLog(resultCheck)
+	&WLog('-------------------------------------------------------------------------------------------------------------')
+	&WLog('Окончание выполнения операции ['||&METHOD$SNAME||'] '||&METHOD$NAME)
+
+	-- Освободим память
+	init_vars;	
+
+	-- Раскомментарить для выгрузки лога в файл
+	/*v_err := ::[RUNTIME].[STDIO].f_close(v_fh);
+	
+	-- заберем лог на клиента
+	::[DOCUMENT].[COPYFILES].idx := 0;
+	::[DOCUMENT].[COPYFILES].tbl_F$L(1).[SRC_NAME]	:= v_fileName;
+	::[DOCUMENT].[COPYFILES].tbl_F$L(1).[SRC_PATH]	:= ::[SYSTEM_PARAMS].[GET]('PATH',null);
+	::[DOCUMENT].[COPYFILES].tbl_F$L(1).[SRC_TYPE]	:= true;	-- источник сервер
+	::[DOCUMENT].[COPYFILES].tbl_F$L(1).[SRC_DELETE]:= true;
+	::[DOCUMENT].[COPYFILES].tbl_F$L(1).[DST_NAME]	:= P_FILE_NAME;
+	::[DOCUMENT].[COPYFILES].tbl_F$L(1).[DST_PATH]	:= P_PATH;
+	::[DOCUMENT].[COPYFILES].tbl_F$L(1).[DST_TYPE]	:= false;	-- приемник клиент
+	::[DOCUMENT].[COPYFILES].tbl_F$L(1).[DST_DELETE]:= false;
+	::[RUNTIME].[STDIO].put_line_buf(' <% CALL DOCUMENT COPYFILES ' || nvl(::[SYSTEM]%id,1) || ' %> ');
+	
+	::[DEFVALS].[SLIB].SaveStr(::[RUNTIME].[STDLIB].user_id, &METHOD$CLASS, &METHOD$SNAME, 'PSB_CHK_CLIENT_L', P_PATH);*/
+	&debug(' end PSB_CHK_CLIENT_L',0)
+end;
+end;
+end;

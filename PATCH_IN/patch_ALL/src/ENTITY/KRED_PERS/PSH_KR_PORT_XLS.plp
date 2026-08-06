@@ -1,0 +1,717 @@
+class KRED_PERS;
+
+@import_plsql(true)
+@name('[ПСБ] Кредитный портфель в Эксель')
+@tag('COPIED')
+static method PSH_KR_PORT_XLS is
+
+@name('V_DEST') public V_DEST [STRING_32000];
+
+d date := ::[SYSTEM].[OP_DATE];
+
+public function Get_d return date is 
+begin
+	return d;
+end;
+pragma restrict_references(Get_d,wnds,wnps);
+
+public function fGetMort(iCr in ref [PR_CRED], iTp in varchar2) return varchar2 is 
+pRes varchar2(2000);
+begin
+      pRes := null;
+      if iTp = 'ACC' then
+	      for (select distinct mort(mort.[ARRAY_DOG_ACC].[ACCOUNT_DOG].[1].[2].MAIN_V_ID :acc)
+	           in ::[ZALOG] all
+	           where mort.[PART_TO_LOAN].PRODUCT = iCr
+	             and f.a('В'||mort.[ARRAY_DOG_ACC].[ACCOUNT_DOG].[1].[2].[ARC_MOVE]||'СН', d+1) != 0)
+	      loop
+	            pRes := pRes||','||mort.acc;
+            end loop;
+      elsif iTp in ('NAME', 'KK') then
+            for (select distinct mort(decode(iTp, 'NAME', mort.[VID_GUARANTEE].NAME, 'KK', mort.[VID_GUARANTEE].[SECS_CALCS_PARTS].NAME) :str)
+	           in ::[ZALOG] all
+	           where mort.[PART_TO_LOAN].PRODUCT = iCr
+	             and f.a('В'||mort.[ARRAY_DOG_ACC].[ACCOUNT_DOG].[1].[2].[ARC_MOVE]||'СН', d+1) != 0)
+	      loop
+	            pRes := pRes||','||mort.str;
+            end loop;
+      else
+            return null;
+      end if;
+      return ltrim(pRes, ',');
+end;--fGetMort
+pragma restrict_references(fGetMort,wnds,wnps);
+
+public function fGetResLimAcc(pCr in ref [PR_CRED]) return ref [AC_FIN] is 
+    iAcc ref [AC_FIN];
+begin
+    select ttt(
+          ttt.[RES_ACC]
+    ) in
+          ::[RES_BASE_ACCS]
+    where
+          ttt.[PROD_RES]=pCr
+      and substr(ttt.[ACC].[MAIN_V_ID],1,5) in ('91316','91317')
+	and substr(ttt.[RES_ACC].[MAIN_V_ID],1,5)='47425'
+    into iAcc;
+    return iAcc;
+exception when NO_DATA_FOUND then
+    return null;
+end;--fGetResLimAcc
+pragma restrict_references(fGetResLimAcc,wnds,wnps);
+
+public function fGetMortAccBal(pDea in ref [PR_CRED], pDate in date, pAcc in varchar2) return number is 
+      vBal number;
+begin
+    select a(
+          sum(abs(coalesce(f.a('В'||a.[ARRAY_DOG_ACC].[ACCOUNT_DOG].[1].[2].[ARC_MOVE]||'СН', pDate+1), 0)))
+    ) in ::[ZALOG] all
+    where
+          a.[PART_TO_LOAN].PRODUCT=pDea
+      and a.[ARRAY_DOG_ACC].[ACCOUNT_DOG].[1].[2].MAIN_V_ID like pACC||'%'
+    into vBal;
+    return vBal;
+exception when others then
+    return null;
+end;--fGetMortAccBal
+pragma restrict_references(fGetMortAccBal,wnds,wnps);
+
+-- Количество дней просрочки за предыдущие 180 дней
+public function itog_prosr_180(id_kred in ref [PR_CRED], pDate in date) return number is 
+day_prosr number;
+prosr_od number;
+prosr_prc number;
+begin
+day_prosr:=0;
+
+for i in 0 .. 179 loop
+prosr_od:=0;
+prosr_prc:=0;
+
+prosr_od:=  ::[RUNTIME].[F_5].A('И'||id_kred.[ACC_DEBTS_CR] ||'СВ',pDate-i);
+prosr_prc:= ::[RUNTIME].[F_5].A('И'||id_kred.[ACC_DEBTS_PRC]||'СВ',pDate-i);
+
+if prosr_od!=0 or prosr_prc!=0 then day_prosr:=day_prosr+1;
+end if;
+
+end loop;
+
+return(day_prosr);
+end;
+
+-- Башкиров В.Г. 25.01.2019 21:50 Обновление 18.6.07
+-- Возвращает дату возникновения суммы задолженности по списку кодов (p_Debts) задолженностей по кредиту (id_cred)
+Function DateCreateDebt(
+	id_cred    ref [PR_CRED]
+	,p_Debts varchar2(32000)
+	,on_date   [DATE]
+)return [DATE] is
+	type TrecDebt is record (
+		  sCode		varchar2(1000)
+		, nSumma	[SUMMA]
+	);
+	
+	type TtblDebts	is table of TrecDebt index by varchar2(128);
+	
+	type TrecVOD is record (
+		  rDebt		ref	[VID_DEBT]
+		, bDT		boolean
+	);
+	type TtblVOD	is table of TrecVOD index by varchar2(128);
+	
+	tblDebts		TtblDebts;
+	tblVOD			TtblVOD;
+	sDebtCode		varchar2(1000);
+	iPos			integer;
+	rDebt		ref	[VID_DEBT];
+	dMinDate		date;
+	vTotalSum		[SUMMA];
+begin
+	
+	if substr(p_Debts, 1, 1) != '#' then p_Debts := '#' || p_Debts;	end if;
+	if substr(p_Debts, length(p_Debts), 1) != '#' then p_Debts := p_Debts || '#'; end if;
+	-- Вычисляем общую сумму задолженности
+	p_Debts   := substr(p_Debts, 2);
+	vTotalSum := 0;		-- общая сумма задолженности
+	
+	-- Определяем набор задолженностей для расчёта
+	while length(p_Debts) > 0 loop
+		iPos := instr(p_Debts, '#');
+		if iPos > 0 then
+			sDebtCode := substr(p_Debts, 1, iPos - 1);
+			p_Debts := substr(p_Debts, iPos + 1);
+			begin
+				rDebt := ::[VID_DEBT]([CODE] = sDebtCode);
+				tblDebts(rDebt).sCode  := sDebtCode;
+				tblDebts(rDebt).nSumma := ::[PR_CRED].[L].GetSumDebt(id_cred, rDebt, on_date);
+				vTotalSum := vTotalSum + tblDebts(rDebt).nSumma;
+			exception
+				when NO_DATA_FOUND or TOO_MANY_ROWS then
+					null;
+			end;
+		end if;
+	end loop;
+
+	if tblDebts.count = 0 or vTotalSum = 0 then return null; end if;
+	
+	-- Заполняем участие в задолженностях для кредитных видов операций
+	for (
+		select rVidOper
+			( rVidOper						: RID
+			, rVidOper.[TAKE_DEBT].[DEBT]	: DEBT
+			, rVidOper.[TAKE_DEBT].[DT]		: DT
+			)
+			in ::[VID_OPER_DOG] all
+		 where	rVidOper.[CODE_GROUP] like 'КРЕДИТ%'
+			and	not (rVidOper.[TAKE_DEBT].[DEBT] is null)					-- У участия в задолженности проставлен вид задолженности
+		)
+	loop
+		if tblDebts.exists(rVidOper.[DEBT]) and tblDebts(rVidOper.[DEBT]).nSumma > 0 then
+			tblVOD(rVidOper.[RID]).rDebt := rVidOper.[DEBT];
+			tblVOD(rVidOper.[RID]).bDT := nvl(rVidOper.[DT], false);
+		end if;
+	end loop;
+	
+	dMinDate := on_date;
+	
+	-- [по факту] определяем момент, когда общая сумма (vTotalSum) уйдёт в ноль
+	for (
+		select rFactOper
+			( rFactOper.[SUMMA]	: SUMMA
+			, rFactOper.[OPER]	: OPER
+			, rFactOper.[DATE]	: OP_DATE
+			)
+			in id_cred.[LIST_PAY]
+		where rFactOper.[DATE] <= on_date
+		order by rFactOper.[DATE] desc
+		)
+	loop
+		if tblVOD.exists(rFactOper.[OPER]) then
+			if tblVOD(rFactOper.[OPER]).bDT
+				then vTotalSum := vTotalSum	+ rFactOper.[SUMMA];
+				else vTotalSum := vTotalSum	- rFactOper.[SUMMA];
+			end if;
+			
+			if vTotalSum <= 0 then
+				dMinDate := least(dMinDate, rFactOper.[OP_DATE]);
+				exit;
+			elsif  vTotalSum > 0 then
+				dMinDate := least(dMinDate, rFactOper.[OP_DATE]);
+			end if;
+		end if;
+	end loop;
+	
+	return dMinDate;
+	
+end;
+-- срок существования задолженности с кодом CODE по договору id_cred на дату on_date
+Function PeriodDebt(
+	id_cred		ref [PR_CRED]
+	,CODE		varchar (25)
+	,on_date	[DATE] default [VIEWFUN].GetOpDate
+)return number is
+mindate date;
+period number := 0;
+begin
+	mindate := DateCreateDebt(id_cred, CODE, on_date);
+	if mindate is not null then
+		period := on_date - mindate;
+	end if;
+	return period;
+end;
+PSH_KR_PORT_XLS (
+	@name('За дату') P_BEGDATE in [DATE]
+) is
+
+validate is
+pragma macro(GD,'::[KRED_PERS].[PSH_KR_PORT_XLS].GET_D',substitute);
+pragma macro(RD,'trunc(::[KRED_PERS].[PSH_KR_PORT_XLS].GET_D+1,''MM'')-1',substitute);
+pragma macro(BAL,'abs(f.a(''В''||[1]||''СН'',::[KRED_PERS].[PSH_KR_PORT_XLS].GET_D+1))',substitute);
+pragma macro(RBAL,'abs(f.a(''В''||[1]||''СН'',trunc(::[KRED_PERS].[PSH_KR_PORT_XLS].GET_D+1,''MM'')))',substitute);
+pragma macro(MD,'to_date(''31.12.4012'',''DD.MM.YYYY'')',substitute);
+
+i 			number;
+vColCount 	number; -- колво колонок в отчете
+
+begin
+
+  if P_MESSAGE = 'DEFAULT' then -- первый запуск процедуры
+		[EXCEL].Init_Xls;
+		--P_BEGDATE:= ::[SYSTEM].[OP_DATE];
+							
+  elsif P_MESSAGE = 'VALIDATE' then -- переход между полями
+
+		if p_info = 'OK' then
+		
+  			if P_BEGDATE is null  then
+  				pragma error('Необходимо указать дату!');
+  			end if;
+
+			d := P_BEGDATE;
+			::[PR_CRED].[PSH_CRED_REP].pCalcPtf(trunc(P_BEGDATE+1, 'MM')-1);
+  			  			  	
+			if [EXCEL].F_Click then
+				[EXCEL].F_Click := False;
+
+				vColCount := 104; -- всего колонок в отчете
+				i := 4; -- первая строка в Excel
+				
+				-- обнуляем переменные
+				-- запуск Excel
+				[EXCEL].open_file(NULL,false, true);
+				[EXCEL].Write(1,1,null,false,false,10,'Times New Roman','LT');
+				[EXCEL].PasteSpecial(1,1,1,1,1,1,6000,vColCount);
+				[EXCEL].Write(1, 4, 'Кредитный портфель за ' ||to_char(P_BEGDATE,'DD.MM.YYYY'));
+
+				[EXCEL].Set_Column_Width(1,vColCount,20);
+				[EXCEL].Write(i-1,1,null,true,false,10,'Times New Roman','LT');
+				[EXCEL].PasteSpecial(i-1,1,i-1,1,i-1,1,i-1,vColCount);
+				-- Шапка
+				
+				[EXCEL].Write(i-1,1,'ID кредита');
+				[EXCEL].Write(i-1,2,'Ошибка');
+				[EXCEL].Write(i-1,3,'Подразделение');
+				[EXCEL].Write(i-1,4,'Филиал');
+				[EXCEL].Write(i-1,5,'Код клиента');
+				[EXCEL].Write(i-1,6,'Заёмщик');
+				[EXCEL].Write(i-1,7,'Тип заёмщика');
+				[EXCEL].Write(i-1,8,'Номер договора');
+				[EXCEL].Write(i-1,9,'Наименование продукта');
+				[EXCEL].Write(i-1,10,'Дата начала');
+				[EXCEL].Write(i-1,11,'Дата окончания');
+				[EXCEL].Write(i-1,12,'Период');
+				[EXCEL].Write(i-1,13,'Ст. на начало');
+				[EXCEL].Write(i-1,14,'Ст. текущая');
+				[EXCEL].Write(i-1,15,'Валюта');
+				[EXCEL].Write(i-1,16,'Сумма договора');
+				[EXCEL].Write(i-1,17,'Пролонгации');
+				[EXCEL].Write(i-1,18,'Категория качества');
+				[EXCEL].Write(i-1,19,'Категория качества');
+				[EXCEL].Write(i-1,20,'Ставка резервирования');
+				[EXCEL].Write(i-1,21,'Счёт ОД');
+				[EXCEL].Write(i-1,22,'Остаток на счёте ОД');
+				[EXCEL].Write(i-1,23,'Счёт лимита');
+				[EXCEL].Write(i-1,24,'Остаток на счёте лимита');
+				[EXCEL].Write(i-1,25,'Счёт %%');
+				[EXCEL].Write(i-1,26,'Остаток на счёте %%');
+				[EXCEL].Write(i-1,27,'Счёт проср. ОД');
+				[EXCEL].Write(i-1,28,'Остаток на счёте проср. ОД');
+				[EXCEL].Write(i-1,29,'Счёт проср. %%');
+				[EXCEL].Write(i-1,30,'Остаток на счёте проср. %%');
+				[EXCEL].Write(i-1,31,'Срок просрочки');
+				[EXCEL].Write(i-1,32,'Счёт резерва %%');
+				[EXCEL].Write(i-1,33,'Остаток на счёте резера %%');
+				[EXCEL].Write(i-1,34,'Счёт резерва проср. %%');
+				[EXCEL].Write(i-1,35,'Остаток на счёте рез. проср. %%');
+				[EXCEL].Write(i-1,36,'Счёт резерва ОД');
+				[EXCEL].Write(i-1,37,'Остаток на счёте резерва ОД');
+				[EXCEL].Write(i-1,38,'Счёт резерва проср. ОД');
+				[EXCEL].Write(i-1,39,'Остаток на счёте рез. проср. ОД');
+				[EXCEL].Write(i-1,40,'Счёт комиссии');
+				[EXCEL].Write(i-1,41,'Остаток комиссии');
+				[EXCEL].Write(i-1,42,'Счёт резерва комиссии');
+				[EXCEL].Write(i-1,43,'Остаток резерва комиссии');
+				[EXCEL].Write(i-1,44,'Единовременная комиссия');
+				[EXCEL].Write(i-1,45,'Счёт %% на внебалансе');
+				[EXCEL].Write(i-1,46,'Остаток на счёте %% на внебал.');
+				[EXCEL].Write(i-1,47,'Счёт проср. %% на внебалансе');
+				[EXCEL].Write(i-1,48,'Остаток на счёте  проср. %% на внебал.');
+				[EXCEL].Write(i-1,49,'Счёт обеспечения');
+				[EXCEL].Write(i-1,50,'Наименование обеспечения');
+				[EXCEL].Write(i-1,51,'Сумма обеспечения');
+				[EXCEL].Write(i-1,52,'Сумма 91311');
+				[EXCEL].Write(i-1,53,'Сумма 91312');
+				[EXCEL].Write(i-1,54,'Сумма 91315');
+				[EXCEL].Write(i-1,55,'Сумма 91414');
+				[EXCEL].Write(i-1,56,'Категория качества обеспечения');
+				[EXCEL].Write(i-1,57,'ОД до 1 дня');
+				[EXCEL].Write(i-1,58,'ОД до 5 дня');
+				[EXCEL].Write(i-1,59,'ОД до 10 дней');
+				[EXCEL].Write(i-1,60,'ОД до 20 дней');
+				[EXCEL].Write(i-1,61,'ОД до 30 дней');
+				[EXCEL].Write(i-1,62,'ОД до 90 дней');
+				[EXCEL].Write(i-1,63,'ОД до 180 дней');
+				[EXCEL].Write(i-1,64,'ОД до 270 дней');
+				[EXCEL].Write(i-1,65,'ОД до 1 года');
+				[EXCEL].Write(i-1,66,'ОД свыше 1 года');
+				[EXCEL].Write(i-1,67,'Проср. ОД до 30 дней');
+				[EXCEL].Write(i-1,68,'Проср. ОД от 31 до 90 дней');
+				[EXCEL].Write(i-1,69,'Проср. ОД от 91 до 180 дней');
+				[EXCEL].Write(i-1,70,'Проср. ОД свыше 180 дней');
+				[EXCEL].Write(i-1,71,'Проср. %% до 30 дней');
+				[EXCEL].Write(i-1,72,'Проср. %% от 31 до 90 дней');
+				[EXCEL].Write(i-1,73,'Проср. %% от 91 до 180 дней');
+				[EXCEL].Write(i-1,74,'Проср. %% свыше 180 дней');
+				[EXCEL].Write(i-1,75,'Номер в кол. 115 ф. по сроку проср.');
+				[EXCEL].Write(i-1,76,'Ф. 115 стр. 2.1, 2.8, 3.1-3.4');
+				[EXCEL].Write(i-1,77,'Ф. 115 стр. 2.7, 3.6');
+				[EXCEL].Write(i-1,78,'ОКАТО');
+				[EXCEL].Write(i-1,79,'ОКВЕД');
+				[EXCEL].Write(i-1,80,'ОГРН');
+				[EXCEL].Write(i-1,81,'Разница между ОД и разбивкой на сроки');
+				[EXCEL].Write(i-1,82,'Разница между проср. ОД и разбивкой на сроки');
+				[EXCEL].Write(i-1,83,'Разница обеспечения');
+				[EXCEL].Write(i-1,84,'Инсайдер');
+				[EXCEL].Write(i-1,85,'МСБ');
+				[EXCEL].Write(i-1,86,'Портфель');
+				[EXCEL].Write(i-1,87,'Первоначальная дата окончания договора');
+				[EXCEL].Write(i-1,88,'ЦЕЛЬ');
+				[EXCEL].Write(i-1,89,'ф.115, р. Справочно, п. 5');
+				[EXCEL].Write(i-1,90,'Счёт штрафов');
+				[EXCEL].Write(i-1,91,'Остаток штрафов');
+				[EXCEL].Write(i-1,92,'Счёт резерва штрафов');
+				[EXCEL].Write(i-1,93,'Остаток на счёте рез. штрафов');
+				[EXCEL].Write(i-1,94,'Сотрудник');
+				[EXCEL].Write(i-1,95,'Счёт для расчётов');
+				[EXCEL].Write(i-1,96,'Остаток на счёте для расчётов');
+				[EXCEL].Write(i-1,97,'Выписка');
+				[EXCEL].Write(i-1,98,'Счёт резерва под лимит');
+				[EXCEL].Write(i-1,99,'Резерв под лимит, руб.');
+				[EXCEL].Write(i-1,100,'Счёт гос пошлины');
+				[EXCEL].Write(i-1,101,'Остаток гос. пошлины, руб.');
+				[EXCEL].Write(i-1,102,'Счёт резерва под гос. пошлину');
+				[EXCEL].Write(i-1,103,'Резерв под гос. пошлину, руб.');
+				[EXCEL].Write(i-1,104,'Всего дней просрочки за 180 суток');
+				
+				
+							
+				-- цикл по договорам
+								
+							for (select cr(
+							cr%id :cr_id,
+							&GD :dt,
+							coalesce(cr.internal_code,to_char(cr%id)) :ident,
+							null :err,
+							cr.[DEPART].code :dep_code,
+							cr.[FILIAL].code :depbal,
+							null :cli_code,
+							coalesce(cr.[CLIENT]->(::CL_ORG)[LONG_NAME],cr.[CLIENT].name) :cli_name,
+							decode(cr.[CLIENT]%class,'CL_PRIV','ФЛ',decode(cr.[CLIENT]->(::CL_ORG)[FORMA].CODE,'91','ИП','ЮЛ')) :cli_tp,
+							cr.num_dog :dea_code,
+							cr.[KIND_CREDIT].name :dea_prod,
+							cr.date_begin :fromdate,
+							cr.date_ending :todate,
+							cr.date_ending-cr.date_begin :srok,
+							(select z(::[PRC_SCHEME].[LIB].GetPrcRate(z.[PRC_SCHEME],cr.date_begin)) in cr.[COMISS_ARR] where z.[DEBT].CODE='НЕУЧТЕН_ПРОЦЕНТЫ') :prc_start,
+							(select z(::[PRC_SCHEME].[LIB].GetPrcRate(z.[PRC_SCHEME],&GD)) in cr.[COMISS_ARR] where z.[DEBT].CODE='НЕУЧТЕН_ПРОЦЕНТЫ') :prc_now,
+							cr.[FT_CREDIT].[CUR_ISO].INT_CUR_SHORT :val_code,
+							cr.SUMMA_DOG :dea_sdok,
+							null :prol,
+							null :dea_risk,
+							::[PR_CRED].[PSH_CRED_REP].fGetRiskGr(cr, &GD) :hd_risk,
+							::[PR_CRED].[PSH_CRED_REP].fGetRiskPrc(cr, &GD) :res_prc,
+							coalesce(tech.ACC.MAIN_V_ID,::[PR_CRED].[PSH_CRED_REP].fGetDeaMainAcc(cr,&GD,'ACCOUNT').MAIN_V_ID) :acc_od,
+							&BAL(coalesce(tech.ACC.[ARC_MOVE], ::[PR_CRED].[PSH_CRED_REP].fGetDeaMainAcc(cr,&GD,'ACCOUNT').[ARC_MOVE])) :bal_od,
+							decode(cr.HIGH_LEVEL_CR,null,cr.[VNB_UNUSED_LINE].MAIN_V_ID,null) :acc_lim,
+							decode(cr.HIGH_LEVEL_CR,null,&BAL(cr.[VNB_UNUSED_LINE].[ARC_MOVE]),null) :bal_lim,
+							cr.[ACC_DEMAND_PRC].MAIN_V_ID :acc_prc,
+							&BAL(cr.[ACC_DEMAND_PRC].[ARC_MOVE]) :bal_prc,
+							cr.[ACC_DEBTS_CR].MAIN_V_ID :acc_exod,
+							&BAL(cr.[ACC_DEBTS_CR].[ARC_MOVE]) :bal_exod,
+							decode(cr.HIGH_LEVEL_CR,null,cr.[ACC_DEBTS_PRC].MAIN_V_ID) :acc_exprc,
+							decode(cr.HIGH_LEVEL_CR,null,&BAL(cr.[ACC_DEBTS_PRC].[ARC_MOVE])) :bal_exprc,
+						  --Башкиров В.Г. 25.01.2019 21:50 Обновление 18.6.07
+					      --greatest([PR_CRED].l_2.PeriodDebt(cr, 'ПРОСРОЧ_КРЕДИТ', &GD),[PR_CRED].l_2.PeriodDebt(cr,'ПРОСРОЧ_ПРОЦЕНТЫ',&GD)) :exp_srok,
+							coalesce(::[PR_CRED].[PSH_CRED_REP].fGetResAcc(cr.[ACC_DEMAND_PRC], &GD).[MAIN_V_ID] ,ptf.accpc) :acc_resprc,
+							decode(ptf.ptf_code,null,&BAL(::[PR_CRED].[PSH_CRED_REP].fGetResAcc(cr.[ACC_DEMAND_PRC], &GD).[ARC_MOVE]),::[PR_CRED].[PSH_CRED_REP].fGetPtfDeaRes(&RBAL(cr.[ACC_DEMAND_PRC].[ARC_MOVE]),ptf.ptf_id,'RESPCN')) :bal_resprc,
+							coalesce(expc_r.[RES_ACC].MAIN_V_ID,ptf.accexpc) :acc_resexprc,
+							decode(ptf.ptf_code,null,&BAL(expc_r.[RES_ACC].[ARC_MOVE]),::[PR_CRED].[PSH_CRED_REP].fGetPtfDeaRes(&RBAL(cr.[ACC_DEBTS_PRC].[ARC_MOVE]),ptf.ptf_id,'RESEXPCN')) :bal_resexprc,
+							decode(ptf.ptf_code,null,coalesce(tech.RES_ACC.MAIN_V_ID,::[PR_CRED].[PSH_CRED_REP].fGetDeaMainAcc(cr,&GD,'ACC_RESERV').MAIN_V_ID),ptf.accod) :acc_resod,
+							decode(ptf.ptf_code,null,&BAL(coalesce(tech.RES_ACC.[ARC_MOVE],::[PR_CRED].[PSH_CRED_REP].fGetDeaMainAcc(cr,&GD,'ACC_RESERV').[ARC_MOVE])),::[PR_CRED].[PSH_CRED_REP].fGetPtfDeaRes(&RBAL(::[PR_CRED].[PSH_CRED_REP].fGetDeaMainAcc(cr,&RD,'ACCOUNT').[ARC_MOVE]),ptf.ptf_id,'RESOD')) :bal_resod,
+							decode(ptf.ptf_code,null,::[PR_CRED].[PSH_CRED_REP].fGetDeaMainAcc(cr,&GD,'ACC_RESERV_DEBTS').MAIN_V_ID,ptf.accex) :acc_resexod,
+							decode(ptf.ptf_code,null,&BAL(::[PR_CRED].[PSH_CRED_REP].fGetDeaMainAcc(cr,&GD,'ACC_RESERV_DEBTS').[ARC_MOVE]),::[PR_CRED].[PSH_CRED_REP].fGetPtfDeaRes(&RBAL(cr.[ACC_DEBTS_CR].[ARC_MOVE]),ptf.ptf_id,'RESEXOD')) :bal_resexod,
+							com.ACC.MAIN_V_ID :acc_com,
+							&BAL(com.ACC.[ARC_MOVE]) :bal_com,
+							com.RES_ACC.MAIN_V_ID :acc_rescom,
+							&BAL(com.RES_ACC.[ARC_MOVE]) :bal_rescom,
+							null :com1,
+							cr.[VNB_DEMAND_PRC].MAIN_V_ID :acc_vnbprc,
+							&BAL(cr.[VNB_DEMAND_PRC].[ARC_MOVE]) :bal_vnbprc,
+							cr.[VNB_EXCEED_PRC].MAIN_V_ID :acc_vnbexprc,
+							&BAL(cr.[VNB_EXCEED_PRC].[ARC_MOVE]) :bal_vnbexprc,
+							--ОБЕСПЕЧЕНИЕ
+							decode(cr.HIGH_LEVEL_CR,null,::[KRED_PERS].[PSH_KR_PORT_XLS].fGetMort(cr,'ACC')) :mort_acc,
+							decode(cr.HIGH_LEVEL_CR,null,::[KRED_PERS].[PSH_KR_PORT_XLS].fGetMort(cr,'NAME')) :mort_name,
+							decode(cr.HIGH_LEVEL_CR,null,(select amnt(sum(round(amnt.[MARKET_SUM].SUMM*f.COURSE(amnt.[MARKET_SUM].[CURR].[JOUR_RECONT],&GD),2))) --Башкиров В.Г. 30.10.2018 ,'Ж','ЕД'),2))) и заменил amnt.[MARKET_SUM].[CURR] на amnt.[MARKET_SUM].[CURR].[JOUR_RECONT]
+							in ::[ZALOG] where amnt.[PART_TO_LOAN].PRODUCT=cr and amnt.[MARKET_SUM].DATE_BEG<=&GD and coalesce(amnt.[MARKET_SUM].DATE_END,&MD)>=&GD)) :mort_amnt,
+							
+							decode(cr.HIGH_LEVEL_CR,null,::[KRED_PERS].[PSH_KR_PORT_XLS].fGetMortAccBal(cr, &GD, '91311')) :a91311,
+							decode(cr.HIGH_LEVEL_CR,null,::[KRED_PERS].[PSH_KR_PORT_XLS].fGetMortAccBal(cr, &GD, '91312')) :a91312,
+							decode(cr.HIGH_LEVEL_CR,null,::[KRED_PERS].[PSH_KR_PORT_XLS].fGetMortAccBal(cr, &GD, '91315')) :a91315,
+							decode(cr.HIGH_LEVEL_CR,null,::[KRED_PERS].[PSH_KR_PORT_XLS].fGetMortAccBal(cr, &GD, '91414')) :a91414,
+							
+							decode(cr.HIGH_LEVEL_CR,null,::[KRED_PERS].[PSH_KR_PORT_XLS].fGetMort(cr,'KK')) :mort_kk,
+							--ОД ПО СРОКАМ
+							decode(cr%class||cr.[CLIENT]%class,'OVERDRAFTSCL_ORG',&BAL(coalesce(tech.ACC.[ARC_MOVE],cr.[ACCOUNT].[ARC_MOVE])),f133.F_115_LOAN_VOSTR+f133.F_115_LOAN_1) :od1day,
+							f133.F_115_LOAN_2 :od5,
+							f133.F_115_LOAN_6 :od10,
+							f133.F_115_LOAN_7 :od20,
+							f133.F_115_LOAN_8 :od30,
+							f133.F_115_LOAN_9 :od90,
+							f133.F_115_LOAN_10 :od180,
+							f133.F_115_LOAN_11 :od270,
+							f133.F_115_LOAN_12 :od1y,
+							f133.F_115_LOAN_13 :odmax,
+							--Просроченный ОД
+							f133.PZ_SUM1+f133.PZ_SUM2 :odex30,
+							f133.PZ_SUM_31_90 :odex90,
+							f133.PZ_SUM_91_180 :odex180,
+							f133.PZ_SUM4 :odexmax,
+							::[KRED_PERS].[PSH_KR_PORT_XLS].itog_prosr_180(cr, &GD) :itodex_180,
+							--Просроченные %%
+							f133.PZ_PRC1+f133.PZ_PRC2 :pcnex30,
+							f133.PZ_PRC3 :pcnex90,
+							f133.PZ_PRC31 :pcnex180,
+							f133.PZ_PRC4 :pcnexmax,
+							case
+							when f133.PZ_PRC4+f133.PZ_SUM4>0 then 12
+							when f133.PZ_PRC31+f133.PZ_SUM_91_180>0 then 11
+							when f133.PZ_PRC3+f133.PZ_SUM_31_90>0 then 10
+							when f133.PZ_SUM1+f133.PZ_SUM2+f133.PZ_PRC1+f133.PZ_PRC2>0 then 9
+							end :ex115_col,
+							case
+							when f133.PZ_PRC4+f133.PZ_SUM4+f133.PZ_PRC31+f133.PZ_SUM_91_180+f133.PZ_PRC3+f133.PZ_SUM_31_90+f133.PZ_SUM1+f133.PZ_SUM2+f133.PZ_PRC1+f133.PZ_PRC2 > 0 then &BAL(cr.[ACCOUNT].[ARC_MOVE])+&BAL(cr.[ACC_DEBTS_CR].[ARC_MOVE])
+							end :f115_21_28_31_34,
+							case
+							when f133.PZ_PRC4+f133.PZ_SUM4+f133.PZ_PRC31+f133.PZ_SUM_91_180+f133.PZ_PRC3+f133.PZ_SUM_31_90+f133.PZ_SUM1+f133.PZ_SUM2+f133.PZ_PRC1+f133.PZ_PRC2 > 0 then &BAL(cr.[ACC_DEMAND_PRC].[ARC_MOVE])+&BAL(cr.[ACC_DEBTS_PRC].[ARC_MOVE])+&BAL(com.ACC.[ARC_MOVE])+&BAL(pen.ACC.[ARC_MOVE])
+							end :f115_27_36,
+							--------------
+							coalesce(cr.[CLIENT].OKATO_CODE,::[REPS_SUBJRF].[SLIB].GetSubjectClient(cr.[CLIENT],&GD).CODE) :okato,
+							::[CLIENT].[LIB].Get_Main_OKVED(cr.[CLIENT],&GD).CODE :okved,--ОКВЭД
+							cr.[CLIENT]->(::CL_ORG)[REGISTER].GOS_REG_NUM_REC :ogrn,--ОГРН
+							&BAL(cr.[ACCOUNT].[ARC_MOVE])-(decode(cr%class||cr.[CLIENT]%class,'OVERDRAFTSCL_ORG',&BAL(coalesce(tech.ACC.[ARC_MOVE],cr.[ACCOUNT].[ARC_MOVE])),f133.F_115_LOAN_VOSTR+f133.F_115_LOAN_1)+f133.F_115_LOAN_2+f133.F_115_LOAN_6+f133.F_115_LOAN_7 + f133.F_115_LOAN_8+f133.F_115_LOAN_9+f133.F_115_LOAN_10+f133.F_115_LOAN_11+f133.F_115_LOAN_12+f133.F_115_LOAN_13) :delta_od,
+							&BAL(cr.[ACC_DEBTS_CR].[ARC_MOVE])-(f133.PZ_SUM1+f133.PZ_SUM2+f133.PZ_SUM_31_90+f133.PZ_SUM_91_180+f133.PZ_SUM4) :delta_odex,
+							null :delta_mort,
+							--::[CLIENT].[PSH_CLI_REP].fGetDispFl(cr.[CLIENT],'ИН',&GD) :ins,
+							--::[CLIENT].[PSH_CLI_REP].fGetGrpFl(cr.[CLIENT],'SMALL',&GD) :msb,
+							ptf.ptf_code :ptf,
+							null :prevend,
+							(select p(p.[OBJ_CRED].SYS_NAME) in cr.[OBJECTS_CRED] where p.[OBJ_CRED].SYS_NAME like '[%' and rownum=1) :purp,
+							case
+							when f133.PZ_SUM_91_180+f133.PZ_SUM4+f133.PZ_PRC31+f133.PZ_PRC4 > 0 then &BAL(cr.[VNB_EXCEED_PRC].[ARC_MOVE])
+							else 0
+							end :f115_spr,
+							pen.ACC.MAIN_V_ID :acc_pen,
+							&BAL(pen.ACC.[ARC_MOVE]) :bal_pen,
+							pen.RES_ACC.MAIN_V_ID :acc_respen,
+							&BAL(pen.RES_ACC.[ARC_MOVE]) :bal_respen,
+							--::[CLIENT].[PSH_CLI_REP].fGetDispFl(cr.[CLIENT],'СЛ',&GD) :wrk,
+							cr.[CLIENT_REQ].[1].[2].[MAIN_V_ID] :acc_rashet,
+							&BAL(cr.[CLIENT_REQ].[1].[2].[ARC_MOVE]) :bal_rashet,
+							cr.[CLIENT_REQ].[1].[2].[ARC_MOVE] :vip_rashet,
+							::[KRED_PERS].[PSH_KR_PORT_XLS].fGetResLimAcc(cr).MAIN_V_ID :LimResAcc,
+							&BAL(::[KRED_PERS].[PSH_KR_PORT_XLS].fGetResLimAcc(cr).[ARC_MOVE]) :LimResBal,
+							::[PR_CRED].[PSH_CRED_REP].fGetDeaMainAcc(cr,&GD,'ACC_GP').[MAIN_V_ID] :accgp,
+							&BAL(::[PR_CRED].[PSH_CRED_REP].fGetDeaMainAcc(cr, &GD, 'ACC_GP').[ARC_MOVE]) :balgp,
+							::[PR_CRED].[PSH_CRED_REP].fGetResAcc(::[PR_CRED].[PSH_CRED_REP].fGetDeaMainAcc(cr,&GD,'ACC_GP'), &GD).[MAIN_v_ID] :accgpres,
+							&BAL(::[PR_CRED].[PSH_CRED_REP].fGetResAcc(::[PR_CRED].[PSH_CRED_REP].fGetDeaMainAcc(cr,&GD,'ACC_GP'), &GD).[ARC_MOVE]) :accgpresbal
+							)
+							in ::[PR_CRED],
+							(::[RES_BASE_ACCS] all :expc_r),
+							(select tech(tech%collection :collection_id,tech.[ACCOUNT_DOG].[1].[2] :ACC,tech_r.[RES_ACC] :RES_ACC)
+							in ::[HOZ_OP_ACC],(::[RES_BASE_ACCS] all :tech_r) all
+							where tech.[NAME_ACCOUNT].COD='ACCOUNT_TECH' and tech_r.ACC(true)=tech.[ACCOUNT_DOG].[1].[2]),
+							(select com(com%collection :collection_id,com.[ACCOUNT_DOG].[1].[2] :ACC,com_r.RES_ACC :RES_ACC)
+							in ::[HOZ_OP_ACC],(::[RES_BASE_ACCS] all :com_r) all
+							where com.[NAME_ACCOUNT].COD='ACC_DEMAND_COM' and com_r.ACC(true)=com.[ACCOUNT_DOG].[1].[2]),
+							(select pen(pen%collection :collection_id,pen.[ACCOUNT_DOG].[1].[2] :ACC,pen_r.[RES_ACC] :RES_ACC)
+							in ::[HOZ_OP_ACC],(::[RES_BASE_ACCS] all :pen_r) all
+							where pen.[NAME_ACCOUNT].COD='ACC_DEMAND_PEN' and pen_r.ACC(true)=pen.[ACCOUNT_DOG].[1].[2]),
+							(select ptf(ptf%id :ptf_id,ptf.NUM_DOG :ptf_code,ptf.[CREDITS].[PR_CRED] :cred,(select r(r.[ACCOUNT_DOG].[1].[2].MAIN_V_ID) in ptf.[ARRAY_DOG_ACC] where r.[NAME_ACCOUNT].COD='ACC_RESERV') :accod, (select r(r.[ACCOUNT_DOG].[1].[2].MAIN_V_ID) in ptf.[ARRAY_DOG_ACC] where r.[NAME_ACCOUNT].COD='ACC_RESERV_DEBTS') :accex,
+							::[PR_CRED].[PSH_CRED_REP].fGetPotAcc(ptf,&GD,'ACC_DEMAND_PRC').MAIN_V_ID :accpc,
+							::[PR_CRED].[PSH_CRED_REP].fGetPotAcc(ptf,&GD,'ACC_DEBTS_PRC').MAIN_V_ID :accexpc)
+							in ::[SIM_LOAN_PORT] all
+							where ptf.[CREDITS].DATE_BEGIN <= &RD and (ptf.[CREDITS].DATE_END is null or ptf.[CREDITS].DATE_END > &RD)),
+							(select f133(
+							f133.[CRED_DOG] :dea_id,
+							f133.F_115_LOAN_VOSTR :F_115_LOAN_VOSTR,
+							f133.F_115_LOAN_1 :F_115_LOAN_1,
+							f133.F_115_LOAN_2 :F_115_LOAN_2,
+							f133.F_115_LOAN_6 :F_115_LOAN_6,
+							f133.F_115_LOAN_7 :F_115_LOAN_7,
+							f133.F_115_LOAN_8 :F_115_LOAN_8,
+							f133.F_115_LOAN_9 :F_115_LOAN_9,
+							f133.F_115_LOAN_10 :F_115_LOAN_10,
+							f133.F_115_LOAN_11 :F_115_LOAN_11,
+							f133.F_115_LOAN_12 :F_115_LOAN_12,
+							f133.F_115_LOAN_13 :F_115_LOAN_13,
+							--Проср.ОД
+							f133.PZ_SUM1 :PZ_SUM1,--0-5
+							f133.PZ_SUM2 :PZ_SUM2,--6-30
+							f133.PZ_SUM_31_90 :PZ_SUM_31_90,--31-90
+							f133.PZ_SUM_91_180 :PZ_SUM_91_180,--90-180
+							f133.PZ_SUM4 :PZ_SUM4,--180+
+							--Проср.%%
+							f133.PZ_PRC1 :PZ_PRC1,--0-5
+							f133.PZ_PRC2 :PZ_PRC2,--6-30
+							f133.PZ_PRC3 :PZ_PRC3,--31-90
+							f133.PZ_PRC31 :PZ_PRC31,--91-180
+							f133.PZ_PRC4 :PZ_PRC4)--180+
+							in ::[F_133_DATA] all
+							where
+							f133.[PARAM].[REPORT].CODE='F_133'
+							and f133.[PARAM].DATE1=&GD+1
+							and f133.[PARAM].DATE2=&GD+1
+							and f133.[PARAM].[BRANCH] is null)
+							all
+							where
+							cr.DATE_GIVE <= &GD
+							and ((ptf.ptf_id is null and (cr.DATE_CLOSE is null or cr.DATE_CLOSE>&GD)) or
+							(ptf.ptf_id is not null and (cr.DATE_CLOSE is null or cr.DATE_CLOSE>&RD)))
+							and (cr.HIGH_LEVEL_CR is null or cr.HIGH_LEVEL_CR%class!='OVERDRAFTS')
+							and expc_r.ACC(true)=cr.[ACC_DEBTS_PRC]
+							and tech.collection_id(true)=cr.[ARRAY_DOG_ACC]
+							and com.collection_id(true)=cr.[ARRAY_DOG_ACC]
+							and pen.collection_id(true)=cr.[ARRAY_DOG_ACC]
+							and ptf.cred(true)=cr
+							and f133.dea_id(true)=cr
+							--and cr%id=50974381
+
+					) loop
+					[EXCEL].Write(i,1,cr.IDENT);
+					[EXCEL].Write(i,2,cr.ERR);
+					[EXCEL].Write(i,3,cr.DEP_CODE);
+					[EXCEL].Write(i,4,cr.DEPBAL);
+					[EXCEL].Write(i,5,cr.CLI_CODE);
+					[EXCEL].Write(i,6,cr.CLI_NAME);
+					[EXCEL].Write(i,7,cr.CLI_TP);
+					[EXCEL].Write(i,8,cr.DEA_CODE);
+					[EXCEL].Write(i,9,cr.DEA_PROD);
+					[EXCEL].Write(i,10,to_char(cr.FROMDATE,'DD.MM.YYYY'));
+					[EXCEL].Write(i,11,to_char(cr.TODATE,'DD.MM.YYYY'));
+					[EXCEL].Write(i,12,cr.SROK);
+					[EXCEL].Set_Number_Format(i,13,i,13,2);
+					[EXCEL].Write(i,13,cr.PRC_START,false,false,10,'Times New Roman','RT');
+					[EXCEL].Set_Number_Format(i,14,i,14,2);
+					[EXCEL].Write(i,14,cr.PRC_NOW,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,15,cr.VAL_CODE);
+					[EXCEL].Set_Number_Format(i,16,i,16,2);
+					[EXCEL].Write(i,16,cr.DEA_SDOK,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,17,cr.PROL);
+					[EXCEL].Write(i,18,cr.DEA_RISK);
+					[EXCEL].Write(i,19,cr.HD_RISK);
+					[EXCEL].Write(i,20,cr.RES_PRC);
+					[EXCEL].Write(i,21,''''||cr.ACC_OD);
+					[EXCEL].Set_Number_Format(i,22,i,22,2);
+					[EXCEL].Write(i,22,cr.BAL_OD,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,23,''''||cr.ACC_LIM);
+					[EXCEL].Set_Number_Format(i,24,i,24,2);
+					[EXCEL].Write(i,24,cr.BAL_LIM,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,25,''''||cr.ACC_PRC);
+					[EXCEL].Set_Number_Format(i,26,i,26,2);
+					[EXCEL].Write(i,26,cr.BAL_PRC,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,27,''''||cr.ACC_EXOD);
+					[EXCEL].Set_Number_Format(i,28,i,28,2);
+					[EXCEL].Write(i,28,cr.BAL_EXOD,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,29,''''||cr.ACC_EXPRC);
+					[EXCEL].Set_Number_Format(i,30,i,30,2);
+					[EXCEL].Write(i,30,cr.BAL_EXPRC,false,false,10,'Times New Roman','RT');
+				  --Башкиров В.Г. 25.01.2019 21:50 Обновление 18.6.07
+				  --[EXCEL].Write(i,31,cr.EXP_SROK);
+					[EXCEL].Write(i,32,''''||cr.ACC_RESPRC);
+					[EXCEL].Set_Number_Format(i,33,i,33,2);
+					[EXCEL].Write(i,33,cr.BAL_RESPRC,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,34,''''||cr.ACC_RESEXPRC);
+					[EXCEL].Set_Number_Format(i,35,i,35,2);
+					[EXCEL].Write(i,35,cr.BAL_RESEXPRC,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,36,''''||cr.ACC_RESOD);
+					[EXCEL].Set_Number_Format(i,37,i,37,2);
+					[EXCEL].Write(i,37,cr.BAL_RESOD,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,38,''''||cr.ACC_RESEXOD);
+					[EXCEL].Set_Number_Format(i,39,i,39,2);
+					[EXCEL].Write(i,39,cr.BAL_RESEXOD,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,40,''''||cr.ACC_COM);
+					[EXCEL].Set_Number_Format(i,41,i,41,2);
+					[EXCEL].Write(i,41,cr.BAL_COM,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,42,''''||cr.ACC_RESCOM);
+					[EXCEL].Set_Number_Format(i,43,i,43,2);
+					[EXCEL].Write(i,43,cr.BAL_RESCOM,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,44,cr.COM1);
+					[EXCEL].Write(i,45,''''||cr.ACC_VNBPRC);
+					[EXCEL].Set_Number_Format(i,46,i,46,2);
+					[EXCEL].Write(i,46,cr.BAL_VNBPRC,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,47,''''||cr.ACC_VNBEXPRC);
+					[EXCEL].Set_Number_Format(i,48,i,48,2);
+					[EXCEL].Write(i,48,cr.BAL_VNBEXPRC,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,49,''''||cr.MORT_ACC);
+					[EXCEL].Write(i,50,cr.MORT_NAME);
+					[EXCEL].Set_Number_Format(i,51,i,55,2);
+					[EXCEL].Write(i,51,cr.MORT_AMNT,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,52,cr.A91311,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,53,cr.A91312,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,54,cr.A91315,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,55,cr.A91414,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,56,cr.MORT_KK);
+					[EXCEL].Set_Number_Format(i,57,i,77,2);
+					[EXCEL].Write(i,57,cr.OD1DAY,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,58,cr.OD5,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,59,cr.OD10,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,60,cr.OD20,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,61,cr.OD30,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,62,cr.OD90,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,63,cr.OD180,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,64,cr.OD270,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,65,cr.OD1Y,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,66,cr.ODMAX,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,67,cr.ODEX30,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,68,cr.ODEX90,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,69,cr.ODEX180,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,70,cr.ODEXMAX,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,71,cr.PCNEX30,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,72,cr.PCNEX90,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,73,cr.PCNEX180,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,74,cr.PCNEXMAX,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,75,cr.EX115_COL,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,76,cr.F115_21_28_31_34,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,77,cr.F115_27_36,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,78,''''||cr.OKATO);
+					[EXCEL].Write(i,79,''''||cr.OKVED);
+					[EXCEL].Write(i,80,''''||cr.OGRN);
+					[EXCEL].Set_Number_Format(i,81,i,85,2);
+					[EXCEL].Write(i,81,cr.DELTA_OD,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,82,cr.DELTA_ODEX,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,83,cr.DELTA_MORT,false,false,10,'Times New Roman','RT');
+					--[EXCEL].Write(i,84,cr.INS,false,false,10,'Times New Roman','RT');
+					--[EXCEL].Write(i,85,cr.MSB,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,86,cr.PTF);
+					[EXCEL].Write(i,87,to_char(cr.PREVEND,'DD.MM.YYYY'));
+					[EXCEL].Write(i,88,cr.PURP);
+					[EXCEL].Set_Number_Format(i,89,i,89,2);
+					[EXCEL].Write(i,89,cr.F115_SPR,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,90,''''||cr.ACC_PEN);
+					[EXCEL].Set_Number_Format(i,91,i,91,2);
+					[EXCEL].Write(i,91,cr.BAL_PEN,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,92,''''||cr.ACC_RESPEN);
+					[EXCEL].Set_Number_Format(i,93,i,93,2);
+					[EXCEL].Write(i,93,cr.BAL_RESPEN,false,false,10,'Times New Roman','RT');
+					--[EXCEL].Write(i,94,cr.WRK);
+					[EXCEL].Write(i,95,''''||cr.ACC_RASHET);
+					[EXCEL].Set_Number_Format(i,96,i,96,2);
+					[EXCEL].Write(i,96,cr.BAL_RASHET,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,97,''); --cr.VIP_RASHET);
+					[EXCEL].Write(i,98,''''||cr.LIMRESACC);
+					[EXCEL].Set_Number_Format(i,99,i,99,2);
+					[EXCEL].Write(i,99,cr.LIMRESBAL,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,100,''''||cr.ACCGP);
+					[EXCEL].Set_Number_Format(i,101,i,101,2);
+					[EXCEL].Write(i,101,cr.BALGP,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,102,''''||cr.ACCGPRES);
+					[EXCEL].Set_Number_Format(i,103,i,103,2);
+					[EXCEL].Write(i,103,cr.ACCGPRESBAL,false,false,10,'Times New Roman','RT');
+					[EXCEL].Write(i,104,cr.itodex_180);
+					
+					i:=i+1;
+					end loop;
+				
+				[EXCEL].Borders(3, 1, i-1, vColCount, 'RLBTVH');
+								
+				[EXCEL].Visible;
+				[EXCEL].Release;
+			end if;
+			
+			[EXCEL].Exec_Script(V_DEST);	
+		end if;	
+  end if;
+end;
+end;
+end;

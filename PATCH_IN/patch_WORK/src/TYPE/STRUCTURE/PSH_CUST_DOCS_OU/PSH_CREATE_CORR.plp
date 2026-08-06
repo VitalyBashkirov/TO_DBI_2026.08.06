@@ -1,0 +1,226 @@
+class PSH_CUST_DOCS_OU;
+
+@import_plsql(true)
+@name('[ПСБ] Создать корректировку')
+@tag('COPIED')
+method PSH_CREATE_CORR is
+
+@name('Содержимое сообщения') public V_FILEDATA [MEMO_BIG];
+@name('Текущая часть')        public V_CUR_PART [NUM10];
+@name('Количество частей')    public V_NUM_PART [NUM10];
+
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB_TC]); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB_FUN]); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+
+type clob_table is table of varchar2(32000);
+GClob		clob_table;
+
+ERR_NUM   exception;
+PRAGMA EXCEPTION_INIT (ERR_NUM, -06502);
+
+procedure partitionClob( p_clob		clob
+						,p_num_part in out nocopy number(10,0)
+				  ) is
+
+v_part		integer := 16000;
+v_length	integer;
+begin
+	v_length := dbms_lob.getlength(p_clob);
+	if	not (p_clob is null and v_length <> 0) then
+		for i in 1..ceil(v_length/v_part) loop
+			GClob(i) := dbms_lob.substr(p_clob, v_part, (i-1)*v_part + 1);
+		end loop;
+	else
+		GClob(1) := null;
+	end if;
+	p_num_part := GClob.count;
+end;
+
+
+function getNumCorr(p_fileName ::[DOC_TAX].[FILE_NAME]%type)
+return integer
+is
+v_res integer;
+begin
+	v_res := to_number(substr(p_fileName, 4, 1)) + 1;
+	return v_res;
+exception when ERR_NUM then
+	return null;
+end;
+PSH_CREATE_CORR is
+
+validate is
+begin
+
+	if p_message = 'DEFAULT' then
+		
+		if
+			this.[DOC_TYPE] in (&libtc.typeUV1, &libtc.typeUV2, &libtc.typeUV3)
+			or
+			this.[DOC_TYPE] in (&libtc.typePT1, &libtc.typePT2) and this.[DOC_STATE] = &libtc.stFinish
+		then
+			pragma error('Нельзя создать корректировку для текущего документа!');
+		end if;
+
+		if this.[DOC_STATE] = &libtc.stSend then
+			pragma error('Исправление исходящего документа в состоянии "Отправлен" не допускается. Если исправление необходимо, убедитесь, что файл документа еще не отправлен в таможенный орган, исключите его отправку, измените состояние документа на "Новый".');
+		end if;
+
+		for x in ::[PSH_CUST_LINK] all -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+			where x.[DOC_ORIGIN] = this and x.[LINK_TYPE] = &libtc.lnkCorr loop
+			pragma error('Уже существует корректировка для текущего документа.');
+		end loop;
+
+		if this.[DOC_STATE] = &libtc.stFinish then
+			if getNumCorr(this.[FILE_NAME]) > 9 then
+				pragma error('Выполнение операции невозможно: превышено максимальное количество корректировок!');
+			end if;
+		end if;
+		
+		GClob.delete;
+		partitionClob(this.[FILE_CONTENT], V_NUM_PART);
+		V_FILEDATA 	:=  GClob(GClob.first);
+		V_CUR_PART 	:= 1;
+				
+	elsif p_message = 'VALIDATE' then
+		GClob(V_CUR_PART) := V_FILEDATA; -- сохранение изменений
+	
+		if p_info = 'NEXT' then
+			V_CUR_PART := least(V_CUR_PART+1, V_NUM_PART);
+		elsif p_info = 'PREV' then
+			V_CUR_PART := greatest(V_CUR_PART-1, 1);
+		elsif p_info = 'LAST' then
+			V_CUR_PART := V_NUM_PART;
+		elsif p_info = 'FIRST' then
+			V_CUR_PART := 1;
+		elsif P_INFO = 'OK' then
+			GClob(V_CUR_PART) := V_FILEDATA;
+		elsif P_INFO = 'Отмена' then
+			GClob.delete;
+		end if;
+
+		V_FILEDATA := GClob(V_CUR_PART);
+				
+	end if;
+
+end;
+
+execute is
+v_clob			clob;
+v_datePos		integer;
+v_newDoc		ref [PSH_CUST_DOCS_OU]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+v_inDoc			ref [PSH_CUST_DOCS_IN]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+v_filename		::[PSH_CUST_DOCS].[FILE_NAME]%type; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+v_inFilename	::[PSH_CUST_DOCS].[FILE_NAME]%type; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+v_link			ref [TAX_EXC_LINK_TYP];
+v_inFilial		ref [BRANCH];
+v_docDate		date;
+v_reason		ref [PSH_CUST_DOCS]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+v_st_doc		&libfun.TFileStates;
+begin
+	-- найти входящий документ
+	v_inDoc := ::[PSH_CUST_DOCS].[PSH_LOAD_DOCS].getInFile(this); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	v_inFilename := v_inDoc.[FILE_NAME];
+	v_inFilename := regexp_substr(v_inFilename, '[^\.]*');
+	
+	&debug('v_inDoc='||v_inDoc,0)
+	&debug('v_inFilename='||v_inFilename,0)
+	
+	v_inFilial := &libfun.getDogFromName(v_inFilename).[FILIAL];
+	
+	&debug('v_inFilial='||v_inFilial.[CODE],0)
+	
+	-- заменим дату направления
+	GClob(GClob.first) := regexp_replace(GClob(GClob.first),'(.*ДатаНапр\s*=\s*")(\d{4}-\d{2}-\d{2})(.*)','\1'|| &curdate_x(v_inFilial) ||'\3');
+
+	if this.[DOC_TYPE] in (&libtc.typePT1, &libtc.typePT2) then
+		v_filename := this.[FILE_NAME];
+		v_docDate := &curdate_d(v_inFilial);
+	else
+		
+		v_datePos := instr(this.[FILE_NAME], v_inFilename) + length(v_inFilename);
+	
+		-- обновляем дату в наименовании файла
+		v_filename := substr(this.[FILE_NAME], 1, v_datePos) || &curdate_f(v_inFilial) || substr(this.[FILE_NAME], v_datePos + 9);
+
+		&debug('v_filename='||v_filename,0)
+
+		if this.[DOC_STATE] = &libtc.stFinish then
+			v_filename := substr(v_filename, 1, 3) || getNumCorr(v_filename) || substr(v_filename, 5);
+		end if;
+		v_docDate := &curdate_d(this.[BRANCH]);
+
+	end if;
+
+	dbms_lob.createtemporary(v_clob, true, dbms_lob.session);
+
+	for i in 1..GClob.count loop
+		dbms_lob.writeappend(v_clob, length(GClob(i)), GClob(i));
+	end loop;
+
+	GClob.delete;
+
+	v_newDoc := this;
+	if this.[DOC_STATE] in (&libtc.stNAdopt, &libtc.stFinish) then
+		v_newDoc := ::[PSH_CUST_DOCS_OU].[PSH_NEW_AUTO]( -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+												  P_FILE_NAME 		== v_filename				/*P_FILE_NAME*/		--Имя файла
+												, P_FILE_CONTENT	== v_clob					/*P_FILE_CONTENT*/	--Содержимое файла
+												, P_FILE_CR_DATE	== null						/*P_FILE_CR_DATE*/	--Дата создания файла
+												, P_DOC_CR_DATE		== v_docDate				/*P_DOC_CR_DATE*/	--Дата создания документа
+												, P_VERSION			== this.[VERSION]			/*P_VERSION*/		--Версия формата
+												, P_DOC_TYPE		== this.[DOC_TYPE]			/*P_DOC_TYPE*/		--Тип документа
+												, P_BRANCH			== this.[BRANCH]			/*P_BRANCH*/		--Филиал
+											);
+		if this.[DOC_STATE] = &libtc.stNAdopt then
+			&libfun.addDoc(v_st_doc, this, &libtc.StFinish);
+			this.[DOC_STATE] := &libtc.StFinish;
+			
+			--изменить состояние входящего документа на "ответ сформирован" или "ответ на проверке"
+			if v_inDoc is not null and v_inDoc.[DOC_STATE] = &libtc.stNAdoptAnsw then
+				case v_newDoc.[DOC_STATE] of
+					: &libtc.stNew :
+						&libfun.addDoc(v_st_doc, v_inDoc, &libtc.stFormAnsw);
+						v_inDoc.[DOC_STATE] := &libtc.stFormAnsw;
+					: &libtc.stCheckXSD :
+						&libfun.addDoc(v_st_doc, v_inDoc, &libtc.stAnswXSD);
+						v_inDoc.[DOC_STATE] := &libtc.stAnswXSD;
+				end;
+			end if;
+			
+			-- добавить такую же связь
+			begin
+				select l(l.[LINK_TYPE], l.[DOC_ORIGIN]) in ::[PSH_CUST_LINK] all where l.[DOC_RESULT] = this into v_link, v_reason; -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+				&lib.linkDoc(v_reason, v_newDoc, v_link);
+			exception
+				when NO_DATA_FOUND or TOO_MANY_ROWS then
+					null;
+			end;
+
+		else
+			&lib.linkDoc(this, v_newDoc, &libtc.lnkCorr);
+		end if;
+	else
+		v_newDoc.[FILE_NAME] := v_filename;
+		v_newDoc.[DOC_CR_DATE] := v_docDate;
+		
+		if &libfun.checkApp('1B028090') is null then
+			&libfun.addDoc(v_st_doc, v_newDoc, &libtc.stCheckXSD);
+			v_newDoc.[DOC_STATE] := &libtc.stCheckXSD;	-- ставим на проверку
+			
+			--изменить состояние входящего документа на "ответ на проверке"
+			if v_inDoc is not null then
+				&libfun.addDoc(v_st_doc, v_inDoc, &libtc.stAnswXSD);
+				v_inDoc.[DOC_STATE] := &libtc.stAnswXSD;
+			end if;
+		end if;		
+	end if;
+	
+	v_newDoc.[FILE_CONTENT] := v_clob;
+	
+	dbms_lob.freetemporary(v_clob);
+	
+	::[HOOK].[PSB_CUST_CH_ST](v_st_doc);
+end;
+end;
+end;

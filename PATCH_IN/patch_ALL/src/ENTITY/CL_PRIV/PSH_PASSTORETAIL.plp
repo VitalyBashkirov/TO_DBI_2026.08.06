@@ -1,0 +1,803 @@
+class CL_PRIV;
+
+@import_plsql(true)
+@archive(value:='all_archive')
+@name('[ПСБ] RBO. Передать в Retail - ETO')
+@tag('COPIED')
+method PSH_PASSTORETAIL is
+
+@name('Формат обмена')                          public V_FORMAT_EXP [CASE_BETWEEN_TWO];
+@name('Информация о db-link')                   public V_LINK_INFO  [MEMO];
+@name('Информация о Интеграторе')               public V_CIT_INFO   [MEMO];
+@name('Строка для выполнения в клиент-скрипте') public V_EXEC       [STRING_32000];
+pragma Include([RUNTIME].[DEBUG_MACRO]);
+pragma include([RUNTIME].[MACRO_LIB]);
+pragma include([RUNTIME].[CSMD]);
+pragma include([INTERFACE].[COMPILE_LIB]);
+pragma include([CLIENT_INTERFACE].[PRX_CIT]);
+pragma macro (prx_cit, '::[CLIENT_INTERFACE].[PRX_CIT]');
+
+-- В ТЯ2 не компилируем передачу по db-link
+pragma IF_DEF('JAVA', false); -- Не компилировать в 2MCA
+	-- При компиляции операции проверим существование синонимов retailexecutor и retailcl_org,
+	-- если они оба существует, будем считать, что шлюз с РБО по db-link работает
+	&check_synonym(retailexecutor, RETAIL_EXISTS)
+	&check_synonym(retailclients, RETAIL_EXISTS)
+pragma END_IF; -- JAVA
+
+format_tbl &prx_cit.cit_grp_tbl_type;
+PSH_PASSTORETAIL (
+	@name('Одиночный запуск') P_INDIVIDUAL in [BOOLEAN] default null
+) is
+
+validate is
+cit_exp		boolean := false;
+link_exp	boolean := false;
+cnt			integer := 0;
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		P_INDIVIDUAL := True;
+		V_CIT_INFO	:= null;
+		V_LINK_INFO	:= null;
+		--Получение формата обмена
+		format_tbl := &prx_cit.Cit_Pass_ClPriv_Grp(::[SYSTEM].[VARIABLES].ourdepart);
+		for i in 1..format_tbl.count
+		loop
+			if format_tbl(i).format_exp = 3 then
+				if format_tbl(i).cit_grp is not null then
+					cnt := cnt + 1;
+					cit_exp := true;
+					-- Сведения о группе получателей
+					V_CIT_INFO := V_CIT_INFO||NL$||cnt||'. Группа получателей "'||format_tbl(i).cit_grp.[NAME]||'" ('||format_tbl(i).cit_grp.[CODE]||'):';
+					-- Список бизнес-процессов
+					for a in format_tbl(i).cit_grp.[BO_LIST]
+					loop
+						V_CIT_INFO := V_CIT_INFO||NL$||'- б/п '||a.[CODE]||': '||a.[NAME];
+					end loop;
+				end if;
+			elsif format_tbl(i).format_exp = 1 then
+				link_exp := true;
+			end if;
+		end loop;
+		if V_CIT_INFO is not null then
+			V_CIT_INFO := 'Передача физического лица через Интегратор'||V_CIT_INFO;
+		end if;
+		
+		if link_exp then
+			V_LINK_INFO := 'Передача физического лица по dblink в Retail';
+			V_FORMAT_EXP.[0] := 1;
+		elsif cit_exp then
+			V_FORMAT_EXP.[0] := 2;
+		end if;
+		if not link_exp then
+			[CSMD].disableS(v_exec,'Variant1');
+		end if;
+		if not cit_exp then
+			[CSMD].disableS(v_exec,'Variant2');
+		end if;
+	end if;
+end;
+
+execute is
+/*********************************************************************
+Назначение:
+
+Klein, последнее изменение 14 Мая 2004 г.
+*********************************************************************/
+pragma INCLUDE(::[SYSTEM].[OUTER_SYSTEMS]);
+sep					const varchar2 := ';';
+format				const varchar2(10) := 'dd/mm/yyyy';
+
+born_city			varchar2(2000);
+born				ref [NAMES_CITY];
+born_country 		varchar2(3);
+born_region			varchar2(1000);
+born_kladr			varchar2(20);
+com_status_code 	varchar2(20);
+country_code 		varchar2(3);
+date_ank			date;
+date_pers			date;
+depart_code			varchar2(20);
+fail_level_code		varchar2(20);
+fail_mark			varchar2(32000);
+filial_code			varchar2(20);
+i_name				varchar2(160);
+inn					varchar2(16);
+snils				varchar2(11);
+internal_code 		varchar2(25);
+low					varchar2(32000);
+marige_status_code	varchar2(20);
+name				varchar2(160);
+notes				varchar2(32000);
+oper_c				varchar2(32000);
+reg_status_code		varchar2(20);
+registr_num			number;
+resident			boolean;
+sex_code			varchar2(20);
+vid_cl_code			varchar2(20);
+visa_info			varchar2(32000);
+group_link_num		varchar2(200);
+date_form_upd		date;
+r_cl_info_req		::[CL_INFO_REQ]%rowtype;
+clreq_work_users	varchar2(32767);
+
+family_cl			varchar2(128);--фамилия
+name_cl				varchar2(128);--имя
+sname_cl			varchar2(128);--отчество
+migr_card_arr		[MIGR_CARD_ARR];
+add_prop_arr		[PROPERTIES_ARR];
+
+
+error_message		varchar2(200);
+tmp_char			varchar2;
+
+int_id				[REFERENCE];
+ext_id				[REFERENCE];
+new_id				[REFERENCE];
+cl_class			varchar2(16);
+
+addresses			varchar2(32000);
+names				varchar2(32000);
+
+acc_bank			[BANKS_ACC_ARR];
+vid_cl_arr			[CL_CATEGORIE_ARR];
+address_arr			[ADDRESSES];
+cl_oper_arr			[CL_OPER_COLLECT];
+cont_arr			[CONTACTS_ARR];
+decl_arr			[DECLENSION_ARR];
+dispos_arr			[STR_DISPOSIT_ARR];
+inspect_arr			[TAX_INSP_ARR];
+names_arr			[NAMES_ARR];
+tmp_val				varchar2(32000);
+Cit_Res_Tbl			&prx_cit.Result_Tbl_Type;
+v_cert_type_snils ref [CERTIFIC_TYPE];
+
+--------------------------------------------------------------------------------
+function getAccounts return varchar2(32000) is
+res varchar2(32000);
+Begin
+	res:='';
+	for o in acc_bank loop
+		res:=res||o.[BANK].[NAME]			||sep||
+			to_char(o.[DATE_BEGIN],format)	||sep||
+			to_char(o.[DATE_END],format)	||sep||
+			o.[INN]							||sep||
+			o.[MAIN_V_ID]					||sep||
+			o.[NAME_ORG]					||sep||
+			o.[NOTES]						||sep||
+			o.[PR_FORM]						||sep||
+			o.[TYPE].[COD]					||sep||
+			o.[USH].[CODE]					||sep;
+	end loop;
+	return res;
+End;
+--------------------------------------------------------------------------------
+function getCity(City_Ref ref [NAMES_CITY]) return varchar2(2000) is
+Res varchar2(2000);
+begin
+	if City_Ref is not null then
+		Res :=	born_city	||sep||
+				born_region	||sep||
+				born_country;
+	end if;
+
+	return Res;
+end;
+--------------------------------------------------------------------------------
+function getOperations return varchar2(32000) is
+res varchar2(32000);
+Begin
+	res:='';
+	for (
+		select o (
+			o.[OPER_COUNT]			: oper_count
+		,	o.[OPER_DATE]			: oper_date
+		,	o.[OPER_SUM]			: oper_sum
+		,	o.[OPERATION]			: oper
+		)
+		in cl_oper_arr
+		where o.[STATE_PARAM] is null
+	)
+	loop
+		res:=res||o.OPER_COUNT			||sep||
+			to_char(o.OPER_DATE,format)	||sep||
+			o.OPER_SUM					||sep||
+			o.OPER.[NAME]			||sep;
+	end loop;
+	return res;
+End;
+--------------------------------------------------------------------------------
+function getOkonh return varchar2(32000) is
+res varchar2(32000);
+op_date	date;
+Begin
+	res:='';
+	op_date := ::[SYSTEM].OP_DATE;
+	for o in this.[OKONH_IN_PERIOD]
+			where	nvl(o.[DATE_BEGIN], op_date) <= op_date
+					and nvl(o.[DATE_END], op_date) >= op_date
+	loop
+		res:=res||o.[OKONH].[CODE]||sep;
+	end loop;
+	return res;
+End;
+--------------------------------------------------------------------------------
+function getContacts return varchar2(32000) is
+res varchar2(32000);
+Begin
+	res:='';
+	for o in cont_arr loop
+		res:=res||o.[ACTIV]			||sep||
+				replace(o.[NUMB], ';', chr(15))	||sep||
+				o.[PRIVATE].[CODE]	||sep||
+				o.[TYPE].[CODE]		||sep;
+	end loop;
+	return res;
+End;
+--------------------------------------------------------------------------------
+function getDecl return varchar2(32000) is
+res varchar2(32000);
+Begin
+	res:='';
+	for o in decl_arr loop
+		res:=res||o.[CASE_GR].[CODE]||sep||
+				o.[NAME]||sep;
+	end loop;
+	return res;
+End;
+--------------------------------------------------------------------------------
+function getDisposit return varchar2(32000) is
+res varchar2(32000);
+Begin
+	res:='';
+	for o in this.[DISPOSITS]
+	where o.[DATE_BEG] <= ::[SYSTEM].OP_DATE
+	and   o.[DATE_END] >= ::[SYSTEM].OP_DATE or o.[DATE_END] is null
+	loop
+		res:=res||o.[DISPOSITION].[SHORT_NAME]||sep||to_char(o.[DATE_BEG],'YYYY-MM-DD')||sep||to_char(o.[DATE_END],'YYYY-MM-DD')||sep;
+	end loop;
+	return res;
+End;
+--------------------------------------------------------------------------------
+function getDoc(Doc [CERTIFICATE], Is_Main boolean, cnt integer) return varchar2(32000) is
+res varchar2(32000);
+Begin
+	--Передача по db-link
+	if V_FORMAT_EXP.[0] = 1 then
+		Res :=	to_char(Doc.[DATE], format)		||sep||	-- Дата выдачи
+				to_char(Doc.[DATE_END], format)	||sep||	-- Действует окончания действия
+				rtl.bool_char(Is_Main)			||sep|| -- Основной (0/1)
+				Doc.[SER]						||sep||	-- Серия
+				Doc.[NUM]						||sep||	-- Номер
+				Doc.[PLACE]						||sep||	-- Место выдачи (реквизит удален. ничего не передаем, потому что в РБО операция вызывается из других.)
+				Doc.[TYPE].[CODE_GNI]			||sep||	-- Код документа
+				Doc.[WHO]						||sep||	-- Кем выдано
+				Doc.[DEPART_CODE]				||sep;	-- Код подразделения			
+				
+		return Res;
+	--Передача через Интегратор
+	else
+		&out_put_val('TYPE',cnt,Doc.[TYPE].[CODE_GNI])	--Тип удостоверения клиента
+		&out_put_val('SER',cnt,Doc.[SER])				--Серия удостоверения клиента
+		&out_put_val('NUM',cnt,Doc.[NUM])				--Номер удостоверения клиента
+		&out_put_val('WHO',cnt,Doc.[WHO])				--Организация, выдавшая паспорт
+		&out_put_val('DATE',cnt,Doc.[DATE])				--Дата выдачи
+		&out_put_val('DATE_END',cnt,Doc.[DATE_END])		--Дата окончания действия
+		&out_put_val('DEPART_CODE',cnt,Doc.[DEPART_CODE])--Код подразделения, выдавшего паспорт
+		&out_put_val('PLACE',cnt,Doc.[PLACE])				--Место выдачи
+		&out_put_val('MAIN',cnt,rtl.bool_char(Is_Main))	--Признак основного удостоверения
+	end if;
+	return null;
+End;
+--------------------------------------------------------------------------------
+function getDocs return varchar(32000) is
+Res varchar2(32000);
+Doc [CERTIFICATE];
+cnt integer := 0;
+begin
+	-- Основной документ
+	Doc := this.[DOC];
+	if Doc.[TYPE] is not null and trim(doc.[SER]||doc.[NUM]) is not null
+		and (Doc.[TYPE] != v_cert_type_snils or v_cert_type_snils is null or (Doc.[TYPE] = v_cert_type_snils and snils is null))
+	then
+		cnt := cnt + 1;
+		Res := GetDoc(Doc, true, cnt);
+	end if;
+	
+	-- Дополнительные удостоверения личности
+	for d in this.[DOC_ARR] where d.[TYPE] != v_cert_type_snils or v_cert_type_snils is null or ((d.[TYPE] = v_cert_type_snils and snils is null))
+	loop
+		cnt := cnt + 1;
+		Doc := d;
+		Res := Res||GetDoc(Doc, false, cnt);
+	end loop;
+	if v_cert_type_snils is not null and snils is not null then
+		Doc := null;
+		Doc.[TYPE] := v_cert_type_snils;
+		Doc.[NUM] := snils;
+		cnt := cnt + 1;
+		Res := Res||GetDoc(Doc, false, cnt);
+	end if;
+
+	return Res;
+end;
+--------------------------------------------------------------------------------
+function getInspect return varchar2(32000) is
+res varchar2(32000);
+Begin
+	res:='';
+	for o in inspect_arr loop
+		res:=res||to_char(o.[DATE],format)||sep||
+			o.[INSPECTOR]||sep||
+			o.[NAME].[NUM]||sep||
+			o.[NOTES]||sep;
+	end loop;
+	return res;
+End;
+function getResInfo return varchar2(32000) is
+res varchar2(32000);
+Begin
+	res:='';
+	for o in this.[RES_INFO] loop
+		res:=res||to_char(o.[DAT],format)||sep||
+			o.[INFO]||sep||
+			o.[SOURCE]||sep;
+	end loop;
+	return res;
+End;
+--------------------------------------------------------------------------------
+--Заполнение коллекции "Миграционные карты" для передачи через Интегратор
+procedure CITgetMigrCards(p_migr_cards_arr [MIGR_CARD_ARR]) is 
+cnt 	integer := 0;
+begin
+	for o in p_migr_cards_arr loop
+		cnt := cnt + 1;
+		&out_put_val('CARD_NUM', cnt, o.[CARD_NUM])		--
+		&out_put_val('CARD_SER', cnt, o.[CARD_SERIA])	--
+		&out_put_val('DATE_BEG', cnt, o.[DATE_BEG])		--
+		&out_put_val('DATE_END', cnt, o.[DATE_END])		--
+	end loop;
+end;
+--------------------------------------------------------------------------------
+-- Начало
+--------------------------------------------------------------------------------
+begin
+	&debug('PASS_TO_RETAIL.begin',0)
+	P_INDIVIDUAL := nvl(P_INDIVIDUAL, False);
+	for (select t(t:cert_type_snils) in ::[CERTIFIC_TYPE] where t.[KOD] = 'СНИЛС') loop
+		v_cert_type_snils := t.cert_type_snils;
+	end loop;
+
+	&sp(A1)
+	declare
+		v_addr ref [ADDRESS_OBJ];
+	begin
+		select a(a							--1
+				,a.[BORN]					--2
+				,a.[COM_STATUS].[CODE]		--3
+				,a.[COUNTRY].[CODE]			--4
+				,a.[DATE_ANK]				--5
+				,a.[DATE_PERS]				--6
+				,a.[DEPART].[CODE]			--7
+				--,a.[FAIL_LEVEL].[CODE]	--8
+				,a.[FAIL_MARK]				--9
+				,a.[FILIAL].[CODE]			--10
+				,a.[GROUP_LINK].[NUM]		--11
+				,a.[I_NAME]					--12
+				,a.[INN]					--13
+				,a.[INTERNAL_CODE]			--14
+				,a.[LOW]					--15
+				,a.[MARIGE_STATUS].[CODE]	--16
+				,a.[NAME]					--17
+				,a.[NOTES]					--18
+				,a.[OPER_CHARACTER]			--19
+				,a.[REG_STATUS].[REG_STATUS]--20
+				,a.[REGISTR_NUM]			--21
+				,a.[SEX].[CODE]				--22
+				,a.[VIDS_CL]				--23
+				,a.[ACC_BANK]				--24
+				,a.[ADDRESSES]				--25
+				,a.[BORN].[COUNTRY].[ALFA_3]--26
+				,a.[BORN].[PARENT]			--27
+				,a.[BORN].[NAME]			--28
+				,a.[BORN].[KLADR]			--29
+				,a.[CL_OPER1]				--30
+				,a.[CONTACTS]				--31
+				,a.[DECL_FIO]				--32
+				,a.[DISPOSITS]				--33
+				,a.[INSPECT]				--34
+				,a.[NAMES]					--35
+				,a%class					--36
+				,a.[DATE_FORM_UPD]			--37
+				,a.[SNILS]					--38
+
+				,a.[FAMILY_CL]				--39
+				,a.[NAME_CL]				--40
+				,a.[SNAME_CL]				--41
+				,a.[MIGR_CARD]				--42
+				,a.[ADD_PROP]				--43
+				
+				)
+		in ::[CL_PRIV] all
+		where a = this
+		into int_id							--1
+			,born							--2
+			,com_status_code				--3
+			,country_code					--4
+			,date_ank						--5
+			,date_pers						--6
+			,depart_code					--7
+			--,fail_level_code				--8
+			,fail_mark						--9
+			,filial_code					--10
+			,group_link_num					--11
+			,i_name							--12
+			,inn							--13
+			,internal_code					--14
+			,low							--15
+			,marige_status_code				--16
+			,name							--17
+			,notes							--18
+			,oper_c							--19
+			,reg_status_code				--20
+			,registr_num					--21
+			,sex_code						--22
+			,vid_cl_arr						--23
+			,acc_bank						--24
+			,address_arr					--25
+			,born_country					--26
+			,v_addr							--27
+			,born_city						--28
+			,born_kladr						--29
+			,cl_oper_arr					--30
+			,cont_arr						--31
+			,decl_arr						--32
+			,dispos_arr						--33
+			,inspect_arr					--34
+			,names_arr						--35
+			,cl_class						--36
+			,date_form_upd					--37
+			,snils							--38
+
+			,family_cl						--39
+			,name_cl						--40
+			,sname_cl						--41
+			,migr_card_arr					--42
+			,add_prop_arr					--43
+			;
+			
+			begin
+				with recursive r(region, parent, cls) as (
+					select x(x, x.[PARENT], x%class) in ::[ADDRESS_OBJ] where x = v_addr
+					union all
+					select x(x, x.[PARENT], x%class) in ::[ADDRESS_OBJ] join (r : rr) on rr.parent = x)
+				select x(x.region) in r where x.cls = ::[CODE_REGION]%class
+				into born_region;
+			exception
+				when no_data_found then
+					born_region := null;
+			end;
+	exception when NO_DATA_FOUND then
+		pragma error('Не найден клиент с ID='||this%id);
+	end;
+	&debug('client data is ok',0)
+	resident := this.[RESIDENT];
+	--получение уровня риска
+	declare
+		fl	ref [FAIL_LEVEL];
+		fv	number;
+	begin
+		::[RISK_RESULTS].[LIB].getRisk_FailValueAndLevel(this, fl, fv);
+		fail_level_code := fl.[CODE];
+	end;
+	
+	--Получение формата обмена, если он не определен в валидации (в случае, если операция вызывалась из другой операции)
+	if format_tbl.count = 0 then
+		format_tbl := &prx_cit.Cit_Pass_ClPriv_Grp(::[SYSTEM].[VARIABLES].ourdepart);
+		for i in 1..format_tbl.count
+		loop
+			--Если в списке форматов есть db-link, то считаем его умолчательным
+			if format_tbl(i).format_exp = 1 then
+				V_FORMAT_EXP.[0] := 1;
+				exit;
+			else
+				V_FORMAT_EXP.[0] := 2;
+			end if;
+		end loop;
+	end if;
+	&debug('get ext id',0)
+	--ext_id := &prx_cit.GetRecord(int_id, &prx_cit.c_client_obj_type);
+--	ext_id := &call_int(CIT_INT, INT_OBJ, 1).GetExtID([CIT_ABONENT](CODE = 'BSS'), ::[CL_PRIV]%class, int_id);
+--	if ext_id is null then
+--		ext_id := &call_int(CIT_INT, INT_OBJ, 1).GetExtID([CIT_ABONENT](CODE = 'CRS'), ::[CL_PRIV]%class, int_id);
+--	end if;
+	for (select a(a.[EXT_ID] :c_ext_id)
+		 in ::[CIT_OBJ] all
+		 where a.[CIT_AB] in (::[CIT_ABONENT](code = 'BSS')
+							 ,::[CIT_ABONENT](code = 'CRS')
+							 ,::[CIT_ABONENT](code = 'ETO')
+							 )
+		 and a.[OBJ_ID] = int_id
+		 and a.[OBJ_CLASS] = ::[CL_PRIV]%class
+		)
+	loop
+		ext_id := a.c_ext_id;
+	end loop;
+
+	&debug('ext id Is '||ext_id,0)
+	-- Категория клиента
+	begin
+		select a(a.[CATEGORY]->[CODE])
+		in vid_cl_arr
+		where a.[IT_MAIN] = True
+		fetch 1
+		into vid_cl_code;
+	exception
+		when NO_DATA_FOUND then
+			begin
+				select a(a.[CATEGORY]->[CODE])
+				in vid_cl_arr
+				fetch 1
+				into vid_cl_code;
+			exception
+				when NO_DATA_FOUND then
+					Null;
+			end;
+	end;
+	begin
+		select r(r%rowtype)
+			in ::[CL_INFO_REQ]
+			where r.[CLIENT] = this
+			into r_cl_info_req;
+	exception
+		when NO_DATA_FOUND or TOO_MANY_ROWS then
+			null;
+	end;
+	--Передача по db-link
+	if V_FORMAT_EXP.[0] = 1 then
+		&debug('througth DBLink',0)
+		pragma IF_DEF('JAVA', false); -- Не компилировать в 2MCA
+			pragma IF_DEF('RETAIL_EXISTS', true); -- Не компилировать при отсутствии синонима
+				if trim(this.[DOC].[BIRTH_PLACE]) is not null then
+					born_city := trim(this.[DOC].[BIRTH_PLACE]);
+				else
+					born_city	:= getCity(born);
+				end if;
+				addresses 	:= ::[CLIENT].[LIB_PASS_RBO].getAddresses(this,sep);
+				names	 	:= ::[CLIENT].[LIB_PASS_RBO].getNames(this, sep, format);
+				if r_cl_info_req%id is not null then
+					clreq_work_users := ::[CLIENT].[LIB_PASS_RBO].getWorkUsers
+						(p_cl_work_users == r_cl_info_req.[CL_WORK_USERS]
+						,p_sep == sep
+						,p_date_format == format
+						,p_cit == false
+						);
+				end if;
+				if P_INDIVIDUAL then
+					tmp_char 	:= retailexecutor.lock_open;
+				end if;
+				&debug('call create_client_2 in the IBSO',0)
+				new_id:=retailclients.CREATE_CLIENT_2(	int_id,
+														ext_id,
+														getAccounts,
+														addresses,
+														born_city,
+														getOperations,
+														getOkonh,
+														com_status_code,
+														getContacts,
+														country_code,
+														date_ank,
+														date_pers,
+														getDecl,
+														depart_code,
+														getDisposit,
+														getDocs,
+														fail_level_code,
+														fail_mark,
+														filial_code,
+														group_link_num,
+														i_name,
+														inn,
+														getInspect,
+														internal_code,
+														low,
+														marige_status_code,
+														name,
+														names,
+														notes,
+														oper_c,
+														reg_status_code,
+														registr_num,
+														resident,
+														getResInfo,
+														sex_code,
+														vid_cl_code,
+														visa_info,
+														error_message,
+														null,
+														date_form_upd,
+														r_cl_info_req.[FIRST_ACC_DATE],
+														clreq_work_users
+														);
+		
+				if P_INDIVIDUAL then
+					retailexecutor.lock_close;
+				end if;
+				&debug('..done, new_id='||new_id||', error='||error_message,0)
+				
+				if new_id is not null then
+					if ext_id is not null then
+						&prx_cit.DeleteRecord(ext_id, 'EXTERNAL');
+					end if;
+					&prx_cit.AddRecord(	p_int_id		== int_id,
+										p_ext_id		== new_id,
+										p_main_v_id		== null,
+										p_obj_type		== &prx_cit.c_client_obj_type,
+										p_is_summary	== null,
+										p_return_str	== error_message,
+										p_pass_time		== Sysdate,
+										p_pass_user		== stdlib.User_ID	);
+				end if;
+				&debug('go to end',0)
+				if error_message is not null then
+					&rb(A1)
+					pragma error('IBSO Retail: '||error_message);
+				end if;
+			pragma END_IF; --RETAIL_EXISTS
+			
+			pragma IF_DEF('RETAIL_EXISTS', false);
+				pragma Error('Передача в ЦФТ-Ритейл банк по db-link не поддерживается!');	
+			pragma END_IF;
+		pragma END_IF; -- JAVA
+
+				
+		pragma IF_DEF('JAVA', true);
+			pragma Error('Передача в ЦФТ-Ритейл банк по db-link не поддерживается!');	
+		pragma END_IF;
+	--Передача через Интегратор
+	else
+		&debug('througth Integrator',0)
+		&out_ini						-- инициализация структуры
+		&out_put_coll('REQ_CL_PRIV',1)
+
+		&out_put_val('ID_EXT',1,ext_id)	--ID в принимающей Системе (в Retail)
+		&out_put_val('ID_INT',1,int_id)	--ID в передающей Системе (в IBSO)
+		&out_put_val('NAME',1,name)		--Наименование клиента
+
+		&out_put_val('LAST_NAME',1,family_cl)				--Фамилия
+		&out_put_val('FIRST_NAME',1,name_cl)				--Имя
+		&out_put_val('SUR_NAME',1,sname_cl)					--Отчество
+
+		&out_put_coll('ACCS_BANK',1)	--Контейнер счетов в других банках - массив "Счета в банках"
+			::[CLIENT].[LIB_PASS_RBO].CITgetAccounts(acc_bank);
+		&out_put_end_coll
+		&out_put_coll('ADDRESSES',1)	--Контейнер, содержащий данные об адресах клиента
+			::[CLIENT].[LIB_PASS_RBO].CITgetAddresses(address_arr);
+		&out_put_end_coll
+		if trim(this.[DOC].[BIRTH_PLACE]) is not null then
+			born_city := trim(this.[DOC].[BIRTH_PLACE]);
+			born_country := null;
+			born_region := null;
+			born_kladr := null;
+		end if;
+		&out_put_coll('BORN',1)			--Контейнер параметров место рождения клиента
+			&out_put_val('COUNTRY',1,born_country)	--Государство (буквенный код - альфа 3)
+			&out_put_val('REGION',1,born_region)	--Регион (обл., край, респ) (наименование)
+			&out_put_val('CITY',1,born_city)		--Населенный пункт (наименование)
+			&out_put_val('KLADR_CODE',1,born_kladr)	--Код КЛАДР населенного пункта
+		&out_put_end_coll
+		&out_put_coll('CL_OPER',1)		--Контейнер операций клиента ? массив "Операции клиента"
+			::[CLIENT].[LIB_PASS_RBO].CITgetOperations(cl_oper_arr);
+		&out_put_end_coll
+		&out_put_val('OKONH',1,getOkonh)--Действующие коды ОКОНХ (разделитель - точка с запятой)
+		&out_put_val('COM_STATUS',1,com_status_code)--Код статуса
+		&out_put_coll('CONTACTS',1)		--Контейнер контактов клиента ? массив "Контакты для связи"
+			::[CLIENT].[LIB_PASS_RBO].CITgetContacts(cont_arr);
+		&out_put_end_coll
+		&out_put_val('COUNTRY',1,country_code)	--Цифровой код страны гражданства клиента
+		&out_put_val('DATE_OP',1,date_ank)		--Дата заведения досье клиента
+		&out_put_val('DATE_PERS',1,date_pers)	--Дата рождения клиента
+		&out_put_coll('DECL_FIO',1)				--Контейнер данных о склонении наименований клиента ? массив "Склонения наименований"
+			::[CLIENT].[LIB_PASS_RBO].CITgetDecl(decl_arr);
+		&out_put_end_coll
+		&out_put_val('DEPART',1,depart_code)	--Код подразделения
+		&out_put_coll('DISPOSITS',1)			--Контейнер отношений клиента с банком ? массив "История характера отношений с банком"
+			::[CLIENT].[LIB_PASS_RBO].CITgetDisposit(dispos_arr);
+		&out_put_end_coll
+		&out_put_coll('CERTIFICATES',1)			--Контейнер удостоверений клиента ? массив "Удостоверения"
+			tmp_val := getDocs;
+		&out_put_end_coll
+		&out_put_val('FAIL_LEVEL',1,fail_level_code)--Код уровня риска клиента по легализации
+		&out_put_val('FAIL_MARK',1,fail_mark)		--Обоснование уровня риска клиента по легализации
+		&out_put_val('FILIAL',1,filial_code)		--Код филиала
+		&out_put_val('GROUP_LINK',1,group_link_num)	--Номер группы взаимосвязанных клиентов
+		&out_put_val('I_NAME',1,i_name)				--Интернациональное наименование клиента
+		&out_put_val('INN',1,inn)					--ИНН клиента
+		&out_put_val('SNILS',1,snils)				--СНИЛС клиента
+		&out_put_coll('INSPECT',1)	--Контейнер налоговых инспекций ? массив "Налоговая инспекция"
+			::[CLIENT].[LIB_PASS_RBO].CITgetInspect(inspect_arr);
+		&out_put_end_coll
+		&out_put_val('INTERNAL_CODE',1,internal_code)--Внутренний код для импорта
+		&out_put_val('LOW',1,low)					--Отношения с законом
+		&out_put_val('MARIGE_STATUS',1,marige_status_code)--Код семейного положения
+		&out_put_coll('NAMES',1)	--Контейнер допустимых наименований клиента ? массив "Допустимые наименования клиента"
+			::[CLIENT].[LIB_PASS_RBO].CITgetNames(names_arr);
+		&out_put_end_coll
+		&out_put_val('NOTES',1,substr(notes,1,2000))			--Примечание
+		&out_put_val('OPER_CHARACTER',1,substr(oper_c,1,2000))	--Характеристика операций
+		&out_put_val('REG_STATUS',1,reg_status_code)			--Код статуса зарегистрированного лица
+		&out_put_val('REGISTR_NUM',1,registr_num)				--Регистрационный номер
+		&out_put_val('RESIDENT',1,resident)						--Резидент
+		&out_put_val('SEX',1,sex_code)							--Код пола клиента
+		&out_put_val('VID_CL',1,vid_cl_code)					--Категория клиента
+
+		&out_put_val('DATE_FORM_UPD',1,date_form_upd)			--Дата обновления анкеты
+		if r_cl_info_req%id is not null then
+			&out_put_val('CLREQ_FIRST_ACC_DATE',1,r_cl_info_req.[FIRST_ACC_DATE])
+			&out_put_coll('CLREQ_WORK_USERS',1)	-- Контейнер для массива "Пользователи, работающие с клиентом"
+				clreq_work_users := ::[CLIENT].[LIB_PASS_RBO].getWorkUsers
+					(p_cl_work_users == r_cl_info_req.[CL_WORK_USERS]
+					,p_sep == sep
+					,p_date_format == format
+					,p_cit == true
+					);
+			&out_put_end_coll
+		end if;
+
+		&out_put_coll('MIGR_CARD',1)			--Контейнер миграционные карты ? массив "Миграционная карта"
+			CITgetMigrCards(migr_card_arr);
+		&out_put_end_coll
+
+		-- Дополнительные свойства
+		for (select x(x.[STR]		:c_str
+					 ,p.c_prop_code	:c_prop_code
+					 ,p.c_prop_id	:c_prop_id
+					 )
+			 in add_prop_arr
+			 , (select p(p.column_value																:c_prop_code
+			 			,::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].getPropertyGrpFromCache(p.column_value)	:c_prop_id
+			 			)
+			 	in ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].getPropCodesVarr()
+			   )
+			 where x.[GROUP_PROP] = p.c_prop_id
+			)
+		loop
+			&out_put_val(x.c_prop_code, 1, x.c_str)
+		end loop;
+
+		&out_put_end_coll
+		
+		--Отправка запросов заданным группам
+		for i in 1..format_tbl.count
+		loop
+			if format_tbl(i).format_exp = 3 and format_tbl(i).cit_grp is not null then
+				&debug('format_tbl(i).cit_grp = ' || format_tbl(i).cit_grp,0)
+				-- Постановка запроса в очередь
+				&prx_cit.Send_By_Ref(format_tbl(i).cit_grp, int_id, Cit_Res_Tbl);
+				
+				--Сохранение соответствия клиента и истории запросов
+				--::[CLIENT].[LIB_PASS_RBO].addRecordToHistory(Cit_Res_Tbl, int_id, cl_class, ext_id);
+				declare
+					vReq	ref [CIT_OUT_REQUEST];
+					vCitObj	ref [CIT_OBJ];
+					idx		string;
+				begin
+					idx  := Cit_Res_Tbl.first;
+					if idx is not null then
+						vReq := Cit_Res_Tbl(idx).req;
+						if vReq is not null then
+							vCitObj := ::[PSH_ETO_CARD].[PSH_CIT_INT_LIB].writeClientToMapping(int_id, ::[CIT_ABONENT](code = 'BSS'), ext_id);
+							&prx_cit.addHistoryRecord([CL_PRIV]%class, int_id, null, vReq, vCitObj);
+						end if;
+					end if;
+				end;
+			end if;
+		end loop;
+	end if;
+	
+	format_tbl.delete;
+	&debug('PASS_TO_RETAIL.end',0)
+end;
+end;
+end;

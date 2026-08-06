@@ -1,0 +1,3134 @@
+class CLIENT;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Библиотека')
+@tag('KUP_P')
+library PSH_LIB_P is
+public default_private   const   ref [OWNER_COM] := ::[OWNER_COM]([CODE] = '2');	-- рабочий
+public default_priv      const   ref [ADDRESS_TYPE] := ::[ADDRESS_TYPE]([KOD] = 'REGISTRATION');	-- Прописка
+public default_corp      const   ref [ADDRESS_TYPE] := ::[ADDRESS_TYPE]([KOD] = 'CORP');	-- Юридический
+
+
+				
+
+pragma include ([RUNTIME]::[DEBUG_MACRO]);
+
+fmt	string:='dd/mm/yyyy';
+fmt_s	string:='dd/mm/yy';  -- NGA17012014
+
+function iif(V boolean, V1 varchar2(32767), V2 varchar2(32767)) return varchar2(32767) is begin if V then return V1; end if; return V2; end;
+
+-- NGA 04/06/2015 добавим макросы по аналогии с &IPDL, &RPDL, &DLMO
+pragma macro(IPDL_RELATIVE, '''IPDL_RELATIVE''');
+pragma macro(IPDL_REPR    , '''IPDL_REPR'''    );
+
+-- NGA 04/06/2015 end
+
+pragma include (::[IPDL_CATEGORY].[LIB]);
+dp	integer:=0;	--управление debug_pipe
+
+op_dat [Date];
+--------------------------------
+rabota ref [WORK_BOOK];       -- ссылка на структуру "Трудовая деятельность"
+account ref [AC_FIN];          -- ссылка на фин. счет
+account_tmp ref [AC_FIN];          -- ссылка на фин. счет
+
+client_priv	[CL_PRIV];
+client_corp	[CL_CORP];
+client_bank ref [CL_BANK_N];
+
+temp_memo memo_32767;
+V_ERR	memo_32767;
+
+date_acc1 date;
+date_mov1 date;
+
+temp_string [MEMO_32767] := '';
+
+--> ivanov.a.v. 17/04/2017 Анкета
+v_date_beg_cl	[DATE];
+v_date_end_cl	[DATE];
+v_rec_prod_tbl	[PRODUCT].[PSH_LIB].rec_prod_tbl; -- updated CHANGE_SHORT_NAME PSB_LIB->PSH_LIB 15/10/25
+v_user_cr		number;
+v_max_user		number;
+v_is_once		boolean;
+v_idx_upd		varchar2(100);
+type rec_date_upd is record(
+							date_upd		[DATE],
+							user_upd		number
+);					
+type tbl_date_upd is table of rec_date_upd index by varchar2(100);
+t_date_upd	tbl_date_upd;
+--< ivanov.a.v. 17/04/2017 Анкета
+--------------------------------
+/*************************************************************
+ NGA Функция возвращает всех учредителей организации с %% через ;
+**************************************************************/
+procedure PSB_Get_FOUNDERS(p_cl [CL_CORP], p_used_length in integer, p_founders out [MEMO_32767], p_err out boolean, p_founder_counter out integer) is
+	available_length integer := 32500 - p_used_length;
+	adding_str [MEMO_32767];
+begin
+	for
+	(
+		select fonder
+		(
+			fonder.[FOUNDER].[NAME]: 	f_name,
+		    fonder.percent         :    per 	
+		)
+	in p_cl.[REGISTER].[FOUNDERS]  order by 2 desc,1
+	)
+	loop
+		--adding_str := to_char(p_founder_counter)||'. '||fonder.f_name||','||chr(13);
+		adding_str := fonder.f_name||' '||fonder.per||'%; ';
+		if length(adding_str) > available_length then
+			p_founders := substr(rtrim(p_founders),1,length(p_founders)-2);
+			p_err := true;
+			return;
+		else
+			available_length := available_length - length(adding_str);
+			--p_founders := p_founders||to_char(p_founder_counter)||'. '||fonder.f_name||','||chr(13);
+		end if;
+		p_founders := p_founders || adding_str;
+	end loop;
+	
+	p_founders := substr(rtrim(p_founders),1,length(p_founders)-2);
+end;
+
+/**********************************************************
+--Дианков А.В. 29.03.2016 Была ли смена документов клиента?
+/*********************************************************/
+--Дианков А.В. 29.03.2016 Была ли смена документов клиента?
+public function CH_DOC(CL ref [CLIENT]) return string is 
+begin
+	
+	for ( select x(x)
+		  in ::[CL_HIST] all
+		  where x.[CLIENT_REF] = CL
+			  AND x.[QUAL] = 'DOC.NUM'
+			  AND x.[VALUE] is not null
+	) loop
+		return '1';
+	end loop;
+	return '0';
+end;
+
+
+/********************************************************
+ Возвращает всех должностных лиц из массива ALL_BOSS
+ (ФИО, должность, паспортные данные, дата рождения, адрес)
+*********************************************************/
+procedure get_all_boss(p_cl in [CL_CORP], p_used_length in integer, p_bosses out [MEMO_32767], p_err out boolean, p_boss_counter out integer) is
+	available_length integer := 32500 - p_used_length;
+	adding_str [MEMO_32767];
+begin
+	p_err := false;
+	p_bosses := '';
+	p_boss_counter := 0;
+	for
+	(
+		select dolg
+		(
+			dolg.[RANGE].[VALUE]: 	d_range,
+			dolg.[FASE].[NAME]:		d_name
+		)
+	in p_cl.[ALL_BOSS]	
+	where dolg.[FASE] is not null and
+		  nvl(dolg.[WORK_BEGIN],op_dat) <= op_dat and
+		  nvl(dolg.[WORK_END],op_dat) >= op_dat
+	)
+	loop
+		adding_str := rtrim(dolg.d_range || ' ' || dolg.d_name) || chr(13);
+		if length(adding_str)>available_length then
+			p_err := true;
+			return;
+		else
+			p_bosses := p_bosses || adding_str;
+			available_length := available_length - length(adding_str);
+			p_boss_counter := p_boss_counter+1;
+		end if;
+	end loop;
+end;
+
+
+/**************************************************************
+ возвращает строку, содержащую все контакты типа contact_type
+ и принадлежности contact_private
+***************************************************************/
+public function GetContacts(cont_arr [CONTACTS_ARR], contact_type string) return varchar2(1000) is 
+str varchar2(1000);
+begin
+	str := '';
+	if contact_type is not null  then
+	-- optimaze
+		for
+		(
+			select res
+			(
+				res.[PRIVATE].[VALUE]: 	c_priv,
+				res.[TYPE].[VALUE]:		c_val,
+				res.[NUMB]:				c_numb
+			)
+		in cont_arr
+		where res.[ACTIV]=true and res.[NUMB] is not null and res.[TYPE].[CODE] = contact_type and (res.[PRIVATE].[CODE] in ('1', '2', '3','SMS','ADD','CONNECT','REAL_LIVE','REGISTRATION') or res.[PRIVATE] is null) order by res.[PRIVATE].[CODE]
+		)	
+		loop
+			if InStr(Upper(res.c_priv),Upper(res.c_val))>0 then
+		  		str := str||LTRIM(res.c_priv||' '||res.c_numb||NL$);
+			elsif InStr(Upper(res.c_val),Upper(res.c_priv))>0 then
+		  		str := str||LTRIM(res.c_val||' '||res.c_numb||NL$);
+			else
+		  		str := str||LTRIM(res.c_priv||' '||res.c_val||' '||res.c_numb||NL$);
+			end if;
+		end loop;
+	else
+		return '';
+	end if;
+	return str;
+end;
+
+/*******************************************
+ Функция возвращает сведения о документах,
+ подтверждающих право проживания в РФ
+********************************************/
+function Get_Visa(p_cl [CL_PRIV], p_date date) return varchar2(32000)
+is
+	str varchar2(32000) := '';
+begin
+	-- optimaze
+	for
+	(
+		select v_visa
+		(
+			v_visa.[TYPE].[FULL_NAME]: 	v_name,
+			v_visa.[SER]:				v_ser,
+			v_visa.[NUM]:				v_num,			
+			v_visa.[DATE]:				v_date,
+			v_visa.[DATE_END]:			v_date_end,
+			v_visa.[WHO]:				v_who
+		)
+	in p_cl.[DOC_ARR]
+	where v_visa.[TYPE].[Residence_right]  and
+		  nvl(v_visa.[DATE],p_date) <= p_date and
+		  nvl(v_visa.[DATE_END],p_date) >= p_date	
+	)	
+	loop
+		-- VISA инфо
+		str :=  str||
+				nvl(v_visa.v_name, '')||
+				' Серия: '||nvl(v_visa.v_ser,'-')||' №: '||nvl(v_visa.v_num,'-')||
+				' Действует с '||nvl(to_char(v_visa.v_date,'dd.mm.rr'),'-/-/--')||' по '||nvl(to_char(v_visa.v_date_end,'dd.mm.rr'),'-/-/--')||
+				' Выдан: '||ltrim(rtrim(v_visa.v_who))
+				||NL$;	
+	end loop;	
+	
+	return str;
+end;
+
+/*******************************************
+ Функция возвращает сведения о месте работы
+********************************************/
+function Get_Work(p_cl [CL_PRIV], p_date date) return varchar2(32000)
+is
+	str varchar2(32000) := '';
+	op_dat [Date];
+begin
+	op_dat := nvl(p_date,[System].[Op_date]);
+	for
+		(
+			select rabota
+				( nvl(rabota.[CORP_R].[NAME], rabota.[CORP])	:vCorp
+				, rabota.[RANGE]								:vRange
+				)
+			in p_cl.[WORK_ACTIVITY]
+			where
+				    (nvl(rabota.[START_DATE],op_dat) <= op_dat )
+				and	(nvl(rabota.[END_DATE],op_dat) >= op_dat )
+				and (rabota.[CORP_R] is not null or rabota.[CORP] is not null or rabota.[RANGE] is not null)
+			order by nvl(rabota.[START_DATE],op_dat) desc
+		)
+	loop
+		str := str||trim(rabota.vCorp||' '||rabota.vRange)||NL$;
+	end loop;
+	str := substr(str,1,length(str)-2);	
+	return str;
+end;
+
+/**********************************************************
+ Функция возвращает сведения обо всех минграционных картах
+**********************************************************/
+function Get_Migration_Card(p_cl [CL_PRIV], p_date date) return varchar2(32000) is
+str varchar2(32000);
+begin
+	str :='';
+	for (
+		select x(x.[CARD_NUM]   :CARD_NUM
+				,x.[DATE_BEG]   :DATE_BEG
+				,x.[DATE_END]   :DATE_END
+				,x.[CARD_SERIA] :CARD_SER)
+		in p_cl.[MIGR_CARD]
+		where	nvl(x.[DATE_BEG],p_date) <= p_date
+			and	nvl(x.[DATE_END],p_date) >= p_date
+		)
+	loop
+		--NGA16/10/2015 str := str|| 'Номер карты: '||nvl(x.[CARD_NUM], '-') ||' Действует с '||nvl(to_char(x.[DATE_BEG],'dd.mm.rr'), '-/-/--')||' по '||nvl(to_char(x.[DATE_END],'dd.mm.rr'), '-/-/--')||NL$;
+		str := str ||'Серия карты: ' ||nvl(x.[CARD_SER], '-') ||
+		             ' Номер карты: '||nvl(x.[CARD_NUM], '-') ||
+		             ' Действует с ' ||nvl(to_char(x.[DATE_BEG],'dd.mm.rr'), '-/-/--')||
+		             ' по '||nvl(to_char(x.[DATE_END],'dd.mm.rr'), '-/-/--')||NL$;
+	end loop;	
+	return str;	                        	
+end;
+
+/**********************************************************
+ Функция возвращает ссылку минграционной карты
+**********************************************************/
+--Функция возвращает ссылку минграционной карты
+public function Ref_Migration_Card(p_cl [CL_PRIV], p_date date) return ref [MIGRATION_CARD] is 
+mig ref [MIGRATION_CARD]:=null;
+begin
+	
+	for (
+		select x(x :id)
+		in p_cl.[MIGR_CARD]
+		where	nvl(x.[DATE_BEG],p_date) <= p_date
+			and	nvl(x.[DATE_END],p_date) >= p_date			
+		)
+	loop
+		mig:=x.id;	
+	end loop;	
+	return mig;	                        	
+end;
+
+/**********************************************************
+Функция возвращает паспортные данные клиента - физ лица.
+**********************************************************/
+public function Get_passport(p_cl [CL_PRIV]) return string is 
+doc [CERTIFICATE];
+begin
+	null;
+	doc := p_cl.[DOC];
+	if doc.[type] is not null then
+	 	return doc.[type].[NAME]||
+	 		   bool_char(doc.[SER] is null, null, ' '||doc.[SER])||
+ 			   bool_char(doc.[NUM] is null, null, ' №'||doc.[NUM])||
+			   bool_char(doc.[date]is null, null, '  выдан '||to_char(doc.[date],'dd/mm/yyyy'))||
+			   bool_char(doc.[WHO] is null, null, ' '||doc.[WHO])||
+			   bool_char(doc.[DEPART_CODE] is null, null, ' код подр. '||doc.[DEPART_CODE]);
+	elsif doc.[WHO] is not null then
+		return doc.[WHO];
+	end if;
+end;
+
+
+/**********************************************************
+Функция возвращает адрес строкой
+**********************************************************/
+--Функция возвращает адрес строкой
+public Function GetAddress(	cl_adresses		[CLIENT].[ADDRESSES]%type
+						,AddRecv varchar2(100) default null
+						,AddrCode varchar2(20) default null
+			)return varchar2(1000) is 
+addr			varchar2(1000);
+addr_ref		ref [PERSONAL_ADDRESS];
+begin
+	AddrCode := upper(AddrCode);
+	begin
+		select a(a)
+			in ::[PERSONAL_ADDRESS], (::[ADDRESS_TYPE] all : t ) all
+			where	a%collection = cl_adresses
+					and t = a.[TYPE]
+					and t.[KOD] = AddrCode
+					and rownum <= 1
+			into addr_ref;
+	exception
+		when NO_DATA_FOUND then
+			if AddrCode is null then   -- ищем любой адрес
+				begin
+					select a(a)
+						in ::[PERSONAL_ADDRESS], (::[ADDRESS_TYPE] all: t) all
+						where	a%collection = cl_adresses
+								and t = a.[TYPE]
+								and rownum <= 1
+						into addr_ref;
+				exception when NO_DATA_FOUND then
+					null;
+				end;
+			end if;
+	end;
+	addr := VIEWFUN.GetAddressByRef(	a		== addr_ref,
+										AddRecv	== AddRecv
+										--,p_struct == 2
+										);
+	return addr;
+end;
+
+--------------------------
+
+/**********************************************************
+Функция возвращает ссылку на адрес
+**********************************************************/
+--Функция возвращает ссылку на адрес
+public Function GetAddressRef(	cl_adresses		[CLIENT].[ADDRESSES]%type
+						,AddRecv varchar2(100) default null
+						,AddrCode varchar2(20) default null
+			)return ref [PERSONAL_ADDRESS] is 
+addr_ref		ref [PERSONAL_ADDRESS];
+begin
+	AddrCode := upper(AddrCode);
+	begin
+		select a(a)
+			in ::[PERSONAL_ADDRESS], (::[ADDRESS_TYPE] all : t ) all
+			where	a%collection = cl_adresses
+					and t = a.[TYPE]
+					and t.[KOD] = AddrCode
+					and rownum <= 1
+			into addr_ref;
+	exception
+		when NO_DATA_FOUND then
+			if AddrCode is null then   -- ищем любой адрес
+				begin
+					select a(a)
+						in ::[PERSONAL_ADDRESS], (::[ADDRESS_TYPE] all: t) all
+						where	a%collection = cl_adresses
+								and t = a.[TYPE]
+								and rownum <= 1
+						into addr_ref;
+				exception when NO_DATA_FOUND then
+					null;
+				end;
+			end if;
+	end;
+
+	return addr_ref;
+end;
+
+
+------------------------
+-- проверка первого движения по счету
+function get_first_move_date(p_acc ref [AC_FIN]) return date is
+date_first		date;		-- Дата первого движения по счету
+begin
+  date_first := null;
+	if p_acc is not null then
+		select arcm(min(arcm.[DATE])) in p_acc.[ARC_MOVE] into date_first;
+  end if;
+	return date_first;
+end;
+
+
+-------------------------------------------------------------------------
+function GetEditDates(cl_ref [CLIENT_REF], on_date date, upd_date date) return varchar2(200) is
+IdClHi	[CL_HIST];
+tmp_str varchar2(200);
+v_upd_date varchar2(20);
+
+begin
+	tmp_str := '';
+	v_upd_date := nvl(::[RUNTIME].[FDP].pdat(upd_date,''), '*');
+for (
+	select distinct cht (cht.[DATE_EDIT] : DATE_EDIT) in ::[CL_HIST]
+	where cht.[CLIENT_REF] = cl_ref
+	and (trunc(cht.[DATE_EDIT]) <= trunc(on_date))
+	order by cht.[DATE_EDIT]
+		)
+	loop
+     tmp_str := tmp_str || '; ' || ::[RUNTIME].[FDP].pdat(cht.[DATE_EDIT],'');
+	end loop;
+	tmp_str := ltrim(tmp_str);
+	tmp_str := ltrim(tmp_str, ';');
+	if trunc(upd_date) < trunc(on_date) then
+	if instr(tmp_str, v_upd_date) <= 0 then
+		tmp_str := tmp_str || '; ' || v_upd_date;
+	end if;
+	end if;
+	tmp_str := ltrim(tmp_str, '*');
+	return tmp_str;
+end;
+
+-------------------------------------------------------------------------
+/** /
+function GetEditDates_(cl_ref [CLIENT_REF], on_date date, upd_date date) return varchar2(200) is
+IdClHi	[CL_HIST];
+tmp_str varchar2(200);
+v_upd_date varchar2(20);
+
+begin
+	tmp_str := '';
+	for dfu in cl_ref.[DATES_FORM_UPD] where dfu.[DATE_UPD] < on_date+1  loop
+		tmp_str := tmp_str || '; ' || ::[RUNTIME].[FDP].pdat(dfu.[DATE_UPD],'');
+	end loop;
+	tmp_str := ltrim(tmp_str, ';');
+	return tmp_str;
+end;
+/**/
+
+-------------------------------------------------------------------------
+function GetAccs(cl_ref [CLIENT_REF], on_date date) return varchar2(3000) is  --NGA 400
+tmp_str varchar2(3000);  --  NGA 400
+begin
+	tmp_str := '';
+	
+ 	for a in ::[AC_FIN]
+		where a.[CLIENT_V] = cl_ref
+			and trunc(a.[DATE_OP]) < on_date+1
+		order by a.[DATE_OP] asc loop
+ 		tmp_str := tmp_str || NL$ || a.[MAIN_V_ID];
+ 	end loop;
+	
+	return ltrim(tmp_str, NL$);
+end;
+
+--Башкиров В.Г. 22.08.2012 Вычислим куратора или ответсвенного по счету
+public function GetCurator(cl_ref [CLIENT_REF], on_date date default [SYSTEM].[OP_DATE]) return [USER_REF] is 
+NameUser [NAME];
+begin
+	NameUser:=GetProp(cl_ref,'PSB_CURATOR',on_date);
+	if NameUser is not null then
+		for u in ::[USER] where u.[NAME]=NameUser and (u.[END_DATE] is null or u.[END_DATE]<=on_date) loop
+			debug_pipe('Ответственный = '||u.[NAME],dp);
+			return u;
+		end loop;
+	end if;
+	return null;
+end;
+
+public function GetUser (StrUserMachine string(1000)) return [USER_REF] is 
+t integer:=InStr(StrUserMachine,'.');
+vUserName string(1000);
+begin
+	if t>0 then
+		vUserName:=SubStr(StrUserMachine,1,t-1);
+		for u in ::[USER] where u.[USERNAME]=vUserName loop --and (u.[END_DATE] is null or u.[END_DATE]<=on_date) loop
+			return u;
+		end loop;
+	end if;
+	return null;
+end;
+
+-- Функция возвращает основной код ОКВЭД клиента
+-- Функция возвращает  ссылку на основной код ОКВЭД клиента
+public function Get_Main_OKVED
+(	p_client ref [CLIENT],
+	p_date date default null
+)return char is 
+begin		
+	if p_date is null then
+		p_date := ::[SYSTEM].[OP_DATE];
+	end if;	
+	/*
+	for ( select c(c.[OKVED].[NAME]: ok_ref)
+			in p_client.[OKVED_IN_PERIOD]
+			where	nvl(c.[MAIN], false)= true
+					and nvl(c.[DATE_BEGIN],p_date) <= p_date
+					and nvl(c.[DATE_END],p_date) >= p_date
+	)loop
+		return c.ok_ref;
+	end loop;			
+	*/
+	for ( select c(c.[OKVED]: ok_ref)
+			in p_client.[OKVED_IN_PERIOD]
+			where	nvl(c.[MAIN], false)= true
+					and nvl(c.[DATE_BEGIN],p_date) <= p_date
+					and nvl(c.[DATE_END],p_date) >= p_date
+	)loop
+		return nvl(nvl(c.ok_ref.upper.upper.[NAME],c.ok_ref.upper.[NAME]),c.ok_ref.upper.[NAME]);
+	end loop;			
+end;
+
+-- Башкиров В.Г. 10.06.2011 Работа с доп.признаками
+public function GetValProp(PropRef ref [PROPERTIES]) return varchar2(32767) is 
+ExStr varchar2(32767);
+begin
+	--Башкиров В.Г. 08.06.2014 Переписана GetValProp
+	/** /
+	ExStr:=
+		'Дополнительное свойство '||PropRef.[GROUP_PROP].[FORM_CODE]||'-'||PropRef.[GROUP_PROP].[NAME]||LF$||
+		'на период '||to_char(PropRef.[DATE_BEG],fmt)||'-'||to_char(PropRef.[DATE_END],fmt)||LF$||
+		'Значение '||
+			iif(PropRef.[PROP] 	is not null,'свойство:'||				PropRef.[PROP].[CODE]||'-'||PropRef.[PROP].[NAME] ,'')||
+			iif(PropRef.[STR] 	is not null,'текст:'||					PropRef.[STR] 								,'')||
+			iif(PropRef.[NUM] 	is not null,'число:'||					PropRef.[NUM] 								,'')||
+			iif(PropRef.[V_DATE] is not null,'дата:'||					to_char(PropRef.[V_DATE],fmt) 				,'')||
+			iif(PropRef.[BOOL] 	is not null,'логика:'||					PropRef.[BOOL] 								,'')||
+			iif(PropRef.[OBJ] 	is not null,'ссылка на объект класса:'||PropRef.[OBJ]%class||' ID:'||PropRef.[OBJ]%ID,'');
+	/**/
+	ExStr:=
+		--PropRef.[GROUP_PROP].[FORM_CODE]||'-'||PropRef.[GROUP_PROP].[NAME]||' '||
+		'('||to_char(PropRef.[DATE_BEG],fmt)||iif(PropRef.[DATE_END] is null,'','-')||to_char(PropRef.[DATE_END],fmt)||')' ||
+			iif(PropRef.[PROP] 	is not null,' '||PropRef.[PROP].[CODE]||'-'||PropRef.[PROP].[NAME] ,'')||
+			iif(PropRef.[STR] 	is not null,' '||PropRef.[STR] 				   ,'')||
+			iif(PropRef.[NUM] 	is not null,' '||PropRef.[NUM] 				   ,'')||
+			iif(PropRef.[V_DATE]is not null,' '||to_char(PropRef.[V_DATE],fmt) ,'')||
+			iif(PropRef.[BOOL] 	is not null,' '||iif(PropRef.[BOOL],'Да','Нет'),'')||
+			iif(PropRef.[OBJ] 	is not null,' ссылка на объект класса:'||PropRef.[OBJ]%class||' ID:'||PropRef.[OBJ]%ID,'');
+	return ExStr;
+end;
+--Z$CLIENT_PSB_LIB.GetProp(A1_1.ID,PSB_CURATOR,null,2)
+public function GetProp(p_client ref [CLIENT],	P_PROP_CODE [STRING_35], p_date [DATE] default null, TypeVal integer default 0) return varchar2(32767) is 
+ExStr varchar2(32767);
+begin
+	if p_date is null then p_date :=::[SYSTEM].[OP_DATE]; end if;
+	
+	for(
+		select ap (
+					ap.[GROUP_PROP].[TYPE_VALUE]	: c_g_prop_type_val
+					, ap.[PROP].[NAME]				: c_prop_name
+					, ap.[NUM]						: c_num
+					, ap.[STR]						: c_str
+					, ap.[V_DATE]					: c_v_date
+					, ap.[BOOL]						: c_bool
+					, ap.[OBJ]						: c_obj
+					, ap.[GROUP_PROP].[TBP]			: c_g_prop_tbp
+					
+					)
+		in p_client.[ADD_PROP] all
+	
+	    where ap.[GROUP_PROP].[CODE] = P_PROP_CODE
+	    and	nvl(ap.[DATE_BEG],p_date) <= p_date
+	    and	nvl(ap.[DATE_END],p_date) >= p_date
+	    	
+	)loop
+		if    ap.c_g_prop_type_val is null 		then 	ExStr := ap.c_prop_name;
+		elsif ap.c_g_prop_type_val ='NUMBER'	then 	ExStr := to_char(ap.c_num,'999G999G999G999G990D0099');
+		elsif ap.c_g_prop_type_val ='STRING'    then 	ExStr := ap.c_str;
+		elsif ap.c_g_prop_type_val ='DATE' 	    then 	ExStr := to_char(ap.c_v_date,fmt);
+		elsif ap.c_g_prop_type_val ='BOOL' 	    then 	ExStr := iif(ap.c_bool, 'Да', iif(ap.c_bool is null,'Null','Нет'));
+		elsif ap.c_g_prop_type_val ='REF' 	    then 	ExStr := ::[RUNTIME].[OBJ].GetObjValue(ap.c_obj, ap.c_g_prop_tbp);
+		else						     				ExStr:='!Ошибка! Тип значения не определён!';
+		end if;		
+		
+		exit;
+	end loop;
+	
+	return trim(ExStr);
+end;
+
+public function getDisposits
+(	p_client ref [CLIENT],
+	p_date date default null
+)return char is 
+begin		
+	if p_date is null then
+		p_date := ::[SYSTEM].[OP_DATE];
+	end if;	
+	/*
+	for ( select c(c.[OKVED].[NAME]: ok_ref)
+			in p_client.[OKVED_IN_PERIOD]
+			where	nvl(c.[MAIN], false)= true
+					and nvl(c.[DATE_BEGIN],p_date) <= p_date
+					and nvl(c.[DATE_END],p_date) >= p_date
+	)loop
+		return c.ok_ref;
+	end loop;			
+	*/
+	for ( select c(c.[DISPOSITION]: desp_ref)
+			in p_client.[DISPOSITS]
+			where	/*nvl(c.[DISPOSITION].[MAIN], false)= true
+					and*/ nvl(c.[DATE_BEG],p_date) <= p_date
+					and nvl(c.[DATE_END],p_date) >= p_date
+	)loop
+		return c.desp_ref.[SHORT_NAME];
+	end loop;			
+end;
+
+--NGA07082013
+--NGA07082013 Список дат из массива "Даты обновлений"
+--                        и массива "История реквизитов"(только некоторые-изменение оценки риска при заполнении анкеты
+--                                                       и установка связи типа выгодо-приобретатель/даатель др.клиентами)
+--            Если массив "Даты обновлений" пуст, то история тоже не нужна! Значение посчитают сами процедуры, вызывающие эту функцию.
+public function GetDateAll(Cl ref [CLIENT], max_date [DATE] default [constant].DATE_MAX)
+return [MEMO] is 
+all_date [MEMO_32767];
+begin
+
+--> ivanov a.v. 17/04/2017 Оптимизация
+--*******************************
+	/** /
+	-- по датам обновлений
+	for	(	select	cl_du( cl_du.[DATE_UPD]	:c_date_upd)
+				in	[CL_DATE_FORM_UPD] all
+			where	cl_du.[DATE_UPD] is not null and
+					cl_du%collection = cl.[DATES_FORM_UPD] and
+					trunc(cl_du.[DATE_UPD])<=trunc(max_date)
+			order by cl_du.[DATE_UPD] desc)
+	loop
+		if InStr(all_date,to_char(cl_du.c_date_upd,fmt))>0 then
+			null;
+		else
+			--NGA20012014 all_date:=all_date||to_char(cl_du.[DATE_UPD],fmt)||'; ';
+			all_date:=all_date||to_char(cl_du.c_date_upd,fmt_s)||'; ';
+		end if;
+	end loop;
+
+	if trim(all_date) is not NULL then
+		all_date:=all_date||chr(10);
+	else
+		return '';
+	end if;
+	/**/
+	-- по датам из истории изменений (только основание смены уровня риска и выгодо(приобретатель/датель)
+	for	(	select cl_h( cl_h.[DATE_EDIT]	:c_date_edit)
+				in ::[CL_HIST]
+			where
+				(	cl_h.[QUAL] = 'FAIL_MARK' or
+					cl_h.[QUAL] = 'LINKS_OTHER' and
+						exists (	select a(a)
+										in ::[LINKS_CL] all
+									where a%collection = cl_h.[VALUE] and
+										a.[VID_LINK].[CODE] in ('ВЫГОДОПРИОБРЕТАТЕЛЬ','ВЫГОДОДАТЕЛЬ') )
+				) and
+				nvl(cl_h.[CLIENT_REF],cl_h.[CLIENT_ID])=Cl and
+				trunc(cl_h.[DATE_EDIT])<=trunc(max_date)
+			order by cl_h.[DATE_EDIT] desc)
+	loop
+		if InStr(all_date,to_char(cl_h.c_date_edit,fmt))>0 then
+			null;
+		else
+			--NGA20012014 all_date:=all_date||to_char(cl_h.[DATE_EDIT],fmt)||'; ';
+			all_date:=all_date||to_char(cl_h.c_date_edit,fmt_s)||'; ';
+		end if;
+	end loop;
+--< ivanov a.v. 17/04/2017 Оптимизация
+	return trim(trim(all_date),';');
+end;
+
+-- Дианков А.В. 24.10.2014  Должность
+--							ФИО первого лица
+--							Дата рождения
+--							Телефон
+--							Email
+public function position(cl_pos number) return memo is 						
+list memo;
+n number:=0;
+begin
+	for dt in ::[PERSONS_POS] all where dt%collection=cl_pos AND dt.[CHIEF]=true
+	loop
+		n:=n+1;
+		
+		if n = 1 then
+		 list:=dt.[RANGE].[VALUE];
+		else
+		 list:=list||chr(10)||dt.[RANGE].[VALUE];
+		end if;
+		
+	end loop;
+	
+	return list;
+end;
+
+public function fio_first(cl_pos number) return memo is 
+list memo;
+n number:=0;
+begin
+	for dt in ::[PERSONS_POS] all where dt%collection=cl_pos AND dt.[CHIEF]=true
+	loop
+		n:=n+1;
+		
+		if n = 1 then
+		 list:=dt.[FASE].[NAME];
+		else
+		 list:=list||chr(10)||dt.[FASE].[NAME];
+		end if;
+		
+	end loop;
+	
+	return list;
+end;
+
+public function fio_date_first(cl_pos number) return memo is 
+list memo;
+n number:=0;
+begin
+	for dt in ::[PERSONS_POS] all where dt%collection=cl_pos AND dt.[CHIEF]=true
+	loop
+		n:=n+1;
+		
+		if n = 1 then
+		 list:=to_char(dt.[FASE].[DATE_PERS], 'dd.mm.yyyy');
+		else
+		 list:=list||chr(10)||to_char(dt.[FASE].[DATE_PERS], 'dd.mm.yyyy');
+		end if;
+		
+	end loop;
+	
+	return list;
+end;
+
+public function fio_tel_first(cl_pos number) return memo is 
+list memo;
+n number:=0;
+begin
+	for dt in ::[PERSONS_POS] all where dt%collection=cl_pos AND dt.[CHIEF]=true
+	loop
+		n:=n+1;
+		
+		if n = 1 then
+		 list:=::[CL_PRIV].[PSH_LIB_CL].cl_phone_10(dt.[FASE].[CONTACTS]); -- updated CHANGE_SHORT_NAME PSB_LIB_CL->PSH_LIB_CL 14/10/25
+		else
+		 list:=list||chr(10)||::[CL_PRIV].[PSH_LIB_CL].cl_phone_10(dt.[FASE].[CONTACTS]); -- updated CHANGE_SHORT_NAME PSB_LIB_CL->PSH_LIB_CL 14/10/25
+		end if;
+		
+	end loop;
+	
+	return list;
+end;
+
+public function fio_email_first(cl_pos number) return memo is 
+list memo;
+n number:=0;
+begin
+	for dt in ::[PERSONS_POS] all where dt%collection=cl_pos AND dt.[CHIEF]=true
+	loop
+		n:=n+1;
+		
+		if n = 1 then
+		 list:=::[CL_PRIV].[PSH_LIB_CL].cl_email(dt.[FASE].[CONTACTS]); -- updated CHANGE_SHORT_NAME PSB_LIB_CL->PSH_LIB_CL 14/10/25
+		else
+		 list:=list||chr(10)||::[CL_PRIV].[PSH_LIB_CL].cl_email(dt.[FASE].[CONTACTS]); -- updated CHANGE_SHORT_NAME PSB_LIB_CL->PSH_LIB_CL 14/10/25
+		end if;
+		
+	end loop;
+	
+	return list;
+end;
+
+public function cl_email(cl ref [CLIENT]) return memo is 
+ret memo;
+begin
+   for cnt in cl.[CONTACTS] where cnt.[TYPE].[CODE] = 'MAIL' AND cnt.[ACTIV]       						
+   loop
+       if ret is null then ret:= substr(cnt.[NUMB],1,100);
+       else ret:= ret ||chr(10)||substr(cnt.[NUMB],1,100);
+       end if;
+   end loop;
+
+   return ret;	
+end;
+
+--NGA 19/12/2014
+public function GET_CONTACT(Cl ref [CLIENT]
+,tp ::[CONTACTS].[TYPE].[CODE]%type    default 'MOBILEPHONE'  -- тип связи
+,pr ::[CONTACTS].[PRIVATE].[CODE]%type default 'SMS'  -- принадлежность
+) return varchar2(100) is 
+  ret varchar2(100);
+  tp2 ::[CONTACTS].[TYPE].[CODE]%type    default 'PHONE';
+begin
+  ret := '  -  ';
+   for cnt in cl.[CONTACTS] where (cnt.[TYPE].[CODE] = tp OR cnt.[TYPE].[CODE] = tp2)
+       AND cnt.[PRIVATE].[CODE] = pr AND cnt.[ACTIV]
+       order by cnt.[TYPE].[CODE]
+   loop
+       ret:= substr(cnt.[NUMB],1,100);
+       exit;
+   end loop;
+   return ret;
+end;
+--NGA 19/12/2014 end
+
+--Картешкина Н.Н.  23.11.16 Получить СНИЛС - begin
+function get_snils_doc(doc_coll [CERTIFICATE_ARR]) return string is
+	snils string;
+begin
+	snils := NULL;
+	-- в удостоверениях
+	for (select x(regexp_replace(x.[NUM], '\D'): NUM) in doc_coll where x.[TYPE] = ::[CERTIFIC_TYPE]([KOD] = 'СНИЛС')) loop
+		snils := x.NUM;
+		exit;
+	end loop;
+
+	return snils;
+end;
+
+function get_snils(priv_ref ref [CL_PRIV]) return string is
+	snils string;
+	priv [CL_PRIV];
+begin
+	snils := NULL;
+	priv := priv_ref;
+	-- в удостоверениях
+	snils := get_snils_doc(priv.[DOC_ARR]);
+	-- в пользователях
+	if snils is NULL then
+		for (select x(x.[PF] : C_SNILS) in ::[USER]
+					where x.[CL_PRIV_REF]=priv_ref )
+				loop	
+					snils := replace(replace(x.[C_SNILS],' ',''),'-','');				
+				end loop;
+	end if;
+	return snils;
+end;
+--Картешкина Н.Н.  23.11.16 Получить СНИЛС - end
+
+--Картешкина Н.Н.  23.12.16 Действует ли банк - begin
+function is_bank_active(ref_cl_bank_n ref [CL_BANK_N]) return boolean is
+	l_state boolean := true;
+begin
+
+	for (
+		select x(x.[ACTIVE]   : BANK_STATE)
+			in ::[CL_BANK_N] all
+			where	x%id= ref_cl_bank_n
+					
+		)
+	loop
+		return x.BANK_STATE;
+	end loop;	
+
+	return l_state;
+	
+end;
+--Картешкина Н.Н.  23.12.16 Действует ли банк - end
+-----------------------------------------------------------------------------
+/*        				ВЫЧИСЛЕНИЕ РЕКВИЗИТОВ КЛИЕНТА				       */
+-----------------------------------------------------------------------------
+
+--Дианков А.В. 18.01.2016 Добавлена функция
+--Дианков А.В. 18.01.2016 Вычисление реквизитов клиента
+public function CL_REC(cl_ref ref [CLIENT],
+				p_info varchar2,
+				--client_org_ref ref [CL_ORG] default null,
+				--cl_org_dolg_fase ref [PERSONS_POS] default null,
+				P_HEADUSER ref [USER] default null,         --P_HEADUSER ref [USER], 12/07/2023 Башкиров В.Г.
+				P_DATE_PRINT date default null,             --P_DATE_PRINT date,
+				is_first	number  default 0) return memo is  --is_first	number := 0) return memo is --is_first	number := 0) return memo 
+	
+	--PRIV_BUSINES boolean;
+	V_SIMPLE_IDENT boolean;
+	ip			   boolean:=false;
+	P_DATE_ANK 		date;	
+	cl_org_dolg_fase ref [PERSONS_POS] default null;
+	
+	temp_str  varchar2(2000) := '';
+    temp_str1 varchar2(2000) := '';
+    temp_str2 varchar2(2000) := '';
+
+    DATE_TMP_1 [DATE];			-- Башкиров В.Г. 15.09.2011
+    DATE_TMP_2 [DATE];			-- Башкиров В.Г. 15.09.2011
+    P_DATA_1   [MEMO];			-- Башкиров В.Г. 11.03.2012
+    P_DATA_2   [MEMO];			-- Башкиров В.Г. 11.03.2012
+    P_DATA_3   [MEMO];			-- Башкиров В.Г. 11.03.2012
+    P_DATA_4   [MEMO];			-- Башкиров В.Г. 11.03.2012
+    P_DATA_5   [MEMO];			-- Башкиров В.Г. 22.08.2012
+    P_DATA_6   [MEMO];			-- Башкиров В.Г. 22.08.2012
+
+    Client_ref REF [CLIENT];  -- NGA07082013
+    v_cl_links	[LINKS_CL_ARR];
+    recprop  [PROPERTIES];
+
+    P_DATA [MEMO_32767];
+begin	
+		
+		-- Инициализация переменных		
+		op_dat := [System].[Op_date];
+		
+		if P_DATE_PRINT is null then P_DATE_PRINT:=op_dat; end if;
+		
+		V_SIMPLE_IDENT := false;
+		rabota := null;
+		account := null;
+		
+		account_tmp := null;  --NGA25092013
+		
+	if is_first = 0 then
+		&debug('11111111111111++++%%%%++++',0)
+		client_priv	:= null;
+		client_corp	:= null;
+		client_bank := null;
+
+		--Получаем структуры клиентов на дату
+		--Изменения анкеты, сделанные в дату P_DATE_PRINT, начинают действовать сразу же,
+		--т.е. прежние реквизиты будут действительны до (P_DATE_PRINT-1) включительно.
+		if cl_ref%class = 'CL_ORG' AND cl_ref->(CL_CORP)[FORMA].[SHORT_NAME] != 'ИП' then
+			client_corp := [CL_HIST].[LIB].get_cl_corp(cl_ref,P_DATE_PRINT+1);
+
+		elsif cl_ref%class = 'CL_ORG' AND cl_ref->(CL_CORP)[FORMA].[SHORT_NAME] = 'ИП' then
+			declare
+				dolg_fase [PERSONS_POS];
+			begin
+				locate exact dolg_fase in cl_ref->(CL_CORP)[ALL_BOSS] where dolg_fase.[FASE] is not null and dolg_fase.[CHIEF] = true; -- для ИП должностных лиц может быть несколько и надо учитывать "Признак руководителя"
+				-- устанавливаем глоб. парам. - ссылку на должностное лицо
+				cl_org_dolg_fase:=dolg_fase;
+				client_priv := dolg_fase.[FASE];
+			exception
+					when NO_DATA_FOUND then
+						pragma error ('Не найдено ни одной ссылки на физическое лицо с "Признаком руководителя" в массиве "Должностные лица" для данного индивидуального предпринимателя!');
+					when TOO_MANY_ROWS then
+						pragma error ('Найдено несколько ссылок на физическое лицо с "Признаком руководителя" в массиве "Должностные лица" для данного индивидуального предпринимателя!');
+			end;
+			client_corp := [CL_HIST].[LIB].get_cl_corp(cl_ref,P_DATE_PRINT+1);
+			ip:=true;
+
+		elsif cl_ref%class = 'CL_BANK_N' then
+			client_bank%id := cl_ref%id;
+		elsif cl_ref%class = 'CL_PRIV' then
+			client_priv := [CL_HIST].[LIB].get_cl_priv(cl_ref,P_DATE_PRINT+1);
+		end if;
+		v_rec_prod_tbl.delete;
+		v_rec_prod_tbl := [PRODUCT].[PSH_LIB].get_product_on_date(	cl_ref, -- updated CHANGE_SHORT_NAME PSB_LIB->PSH_LIB 15/10/25
+																	null,
+																	null,
+																	true);
+
+--> ivanov.a.v. 17/04/2017 Анкета
+		-- дата начала клиентства
+		v_date_beg_cl := null;
+		for i in 1..v_rec_prod_tbl.count loop
+			if v_rec_prod_tbl(i).p_date_begin > P_DATE_PRINT then
+				exit;
+			else
+				if i = 1 then
+					v_date_beg_cl := v_rec_prod_tbl(i).p_date_begin;
+				end if;
+				if nvl(v_rec_prod_tbl(i).split,'0') = '1' then
+					v_date_beg_cl := v_rec_prod_tbl(i).p_date_begin;
+				end if;
+			end if;
+		end loop;
+
+		-- дата окончания клиентства
+		v_date_end_cl := null;
+		for i in 1..v_rec_prod_tbl.count loop
+			if v_rec_prod_tbl(i).p_date_begin > P_DATE_PRINT then
+				exit;
+			else
+				if i = 1 then
+					v_date_end_cl := v_rec_prod_tbl(i).p_date_close;
+				end if;
+				if v_rec_prod_tbl(i).p_date_close >= v_date_end_cl then
+					v_date_end_cl := v_rec_prod_tbl(i).p_date_close;
+					v_is_once := v_rec_prod_tbl(i).p_is_once;
+				end if;
+			end if;
+		end loop;
+
+		t_date_upd.delete;
+		/** /
+		for (	select x(	x.[DATE_UPD]	:c_date,
+							x.[WHO_UPDATE]	:c_user)
+					in	[CL_DATE_FORM_UPD],
+						([CLIENT]	all :c) all
+				where	x%collection = c.[DATES_FORM_UPD] and
+						c%id = cl_ref%id and
+						x.[DATE_UPD] >= v_date_beg_cl and
+						x.[DATE_UPD] <= v_date_end_cl
+				order by x.[DATE_UPD])
+		loop
+			v_idx_upd := to_char(x.c_date,'yyyymmdd');
+			t_date_upd(v_idx_upd).date_upd := x.c_date;
+			t_date_upd(v_idx_upd).user_upd := x.c_user;
+		end loop;
+		/**/
+		
+		for i in 1..v_rec_prod_tbl.count loop
+			if v_rec_prod_tbl(i).p_date_begin >= v_date_beg_cl and v_rec_prod_tbl(i).p_date_begin <= v_date_end_cl then
+				v_idx_upd := to_char(v_rec_prod_tbl(i).p_date_begin,'yyyymmdd');
+				if not t_date_upd.exists(v_idx_upd) then
+					t_date_upd(v_idx_upd).date_upd := v_rec_prod_tbl(i).p_date_begin;
+					t_date_upd(v_idx_upd).user_upd := v_rec_prod_tbl(i).create_user;
+				else
+					if t_date_upd(v_idx_upd).user_upd is null then
+						t_date_upd(v_idx_upd).user_upd := v_rec_prod_tbl(i).create_user;
+					end if;
+				end if;
+			end if;
+		end loop;
+
+--< ivanov.a.v. 17/04/2017 Анкета
+
+	end if;
+		
+				-- Башкиров В.Г. 15.09.2011
+		::[CL_HIST].[PSH_LIB].GetLastEdit(cl_ref,false,P_DATE_ANK,DATE_TMP_2); -- updated CHANGE_SHORT_NAME PSB_LIB->PSH_LIB 15/10/25
+		--NGA07082013 P_DATE_ANK := least(nvl(date_acc1,P_DATE_ANK), P_DATE_ANK);  --NGA
+	
+		begin
+
+			for a in ::[AC_FIN]
+			where a.[CLIENT_V] = cl_ref
+			order by a.[DATE_OP] asc loop
+				account := a;
+				exit;
+			end loop;
+
+			/*Шипицын - отдельно ищем счет с непустой выпиской, чтобы по нему искать ДАТА_ОПЕРАЦИИ1*/
+			for a in ::[AC_FIN]
+			where a.[CLIENT_V] = cl_ref and a.[ARC_MOVE]%size(1)>0
+			order by a.[DATE_OP] asc loop
+				account_tmp := a;
+				exit;
+			end loop;
+
+			P_DATE_ANK := cl_ref.[DATE_ANK];
+			if account is not null then
+				date_acc1 := trunc(account.[DATE_OP]);
+			else
+				date_acc1 := null;
+			end if;
+		end;
+
+		--NGA07082013 ДЛЯ ИП если дата откр.1-ого счета после 01/05/2005,берем ее
+	    if ip then
+   		   /* NGA14032014 Отключено по замечанию С.Н.Морозовой
+   		   if date_acc1 is NOT NULL AND date_acc1>= to_date('01.05.2005','dd.mm.yyyy') then
+		      P_DATE_ANK := date_acc1;
+   		   else
+   		      P_DATE_ANK := client_org_ref.[DATE_ANK];   --NGA20082013 для ИП дату анкеты возьмем с ИП
+		   end if;
+		   */
+		    P_DATE_ANK := cl_ref.[DATE_ANK]; -- NGA14032014
+	    else
+	        P_DATE_ANK := least(nvl(date_acc1,P_DATE_ANK), P_DATE_ANK); -- как было
+	    end if;
+		--NGA07082013 end
+		DEBUG_PIPE('P_INFO='||P_INFO);
+		if p_info = 'СЧЕТА' then   -- СЧЕТА КЛИЕНТА
+	 		P_DATA := nvl(GetAccs(cl_ref, P_DATE_PRINT),'');
+	 				
+		elsif p_info = 'ПРЕДСТАВИТЕЛЬ' then   -- СЧЕТА КЛИЕНТА
+			
+			P_DATA:='';
+			
+			for c in cl_ref.[LINKS_OTHER] where c.[VID_LINK].[CODE] = 'ПРЕДСТАВИТЕЛЬ'
+												AND (c.[DATE_BEG] <= P_DATE_PRINT AND (c.[DATE_END] is null OR c.[DATE_END] >= P_DATE_PRINT))
+			loop
+				if P_DATA is null then P_DATA:=c.[PARTNER].[NAME]|| ' Основание:'||c.[FOUND];
+				else P_DATA:=P_DATA||chr(10)||c.[PARTNER].[NAME]|| ' Основание:'||c.[FOUND];
+				end if;
+			end loop;
+		
+	 	elsif p_info = 'КАТЕГОРИЯ' then   --КАТЕГОРИЯ
+	 		if cl_ref%class = 'CL_ORG' AND ip = false then
+	 			P_DATA := 'юридического лица';
+	 		elsif ip AND ip then
+	 			P_DATA := 'индивидуального предпринимателя';
+	 		elsif cl_ref%class = 'CL_BANK' then
+	 			P_DATA := 'кредитной организации';
+	 		elsif cl_ref%class = 'CL_PRIV' then
+	 			P_DATA := 'физического лица';
+	 		end if;
+	 	
+	 	elsif p_info = 'ДОК_ИН_ФЛ' then
+	 		if cl_ref%class = 'CL_PRIV' then
+	 		  P_DATA:='';
+	 			for vid in cl_ref->(CL_PRIV)[DOC_ARR] where vid.[TYPE].[RESIDENCE_RIGHT] = true
+	 														and (vid.[DATE] is null OR vid.[DATE] <= P_DATE_PRINT)
+	 														and (vid.[DATE_END] is null OR P_DATE_PRINT <= vid.[DATE_END])
+	 			loop
+	 				
+	 				if P_DATA is null then P_DATA:= ' Наименование удостовения:'||vid.[TYPE].[NAME]||' '||' Номер:'||vid.[NUM]||' Серия:'||vid.[SER]||
+	 												' Дата выдачи:'||to_char(vid.[DATE], 'dd.mm.yyyy')||' Дата окончания:'||to_char(vid.[DATE_END], 'dd.mm.yyyy');
+	 				else P_DATA:=P_DATA||chr(10)||' Наименование удостовения:'||vid.[TYPE].[NAME]||' '||' Номер:'||vid.[NUM]||' Серия:'||vid.[SER]||
+	 												' Дата выдачи:'||to_char(vid.[DATE], 'dd.mm.yyyy')||' Дата окончания:'||to_char(vid.[DATE_END], 'dd.mm.yyyy');
+	 				end if;
+	 			
+	 			end loop;
+	 			
+	 			
+	 		end if;
+												
+	 	elsif p_info = 'НАИМ_КЛИЕНТА' then   --НАИМ_КЛИЕНТА
+	 		if client_corp%id is not null AND ip = false then
+	 			temp_string := nvl(client_corp.[LONG_NAME], '');
+	 			P_DATA := temp_string ||
+	 				  rtl.bool_char(temp_string is null, nvl(client_corp.[NAME], ''), rtl.bool_char(client_corp.[NAME] is not null, ' ('||client_corp.[NAME]|| ')', '') );
+	 			temp_string := nvl(client_corp.[I_NAME], '');
+ 				P_DATA := P_DATA||rtl.bool_char(temp_string is null, '', chr(13)||temp_string);
+	 		elsif client_bank%id is not null then
+	 			temp_string := nvl(client_bank.[LONG_NAME], '');
+	 			P_DATA := temp_string ||
+	 				  rtl.bool_char(temp_string is null, nvl(client_bank.[NAME], ''), rtl.bool_char(client_bank.[NAME] is not null, ' ('||client_bank.[NAME]|| ')', '') );
+	 			temp_string := nvl(client_bank.[I_NAME], '');
+ 				P_DATA := P_DATA||rtl.bool_char(temp_string is null, '', chr(13)||temp_string);
+			elsif client_priv%id is not null then
+	 			P_DATA := nvl(client_priv.[NAME], '');
+	 		end if;
+	 		
+		elsif p_info = 'ДАТА_РОЖД' then      --ДАТА_РОЖД
+			if client_priv%id is not null then
+	 			P_DATA := nvl(::[RUNTIME].[FDP].pdat(client_priv.[DATE_PERS]), '');
+			end if;
+	 		
+		elsif p_info = 'МЕСТО_РОЖД' then     --МЕСТО_РОЖД
+		 if client_priv%id is not null then
+			--Башкиров В.Г. 26.06.2014 Удалена обработка полей для ОКАТО при переходе на 14.3
+			--Башкиров В.Г. 26.06.2014 "Место рождения" скопировано с дистрибутивного
+			temp_str := client_priv.[DOC].[BIRTH_PLACE];
+			if temp_str is not null then -- BFS00023043 теперь есть реквизит
+				P_DATA := temp_str;
+			else
+				temp_str := nvl(client_priv.[BORN].[COUNTRY].[VALUE], '');
+				P_DATA := P_DATA||rtl.bool_char(temp_str is null, null, temp_str||', ');
+				
+				temp_str := nvl(client_priv.[BORN].[OKATO].[NAME], '');
+				P_DATA := P_DATA||rtl.bool_char(temp_str is null, null, temp_str||', ');
+		
+				P_DATA := P_DATA||nvl(client_priv.[BORN].[KIND].[SHORT_NAME]||' '||client_priv.[BORN].[NAME], ', ');
+
+				P_DATA := substr(rtrim(ltrim(P_DATA)),1,length(P_DATA)-1);
+		 	end if;
+		 end if;
+
+		elsif p_info = 'ГРАЖД' then          --ГРАЖДАНСТВО
+		 if client_priv%id is not null then
+			P_DATA := nvl(client_corp.[COUNTRY].[NAME],client_priv.[COUNTRY].[NAME]);
+		 end if;
+		--29.12.2016 Картешкина Н.Н. добавила ЮРИСДИКЦИЮ если есть код иностранной организации и ДА_КИО и НЕТ_КИО
+		elsif p_info = 'ДА_КИО' and client_corp%id is not null then
+		      P_DATA := '_';
+		      if client_corp.[KIO] is not null then
+		      	P_DATA:= 'V';
+		      end if;
+		elsif p_info = 'НЕТ_КИО' and client_corp%id is not null then
+		      P_DATA := '_';
+		      if client_corp.[KIO] is null then
+		    	  P_DATA:= 'V';		
+		      end if;	
+		elsif p_info = 'ЮРИСДИКЦИЯ' then --ЮРИСДИКЦИЯ
+		 if client_corp%id is not null then
+			P_DATA := ' ';
+			if client_corp.[KIO] is not null then
+				P_DATA := client_corp.[COUNTRY].[NAME];
+			end if;
+		 end if;
+			
+		elsif p_info = 'ДОКУМЕНТ' then       --ДОКУМЕНТ, удостоверяющий личность
+		 if client_priv%id is not null then
+			P_DATA := nvl(Get_passport(client_priv), '');
+		 end if;
+
+		elsif p_info = 'ВИЗА' then            --ВИЗА
+		 if client_priv%id is not null then
+			P_DATA := Get_Visa(client_priv,P_DATE_PRINT);
+		 end if;
+
+		elsif p_info = 'МИГР_КАРТА' then            --МИГР_КАРТА
+		 if client_priv%id is not null then
+			P_DATA := Get_Migration_Card(client_priv, P_DATE_PRINT);					
+		 end if;
+
+/*---- NGA 26/09/2014
+		elsif p_info = 'МИГР_КАРТА_ВИЗА' then	--  МИГР_КАРТА_ВИЗА
+			temp_str1 := Get_Migration_Card(client_priv, P_DATE_PRINT);
+			temp_str2 := Get_Visa(client_priv,P_DATE_PRINT);
+			if length(temp_str1) > 1 then
+				if length(temp_str2) > 1 then
+					P_DATA := temp_str1 || NL$ || temp_str2;
+				else
+					P_DATA := temp_str1;
+				end if;
+			else
+					P_DATA := 'Отсутствует';
+			end if;
+-------	*/		
+
+		elsif p_info = 'МИГР_КАРТА_ВИЗА' then	--  МИГР_КАРТА_ВИЗА  --NGA 26/09/2014
+		  if client_priv%id is not null then
+			temp_str1 := Get_Migration_Card(client_priv, P_DATE_PRINT);
+			temp_str2 := Get_Visa(client_priv,P_DATE_PRINT);
+            if length(temp_str1) > 1 then
+				if   length(temp_str2) > 1 then	P_DATA := temp_str1 || NL$ || temp_str2;
+				else   					        P_DATA := temp_str1;
+				end if;
+			else
+			    if   length(temp_str2) > 1 then P_DATA := temp_str2;
+				else                            P_DATA := 'Отсутствует';
+				end if;
+			end if;	
+		  end if;
+
+		elsif p_info = 'РЕГ_АДРЕС' then      --Адрес регистрации
+			if client_corp%id is not null then
+				P_DATA := 'Регистрации: ' || nvl(GetAddress(client_corp.[ADDRESSES],'ALL', 'CORP'), GetAddress(client_priv.[ADDRESSES],'ALL', 'REGISTRATION')) || NL$ ||
+				          'Фактический: ' || NVL(GetAddress(client_corp.[ADDRESSES],'ALL', 'FACT'), GetAddress(client_corp.[ADDRESSES],'ALL', 'REAL_LIVE') );
+			elsif client_priv%id is not null then
+				-- Башкиров В.Г. 11.03.2012
+				--P_DATA := nvl(nvl(GetAddress(client_priv.[ADDRESSES],'ALL', 'REGISTRATION'), GetAddress(client_priv.[ADDRESSES],'ALL', 'FACT')), GetAddress(client_priv.[ADDRESSES],'ALL', 'POST'));
+				P_DATA_1 := GetAddress(client_priv.[ADDRESSES],'ALL', 'REGISTRATION'); if P_DATA_1 is not null then P_DATA_1:='Регистрация: '||P_DATA_1||LF$; end if;
+				P_DATA_2 := GetAddress(client_priv.[ADDRESSES],'ALL', 'TEMPORARY_REG');if P_DATA_2 is not null then P_DATA_2:='Временная регистрация: '||P_DATA_2||LF$; end if;
+				P_DATA_3 := GetAddress(client_priv.[ADDRESSES],'ALL', 'REAL_LIVE');	   if P_DATA_3 is not null then P_DATA_3:='Место пребывания: '||P_DATA_3||LF$; end if;
+				P_DATA_4 := GetAddress(client_priv.[ADDRESSES],'ALL', 'FACT');		   if P_DATA_4 is not null then P_DATA_4:='Место пребывания: '||P_DATA_4||LF$; end if;
+--> ivanov a.v. 27/07/2017 почтовый перенесем в контакты
+--				P_DATA_5 := GetAddress(client_priv.[ADDRESSES],'ALL', 'POST');		   if P_DATA_5 is not null then P_DATA_5:='Почтовый: '||P_DATA_5||LF$; end if;
+--Б ivanov a.v. 27/07/2017 почтовый перенесем в контакты
+				P_DATA_6 := GetAddress(client_priv.[ADDRESSES],'ALL', 'ALIEN');		   if P_DATA_6 is not null then P_DATA_6:='Место пребывания для иностранцев: '||P_DATA_6||LF$; end if;
+				P_DATA:=P_DATA_1||P_DATA_2||P_DATA_3||P_DATA_4||P_DATA_5||P_DATA_6;
+				--if Length(P_DATA)>0 then P_DATA:=Substr(P_DATA,1,Length(P_DATA)-2); end if;
+ 			end if;
+ 		
+		elsif (client_corp%id is not null) and (p_info = 'ПОЧТ_АДРЕС') then --ПОЧТ_АДРЕС (почтовый)
+			P_DATA := nvl(GetAddress(client_corp.[ADDRESSES],'ALL', 'POST'), '');
+		
+		-- Дианков А.В. 15/01/16 ЮР. адрес		
+		elsif (client_corp%id is not null) and (p_info = 'ЮР_АДРЕС') then --ЮР_АДРЕС (почтовый)
+			P_DATA := nvl(GetAddress(client_corp.[ADDRESSES],'ALL', 'CORP'), '');
+			
+		
+
+		elsif p_info = 'РАБОТА' then           --Место работы и должность
+			if client_corp%id is not null then
+				P_DATA := nvl(client_corp.[NAME], client_corp.[LONG_NAME])||' '||nvl(cl_org_dolg_fase.[RANGE].[VALUE], '');
+				P_DATA := trim(P_DATA);
+			elsif client_priv%id is not null then
+				P_DATA := nvl(Get_Work(client_priv,P_DATE_PRINT),'');
+			end if;
+
+		elsif p_info = 'ИНН' then            --ИНН
+		 if client_corp%id is not null then
+		 	P_DATA := nvl(client_corp.[INN], '');
+		 elsif client_bank%id is not null then
+		 	P_DATA := nvl(client_bank.[INN], '');
+		 elsif client_priv%id is not null then
+		 	P_DATA := nvl(client_priv.[INN], '');
+		 end if;
+		-- 05/10/2017/ Хмырова А.А.
+		 elsif p_info = 'СНИЛС' then            --СНИЛС
+		 if client_priv%id is not null then
+		 	P_DATA := nvl(client_priv.[SNILS], '');
+		 end if;
+		
+		
+	 	--23.11.16 Картешкина Н.Н. Добавлено получение закладки  "СНИЛС" 	
+		--elsif p_info = 'СНИЛС' then          --СНИЛС
+		-- if client_priv%id is not null then
+		-- 	P_DATA := get_snils(cl_ref);
+		-- end if;
+	 		
+		elsif p_info = 'КОНТАКТ_ТЕЛ' then        --КОНТАКТЫ
+			if client_corp%id is not null then
+				P_DATA := GetContacts(client_corp.[CONTACTS], 'PHONE')||
+			    		  GetContacts(client_corp.[CONTACTS], 'MOBILEPHONE')||				
+--NGA 29/05/2013		  GetContacts(client_corp.[CONTACTS], 'FAX')|| trim(P_DATA);
+		                  GetContacts(client_corp.[CONTACTS], 'FAX');
+	
+			elsif client_priv%id is not null then
+		    --ищем рабочий телефон
+		    	P_DATA := GetContacts(client_priv.[CONTACTS], 'PHONE')||
+		    			  GetContacts(client_priv.[CONTACTS], 'MOBILEPHONE')||
+		            	  GetContacts(client_priv.[CONTACTS], 'FAX');
+				P_DATA_5 := GetAddress(client_priv.[ADDRESSES],'ALL', 'POST');
+				if P_DATA_5 is not null then
+					P_DATA:=P_DATA||'Почтовый: '||P_DATA_5;
+				end if;
+		  end if;
+		
+			
+		elsif p_info = 'Е_МАЙЛ' then
+			if client_corp%id is not null then
+				P_DATA := GetContacts(client_corp.[CONTACTS], 'MAIL') || trim(P_DATA);
+			elsif client_priv%id is not null then
+	 			P_DATA := GetContacts(client_priv.[CONTACTS], 'MAIL');
+			
+			end if;
+	 			 		
+		elsif p_info = 'ДАТА_ЗАПОЛН' then		--Дата заполнения
+			/** /
+			if client_corp%id is not null then
+		 		P_DATA := nvl(::[RUNTIME].[FDP].pdat(nvl(client_corp.[DATE_ANK], date_acc1)), '');
+			else
+		 		P_DATA := nvl(::[RUNTIME].[FDP].pdat(nvl(client_priv.[DATE_ANK], date_acc1)), '');
+	 		end if;
+	 		/**/
+			-- Башкиров В.Г. 15.09.2011
+			::[CL_HIST].[PSH_LIB].GetLastEdit(cl_ref,false,DATE_TMP_1,DATE_TMP_2); -- updated CHANGE_SHORT_NAME PSB_LIB->PSH_LIB 15/10/25
+			--NGA P_DATA:=::[RUNTIME].[FDP].pdat(DATE_TMP_1);
+			P_DATA:=::[RUNTIME].[FDP].pdat(P_DATE_ANK);  --NGA
+/*
+		elsif p_info = 'ДАТА_ОБНОВЛ' then		--Дата обновления
+			if client_corp%id is not null then
+		 		P_DATA := nvl(::[RUNTIME].[FDP].pdat(client_corp.[DATE_FORM_UPD]), '');
+			else
+		 		P_DATA := nvl(::[RUNTIME].[FDP].pdat(client_priv.[DATE_FORM_UPD]), '');
+	 		end if;
+*/
+		elsif p_info = 'ДАТА_ЗАПОЛН_NEW' then		--Дата заполнения
+--> ivanov a.v. 17/04/2017 Анкета
+			P_DATA := '';
+			P_DATA:=::[RUNTIME].[FDP].pdat(t_date_upd.first)||';';
+--< ivanov a.v. 17/04/2017 Анкета
+
+		-- Башкиров В.Г. 11.03.2012
+		elsif p_info = 'ДАТА_ОБНОВЛ_ALL' 	then		--Дата обновления
+			/** /
+			if client_org_ref is not null then
+				P_DATA := GetEditDates_(client_org_ref, P_DATE_PRINT, client_corp.[DATE_FORM_UPD]);
+			else
+				P_DATA := GetEditDates_(cl_ref, P_DATE_PRINT, client_priv.[DATE_FORM_UPD]);
+			end if;
+			/**/
+			
+			--NGA07082013 Берем из массивов "Даты обновлений" и "История рекв.". См.описание функции!
+			if client_corp%id is not NULL then
+			   P_DATA := ::[CLIENT].[PSH_LIB_P].GetDateAll(client_ref, P_DATE_PRINT);
+			   if trim(P_DATA) is NULL then
+			      P_DATA:=::[CL_HIST].[PSH_LIB].GetLastEditAll(cl_ref,false,DATE_TMP_1,DATE_TMP_2); -- updated CHANGE_SHORT_NAME PSB_LIB->PSH_LIB 15/10/25
+			   end if;
+			elsif client_priv%id is not null then
+			   P_DATA:=::[CL_HIST].[PSH_LIB].GetLastEditAll(cl_ref,false,DATE_TMP_1,DATE_TMP_2); -- как было -- updated CHANGE_SHORT_NAME PSB_LIB->PSH_LIB 15/10/25
+			end if;
+			--NGA07082013 end
+			--NGA07082013 P_DATA:=::[CL_HIST].[PSH_LIB].GetLastEditAll(cl_ref,false,DATE_TMP_1,DATE_TMP_2); -- updated CHANGE_SHORT_NAME PSB_LIB->PSH_LIB 15/10/25
+			
+			/* NGA07082013 отключим -- Башкиров В.Г. 22.08.2012
+			P_DATE_UPD:=::[CL_DATE_FORM_UPD].[PSH_LIB].GetLastDateFormUpd(cl_ref); -- updated CHANGE_SHORT_NAME PSB_LIB->PSH_LIB 15/10/25
+			debug_pipe('PSB_WRD_FIZCL_AN -- P_DATE_UPD='||to_char(P_DATE_UPD,fmt)||' P_DATA='||P_DATA,dp);
+		  --debug_pipe('PSB_WRD_FIZCL_AN -- P_DATE_UPD='||P_DATE_UPD||' P_DATA='||P_DATA,dp);
+			if P_DATE_UPD is not null and nvl(InStr(P_DATA,to_char(P_DATE_UPD,fmt)),0)=0 then
+				P_DATA:=to_char(P_DATE_UPD,fmt)||';'||P_DATA;
+				P_DATA:=trim(P_DATA,';');
+			end if;
+		    NGA*/
+		elsif p_info = 'ДАТА_ОБНОВЛ_ALL_N' 	then		--Дата обновления
+--> ivanov a.v. 17/04/2017 Анкета
+		P_DATA := '';
+		v_idx_upd := t_date_upd.first;
+		v_idx_upd := t_date_upd.next(v_idx_upd);
+		while v_idx_upd is not null loop
+			if P_DATA is not null then
+				P_DATA := P_DATA||'; '||to_char(t_date_upd(v_idx_upd).date_upd,'dd/mm/yyyy');
+			else
+				P_DATA := P_DATA||to_char(t_date_upd(v_idx_upd).date_upd,'dd/mm/yyyy');
+			end if;
+		v_idx_upd := t_date_upd.next(v_idx_upd);
+		end loop;
+		if P_DATA is null then
+			P_DATA := '.';
+		end if;
+--< ivanov a.v. 17/04/2017 Анкета
+
+		-- Башкиров В.Г. 15.09.2011
+		elsif p_info = 'ДАТА_ОБНОВЛ' then		--Дата обновления
+		    --NGA07082013 ДЛЯ ИП для поиска в дальнейшем массива дат обновления
+		    if ip then
+			   /*if    client_corp%id is not NULL then
+			         client_ref:=client_corp%id;
+			   elsif client_priv%id is not NULL then
+			         client_ref:=client_priv%id;
+			   else
+			      client_ref:=cl_ref%id;
+			   end if;*/
+			   --NGA07082013 Берем из массивов "Даты обновлений" и "История рекв.". См.описание функции!
+    	       P_DATA := ::[CLIENT].[PSH_LIB_P].GetDateAll(cl_ref, P_DATE_PRINT);
+			   if trim(P_DATA) is NULL then
+			      ::[CL_HIST].[PSH_LIB].GetLastEdit(cl_ref,false,DATE_TMP_1,DATE_TMP_2); -- updated CHANGE_SHORT_NAME PSB_LIB->PSH_LIB 15/10/25
+			      P_DATA:=::[RUNTIME].[FDP].pdat(DATE_TMP_2);
+			   end if;
+		    else
+			   ::[CL_HIST].[PSH_LIB].GetLastEdit(cl_ref,false,DATE_TMP_1,DATE_TMP_2); -- updated CHANGE_SHORT_NAME PSB_LIB->PSH_LIB 15/10/25
+			   P_DATA:=::[RUNTIME].[FDP].pdat(DATE_TMP_2);
+		   end if;			
+		   --NGA07082013 end
+			
+			/*NGA07082013
+			::[CL_HIST].[PSH_LIB].GetLastEdit(cl_ref,false,DATE_TMP_1,DATE_TMP_2); -- updated CHANGE_SHORT_NAME PSB_LIB->PSH_LIB 15/10/25
+			P_DATA:=::[RUNTIME].[FDP].pdat(DATE_TMP_2);
+            NGA*/
+		
+		elsif p_info = 'УРОВЕНЬ_РИСКА' then	 	--Уровень риска
+			if client_corp%id is not null then
+				-- NGA P_DATA := nvl(client_corp.[FAIL_LEVEL].[NAME], client_corp.[FAIL_LEVEL].[CODE]) || ' ' || client_corp.[FAIL_MARK];
+				--P_DATA := client_corp.[FAIL_MARK];
+				P_DATA := nvl(trim(client_corp.[FAIL_MARK]),'0, отсутствуют критерии для отнесения к высокому уровню риска');
+			elsif client_bank%id is not null then
+			    P_DATA := nvl(trim(client_bank.[FAIL_MARK]),'0, отсутствуют критерии для отнесения к высокому уровню риска');
+			elsif client_priv%id is not null then
+				-- NGA P_DATA := nvl(client_priv.[FAIL_LEVEL].[NAME], client_priv.[FAIL_LEVEL].[CODE]) || ' ' || client_priv.[FAIL_MARK];
+				--P_DATA := client_priv.[FAIL_MARK];
+				P_DATA := nvl(trim(client_priv.[FAIL_MARK]),'0, отсутствуют критерии для отнесения к высокому уровню риска');
+				if P_DATA = ' ' then
+					P_DATA := '0, отсутствуют критерии для отнесения к высокому уровню риска';
+				end if;
+	 		end if;
+	 	elsif p_info = 'УРОВЕНЬ_РИСКА_T' then	 	--Уровень риска с текстом
+	 	    P_DATA := 'НИЗКИЙ, отсутствуют критерии для отнесения к высокому уровню риска';
+			if    client_corp%id is not null then if trim(client_corp.[FAIL_MARK]) is NOT NULL then P_DATA := 'ВЫСОКИЙ, '||trim(client_corp.[FAIL_MARK]); end if;
+			elsif client_bank%id is not null then if trim(client_bank.[FAIL_MARK]) is NOT NULL then P_DATA := 'ВЫСОКИЙ, '||trim(client_bank.[FAIL_MARK]); end if;
+			elsif client_priv%id is not null then if trim(client_priv.[FAIL_MARK]) is NOT NULL then P_DATA := 'ВЫСОКИЙ, '||trim(client_priv.[FAIL_MARK]); end if;
+	 		end if;	
+	 	
+		elsif p_info = 'УР_РИСКА_КРИТ' then	 	--Уровень риска с критериями. Начало - как в УРОВЕНЬ_РИСКА из дистрибутива!
+		declare
+			fl	ref [FAIL_LEVEL];
+			fv	number;
+			mrk	::[CLIENT].[FAIL_MARK]%type;
+			begin
+			 if client_corp%id is not null then
+				::[LEGAL_INTERFACE].[PRX_CLIENT].getRisk_FailValueAndLevel(client_corp%id, fl, fv, P_DATE_PRINT);
+				mrk := client_corp.[FAIL_MARK];
+			 elsif client_priv%id is not null then
+				::[LEGAL_INTERFACE].[PRX_CLIENT].getRisk_FailValueAndLevel(client_priv%id, fl, fv, P_DATE_PRINT);
+				mrk := client_priv.[FAIL_MARK];
+			 end if;
+			 P_DATA := COALESCE(fl.[CODE], fl.[NAME]) || ' ' || mrk;
+			 -- NGA
+			 if fl is NULL OR fl.[CODE] = 'НИЗКИЙ'  then  -- текст как было
+			    P_DATA := '0, отсутствуют критерии для отнесения к высокому уровню риска';
+			 else  -- добавим критерии
+			    for mc in ::[MONITORING_CRIT] where	mc.[CLIENT] = client_priv%id
+		                                      and nvl(mc.[CRIT_DATE_BEGIN], P_DATE_PRINT) <= P_DATE_PRINT
+		                                      and nvl(mc.[CRIT_DATE_END],   P_DATE_PRINT) >= P_DATE_PRINT
+			    loop
+			      P_DATA := P_DATA ||LF$||mc.[CRITERIA].[NAME];
+			    end loop;
+			 end if;
+			end;
+
+		elsif p_info = 'КОНТРАГЕНТ' then		--КОНТРАГЕНТ
+			P_DATA := '';
+			if client_corp%id is not null then
+				for cl_link in client_corp.[LINKS_OTHER] where cl_link.[VID_LINK].[CODE] = 'КОНТРАГЕНТ' loop
+					temp_str := nvl(cl_link.[PARTNER].[NAME], '');
+					P_DATA := P_DATA || rtl.bool_char(temp_str is not null, temp_str|| ', ', '');
+				end loop;
+				P_DATA := trim(P_DATA);
+				P_DATA := substr(P_DATA,1,length(P_DATA)-1);
+			end if;
+		elsif p_info = 'ИНД_ПРЕДПРИН' then		--Сведения о инд. предпринимателе
+			if ip then
+				--номер свид-ва
+				temp_str := nvl(client_corp.[REGISTER].[NUM_SERT], '');
+				P_DATA := rtl.bool_char(temp_str is null, null, 'Номер свид-ва: '||temp_str||', ');
+				--дата рег-ии
+				temp_str := nvl(::[RUNTIME].[FDP].pdat(client_corp.[REGISTER].[DATE_REG]), ::[RUNTIME].[FDP].pdat(client_corp.[REGISTER].[DATE_REESTR]));
+				P_DATA := P_DATA||rtl.bool_char(temp_str is null, null, 'Дата регистрации: '||temp_str||', ');
+				--место рег-ии
+--				STULY в населенном пункте хранится район области, а не район населенного пункта, поэтому район населенного пункта можно взять только из реквизита	DISTRICT 			
+--				temp_str := nvl(client_org_ref.[REGISTER].[DISTRICT].[NAME], client_org_ref.[REGISTER].[CITY].[AREA].[NAME]);
+				temp_str := client_corp.[REGISTER].[DISTRICT].[NAME];
+				temp_str := rtl.bool_char(temp_str is null, '', temp_str||' р-он');
+
+				--Башкиров В.Г. 26.06.2014 Удалена обработка полей для ОКАТО при переходе на 14.3
+				-- меняю client_corp.[REGISTER].[CITY].[REGION_GNI]
+				-- на ::[PERSONAL_ADDRESS].[LIB].get_region(client_corp.[REGISTER].[CITY]%ID)
+				--[PEOPLE_PLACE] на [KIND]
+				temp_str := nvl(client_corp.[REGISTER].[CITY].[COUNTRY].[VALUE], '')||'  '||
+							nvl(::[PERSONAL_ADDRESS].[LIB].get_region(client_corp.[REGISTER].[CITY]%ID).[NAME], '')||'  '||
+							nvl(client_corp.[REGISTER].[CITY].[KIND].[SHORT_NAME], '')||' '||
+							nvl(client_corp.[REGISTER].[CITY].[NAME], '')||' '||
+							temp_str;
+--							nvl(client_org_ref.[REGISTER].[DISTRICT].[NAME], client_org_ref.[REGISTER].[CITY].[AREA].[NAME]);
+				temp_str := ltrim(rtrim(temp_str));
+				P_DATA := P_DATA||rtl.bool_char(temp_str is null, null, 'Место выдачи: '||temp_str||', ');
+				--рег-ий орган
+				temp_str := nvl(client_corp.[REGISTER].[REG_BODY].[NAME], '');
+				P_DATA := P_DATA||rtl.bool_char(temp_str is null, null, 'Рег. орган: '||temp_str||', ');
+
+				P_DATA := substr(P_DATA,1,length(P_DATA)-2);
+			else
+				P_DATA :='';
+			end if;
+--------
+
+		elsif p_info like 'ИП_%' then		--Сведения о инд. предпринимателе
+		  IF is_first <> 0 then  -- NGA27/10/2017 для последующих вызовов ф-ии для вычисления очередных закладок снова рассчитаем переменную IP!
+		     &debug('22222222++++%%%%++++',0)
+		     IF cl_ref%class = 'CL_ORG' AND cl_ref->(CL_CORP)[FORMA].[SHORT_NAME] = 'ИП' then
+			    declare
+				  dolg_fase [PERSONS_POS];
+			    begin
+				  locate exact dolg_fase in cl_ref->(CL_CORP)[ALL_BOSS] where dolg_fase.[FASE] is not null and dolg_fase.[CHIEF] = true; -- для ИП должностных лиц может быть несколько и надо учитывать "Признак руководителя"
+				  -- устанавливаем глоб. парам. - ссылку на должностное лицо
+				  cl_org_dolg_fase:=dolg_fase;
+				  client_priv := dolg_fase.[FASE];
+			    exception when NO_DATA_FOUND then pragma error ('Не найдено ни одной ссылки на ФЛ с "Признаком руководителя" в массиве "Должностные лица" для данного ИП!');
+				          when TOO_MANY_ROWS then pragma error ('Найдено несколько ссылок на ФЛ с "Признаком руководителя" в массиве "Должностные лица" для данного ИП!');
+			    end;
+			    client_corp := [CL_HIST].[LIB].get_cl_corp(cl_ref,P_DATE_PRINT+1);
+			    ip:=true;
+		    end if;
+		  END IF; --NGA27/10/2017 end
+			p_info := substr(p_info,4);
+			if ip then
+				if p_info = 'РЕГ_НОМЕР' then
+				--номер свид-ва
+--					temp_str := nvl(client_corp.[REGISTER].[NUM_SERT], ' ');
+					temp_str := nvl(client_corp.[REGISTER].[NUM_REESTR], ' ') || ' / ' || nvl(client_corp.[REGISTER].[GOS_REG_NUM_REC],' ');
+					P_DATA := temp_str;
+				elsif p_info = 'ДАТА_РЕГ' then
+				--дата рег-ии
+--					temp_str := nvl(::[RUNTIME].[FDP].pdat(client_corp.[REGISTER].[DATE_REG]), ::[RUNTIME].[FDP].pdat(client_corp.[REGISTER].[DATE_REESTR]));
+					temp_str := nvl(::[RUNTIME].[FDP].pdat(client_corp.[REGISTER].[DATE_REESTR]), ' ') || ' / ' || nvl(::[RUNTIME].[FDP].pdat(client_corp.[REGISTER].[DATE_REG]), ' ');
+					P_DATA := temp_str;
+				elsif p_info = 'МЕСТО_РЕГ' then
+					if client_corp%id is not null then
+				--место рег-ии
+--				STULY в населенном пункте хранится район области, а не район населенного пункта, поэтому район населенного пункта можно взять только из реквизита	DISTRICT 			
+--				temp_str := nvl(client_org_ref.[REGISTER].[DISTRICT].[NAME], client_org_ref.[REGISTER].[CITY].[AREA].[NAME]);
+					  temp_str := client_corp.[REGISTER].[DISTRICT].[NAME];
+					  temp_str := rtl.bool_char(temp_str is null, '', temp_str||' р-он');
+
+					  temp_str := nvl(client_corp.[REGISTER].[CITY].[COUNTRY].[VALUE], '')||'  '||
+					  		nvl(::[PERSONAL_ADDRESS].[LIB].get_region(client_corp.[REGISTER].[CITY]%ID).[NAME], '')||'  '||
+					  		nvl(client_corp.[REGISTER].[CITY].[KIND].[SHORT_NAME], '')||' '||
+					  		nvl(client_corp.[REGISTER].[CITY].[NAME], '')||' '||
+					  		temp_str;
+--					  		nvl(client_org_ref.[REGISTER].[DISTRICT].[NAME], client_org_ref.[REGISTER].[CITY].[AREA].[NAME]);
+					  temp_str := ltrim(rtrim(temp_str));
+				       P_DATA := temp_str;
+					elsif client_bank%id is not null then
+							  temp_str := client_bank.[REGISTER].[DISTRICT].[NAME];
+					  temp_str := rtl.bool_char(temp_str is null, '', temp_str||' р-он');
+				
+					  temp_str := nvl(client_bank.[REGISTER].[CITY].[COUNTRY].[VALUE], '')||'  '||
+					  		nvl(::[PERSONAL_ADDRESS].[LIB].get_region(client_bank.[REGISTER].[CITY]%ID).[NAME], '')||'  '||
+					  		nvl(client_bank.[REGISTER].[CITY].[KIND].[SHORT_NAME], '')||' '||
+					  		nvl(client_bank.[REGISTER].[CITY].[NAME], '')||' '||
+					  		temp_str;
+--					  		nvl(client_org_ref.[REGISTER].[DISTRICT].[NAME], client_org_ref.[REGISTER].[CITY].[AREA].[NAME]);
+					  temp_str := ltrim(rtrim(temp_str));
+					  P_DATA := temp_str;
+					end if;
+				elsif p_info = 'РЕГ_ОРГАН' then
+				 if client_corp%id is not null then
+					temp_str := nvl(client_corp.[REGISTER].REGISTRAR, ' ') || ' / ' || nvl(client_corp.[REGISTER].[REG_BODY].[NAME], client_corp.[REGISTER].[REG_BODY].[LONG_NAME]);
+				 elsif client_bank%id is not null then
+				 	temp_str := nvl(client_bank.[REGISTER].REGISTRAR, ' ') || ' / ' || nvl(client_bank.[REGISTER].[REG_BODY].[NAME], client_corp.[REGISTER].[REG_BODY].[LONG_NAME]);
+				 end if;
+
+					P_DATA := temp_str;
+				end if;
+			else
+				P_DATA := ' ';
+			end if;
+--------
+		elsif p_info = 'ЛИЦЕНЗИИ' then	 	--ЛИЦЕНЗИИ
+			if client_corp%id is not null then
+				P_DATA := null;
+				-- optimaze
+				for
+				(
+					select lic
+					(
+						lic.[TYPE_LICENCE].[NAME]: 		l_type,
+						lic.[NUM_LICENCE]:				l_num,
+						lic.[DATE_BEGIN]:				l_date1,
+						lic.[DATE_END]:					l_date2,
+						lic.[WHO]:						l_who,
+						lic.[LIST_TYPES]:				l_list
+					)
+				in client_corp.[LICENCES]
+				where nvl(lic.[DATE_BEGIN],op_dat) <= op_dat and
+					  nvl(lic.[DATE_END],op_dat) >= op_dat
+				)
+				loop
+				P_DATA := P_DATA
+						  ||rtl.bool_char(lic.l_type is null, null, 'Вид лицензии: '||lic.l_type||' ')
+						  ||rtl.bool_char(lic.l_num is null, null, 'Номер: '||lic.l_num||' ')
+						  ||rtl.bool_char(lic.l_date1 is null, null, ' Дата выдачи: '||to_char(lic.l_date1, 'DD.MM.YYYY')||' ')
+						  ||rtl.bool_char(lic.l_date2 is null, null, ' Дата окончания: '||to_char(lic.l_date2, 'DD.MM.YYYY')||' ')
+						  ||rtl.bool_char(lic.l_who is null, null, ' Выдана: '||lic.l_who||' ')
+						  ||rtl.bool_char(lic.l_list is null, null, ' Виды лицензируемой деятельности: '||lic.l_list)
+						  ||NL$||NL$;
+				end loop;
+
+				P_DATA := trim(P_DATA);
+				P_DATA := rtl.bool_char(P_DATA is null, null, substr(P_DATA, 1, length(P_DATA)-4));
+			else
+				P_DATA := '';
+			end if;
+			
+		elsif p_info = 'ДАТА_СЧЕТА1' then	 	--ДАТА_СЧЕТА1
+			if account is not null then
+				begin
+				P_DATA := nvl(::[RUNTIME].[FDP].pdat(date_acc1), '');
+				exception when  NO_DATA_FOUND then
+					pragma error('Ошибка при вычислении реквизита клиента ДАТА_СЧЕТА1');
+				end;
+			else
+				P_DATA :='';
+			end if;
+		
+		elsif p_info = 'ДАТА_СЧЕТА_NEW' then	 	--ДАТА_СЧЕТА_NEW
+--> ivanov a.v. 17/04/2017 Анкета
+			P_DATA :='';
+			if v_date_beg_cl is not null then
+				P_DATA := nvl(::[RUNTIME].[FDP].pdat(v_date_beg_cl), '');
+			end if;
+--< ivanov a.v. 17/04/2017 Анкета
+
+		---->--Дианков А.В. 15/01/16
+		elsif p_info = 'ДАТА_ЗАК_СЧЕТА' then	 	--ДАТА_ЗАК_СЧЕТА
+
+			P_DATA :='';
+
+				declare
+				  acc ref [AC_FIN];
+				begin
+					locate acc in ::[AC_FIN] all where acc.[CLIENT_V]=cl_ref
+														AND (acc.[DATE_CLOSE] is null OR P_DATE_PRINT <= acc.[DATE_CLOSE]);
+					P_DATA :='';
+				exception when NO_DATA_FOUND then
+					begin
+					select x(x)
+					in ::[AC_FIN] all
+					where x.[CLIENT_V]=cl_ref
+						  AND rownum < 2
+					order by x.[DATE_CLOSE] desc
+					into acc;
+					
+					P_DATA := nvl(::[RUNTIME].[FDP].pdat(acc.[DATE_CLOSE]), '');
+					exception when NO_DATA_FOUND then
+						pragma error('Ошибка при вычислении реквизита клиента ДАТА_ЗАК_СЧЕТА');
+					end;
+				end;
+				
+			
+		elsif p_info = 'ДАТА_ЗАК_СЧЕТА_NEW' then	 	--ДАТА_ЗАК_СЧЕТА_NEW
+--> ivanov a.v. 17/04/2017 Анкета
+			P_DATA :='';
+			if v_date_end_cl <> to_date('01/01/4000','dd/mm/yyyy') then
+				P_DATA := nvl(::[RUNTIME].[FDP].pdat(v_date_end_cl), '');
+			end if;
+--< ivanov a.v. 17/04/2017 Анкета
+
+		elsif p_info = 'КЛ_ТЕРРОРИСТ' then  --проверка на терроризм
+			declare
+				dt date;
+				l_data	[MEMO_32767];
+			begin	
+				P_DATA:=null;
+				dt:='2016.01.01';
+
+				for (	select x(	x%id :id,
+									x.[CHECK_DATE]	:cd,
+									x.[CHECK_VAL].[NAME]: cvn)
+							in ::[CL_CHECK_RESULT] all
+						where	x.[CHECK_OBJ] = cl_ref and
+								x.[CHECK_TYPE].[CODE] = 'TERROR_LIST' and
+								dt <= x.[CHECK_DATE])
+				loop
+					l_data := to_char(x.[cd],'dd.mm.yyyy')||' Результат: '||x.[CVN];
+					if P_DATA is null then
+						P_DATA:= l_data;
+					else
+						if instr(P_DATA, l_data) = 0 then
+							P_DATA := P_DATA || chr(10) || l_data;
+						end if;
+					end if;
+					&debug('P_DATA = '||P_DATA,0)
+					&debug('length(P_DATA) = '||length(P_DATA),0)
+				end loop;
+
+				&debug('return P_DATA КЛ_ТЕРРОРИСТ',0)
+			exception when others then
+				pragma error ('Ошибка при выводе. Параметра "КЛ_ТЕРРОРИСТ" '||sqlerrm);	
+			end;
+
+		elsif p_info = 'КЛ_ТЕРРОРИСТ_NEW' then  --проверка на терроризм
+				
+--> ivanov.a.v. 17/04/2017 Анкета
+		  declare
+		  	dt date;
+		  	l_data	[MEMO_32767];
+		  begin	
+			&debug('!!!!!  КЛ_ТЕРРОРИСТ_NEW v_date_beg_cl = '||to_char(v_date_beg_cl,'dd.mm.yy'),0)
+			&debug('!!!!!  КЛ_ТЕРРОРИСТ_NEW v_date_end_cl = '||to_char(v_date_end_cl,'dd.mm.yy'),0)
+			&debug('!!!!!  КЛ_ТЕРРОРИСТ_NEW v_is_once = '||bool_char(v_is_once),0)
+				if v_date_beg_cl = v_date_end_cl and v_is_once then
+					&debug('!!!!!  Перед циклом и разовая операция',0)
+					for (	select x(x%id :id,
+									x.[CHECK_DATE]	:cd,
+									x.[CHECK_VAL].[NAME]: cvn)
+								in ::[CL_CHECK_RESULT] all
+							where x.[CHECK_OBJ] = cl_ref and
+								x.[CHECK_TYPE].[CODE] = 'TERROR_LIST' and
+								v_date_end_cl >= trunc(x.[CHECK_DATE])
+							order by x.[CHECK_DATE] desc
+					)loop
+						&debug('!!!!!  В цикле разовая',0)
+						if v_date_end_cl > trunc(x.[cd]) then
+							l_data := to_char(v_date_end_cl,'dd.mm.yyyy')||' Результат: '||x.[CVN];
+						else
+							l_data := to_char(x.[cd],'dd.mm.yyyy')||' Результат: '||x.[CVN];
+						end if;
+						P_DATA:= l_data;
+						&debug('!!!!!  В цикле P_DATA = '||P_DATA,0)
+						exit;
+					end loop;
+				else
+					&debug('!!!!!  не разовая операция',0)
+					dt:= greatest(v_date_beg_cl, to_date('01/01/2016','dd/mm/yyyy'));
+					--> TTI 28/07/2017   "рисуем проверку на терроризм"  для катигории клиентов "с работающими продуктами"
+					P_DATA:= to_char(dt,'dd.mm.yyyy')||' Результат: Не выявлено совпадений со справочником террористов РФ';  -- "рисуем проверку на терроризм"   в дату начала отношений с клиентом
+					--< TTI 28/07/2017
+					for (select x(x%id :id,
+									x.[CHECK_DATE]	:cd,
+									x.[CHECK_VAL].[NAME]: cvn)
+							in ::[CL_CHECK_RESULT] all
+						where x.[CHECK_OBJ] = cl_ref and
+							x.[CHECK_TYPE].[CODE] = 'TERROR_LIST' and
+						--	dt <= x.[CHECK_DATE] and
+							dt < x.[CHECK_DATE] and    --28.07.2017 TTI Делаем  строго больше т.к."рисуем проверку" в дату начала отношений с клиентом
+							v_date_end_cl >= trunc(x.[CHECK_DATE])
+							order by x.[CHECK_DATE] asc
+					)loop
+						&debug('!!!!!  В цикле не разовая',0)
+						l_data := to_char(x.[cd],'dd.mm.yyyy')||' Результат: '||x.[CVN];
+						&debug('!!!!!  В цикле не разовая l_data'||l_data,0)
+						if P_DATA is null then
+							P_DATA:= l_data;
+						else
+							if instr(P_DATA, l_data) = 0 then
+								P_DATA := P_DATA || chr(10) || l_data;
+							end if;
+						end if;
+						&debug('P_DATA = '||P_DATA,0)
+						&debug('length(P_DATA) = '||length(P_DATA),0)
+					end loop;
+				end if;
+		  end;
+--< ivanov.a.v. 17/04/2017 Анкета
+
+		----------<---Дианков А.В.
+----
+		elsif p_info = 'ДАТА_ОПЕРАЦИИ' then	 	--ДАТА_ОПЕРАЦИИ NGA24/12/2014
+		  if client_corp%id is not null OR client_bank%id is not null then
+		  	if account is not null then
+	 			P_DATA := to_char(get_first_move_date(account), 'DD.MM.YYYY');
+	 		else
+	 		    P_DATA :='';
+	 		end if;
+		  elsif client_priv%id is not null then
+		    var date_vop  date default [CONSTANT].DATE_MAX;  -- дата 1-ой ВОП Клиента
+		    var date_safe date default [CONSTANT].DATE_MAX;  -- дата 1-ого договора Аренды ячейки с арендатором-Клиентом
+		
+		    for kv in ::[KASSA_V] where -- найдем дату 1-ой ВОП Клиента.
+		         --1. В операции ВОП нет ссылки на Клиента, но есть такие же серия/номер, как в истории изменений Клиента
+		        (kv.[CLIENT] is NULL and
+		         exists (select v(v) in ::[CL_HIST] where
+		                             v.[VALUE] = kv.[NEW_CLIENT].[SERIA] AND
+		                             v.[QUAL]='DOC.SER' AND
+		                             v.[CLIENT_REF] = client_priv%id
+		                             and rownum=1) and
+                 exists (select v(v) in ::[CL_HIST] where
+		                             v.[VALUE] = kv.[NEW_CLIENT].[NUMBER] AND
+		                             v.[QUAL]='DOC.NUM' AND
+		                             v.[CLIENT_REF] = client_priv%id
+		                             and rownum=1)		
+		        )  OR
+		         --2. В операции ВОП нет ссылки на Клиента, но есть такие же паспорт/серия/номер, как у Клиента
+		        (kv.[CLIENT] is NULL and
+		         kv.[NEW_CLIENT].[PASSPORT] = client_priv.[DOC].[TYPE].[FULL_NAME] and
+		         kv.[NEW_CLIENT].[SERIA]    = client_priv.[DOC].[SER]  and
+		         kv.[NEW_CLIENT].[NUMBER]   = client_priv.[DOC].[NUM])   OR
+		         --3. Есть прямая ссылка на клиента 	
+		         kv.[CLIENT] = client_priv%id
+		         order by kv.[DATE]
+		    loop
+		        date_vop:=trunc(kv.[DATE]);
+		        exit;
+		    end loop;
+debug_pipe('PSB_WRD_FIZCL_AN -- p_info=ДАТА_ОПЕРАЦИИ1  дата 1-ой ВОП Клиента(макс.дата=нет) date_vop='||date_vop,0);		
+		    for h in ::[HOLDER] ALL where h.[CLIENT] = client_priv%id order by h.[DATA_BEG]  -- найдем дату 1-ого договора Аренды с арендатором-Клиентом
+		    loop
+		       date_safe:=trunc(h.[DATA_BEG]);
+		       exit;
+		    end loop;
+debug_pipe('PSB_WRD_FIZCL_AN -- p_info=ДАТА_ОПЕРАЦИИ1  дата 1-ого договора Аренды(макс.дата=нет) date_safe='||date_safe,0);		    		
+--
+            date_mov1:=[CONSTANT].DATE_MAX;
+            if account_tmp is not null then
+               date_mov1 := trunc(get_first_move_date(account_tmp));
+			   if (date_acc1 < to_date('31.12.2008', 'dd.mm.yyyy')) and (date_mov1 = to_date('31.12.2008', 'dd.mm.yyyy')) then
+			       date_mov1 := date_acc1;
+			   end if;
+            end if;
+debug_pipe('PSB_WRD_FIZCL_AN -- p_info=ДАТА_ОПЕРАЦИИ1  дата 1-ого движ.по счету(макс.дата=нет) date_mov1='||date_mov1||'  счет='||account_tmp.[MAIN_V_ID],0);
+            date_mov1 := least(date_vop, date_safe, date_mov1);
+            if date_mov1 < [CONSTANT].DATE_MAX then
+               P_DATA := ::[RUNTIME].[FDP].pdat(date_mov1, '');
+            else
+               P_DATA :='';
+            end if;
+		  end if;
+
+			/*
+			if account_tmp is not null then
+--				date_acc1 := trunc(account.[DATE_OP]);
+				date_mov1 := trunc(get_first_move_date(account_tmp));
+				if (date_acc1 < to_date('31.12.2008', 'dd.mm.yyyy')) and (date_mov1 = to_date('31.12.2008', 'dd.mm.yyyy')) then
+					P_DATA := ::[RUNTIME].[FDP].pdat(date_acc1, '');
+				else
+					P_DATA := ::[RUNTIME].[FDP].pdat(get_first_move_date(account_tmp), '');
+				end if;
+			else
+				P_DATA :='';
+			end if;
+			*/
+
+		elsif p_info = 'СОТР_ОТКР' then		--СОТР_ОТКР
+			declare u ref [USER];
+			begin
+				u := account.[USER_OP];
+				if (account is not null) and (u is not null) then
+					P_DATA := nvl(::[RUNTIME].[FDP_2].fio_short(u.[NAME]), '') || ', ' || u.[CASTA].[VALUE];
+				else
+					P_DATA :='';
+				end if;
+			end;
+		elsif p_info = 'СОТР_УТВ' then		--СОТР_УТВ
+			P_DATA :='';
+
+		elsif p_info = 'ЗАПОЛНИЛ' then		--ЗАПОЛНИЛ
+			P_DATA := nvl(stdlib.userid.[CASTA].[VALUE], '')||' '||nvl(::[RUNTIME].[FDP_2].fio_short(stdlib.userid.[NAME]), '');
+
+------
+		elsif p_info like 'ЗАПОЛН_%' then		--ЗАПОЛНИЛ
+			p_info := substr(p_info, 8);
+			if p_info = 'ДОЛЖН' then
+				P_DATA := nvl(P_HEADUSER.[CASTA].[VALUE], ' ');
+			elsif p_info = 'ФИО' then
+				P_DATA := nvl(::[RUNTIME].[FDP_2].fio_short(P_HEADUSER.[NAME]), ' ');
+			else
+				P_DATA := ' ';
+			end if;
+
+------
+		elsif p_info = 'РУК_ПОДР' then	 	--РУК_ПОДР
+			if P_HEADUSER is not null then
+				P_DATA := nvl(::[RUNTIME].[FDP_2].fio_short(P_HEADUSER.[NAME]), '');
+				P_DATA := rtl.bool_char(P_DATA is not null, nvl(P_HEADUSER.[CASTA].[VALUE], '')||' '||P_DATA, '');
+			else
+				P_DATA :='';
+			end if;
+------	
+		elsif p_info = 'СОТР_ОТВ_НАЧ'  then --Дианков А.В. начальник ответственного сотрудника (Лотес Н.В.)
+			P_DATA:='';
+			-- 19.01.2016 Вычислим должность сотрудника Банка, принявшего решение о приеме клиента на обслуживание.
+			-- Всегда будет начальник РОО (Лотес Н.В.)
+			-- Картешкина 24/08/16 для Тюмени должность PSB_uprav_filial сделала и добавила должность к имени
+			for us in ::[USER] all
+			where	us.[FILIAL]=account.[FILIAL] and
+					--- (us.[FILIAL] = ::[BRANCH]([CODE]='002') and us.[CASTA].[CODE] = 'PSB_uprav_filial' or
+					--- 	us.[FILIAL] != ::[BRANCH]([CODE]='002') and us.[CASTA].[CODE] in ('PSB_gl_buh_nroo' , 'nch_POO', 'PSB_grav_buch')
+					--- ) and
+					us.[BEG_DATE] <= P_DATE_PRINT and
+					(us.[END_DATE] is null OR P_DATE_PRINT <= us.[END_DATE])
+			loop
+				if P_DATA is null then
+					P_DATA:=us.[NAME]|| ', ' || us.[CASTA].[VALUE];
+				else
+					P_DATA:=P_DATA||';'||us.[NAME]|| ', ' || us.[CASTA].[VALUE];
+				end if;
+			end loop;
+
+		elsif p_info = 'СОТР_ОТВ_НАЧ_NEW'  then --Дианков А.В. начальник ответственного сотрудника (Лотес Н.В.)
+--> ivanov a.v. 17/04/2017 Анкета
+			P_DATA :='';
+			for i in 1..v_rec_prod_tbl.count loop
+				if v_rec_prod_tbl(i).p_date_begin > P_DATE_PRINT then
+					exit;
+				else
+					if i = 1 then
+						v_user_cr := v_rec_prod_tbl(i).create_user;
+					end if;
+					if nvl(v_rec_prod_tbl(i).split,'0') = '1' then
+						v_user_cr := v_rec_prod_tbl(i).create_user;
+					end if;
+				end if;
+			end loop;
+			if v_user_cr is not null then
+				for us in ::[USER] all
+				where us%id = v_user_cr
+				loop
+					if P_DATA is null then
+						P_DATA:=us.[NAME]|| ', ' || us.[CASTA].[VALUE];
+					else
+						P_DATA:=P_DATA||';'||us.[NAME]|| ', ' || us.[CASTA].[VALUE];
+					end if;
+				end loop;
+			end if;
+--< ivanov a.v. 17/04/2017 Анкета
+
+		elsif p_info = 'СОТР_ОТВ' then	 	--СОТР_ОТВ
+			declare u ref [USER];
+			begin
+				--Башкиров В.Г. 22.08.2012 Вычислим куратора или ответсвенного по счету
+				u := nvl(GetCurator(cl_ref,P_DATE_PRINT),account.[OTV]);
+				--Башкиров В.Г. 22.08.2012 Если уволился, сбросим.
+				--NGA05/06/2015 if u is not null and (u.[END_DATE] is null or u.[END_DATE]<=P_DATE_PRINT) then
+				if u is not null and u.[END_DATE] is not null and u.[END_DATE]<=P_DATE_PRINT then  --NGA05/06/2015 Дата ув.есть и она меньше даты печати
+				   u:=null;
+				end if;
+                -- NGA 17/08/2015
+                if u is null then
+                   /*declare
+			         cl_ref ref [CLIENT];*/
+	               begin
+	    	        /*if client_org_ref is not null then cl_ref := client_org_ref;
+	    	        else             	    		    cl_ref := cl_ref;
+	    	        end if;*/
+    	            --1. Если отв.по 1-му откр.счету уволен,попробуем поискать неувол.отв.по другим счетам клиента
+                    for a in ::[AC_FIN] where a%id <> account%id and a.[CLIENT_V] = cl_ref order by a.[DATE_OP] asc
+                    loop
+                        if a.[OTV].[END_DATE] is null or -- не уволен или уволен позже даты печати
+                           a.[OTV].[END_DATE] is not null and a.[OTV].[END_DATE]>P_DATE_PRINT then
+                           u:=a.[OTV];
+		   		           exit;
+                        end if;
+		            end loop;
+						debug_pipe('u1='||u.[NAME]);
+		            --2. Если ни по какому счету нет неувол.ответ-ого,ищем любого неувол.сотр-ка этого отдела
+		            if u is null then
+	                   for a in ::[AC_FIN] where a.[CLIENT_V] = cl_ref order by a.[DATE_OP] asc
+                       loop
+                          for u2 in ::[USER] where (u2.[END_DATE] is null or u2.[END_DATE] is not null and u2.[END_DATE]>P_DATE_PRINT)
+                                            and u2.[DEPART]=a.[OTV].[DEPART]
+                          loop
+			 			   u:=u2;
+			 		  	   exit;
+			 		      end loop;  -- по юзерам того же подразделения
+			 		      if u is NOT NULL then
+                             exit;
+			 		      end if;
+		               end loop;  -- по счетам
+		            end if;
+	               end;
+                end if;
+                -- NGA 17/08/2015 end
+
+				--Башкиров В.Г. 22.08.2012 заявка от Брюжецовой Н.М.
+				--У физ лиц, которые, которые являются  директорами( представителями)
+				--клиентов-юридических лиц должна проставляться ФИО и должность
+				--сотрудника, ответственного за работу с клиентом-юридическим лицом и
+				--желательно подтягиваться автоматически при проставлении или изменении
+				--сотрудника, ответственного за работу с клиентом-фр лицом.
+				if u is null then
+					if cl_ref%class='CL_PRIV' then
+						for p in ::[PERSONS_POS] all where p.[FASE]=cl_ref loop
+							for cc in ::[CL_CORP] all where p%collection=cc.[ALL_BOSS] loop
+								for af in ::[AC_FIN] where af.[CLIENT_V]=cc and (af.[OTV].[END_DATE] is null or af.[OTV].[END_DATE]<=P_DATE_PRINT) loop
+									u:=af.[OTV];
+									exit;
+								end loop;
+							end loop;
+							if u is not null then
+								exit;
+							end if;
+						end loop;
+					end if;
+				end if;
+				--У физ лиц - не имеющих счетов в Банке в графе "Должность ФИО сотрудника,
+				--ответственного за работу с Клиентом" должна проставляться фио и
+				--должность сотрудника, который завел сведения о данном клиенте в ЦФТ или
+				--произвел их последнее обновление.
+				/*if u is null then --смотрим по 6.1. История изменения реквизитов экземпляров
+					var vUserName [STRING_30];
+					::[SYS_DIARYS].[CRIT_DIARY](to_date('01/01/1901','dd/mm/yyyy'),::[SYSTEM].[OP_DATE]+1); --!!! здесь определяется контекст сессии для этого представления
+					for (select a1(
+								a1.C_1  : C_1,
+								a1.C_2  : C_2,
+								a1.C_3  : C_3,
+								a1.C_11 : C_11,
+								a1.id   : a1_id)
+								in (VW_CRIT_VALUES_HISTORY%RowType : a1)
+								where a1.C_1=cl_ref
+								order by to_date(a1.C_2,'yyyy-mm-dd hh24:mi:ss') desc, a1.C_11 desc
+								)
+					loop
+						 u:=GetUser(a1.C_3);
+						 debug_pipe('СОТР_ОТВ-3-...: фио = '||u.[NAME],0);
+						 if u is not null and (u.[END_DATE] is null or u.[END_DATE]<=P_DATE_PRINT) then
+						 	 debug_pipe('PSB_WRD_FIZCL_AN -- a1.C_1='||a1.C_1||' a1.C_2='||a1.C_2||' a1.C_3='||a1.C_3||' a1.C_11='||a1.C_11||' -> '||u.[NAME],dp);
+						     exit;
+						 end if;
+					end loop;
+				end if;*/
+				--А если данный сотрудник уже уволен-то
+				--любой сотрудник операционного офиса.
+			 	if u is not null and not (u.[END_DATE] is null or u.[END_DATE]<=P_DATE_PRINT) then
+			 		for u2 in ::[USER] where u2.[DEPART]=u.[DEPART] and (u2.[END_DATE] is null or u2.[END_DATE]<=P_DATE_PRINT) loop
+			 			u:=u2;
+			 			exit;
+			 		end loop;
+				end if;
+			 	if u is not null and not (u.[END_DATE] is null or u.[END_DATE]<=P_DATE_PRINT) then
+			 		var hDepart ref [DEPART]:=u.[DEPART].[HIGH];
+			 		var vFilial ref [BRANCH]:=u.[FILIAL];
+			 		var iErr integer:=0;
+			 		u:=null;
+			 		for iErr in 1..100 loop
+				 		for u2 in ::[USER] where hDepart is not null and u2.[DEPART]=hDepart and (u2.[END_DATE] is null or u2.[END_DATE]<=P_DATE_PRINT) loop
+				 			u:=u2;
+				 			exit;
+				 		end loop;
+				 		hDepart:=hDepart.[HIGH];
+				 		if u is not null then exit; end if;
+			 		end loop;
+			 		if u is null then
+				 		for u2 in ::[USER] where u2.[FILIAL]=vFilial and (u2.[END_DATE] is null or u2.[END_DATE]<=P_DATE_PRINT) loop
+				 			u:=u2;
+				 			exit;
+				 		end loop;
+			 		end if;
+				end if;
+			
+				if u is not null then P_DATA := nvl(::[RUNTIME].[FDP_2].fio_short(u.[NAME]), '') || ', ' || u.[CASTA].[VALUE];
+				else				  P_DATA :='';
+				end if;
+			end;
+		
+			
+	 	elsif p_info = 'ВЫГОДОПРИОБРЕТАТЕЛЬ' then
+		  if client_corp%id is not null then
+		  	for cl_link in client_corp.[LINKS_OTHER] where cl_link.[VID_LINK].[CODE] = 'ВЫГОДОПРИОБРЕТАТЕЛЬ' loop
+				--NGA temp_str := nvl(cl_link.[PARTNER].[NAME], '');
+				temp_str  := nvl(cl_link.[PARTNER].[NAME], cl_link.[CLIENT_NAME]);
+				temp_str2 := cl_link.[FOUND];  -- NGA основание
+				--NGA P_DATA := P_DATA || rtl.bool_char(temp_str is not null, temp_str|| ', ', '');
+				P_DATA := P_DATA || rtl.bool_char(temp_str is not null, temp_str||' основание:' || temp_str2 || ', ', '');
+			end loop;
+			--NGA23092013 temp_str1 := rtrim(P_DATA,' ,');
+			temp_memo := rtrim(P_DATA,' ,');
+			temp_str2 := '';  --NGA
+			P_DATA := '';
+			for cl_link in client_corp.[LINKS_OTHER] where cl_link.[VID_LINK].[CODE] = 'ВЫГОДОДАТЕЛЬ' loop
+				temp_str := nvl(cl_link.[PARTNER].[NAME], '');
+				P_DATA := P_DATA || rtl.bool_char(temp_str is not null, temp_str|| ', ', '');
+			end loop;
+			temp_str2 := rtrim(P_DATA,' ,');
+
+			/*NGA23092013
+			if length(temp_str1) > 1 then
+		 		temp_str1 := 'Выгодоприобретатели: ' || temp_str1;
+			else
+			  temp_str1 := ' ';
+			end if;
+            */
+            if length(temp_memo) > 1 then -- NGA23092013
+		 		temp_memo := 'Выгодоприобретатели: ' || temp_memo;
+			else
+			  temp_memo := ' ';
+			end if;
+			
+			if length(temp_str2) > 1 then
+		 		temp_str2 := 'Выгододатели: ' || temp_str2;
+			else
+			  temp_str2 := ' ';
+			end if;
+
+			if /*NGA23092013 temp_str1 != ' '*/ temp_memo != ' ' then
+				if temp_str2 = ' ' then
+					--NGA23092013 P_DATA := temp_str1;
+					P_DATA := temp_memo;
+				else
+					--NGA23092013 P_DATA := temp_str1 || NL$ || temp_str2;
+					P_DATA := temp_memo || NL$ || temp_str2;
+				end if;
+			else
+				if temp_str2 = ' ' then
+					P_DATA := 'Отсутствует';
+				else
+					P_DATA := temp_str2;
+				end if;
+			end if;	
+			
+		  elsif client_priv%id is not null then
+			for cl_link in client_priv.[LINKS_OTHER] where cl_link.[VID_LINK].[CODE] = 'ВЫГОДОПРИОБРЕТАТЕЛЬ' loop
+				temp_str := nvl(nvl(cl_link.[PARTNER].[NAME],cl_link.CLIENT_NAME),'');
+				P_DATA := P_DATA || rtl.bool_char(temp_str is not null, temp_str|| ', ', '');
+			end loop;
+			temp_str1 := rtrim(P_DATA,' ,');
+			P_DATA := '';
+			for cl_link in client_priv.[LINKS_OTHER] where cl_link.[VID_LINK].[CODE] = 'ВЫГОДОДАТЕЛЬ' loop
+				temp_str := nvl(nvl(cl_link.[PARTNER].[NAME],cl_link.CLIENT_NAME), '');
+				P_DATA := P_DATA || rtl.bool_char(temp_str is not null, temp_str|| ', ', '');
+			end loop;
+			temp_str2 := rtrim(P_DATA,' ,');
+			if length(temp_str1) > 1 then
+		 		temp_str1 := 'Выгодоприобретатели: ' || temp_str1;
+			else
+			  temp_str1 := ' ';
+			end if;
+
+			if length(temp_str2) > 1 then
+		 		temp_str2 := 'Выгододатели: ' || temp_str2;
+			else
+			  temp_str2 := ' ';
+			end if;
+
+			if temp_str1 != ' ' then
+				if temp_str2 = ' ' then
+					P_DATA := temp_str1;
+				else
+					P_DATA := temp_str1 || NL$ || temp_str2;
+				end if;
+			else
+				if temp_str2 = ' ' then
+					P_DATA := 'Отсутствует';
+				else
+					P_DATA := temp_str2;
+				end if;
+			end if;	
+	 	 end if;
+-----------
+            elsif p_info in ('ВЫГОДОДАТ_С_ОСН', 'ВЫГОДОПРИ_С_ОСН') then  -- NGA21/05/2015 добавлено из WRD_FIZCL_ANK
+				if (client_corp%id is not null) then
+					V_CL_LINKS := client_corp.[LINKS_OTHER];
+				else
+					V_CL_LINKS := client_priv.[LINKS_OTHER];
+				end if;
+				
+				if p_info = 'ВЫГОДОДАТ_С_ОСН' then
+				 if (client_priv%id is not null) then
+					P_DATA := ::[CL_PRIV].[WRD_ANK_L_OOXML].fill_benefit(P_DATE_PRINT, V_CL_LINKS, ::[CL_LINK]([CODE]='ВЫГОДОДАТЕЛЬ'), true, true);
+				 end if;	
+				elsif p_info = 'ВЫГОДОПРИ_С_ОСН' then
+				 if (client_priv%id is not null) then
+					P_DATA := ::[CL_PRIV].[WRD_ANK_L_OOXML].fill_benefit(P_DATE_PRINT, V_CL_LINKS, ::[CL_LINK]([CODE]='ВЫГОДОПРИОБРЕТАТЕЛЬ'), true, true);
+				 end if;	
+				end if;									
+-----------
+	 	elsif p_info = 'МЕРЫ' then
+			P_DATA := nvl(cl_ref.[NOTES], '   ');
+			
+------------
+            elsif p_info = 'БЕН_ВЛАД' then  -- NGA11092013  Бен.владелец для ИП(берем из связей).
+			if client_corp%id is not null then  -- для ФЛ=ИП
+			   P_DATA := '';
+			   for cl_link in client_corp.[LINKS_OTHER] where
+			                  nvl(cl_link.[DATE_BEG],to_date('01.01.1980','dd.mm.yyyy')) <= P_DATE_PRINT and
+			                  nvl(cl_link.[DATE_END],to_date('01.01.4000','dd.mm.yyyy')) >  P_DATE_PRINT and
+			                  cl_link.[VID_LINK].[CODE] in ('PSB_БЕН_ВЛАДЕЛЕЦ','БЕНЕФИЦИАР') --NGA18092014
+			   loop
+			       temp_str := nvl(cl_link.[PARTNER].[NAME], '');
+				   P_DATA := P_DATA || rtl.bool_char(temp_str is not null, temp_str|| ', ', '');
+			   end loop;						
+		 	   P_DATA := trim(P_DATA);
+	 		   P_DATA := substr(P_DATA,1,length(P_DATA)-1);
+			elsif client_priv%id is not null then  -- для просто ФЛ
+			   for cl_link in client_priv.[LINKS_OTHER] where
+			                  nvl(cl_link.[DATE_BEG],to_date('01.01.1980','dd.mm.yyyy')) <= P_DATE_PRINT and
+			                  nvl(cl_link.[DATE_END],to_date('01.01.4000','dd.mm.yyyy')) >  P_DATE_PRINT and
+			                  cl_link.[VID_LINK].[CODE] in ('PSB_БЕН_ВЛАДЕЛЕЦ','БЕНЕФИЦИАР') --NGA18092014
+			   loop
+			       temp_str := nvl(cl_link.[PARTNER].[NAME], '');
+				   P_DATA := P_DATA || rtl.bool_char(temp_str is not null, temp_str|| ', ', '');
+			   end loop;						
+		 	   P_DATA := trim(P_DATA);
+	 		   P_DATA := substr(P_DATA,1,length(P_DATA)-1);
+			end if;
+        elsif p_info = 'БЕН_ВЛАД_N' then  -- NGA11092013  Бен.владелец для ИП(берем из связей).
+            P_DATA := '';
+			if client_corp%id is not null then -- для ФЛ=ИП
+			   for cl_link in client_corp.[LINKS_OTHER] where
+			                  nvl(cl_link.[DATE_BEG],to_date('01.01.1980','dd.mm.yyyy')) <= P_DATE_PRINT and
+			                  nvl(cl_link.[DATE_END],to_date('01.01.4000','dd.mm.yyyy')) >  P_DATE_PRINT and
+			                  cl_link.[VID_LINK].[CODE] in ('PSB_БЕН_ВЛАДЕЛЕЦ','БЕНЕФИЦИАР') --NGA18092014
+			   loop
+			       temp_str := nvl(cl_link.[PARTNER].[NAME], '');
+				   P_DATA := P_DATA || rtl.bool_char(temp_str is not null, temp_str|| ', ', '');
+			   end loop;						
+		 	   P_DATA := trim(P_DATA);
+	 		   P_DATA := substr(P_DATA,1,length(P_DATA)-1);
+			else  -- для просто ФЛ
+			   for cl_link in client_priv.[LINKS_OTHER] where
+			                  nvl(cl_link.[DATE_BEG],to_date('01.01.1980','dd.mm.yyyy')) <= P_DATE_PRINT and
+			                  nvl(cl_link.[DATE_END],to_date('01.01.4000','dd.mm.yyyy')) >  P_DATE_PRINT and
+			                  cl_link.[VID_LINK].[CODE] in ('PSB_БЕН_ВЛАДЕЛЕЦ','БЕНЕФИЦИАР') --NGA18092014
+			   loop
+			       temp_str := nvl(cl_link.[PARTNER].[NAME], '');
+				   P_DATA := P_DATA || rtl.bool_char(temp_str is not null, temp_str|| ', ', '');
+			   end loop;
+			 --Башкиров В.Г. 08.09.2015 Для ФЛ Бенефициарны владелец = ФИО Клиента
+			 --P_DATA := trim(P_DATA);
+			 --NGA 15/09/2015 P_DATA := nvl(trim(P_DATA),client_priv.[NAME]);
+			
+			   P_DATA := substr(P_DATA,1,length(P_DATA)-1);
+			   P_DATA := nvl(trim(P_DATA),client_priv.[NAME]);  -- NGA 15/09/2015 переставим оператор сюда, а то без посл.буквы получаем
+			end if;
+
+		elsif p_info = 'НЕТ_БЕН' then  -- NGA11092013  Бен.владелец для ИП(берем из связей). NGA20/05/2015 доб.'НЕТ_БЕН'
+			if client_corp%id is not null then -- для ФЛ=ИП
+			   P_DATA := '';
+			   for cl_link in client_corp.[LINKS_OTHER] where
+			                  nvl(cl_link.[DATE_BEG],to_date('01.01.1980','dd.mm.yyyy')) <= P_DATE_PRINT and
+			                  nvl(cl_link.[DATE_END],to_date('01.01.4000','dd.mm.yyyy')) >  P_DATE_PRINT and
+			                  cl_link.[VID_LINK].[CODE] in ('PSB_БЕН_ВЛАДЕЛЕЦ','БЕНЕФИЦИАР') --NGA18092014
+			   loop
+			       temp_str := nvl(cl_link.[PARTNER].[NAME], '');
+				   P_DATA := P_DATA || rtl.bool_char(temp_str is not null, temp_str|| ', ', '');
+			   end loop;
+			   P_DATA := trim(P_DATA);
+			   P_DATA := substr(P_DATA,1,length(P_DATA)-1);
+			elsif client_priv%id is not null then  -- для просто ФЛ
+			   --Башкиров В.Г. 08.09.2015 Для ФЛ Бенефициарны владелец = Клиенту т.е. не отсутствует
+			   if  client_priv.[NAME] is not null then
+			 	   P_DATA := ' ';
+			   else
+				   for cl_link in client_priv.[LINKS_OTHER] where
+				                  nvl(cl_link.[DATE_BEG],to_date('01.01.1980','dd.mm.yyyy')) <= P_DATE_PRINT and
+				                  nvl(cl_link.[DATE_END],to_date('01.01.4000','dd.mm.yyyy')) >  P_DATE_PRINT and
+				                  cl_link.[VID_LINK].[CODE] in ('PSB_БЕН_ВЛАДЕЛЕЦ','БЕНЕФИЦИАР') --NGA18092014
+				   loop
+				       temp_str := nvl(cl_link.[PARTNER].[NAME], '');
+					   P_DATA := P_DATA || rtl.bool_char(temp_str is not null, temp_str|| ', ', '');
+				   end loop;
+			 	   P_DATA := trim(P_DATA);
+		 		   P_DATA := substr(P_DATA,1,length(P_DATA)-1);
+			   end if;
+			end if;
+
+			   if    P_DATA is null then P_DATA:= 'V';
+			   else                      P_DATA:= ' ';
+			   end if;
+		--NGA20/05/2015
+		elsif p_info = 'ДА'  and not nvl(cl_ref.[IS_RESIDENT], false) then
+			P_DATA:= 'V';
+		elsif p_info = 'НЕТ' and nvl(cl_ref.[IS_RESIDENT], false) then
+			P_DATA:= 'V';
+		elsif p_info = 'ИНОСТР_ГОС' and not nvl(cl_ref.[IS_RESIDENT], false) then
+			P_DATA:= cl_ref.[COUNTRY].[VALUE];
+		--NGA20/05/2015 end
+
+		--NGA03/06/2015 для ПДЛ
+		elsif p_info like '%ПДЛ%' and client_priv%id is not null  then
+
+			if  p_info =  'ДА_ИПДЛ' and client_priv.[IS_IPDL].[CODE] =  'IPDL' then  P_DATA:='V'; end if;  -- Иностр.(сам)
+			if  p_info = 'НЕТ_ИПДЛ' and client_priv.[IS_IPDL].[CODE] <> 'IPDL' then  P_DATA:='V'; end if;
+
+			if  p_info =  'ДА_МРПДЛ' and client_priv.[IS_IPDL].[CODE]     in ('DLMO','RPDL') then P_DATA:='V'; end if;  -- Межд.или Росс.(сам)
+			if  p_info = 'НЕТ_МРПДЛ' and client_priv.[IS_IPDL].[CODE] not in ('DLMO','RPDL') then P_DATA:='V'; end if;
+
+			if  p_info =  'ДА_ИПДЛ_Р' and client_priv.[IS_IPDL].[CODE] =  'IPDL_RELATIVE' then  P_DATA:='V'; end if;  -- Иностр.(родств.)
+			if  p_info = 'НЕТ_ИПДЛ_Р' and client_priv.[IS_IPDL].[CODE] <> 'IPDL_RELATIVE' then  P_DATA:='V'; end if;
+
+			if  p_info =  'ДА_ИПДЛ_П' and client_priv.[IS_IPDL].[CODE] =  'IPDL_REPR' then  P_DATA:='V'; end if;  -- Иностр.(действ.в интер.)
+			if  p_info = 'НЕТ_ИПДЛ_П' and client_priv.[IS_IPDL].[CODE] <> 'IPDL_REPR' then  P_DATA:='V'; end if;
+			-- Нет еще раз посмотрим
+			if p_info in ('НЕТ_ИПДЛ','НЕТ_МРИПДЛ','НЕТ_ИПДЛ_Р','НЕТ_ИПДЛ_П') and client_priv.[IS_IPDL].[CODE] = 'PSB_NOT_PDL' then
+				P_DATA:='V';
+			end if;
+			if client_priv.[IS_IPDL] is null then P_DATA:=' '; end if; -- Сбросим, если не задано ничего
+
+		--NGA03/06/2015 end
+		
+		--NGA04/06/2015 для ПДЛ ищем не по типу, а по категории! Пока отключим.
+/*		elsif p_info like '%ПДЛ%' AND 1=2 then
+
+         --Иностр.(сам)			
+         if p_info =  'ДА_ИПДЛ' AND nvl(instr(::[IPDL_CATEGORY].[LIB].GetPDLStr(client_priv.[IS_IPDL],&IPDL),::[IPDL_CATEGORY]([CODE]=&IPDL).[NAME]),0)>0 then P_DATA:='V'; end if;
+         if p_info = 'НЕТ_ИПДЛ' AND nvl(instr(::[IPDL_CATEGORY].[LIB].GetPDLStr(client_priv.[IS_IPDL],&IPDL),::[IPDL_CATEGORY]([CODE]=&IPDL).[NAME]),0)=0 then P_DATA:='V'; end if;
+         --Межд.или Росс.(сам)		
+         if p_info =  'ДА_МРПДЛ' AND (nvl(instr(::[IPDL_CATEGORY].[LIB].GetPDLStr(client_priv.[IS_IPDL],&DLMO),::[IPDL_CATEGORY]([CODE]=&DLMO).[NAME]),0)>0 OR
+                                      nvl(instr(::[IPDL_CATEGORY].[LIB].GetPDLStr(client_priv.[IS_IPDL],&RPDL),::[IPDL_CATEGORY]([CODE]=&RPDL).[NAME]),0)>0)   then P_DATA:='V'; end if;
+         if p_info = 'НЕТ_МРПДЛ' AND  nvl(instr(::[IPDL_CATEGORY].[LIB].GetPDLStr(client_priv.[IS_IPDL],&DLMO),::[IPDL_CATEGORY]([CODE]=&DLMO).[NAME]),0)=0 AND
+                                      nvl(instr(::[IPDL_CATEGORY].[LIB].GetPDLStr(client_priv.[IS_IPDL],&RPDL),::[IPDL_CATEGORY]([CODE]=&RPDL).[NAME]),0)=0     then P_DATA:='V'; end if;
+         --Иностр.(родств.)		
+         if p_info =  'ДА_ИПДЛ_Р' AND nvl(instr(::[IPDL_CATEGORY].[LIB].GetPDLStr(client_priv.[IS_IPDL],&IPDL_RELATIVE),::[IPDL_CATEGORY]([CODE]=&IPDL_RELATIVE).[NAME]),0)>0 then P_DATA:='V'; end if;
+         if p_info = 'НЕТ_ИПДЛ_Р' AND nvl(instr(::[IPDL_CATEGORY].[LIB].GetPDLStr(client_priv.[IS_IPDL],&IPDL_RELATIVE),::[IPDL_CATEGORY]([CODE]=&IPDL_RELATIVE).[NAME]),0)=0 then P_DATA:='V'; end if;
+         -- Иностр.(действ.в интер.)		
+         if p_info =  'ДА_ИПДЛ_П' AND nvl(instr(::[IPDL_CATEGORY].[LIB].GetPDLStr(client_priv.[IS_IPDL],&IPDL_REPR),::[IPDL_CATEGORY]([CODE]=&IPDL_REPR).[NAME]),0)>0 then  P_DATA:='V'; end if;
+         if p_info = 'НЕТ_ИПДЛ_П' AND nvl(instr(::[IPDL_CATEGORY].[LIB].GetPDLStr(client_priv.[IS_IPDL],&IPDL_REPR),::[IPDL_CATEGORY]([CODE]=&IPDL_REPR).[NAME]),0)=0 then  P_DATA:='V'; end if;
+
+         -- Нет еще раз посмотрим (пока не удален PSB_NOT_PDL)
+         if p_info in ('НЕТ_ИПДЛ','НЕТ_МРИПДЛ','НЕТ_ИПДЛ_Р','НЕТ_ИПДЛ_П') AND client_priv.[IS_IPDL].[CODE] = 'PSB_NOT_PDL' then  P_DATA:='V';   end if;
+         if client_priv.[IS_IPDL] is NULL then P_DATA:=' '; end if; -- Сбросим, если не задано ничего
+         		--NGA04/06/2015 end
+*/
+        --NGA20/07/2015
+		elsif p_info in ('S1_','S2_','S3_','S4_','S5_','S6_','S7_','S8_','S10_','S10txt') then -- CL_ANK_CHARACTER_REL  (Предполагаемый характер деловых отношений с Банком),
+			for rec in cl_ref.[ADD_PROP]
+			where rec.[GROUP_PROP].[CODE] = 'CL_ANK_CHARACTER_REL'
+			loop
+				recprop:=rec;
+				exit;
+			end loop;
+			if p_info = 'S1_' then  -- вклады
+				if recprop%id is not null and recprop.[STR] like '%1 Размещение вклада(депозита)%' then
+					P_DATA:='V';
+				else /*вычисляем*/
+					for dep in ::[DEPN]
+					where	(dep.[ACCOUNT].[MAIN_V_ID] like '4230%' or
+							dep.[ACCOUNT].[MAIN_V_ID] like '4260%') and -- только вклады!
+							dep.[CLIENT] = client_priv%id
+					loop
+						P_DATA:='V';
+						exit;
+					end loop;
+				end if;
+			elsif p_info = 'S2_' then  -- покупка/продажа валюты
+				if recprop%id is not null and recprop.[STR] like '%2 Покупка/продажа иностранной валюты%' then
+					P_DATA:='V';
+				else /*вычисляем*/
+					for kv in ::[KASSA_V] -- найдем ВОП Клиента.
+					--1. В операции ВОП нет ссылки на Клиента, но есть такие же серия/номер, как в истории изменений Клиента
+					where	(	kv.[CLIENT] is null and
+								exists (
+										select v(v)
+											in ::[CL_HIST]
+										where	v.[VALUE] = kv.[NEW_CLIENT].[SERIA] and
+												v.[QUAL]='DOC.SER' and
+												v.[CLIENT_REF] = client_priv%id and
+												rownum=1
+										) and
+								exists (
+										select v(v)
+											in ::[CL_HIST]
+										where	v.[VALUE] = kv.[NEW_CLIENT].[NUMBER] and
+												v.[QUAL]='DOC.NUM' and
+												v.[CLIENT_REF] = client_priv%id and
+												rownum=1
+										)
+							) or
+					--2. В операции ВОП нет ссылки на Клиента, но есть такие же паспорт/серия/номер, как у Клиента
+						(	kv.[CLIENT] is null and
+							kv.[NEW_CLIENT].[PASSPORT]	= client_priv.[DOC].[TYPE].[FULL_NAME] and
+							kv.[NEW_CLIENT].[SERIA]		= client_priv.[DOC].[SER] and
+							kv.[NEW_CLIENT].[NUMBER]   = client_priv.[DOC].[NUM]
+						) or
+					--3. Есть прямая ссылка на клиента
+						kv.[CLIENT] = client_priv%id
+					order by kv.[DATE]
+					loop
+						P_DATA:='V';
+						exit;
+					end loop;
+				end if;
+			elsif p_info = 'S3_' then  -- переводы БОС
+				if recprop%id is not null and recprop.[STR] like '%3 Переводы без открытия счета%' then
+					P_DATA:='V';
+				else /*вычисляем*/
+					for doc in ::[MAIN_DOCUM]
+					where -- найдем перевод БОС Клиента.
+					--1. В переводе БОС нет ссылки на Клиента, но есть такие же серия/номер, как в истории изменений Клиента
+						(
+							(	doc.[REQ_MAN].[CLIENTREF] is null and
+								exists (
+											select	v(v)
+												in ::[CL_HIST]
+											where	replace(upper(v.[VALUE]),' ','') = replace(doc.[REQ_MAN].[SERIA],' ','') and
+													v.[QUAL]='DOC.SER' and v.[DATE_EDIT]> to_date('01/01/1900','dd/mm/yyyy') and
+													v.[CLIENT_REF] = client_priv%id and
+													rownum=1
+										) and
+								exists (
+											select	v(v)
+												in ::[CL_HIST]
+											where	upper(v.[VALUE]) = doc.[REQ_MAN].[NUMBER] and
+													v.[QUAL]='DOC.NUM' and v.[DATE_EDIT]> to_date('01/01/1900','dd/mm/yyyy') and
+													v.[CLIENT_REF] = client_priv%id and
+													rownum=1
+										)
+							) or
+					--2. В переводе БОС нет ссылки на Клиента, но есть такие же паспорт/серия/номер, как у Клиента
+							(	doc.[REQ_MAN].[CLIENTREF] is null and
+								doc.[REQ_MAN].[PASSPORT] = client_priv.[DOC].[TYPE].[FULL_NAME] and
+								replace(doc.[REQ_MAN].[SERIA],' ','') = replace(client_priv.[DOC].[SER],' ','') and
+								doc.[REQ_MAN].[NUMBER]   = client_priv.[DOC].[NUM]
+							) or
+					--3. Есть прямая ссылка на клиента 	
+							doc.[REQ_MAN].[CLIENTREF] = client_priv%id
+						) -- условия на клиента end
+						and
+						(	
+							doc.[ACC_DT].[MAIN_V_ID] like '20202%' and doc.[ACC_KT].[MAIN_V_ID] like '409%' or
+							doc.[ACC_DT].[MAIN_V_ID] like '409%'   and doc.[ACC_KT].[MAIN_V_ID] like '20202%'
+						) and
+						upper(doc%state) = 'PROV'
+					loop
+						P_DATA:='V';
+						exit;
+					end loop;
+				end if;
+			elsif p_info = 'S4_' then  -- кредиты
+				if recprop%id is not null and recprop.[STR] like '%4 Кредитование%' then
+					P_DATA:='V';
+				else /*вычисляем*/
+					for cred in ::[PR_CRED]
+					where cred.[CLIENT] = client_priv%id
+					loop
+						P_DATA:='V';
+						exit;
+					end loop;
+				end if;
+			elsif p_info = 'S5_' then  -- операции с Цен.Бум.
+				if recprop%id is not null and recprop.[STR] like '%5 Операции с ценными бумагами%' then
+					P_DATA:='V';
+				else /*вычисляем*/
+					for nod in ::[NS_OPER_DOG]
+					where	nod.[AGENT]%id = client_priv%id or
+							nod.[CLIENT_F]%id = client_priv%id or
+							nod.[COAGENT]%id  = client_priv%id
+					loop
+						P_DATA:='V';
+						exit;
+					end loop;
+				end if;
+			elsif p_info = 'S6_' then  -- сейф.ячейки
+				if recprop%id is not null and recprop.[STR] like '%6 Сейфовые ячейки%' then
+					P_DATA:='V';
+				else /*вычисляем*/
+					for h in ::[HOLDER] all
+					where h.[CLIENT] = client_priv%id
+					loop
+						P_DATA:='V';
+						exit;
+					end loop;
+				end if;
+			elsif p_info = 'S7_' then  -- ПК
+				if recprop%id is not null and recprop.[STR] like '%7 Оформление ПК%' then
+					P_DATA:='V';
+				else /*вычисляем*/
+					for card in ::[IP_CARDS]
+					where card.[CLIENT] = client_priv%id
+					loop
+						P_DATA:='V';
+						exit;
+					end loop;
+				end if;
+			elsif p_info = 'S8_' then  -- Тек.счета
+				if recprop%id is not null and recprop.[STR] like '%8 Текущий счет%' then
+					P_DATA:='V';
+				else /*вычисляем*/
+					for dep in ::[DEPN]
+					where	(
+								dep.[ACCOUNT].[MAIN_V_ID] like '40817%' or
+								dep.[ACCOUNT].[MAIN_V_ID] like '40820%'
+							) and -- только тек.счета!
+							dep.[CLIENT] = client_priv%id
+					loop
+						P_DATA:='V';
+						exit;
+					end loop;
+				end if;
+			elsif p_info = 'S10_' and recprop.[STR] like '%#%' then
+				P_DATA:='V';
+			elsif p_info = 'S10txt' and recprop.[STR] like '%#%' then
+				P_DATA := substr(recprop.[STR],instr(recprop.[STR],'#')+1);
+			end if; -- по 'S_%'
+
+--> ivanov a.v. 14/06/2017 Анкета
+		elsif p_info in ('S1_N','S2_N','S3_N','S4_N','S5_N','S6_N','S7_N','S8_N','S10_N','S10txtN') then -- CL_ANK_CHARACTER_REL  (Предполагаемый характер деловых отношений с Банком),
+			for rec in cl_ref.[ADD_PROP]
+			where rec.[GROUP_PROP].[CODE] = 'CL_ANK_CHARACTER_REL'
+			loop
+				recprop:=rec;
+				exit;
+			end loop;
+			if p_info = 'S1_N' then  -- вклады
+				if recprop%id is not null and recprop.[STR] like '%1 Размещение вклада(депозита)%' then
+					P_DATA:='V';
+				else /*вычисляем*/
+					for i in 1..v_rec_prod_tbl.count loop
+						if v_rec_prod_tbl(i).p_date_begin > P_DATE_PRINT then
+							exit;
+						else
+							if v_rec_prod_tbl(i).prod_class in ('DEPOSIT_MULT','DEPOSIT_PRIV') and
+							   v_rec_prod_tbl(i).p_date_begin  <= P_DATE_PRINT and
+							   v_rec_prod_tbl(i).p_date_close  >= P_DATE_PRINT and
+							   (v_rec_prod_tbl(i).p_acc like '4230%' or
+								v_rec_prod_tbl(i).p_acc like '4260%' or
+								v_rec_prod_tbl(i).p_acc like '40817%' or
+								v_rec_prod_tbl(i).p_acc like '40820%')--включаем текущие счета
+							    then
+								P_DATA:='V';
+								exit;
+							end if;
+						end if;
+					end loop;
+				end if;
+			elsif p_info = 'S2_N' then  -- покупка/продажа валюты
+				if recprop%id is not null and recprop.[STR] like '%2 Покупка/продажа иностранной валюты%' then
+					P_DATA:='V';
+				else /*вычисляем*/
+					for i in 1..v_rec_prod_tbl.count loop
+						if v_rec_prod_tbl(i).p_date_begin > P_DATE_PRINT then
+							exit;
+						else
+							if v_rec_prod_tbl(i).prod_class =  'KASSA_V' and
+							   v_rec_prod_tbl(i).p_date_begin  <= P_DATE_PRINT
+							    then
+								P_DATA:='V';
+								exit;
+							end if;
+						end if;
+					end loop;
+				end if;
+			elsif p_info = 'S3_N' then  -- переводы БОС
+				if recprop%id is not null and recprop.[STR] like '%3 Переводы без открытия счета%' then
+					P_DATA:='V';
+				else /*вычисляем*/
+					for i in 1..v_rec_prod_tbl.count loop
+						if v_rec_prod_tbl(i).p_date_begin > P_DATE_PRINT then
+							exit;
+						else
+							if v_rec_prod_tbl(i).prod_class =  'MAIN_DOCUM' and
+							   v_rec_prod_tbl(i).p_date_begin  <= P_DATE_PRINT and
+							   v_rec_prod_tbl(i).p_date_close  >= P_DATE_PRINT
+							    then
+								P_DATA:='V';
+								exit;
+							end if;
+						end if;
+					end loop;
+				end if;
+			elsif p_info = 'S4_N' then  -- кредиты
+				if recprop%id is not null and recprop.[STR] like '%4 Кредитование%' then
+					P_DATA:='V';
+				else /*вычисляем*/
+					for i in 1..v_rec_prod_tbl.count loop
+						if v_rec_prod_tbl(i).p_date_begin > P_DATE_PRINT then
+							exit;
+						else
+							if v_rec_prod_tbl(i).prod_class in ('KRED_PERS','OVERDRAFTS') and
+							   v_rec_prod_tbl(i).p_date_begin  <= P_DATE_PRINT and
+							   v_rec_prod_tbl(i).p_date_close  >= P_DATE_PRINT
+							    then
+								P_DATA:='V';
+								exit;
+							end if;
+						end if;
+					end loop;
+				end if;
+			elsif p_info = 'S5_N' then  -- операции с Цен.Бум.
+				if recprop%id is not null and recprop.[STR] like '%5 Операции с ценными бумагами%' then
+					P_DATA:='V';
+				else /*вычисляем*/
+					for nod in ::[NS_OPER_DOG]
+					where	nod.[AGENT]%id = client_priv%id or
+							nod.[CLIENT_F]%id = client_priv%id or
+							nod.[COAGENT]%id  = client_priv%id
+					loop
+						P_DATA:='V';
+						exit;
+					end loop;
+				end if;
+			elsif p_info = 'S6_N' then  -- сейф.ячейки
+				if recprop%id is not null and recprop.[STR] like '%6 Сейфовые ячейки%' then
+					P_DATA:='V';
+				else /*вычисляем*/
+					for i in 1..v_rec_prod_tbl.count loop
+						if v_rec_prod_tbl(i).p_date_begin > P_DATE_PRINT then
+							exit;
+						else
+							if v_rec_prod_tbl(i).prod_class =  'IND_SAFE_LEASE' and
+							   v_rec_prod_tbl(i).p_date_begin  <= P_DATE_PRINT and
+							   v_rec_prod_tbl(i).p_date_close  >= P_DATE_PRINT
+							    then
+								P_DATA:='V';
+								exit;
+							end if;
+						end if;
+					end loop;
+				end if;
+			elsif p_info = 'S7_N' then  -- ПК
+				if recprop%id is not null and recprop.[STR] like '%7 Оформление ПК%' then
+					P_DATA:='V';
+				else /*вычисляем*/
+					for i in 1..v_rec_prod_tbl.count loop
+						if v_rec_prod_tbl(i).p_date_begin > P_DATE_PRINT then
+							exit;
+						else
+							if v_rec_prod_tbl(i).prod_class =  'VZ_CARDS' and
+							   v_rec_prod_tbl(i).p_date_begin  <= P_DATE_PRINT and
+							   v_rec_prod_tbl(i).p_date_close  >= P_DATE_PRINT
+							    then
+								P_DATA:='V';
+								exit;
+							end if;
+						end if;
+					end loop;
+				end if;
+/*			elsif p_info = 'S8_N' then  -- Тек.счета
+				if recprop%id is not null and recprop.[STR] like '%8 Текущий счет%' then
+					P_DATA:='V';
+				else --вычисляем
+					for i in 1..v_rec_prod_tbl.count loop
+						if v_rec_prod_tbl(i).p_date_begin > P_DATE_PRINT then
+							exit;
+						else
+							if v_rec_prod_tbl(i).prod_class in ('DEPOSIT_MULT','DEPOSIT_PRIV') and
+							   v_rec_prod_tbl(i).p_date_begin  <= P_DATE_PRINT and
+							   v_rec_prod_tbl(i).p_date_close  >= P_DATE_PRINT and
+							   (v_rec_prod_tbl(i).p_acc like '40817%' or
+								v_rec_prod_tbl(i).p_acc like '40820%')
+							    then
+								P_DATA:='V';
+								exit;
+							end if;
+						end if;
+					end loop;
+				end if;*/
+			elsif p_info = 'S10_N' and recprop.[STR] like '%#%' then
+				P_DATA:='V';
+			elsif p_info = 'S10txtN' and recprop.[STR] like '%#%' then
+				P_DATA := substr(recprop.[STR],instr(recprop.[STR],'#')+1);
+			end if; -- по 'S_%'
+--< ivanov a.v. 14/06/2017 Анкета
+		elsif p_info in ('D1_','D2_') then -- PSB_PASP  (Паспорт действительный/недействительный
+			for rec in cl_ref.[ADD_PROP]
+			where rec.[GROUP_PROP].[CODE] = 'PSB_PASP'
+			loop recprop:=rec;
+				exit;
+			end loop;
+			if p_info = 'D1_' then  -- Паспорт всегда действительный, если прямо не указано обратное!!
+				if recprop%id is null or recprop%id is not null and nvl(recprop.[BOOL],true) then
+					P_DATA:='V';
+				end if;
+			elsif p_info = 'D2_' then  -- Паспорт недействительный, если это прямо указано!!
+				if recprop%id is not null and nvl(recprop.[BOOL],true) then
+					P_DATA:='V';
+				end if;
+			end if;
+
+		elsif p_info in ('V1_','V2_','V3_','V4_','V5_','V6_','V7_','V8_','V9_','V10_','V10txt') then -- CL_ANK_PURPOSES_ACTIV Цели финансово-хозяйственной деятельности
+			for rec in cl_ref.[ADD_PROP]
+			where rec.[GROUP_PROP].[CODE] = 'CL_ANK_PURPOSES_ACTIV'
+			loop
+				recprop:=rec;
+				exit;
+			end loop;
+			if recprop%id is NOT NULL then
+				if p_info = 'V1_' and recprop.[STR] like '%1 Работа по найму в бюджетной организации%' then
+					P_DATA:='V';
+				elsif p_info = 'V2_' and recprop.[STR] like '%2 Работа по найму в коммерческой организации%' then
+					P_DATA:='V';
+				elsif p_info = 'V3_' and recprop.[STR] like '%3 Работа по гражданско-правовому договору (фрилансер и т.д.)%' then
+					P_DATA:='V';
+				elsif p_info = 'V4_' and recprop.[STR] like '%4 Социальные выплаты (пенсия, пособие)%' then
+					P_DATA:='V';
+				elsif p_info = 'V5_' and recprop.[STR] like '%5 Стипендия%' then
+					P_DATA:='V';
+				elsif p_info = 'V6_' and recprop.[STR] like '%6 Алименты%' then
+					P_DATA:='V';
+				elsif p_info = 'V7_' and recprop.[STR] like '%7 Дивиденды%' then
+					P_DATA:='V';
+				elsif p_info = 'V8_' and recprop.[STR] like '%8 Наследство%' then
+					P_DATA:='V';
+				elsif p_info = 'V9_' and recprop.[STR] like '%9 Предпринимательская деятельность%' then
+					P_DATA:='V';
+				elsif p_info = 'V10_' and recprop.[STR] like '%#%' then
+					P_DATA:='V';
+				elsif p_info = 'V10txt' and recprop.[STR] like '%#%' then
+					P_DATA:=substr(recprop.[STR],instr(recprop.[STR],'#')+1);
+				end if;
+			end if;
+		elsif p_info in ('W1_','W2_') then -- в списке террористов
+			if p_info  = 'W1_' then
+				for ch in ::[CL_CHECK_RESULT]
+				where	ch.[CHECK_OBJ]%id = cl_ref%id and
+						upper(ch.[CHECK_VAL].[CODE]) not like '%CLEAR%' and
+						upper(ch.[CHECK_VAL].[CODE]) not like '%NEED%' and
+						ch.[CHECK_DATE]<=P_DATE_PRINT
+				loop
+					P_DATA:='V';
+					exit;
+				end loop;
+			elsif p_info  = 'W2_' then
+				P_DATA:='V';
+				for ch in ::[CL_CHECK_RESULT]
+				where	ch.[CHECK_OBJ]%id = cl_ref%id and
+						upper(ch.[CHECK_VAL].[CODE]) not like '%CLEAR%' and
+						upper(ch.[CHECK_VAL].[CODE]) not like '%NEED%'  and
+						ch.[CHECK_DATE]<=P_DATE_PRINT
+				loop
+					P_DATA:='';
+					exit;
+				end loop;
+			end if;
+		elsif p_info = 'FORM_CODE' then
+			P_DATA	:= client_corp.[FORM_CODE];
+
+		elsif p_info = 'КАПИТАЛ' then		--КАПИТАЛ
+			P_DATA := nvl(client_corp.[REGISTER].[DECLARE_UF], '');
+			if P_DATA is not null then
+				P_DATA := P_DATA || ' '||client_corp.[REGISTER].[DECLARE_UF_CUR].[INT_CUR_SHORT];
+			end if;
+			P_DATA := rtl.bool_char(P_DATA is not null, 'Объявленный уставной фонд: '||P_DATA||chr(13), '');
+			temp_string := nvl(client_corp.[REGISTER].[PAID_UF], '');
+			if temp_string is not null then
+				temp_string := temp_string || ' '||client_corp.[REGISTER].[PAID_UF_CUR].[INT_CUR_SHORT];
+			end if;
+			P_DATA := P_DATA || rtl.bool_char(temp_string is not null, 'Оплаченный уставной фонд: '||temp_string, '');
+		--06.12.2016 Картешкина добавила КАПИТАЛ_ПРОПИСЬЮ
+		elsif p_info = 'КАПИТАЛ_ПРОПИСЬЮ' then	 	--КАПИТАЛ_ПРОПИСЬЮ
+			::[RUNTIME].[STDLIB].N2Str(client_corp.[REGISTER].[DECLARE_UF],P_DATA,client_corp.[REGISTER].[DECLARE_UF_CUR].[INT_CUR_SHORT]);		
+			P_DATA := nvl(client_corp.[REGISTER].[DECLARE_UF], '')||'/'||P_DATA;
+			P_DATA := rtl.bool_char(P_DATA is not null, 'Зарегистрированный уставной фонд: '||P_DATA||chr(13), '');
+
+			::[RUNTIME].[STDLIB].N2Str(client_corp.[REGISTER].[PAID_UF],temp_string,client_corp.[REGISTER].[PAID_UF_CUR].[INT_CUR_SHORT]);
+			temp_string := nvl(client_corp.[REGISTER].[PAID_UF], '')||'/'||temp_string;
+			P_DATA := P_DATA || rtl.bool_char(temp_string is not null, 'Оплаченный уставной фонд: '||temp_string, '');
+
+		elsif p_info = 'СТРУКТУРА' then	 	--СТРУКТУРА
+			declare
+				v_out [MEMO_32767] := '';
+				v_bool boolean;
+				temp_str string := 'Должностные лица' || chr(13);
+				v_boss_counter integer;
+			begin
+				P_DATA := nvl(trim(client_corp.[ADMINISTRATION]), '');
+				P_DATA := rtl.bool_char(P_DATA is null, null, 'Органы управления:'||chr(13)||P_DATA||chr(13)||chr(13));
+				get_all_boss(client_corp, length (P_DATA)+length(temp_str), v_out, v_bool, v_boss_counter);
+				if v_bool then
+					V_ERR := 'Количество должностных лиц слишком велико и не может быть обработано. Взяты только первые ' || to_char(v_boss_counter) || '!';
+				else
+					V_ERR := '';
+				end if;
+				P_DATA := P_DATA||rtl.bool_char(v_out is not null, temp_str || v_out, '');
+				/*if trim(P_DATA) is not NULL then  -- NGA 02/04/2013
+				   str_not_empty := true;
+				end if;*/
+			end;
+
+		elsif p_info = 'УЧРЕДИТЕЛИ' then		--УЧРЕДИТЕЛИ
+			declare
+				v_out [MEMO_32767] := '';
+				v_bool boolean;
+--NGA				temp_str string := 'Учредители:'||chr(13);
+				temp_str string := 'Участники общества:'||chr(13);
+				v_founder_counter integer;
+			begin
+
+				--NGA Get_FOUNDERS(client_corp, length(temp_str), v_out, v_bool, v_founder_counter);
+				PSB_Get_FOUNDERS(client_corp, length(temp_str), v_out, v_bool, v_founder_counter);
+				if v_bool then
+					V_ERR := 'Количество учредителей слишком велико и не может быть обработано. Взяты только первые ' || to_char(v_founder_counter) || '!';
+				else
+					V_ERR := '';
+				end if;
+				P_DATA := rtl.bool_char(v_out is null, null, temp_str||v_out);
+
+			end;
+		
+		elsif p_info = 'КОДЫ_ОКВЭД' then
+			declare
+				okv	[OKVED];
+				date_ank	date;
+			begin
+				date_ank :=  nvl(client_corp.[DATE_ANK], op_dat);
+				okv := ::[CLIENT].[LIB].Get_Main_OKVED(cl_ref, date_ank);
+				P_DATA := 'Основной: ' || okv.[CODE] || ' ' || okv.[NAME] || NL$ || 'Допустимые: ';
+				for (select vd(	vd.[OKVED].[CODE] : CODE,
+								vd.[OKVED].[NAME] : NAME)
+						in cl_ref.[OKVED_IN_PERIOD]
+						where nvl(vd.[MAIN], false) = false
+						and nvl(vd.[DATE_BEGIN], date_ank) <= date_ank
+						and nvl(vd.[DATE_END], date_ank) >= date_ank
+					)
+				loop
+					P_DATA := P_DATA || vd.[CODE] || ' ' || vd.[NAME] || NL$;
+				end loop;
+			end;
+
+		elsif p_info = 'КОД_ОКПО' then
+			P_DATA := client_corp.[KOD_OKPO];
+
+		elsif p_info = 'КОД_OKATO' then
+			P_DATA := client_corp.[OKATO_CODE];
+
+		elsif p_info = 'БИК' then    --БИК
+			if client_bank%id is not null then
+				if cl_ref%class(true) = 'CL_PART' then
+					declare
+						cl_part_ref ref [CL_PART];
+					begin
+						cl_part_ref := cl_ref;
+						P_DATA := 'БИК:'||cl_part_ref.[BANK].[BIC];
+						if P_DATA is null then
+							P_DATA := nvl('SWIFT:'||cl_part_ref.[BANK_F].[SWIFT_C], '');
+						end if;
+					end;
+				else
+					declare
+						bank_n_ref ref [CL_BANK_N];
+					begin
+						bank_n_ref := cl_ref;
+						P_DATA := nvl('БИК:'||bank_n_ref.[BIC], '');
+					end;
+				end if;
+			else
+				P_DATA := '';
+			end if;
+
+		elsif p_info = 'INFO_ADDR' then          --INFO_ADDR
+
+			P_DATA := nvl(GetAddress(client_corp.[ADDRESSES],'ALL', 'FACT') || NL$ || client_corp.[INFO_ADDR],
+							GetAddress(client_bank.[ADDRESSES],'ALL', 'FACT') || NL$ || client_bank.[INFO_ADDR]);
+
+		elsif p_info = 'МЕСТО_РЕГ' then     --МЕСТО_РЕГ
+			if client_corp.[REGISTER].[CITY] is not null then
+
+				--Страна
+				temp_string := nvl(client_corp.[REGISTER].[CITY].[COUNTRY].[VALUE], null);
+				if temp_string is not null then
+					P_DATA := temp_string||', ';
+				end if;
+
+				declare print_region	boolean := true;-- BFS00036935 - если city_id.[KLADR] следующего вида "nn00000000000" то регион не печатаем
+						city_kladr		client_corp.[REGISTER].[CITY].[KLADR]%type;
+						reg_kind		::[PEOPLE_PLACE].[FOR_ADDRESS]%type;
+						reg_to_end		boolean;
+				begin
+					city_kladr := client_corp.[REGISTER].[CITY].[KLADR];
+					if city_kladr is not null then
+						if Length(city_kladr) <= 2 then
+							print_region := false;
+						else
+							if Length(rtrim(city_kladr, '0')) <= 2 then
+								print_region := false;
+							end if;
+						end if;
+					end if;
+
+					if print_region then
+						-- Регион
+						--temp_string := nvl(this.[REGISTER].[CITY].[REGION].[NAME], null);
+						
+						--Башкиров В.Г. 26.06.2014 Удалена обработка полей для ОКАТО при переходе на 14.3
+							-- меняю client_corp.[REGISTER].[CITY].[REGION_GNI]
+							-- на ::[PERSONAL_ADDRESS].[LIB].get_region(client_corp.[REGISTER].[CITY]%ID)
+							--[PEOPLE_PLACE] на [KIND]
+						reg_kind := nvl(::[PERSONAL_ADDRESS].[LIB].get_region(client_corp.[REGISTER].[CITY]%ID).[KIND].[FOR_ADDRESS], ::[PERSONAL_ADDRESS].[LIB].get_region(client_corp.[REGISTER].[CITY]%ID).[KIND].[SHORT_NAME]);
+						reg_to_end := nvl(::[PERSONAL_ADDRESS].[LIB].get_region(client_corp.[REGISTER].[CITY]%ID).[KIND].[TO_END], false);
+						temp_string := ::[PERSONAL_ADDRESS].[LIB].get_region(client_corp.[REGISTER].[CITY]%ID).[NAME];
+						if temp_string is not null then
+							if reg_to_end then
+								temp_string := temp_string||' '||reg_kind;
+							else
+								temp_string := reg_kind||' '||temp_string;
+							end if;
+							P_DATA := P_DATA||temp_string||', ';
+						end if;
+					end if;
+				end;
+
+				--Тип нас-го пункта
+				P_DATA := P_DATA||nvl(client_corp.[REGISTER].[CITY].[KIND].[SHORT_NAME], '')||' ';
+
+				--название нас-го пункта
+				temp_string := nvl(client_corp.[REGISTER].[CITY].[NAME], null);
+				if temp_string is not null then
+					P_DATA := P_DATA||temp_string||', ';
+				end if;
+
+				--район нас-го пункта
+				--STYLY в населенном пункте хранится район области, а никак не район населенного пункта...
+				--temp_string := nvl(this.[REGISTER].[DISTRICT].[NAME], this.[REGISTER].[CITY].[AREA].[NAME]);
+				temp_string := client_corp.[REGISTER].[DISTRICT].[NAME];
+				if temp_string is not null then
+					P_DATA := P_DATA||temp_string||' р-он';
+				else
+					P_DATA := ltrim(rtrim(P_DATA));
+					P_DATA :=substr(P_DATA,1,length(P_DATA)-1);
+				end if;
+			else
+				P_DATA :='';
+			end if;
+			-- NGA для нерезидента берем место регистрации из др.поля
+			if NOT client_corp.[NU_REZIDENT] then
+				P_DATA := client_corp.[REGISTER].[REG_PLACE];
+			end if;
+
+		elsif p_info = 'МЕСТО_НАХОЖД' then          --МЕСТО_НАХОЖД (Юридический)
+			if client_corp%id is not null then
+				P_DATA := GetAddress(client_corp.[ADDRESSES],'ALL', 'CORP');
+			elsif client_bank%id is not null then
+				P_DATA := GetAddress(client_bank.[ADDRESSES],'ALL', 'CORP');
+			end if;
+
+		elsif p_info = 'РЕГ_ОРГАН' then     --РЕГ_ОРГАН
+
+			if client_corp%id is not null then
+				P_DATA := nvl(client_corp.[REGISTER].REGISTRAR, ' ') || ' / ' || nvl(client_corp.[REGISTER].[REG_BODY].[NAME], client_corp.[REGISTER].[REG_BODY].[LONG_NAME]);
+			elsif client_bank%id is not null then
+				P_DATA := nvl(client_bank.[REGISTER].REGISTRAR, ' ') || ' / ' || nvl(client_bank.[REGISTER].[REG_BODY].[NAME], client_bank.[REGISTER].[REG_BODY].[LONG_NAME]);
+			end if;
+
+		elsif p_info = 'ОП_ФОРМА' then      --ОП_ФОРМА
+			P_DATA := nvl(client_corp.[FORMA].[NAME], client_corp.[FORMA].[SHORT_NAME]);
+
+		elsif p_info = 'РЕГ_НОМЕР' then     --РЕГ_НОМЕР
+			if client_corp%id is not null then
+				P_DATA := nvl(client_corp.[REGISTER].[NUM_REESTR], ' ') || ' / ' || nvl(client_corp.[REGISTER].[GOS_REG_NUM_REC],' ');
+			elsif client_bank%id is not null then
+				P_DATA := nvl(client_bank.[REGISTER].[NUM_REESTR], ' ') || ' / ' || nvl(client_bank.[REGISTER].[GOS_REG_NUM_REC],' ');
+			end if;
+
+		elsif p_info = 'ДАТА_РЕГ' then     --ДАТА_РЕГ
+			if client_corp%id is not null then
+				P_DATA := nvl(::[RUNTIME].[FDP].pdat(client_corp.[REGISTER].[DATE_REESTR]), ' ') || ' / ' || nvl(::[RUNTIME].[FDP].pdat(client_corp.[REGISTER].[DATE_REG]), ' ');
+--				rtl.bool_char(client_corp.[REGISTER].[DATE_REG] is not null, ::[RUNTIME].[FDP].pdat(client_corp.[REGISTER].[DATE_REG]), rtl.bool_char(client_corp.[REGISTER].[DATE_REESTR] is not null, 'Дата внесения в ЕГРЮЛ до 1 января 2004 года: '||::[RUNTIME].[FDP].pdat(client_corp.[REGISTER].[DATE_REESTR]), ''));
+			elsif client_bank%id is not null then
+				P_DATA := nvl(::[RUNTIME].[FDP].pdat(client_bank.[REGISTER].[DATE_REESTR]), ' ') || ' / ' || nvl(::[RUNTIME].[FDP].pdat(client_bank.[REGISTER].[DATE_REG]), ' ');
+			end if;
+		--Картешкина 22.12.2016 добавила ЧИСЛЕННОСТЬ
+		elsif p_info = 'ЧИСЛЕННОСТЬ' then
+			if client_corp%id is not null then
+				P_DATA := client_corp.[NUMBERS];
+			end if;
+		--Картешкина 22.12.2016 добавила СЧЕТА_В_БАНКАХ_ДА
+		elsif p_info = 'СЧЕТА_В_БАНКАХ_ДА' then
+				P_DATA := '_';
+				if client_corp%id is not null then
+					for acc_bank in client_corp.[ACC_BANK] where
+							nvl(acc_bank.[DATE_BEGIN],to_date('01.01.1980','dd.mm.yyyy')) <= P_DATE_PRINT and
+							nvl(acc_bank.[DATE_END],to_date('01.01.4000','dd.mm.yyyy')) >  P_DATE_PRINT and
+							nvl(acc_bank.[BANK].[DATE_OP],to_date('01.01.1980','dd.mm.yyyy')) <= P_DATE_PRINT
+					loop
+						if is_bank_active (acc_bank.[BANK]) then
+							if P_DATA = '_' then
+								P_DATA := 'V';
+								exit;
+							end if;
+						end if;
+					end loop;
+				end if;
+		--Картешкина 22.12.2016 добавила СЧЕТА_В_БАНКАХ_НЕТ
+		elsif p_info = 'СЧЕТА_В_БАНКАХ_НЕТ' then
+				P_DATA := 'V';
+				if client_corp%id is not null then
+					for acc_bank in client_corp.[ACC_BANK] where
+							nvl(acc_bank.[DATE_BEGIN],to_date('01.01.1980','dd.mm.yyyy')) <= P_DATE_PRINT and
+							nvl(acc_bank.[DATE_END],to_date('01.01.4000','dd.mm.yyyy')) >  P_DATE_PRINT and
+							nvl(acc_bank.[BANK].[DATE_OP],to_date('01.01.1980','dd.mm.yyyy')) <= P_DATE_PRINT
+					loop
+						if is_bank_active (acc_bank.[BANK]) then
+							P_DATA := '_';
+							exit;
+						end if;
+					end loop;
+				end if;
+		--Картешкина 30.12.2016 добавила СЧЕТА_В_БАНКАХ
+		elsif p_info = 'СЧЕТА_В_БАНКАХ' then
+				P_DATA := ' ';
+				if client_corp%id is not null then
+					for acc_bank in client_corp.[ACC_BANK] where
+							nvl(acc_bank.[DATE_BEGIN],to_date('01.01.1980','dd.mm.yyyy')) <= P_DATE_PRINT and
+							nvl(acc_bank.[DATE_END],to_date('01.01.4000','dd.mm.yyyy')) >  P_DATE_PRINT and
+							nvl(acc_bank.[BANK].[DATE_OP],to_date('01.01.1980','dd.mm.yyyy')) <= P_DATE_PRINT
+					loop
+						if is_bank_active (acc_bank.[BANK]) then
+							if instr(P_DATA,acc_bank.[BANK].[NAME]) = 0 then
+								P_DATA := P_DATA||acc_bank.[BANK].[NAME]||',';
+							end if;
+						end if;
+					end loop;
+					if P_DATA <> ' ' then
+						P_DATA:=RTRIM(P_DATA,',');
+					end if;
+				end if;
+				
+		elsif p_info = 'СОЗД_СОТР' then     --СОЗДАТЕЛЬ АНКЕТЫ
+			begin
+
+			--создатель анкеты
+				for ( select x(x.[USER_NAME] 	: vuser,
+							x.[USER_CASTA]	: vcasta)
+					in ::[CL_HIST] all
+					where x.[CLIENT_REF] = cl_ref
+					order by x.[DATE_EDIT]
+				) loop
+
+					P_DATA:= 'Создал(а): '||x.vuser||', '||x.vcasta;
+					exit;
+				end loop;
+			exception when others then
+				null;
+			end;
+		
+		elsif p_info = 'ИЗМ_СОТР' then     --ИЗМ. АНКЕТУ
+
+			P_DATA:= '';
+			begin
+
+			--последний польз. обновил анкету
+			for ( select x(x.[USER_NAME]	: vuser,
+							x.[USER_CASTA]	: vcasta)
+					in ::[CL_HIST] all
+					where x.[CLIENT_REF] = cl_ref
+					order by x.[DATE_EDIT] desc
+			) loop
+
+				P_DATA:= 'Обновил(а): '||x.vuser||', '||x.vcasta;
+				exit;
+			end loop;
+
+			exception when others then
+				null;
+			end;
+
+		elsif p_info = 'ИЗМ_СОТР_NEW' then     --ИЗМ. АНКЕТУ
+
+--> ivanov a.v. 17/04/2017 Анкета
+			P_DATA:= '';
+			/** /
+			for ( select x(	x.[WHO_UPDATE].[NAME]			: vuser,
+							x.[WHO_UPDATE].[CASTA].[VALUE]	: vcasta)
+					in [CL_DATE_FORM_UPD],
+						([CLIENT] all cl) all
+					where	cl%id = cl_ref and
+							x%collection = cl.[DATES_FORM_UPD] and
+							x.[DATE_UPD] <= P_DATE_PRINT and
+							x.[WHO_UPDATE] is not null
+					order by x.[DATE_UPD] desc
+			) loop
+				P_DATA:= 'Обновил(а): '||x.vuser||', '||x.vcasta;
+				exit;
+			end loop;
+			/**/
+			
+			if P_DATA is null then
+				for i in 1..v_rec_prod_tbl.count loop
+					if v_rec_prod_tbl(i).p_date_begin > P_DATE_PRINT then
+						exit;
+					else
+						v_max_user := v_rec_prod_tbl(i).create_user;
+					end if;
+				end loop;
+				if v_max_user is not null then
+					for (	select us (	us.[NAME]			: vuser,
+										us.[CASTA].[VALUE]	: vcasta)
+							 in ::[USER] all where us%id = v_max_user)
+					loop
+						P_DATA:= 'Обновил(а): '||us.vuser||', '||us.vcasta;
+					end loop;
+				end if;
+			end if;
+--< ivanov a.v. 17/04/2017 Анкета
+
+		--NGA20/07/2015  end
+		end if; --end P_info
+--debug_pipe('вышли! p_info = '||p_info  ||'   P_DATA='||P_DATA,0);
+		
+		if P_INFO not in (	'ДА','НЕТ','ИНОСТР_ГОС','НЕТ_БЕН','БЕН_ВЛАД_N'
+							,'S1_','S2_','S3_','S4_','S5_','S6_','S7_','S8_','S10_','S10txt'
+--> ivanov a.v. 17/04/2017 Анкета
+							,'S1_N','S2_N','S3_N','S4_N','S5_N','S6_N','S7_N','S8_N','S10_N','S10txtN'
+--< ivanov a.v. 17/04/2017 Анкета
+							,'D1_','D2_'
+							,'V1_','V2_','V3_','V4_','V5_','V6_','V7_','V8_','V9_','V10_','V10txt'
+							,'W1_','W2_'
+						) AND P_INFO not like '%ПДЛ%' then
+		if (P_DATA = '') or (P_DATA = ' ') or P_DATA is null then P_DATA := 'Отсутствует'; end if;  -- NGA20/05/2015 Эти коды на "Отсутствует" не заменяем!
+		end if;
+
+		P_DATA := nvl(P_DATA, ' ');
+
+	return P_DATA;
+exception when OTHERS then
+	pragma error('Ошибка при вычисление реквизитов клиента. Ошибка '||sqlerrm);
+end;
+
+--Дианков А.В. 20.09.2016 Есть ли СНИЛС?
+public function CL_SNILS(cl ref [CLIENT]) return boolean is 
+dt date := [SYSTEM].[OP_DATE];
+begin
+	if cl%class = 'CL_PRIV' then
+		--27/12/2016 Дианков А.В. Добавлен контроль реквизита СНИЛС
+		if cl -> (CL_PRIV)[SNILS] is not null then return true; end if;
+		for doc in cl -> (CL_PRIV)[DOC_ARR] where doc.[TYPE].[KOD] = 'СНИЛС'
+												  AND (doc.[DATE] <= dt OR doc.[DATE] is null)
+												  AND (doc.[DATE_END] is null OR dt <= doc.[DATE_END])
+		loop
+			if doc.[NUM] is not null OR doc.[SER] is not null then
+			--cl->(CL_PRIV)[SNILS] := doc.num;
+				return true;
+			end if;
+		end loop;
+
+		return false;
+	end if;
+end;
+end;

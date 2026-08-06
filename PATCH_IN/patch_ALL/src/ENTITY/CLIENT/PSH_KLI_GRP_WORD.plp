@@ -1,0 +1,194 @@
+class CLIENT;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Групповая печать WORD')
+@tag('COPIED')
+batch method PSH_KLI_GRP_WORD is
+
+@name('Строка для передачи данных') public V_DATA [STRING_32000];
+@name('Клиент-скрипт')              public V_VB   [STRING_32000];
+pragma include (::[DEFVALS].[SLIB]);
+wdFieldType integer := [WORD].wdFieldDocVariable;
+
+vShablonPath	[FILE$PATH]; -- Путь к месту хранения шаблона
+vShablonName	::[SHABLON_DOC].[FILE_NAME]%type; -- Имя файла шаблона
+
+vOpDate			date;
+
+type FieldNameType is varchar2(50);
+
+fDate			FieldNameType	:= 'ДАТА';			-- Дата ? с экранной формы
+fSign			FieldNameType	:= 'ПОДПИСЬ';		-- Подпись ? на экранной форме ссылка на пользователей. В форму тянуть его ФИО
+fSignDol		FieldNameType	:= 'ДОЛЖНОСТЬ';		-- Подпись ? на экранной форме ссылка на пользователей. В форму тянуть его Должность
+fClientName		FieldNameType	:= 'КЛИЕНТ';		-- Наименование клиента
+fClientNameFull	FieldNameType	:= 'КЛИЕНТ_ПОЛНОЕ';	-- Полное наименование клиента
+fInn			FieldNameType	:='ИНН';			-- ИНН
+fAdrReg			FieldNameType	:='АДРЕС_РЕГИС';	-- Регистрацию (юр.адрес)
+fAdrMES			FieldNameType	:='АДРЕС_МЕСТО';	-- Местонахождение
+
+
+
+
+procedure draw_one_acc(	  p_file		[FILE$PATH]					-- Путь к шаблону
+						, p_acc			ref [CL_ORG]				-- Счет
+						, p_date		date
+						, p_sign_user	ref [USER]		-- Подписывает
+						, p_save_to		varchar2(512)	-- Сохранить в файл
+						, p_print 		boolean
+					)
+is
+vClientName		::[CLIENT].[NAME]%type;
+vClientNameFull	::[CL_CORP].[LONG_NAME]%type;
+vClientInn		::[CL_CORP].[INN]%type;
+vClientDresREGIS varchar2(1024);
+vClientDresMESTO varchar2(1024);
+vFilCODE varchar2(6);
+
+
+begin
+	[WORD].Open_file(P_FILE, false);
+	
+	begin
+	
+			select x(
+			x.[FILIAL].[CODE] :C_FIL
+			,x.[NAME] :C_NAME
+			,x.[LONG_NAME] :C_LONG_NAME
+			,x.[INN] :C_INN
+			,::[RUNTIME].[VIEWFUN].GetAddress(x, 'POST_CODE,REGION_NCT,DISTRICT,CITY,STREET,HOUSE,KORPUS,FLAT', 'FACT') :C_FACT
+			,::[RUNTIME].[VIEWFUN].GetAddress(x, 'POST_CODE,REGION_NCT,DISTRICT,CITY,STREET,HOUSE,KORPUS,FLAT', 'CORP') :C_URID
+			) in ::[CL_ORG]
+			/*where ::[RUNTIME].[VIEWFUN].GetAddress(x, 'POST_CODE,REGION_NCT,DISTRICT,CITY,STREET,HOUSE,KORPUS,FLAT', 'FACT')!=::[RUNTIME].[VIEWFUN].GetAddress(x, 'POST_CODE,REGION_NCT,DISTRICT,CITY,STREET,HOUSE,KORPUS,FLAT', 'CORP')
+			and (select a(count(a)) in ::[AC_FIN] where (a.[CLIENT_V]=x or  a.[CLIENT_R]=x) and a.[DATE_CLOSE] is null)>0	*/
+			where x = p_acc
+			into vFilCODE, vClientName, vClientNameFull, vClientInn, vClientDresREGIS, vClientDresMESTO;
+	exception when no_data_found then
+					null;	
+	end;
+
+	if p_save_to is not null then
+		p_save_to := p_save_to || to_char(p_date, 'yyyymmdd') || '_' || vClientInn || '.doc';
+	end if;
+
+	[WORD].Prepare_Doc_to_Put;
+	[WORD].put(wdFieldType, fDate, nvl([VIEWFUN].[DAT_STR](p_date), ' '));			-- Дата с экранной формы
+	[WORD].put(wdFieldType, fClientName, nvl(vClientName, ' '));					-- Наименование клиента
+	[WORD].put(wdFieldType, fClientNameFull, nvl(vClientNameFull, ' '));			-- Полное наименование клиента
+	[WORD].put(wdFieldType, fInn, nvl(vClientInn, ' '));							-- ИНН
+	[WORD].put(wdFieldType, fAdrReg, nvl(vClientDresREGIS, ' '));					-- Регистрацию (юр.адрес)
+	[WORD].put(wdFieldType, fAdrMES, nvl(vClientDresMESTO, ' '));					-- Местонахождение
+	[WORD].put(wdFieldType, fSign, nvl(stdlib.fio(p_sign_user.[NAME], 'Ф И.О.'), ' '));		-- Подпись на экранной форме ссылка на пользователей. В форму тянуть его ФИО
+	[WORD].put(wdFieldType, fSignDol, nvl(p_sign_user.[CASTA].[VALUE], ' '));		
+	[WORD].Update_Fields;
+	
+	if p_print then
+		[WORD].Print(null);
+	end if;
+	
+	if p_save_to is null then
+		[WORD].visible;
+		[WORD].release;
+	else
+		--[WORD].visible;
+		[WORD].Save_As(p_save_to);
+		--[WORD].release;
+		[WORD].Close_App;
+	end if;	
+	
+	
+	if length([WORD].tbl_rep([WORD].i_rep)) > 25000 then
+		[WORD].i_rep := [WORD].i_rep + 1;
+	end if;	
+	
+end;
+
+
+procedure draw_report(	  p_file		[FILE$PATH]		-- Путь к шаблону
+						, p_this		THIS_TABLE		-- Список счетов
+						, p_date		date			-- Дата с ЭФ
+						, p_sign_user	ref [USER]		-- Подписывает
+						, p_save_to		varchar2(512)	-- Сохранить в файл
+						, p_print 		boolean
+					)
+is
+idx integer;
+begin
+	[WORD].Init_WRD;
+	[WORD].F_Click	:= False;
+	
+	idx := p_this.first;
+	while idx is not null loop
+		draw_one_acc(p_file, p_this(idx), p_date, p_sign_user, p_save_to, p_print);
+		idx := p_this.next(idx);
+	end loop;
+end;
+PSH_KLI_GRP_WORD (
+	@name('Документ')             P_SHABLON   in [SHABLON_DOC_REF],
+	@name('Сохранить в')          P_SAVE_PATH in [FILE$PATH],
+	@name('Отправить на принтер') P_TO_PRINT  in [BOOLEAN],
+	@name('Дата')                 P_DATE      in [DATE],
+	@name('Подпись')              P_SIGN_USER in [USER_REF]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATE := [SYSTEM]::[OP_DATE];
+
+end if;
+-- End initialization of parameters and variables
+begin
+	if p_message = 'DEFAULT' then
+		-- Скрываем параметры для групповой печати
+		P_SIGN_USER := 1063446488;
+
+		vShablonPath := ::[SYSTEM_PARAMS].[GET]('PATH_PRINT_DOC', null);
+
+		vShablonName 	:= P_SHABLON.[FILE_NAME];
+		P_SAVE_PATH 	:= &mRestoreStr4User('P_SAVE_PATH');
+		P_TO_PRINT		:= false;
+		vOpDate			:= ::[SYSTEM].[VARIABLES].Opdate;
+
+
+		WORD.F_Click := true;
+		
+	elsif p_message = 'VALIDATE' then
+		
+		if p_info = 'P_SHABLON' then
+			vShablonName := P_SHABLON.[FILE_NAME];
+		
+		
+		elsif p_info = 'OK' then
+		
+			if P_SHABLON is null then
+				pragma error('Не указан шаблон!');
+			end if;
+
+			if P_SAVE_PATH is not null then P_SAVE_PATH:=replace(P_SAVE_PATH||'\','\\','\');
+			end if;
+			
+			if WORD.F_Click then
+				WORD.F_Click := False;
+				
+				draw_report(	  vShablonPath || vShablonName
+								, this
+								, P_DATE
+								, P_SIGN_USER
+								, P_SAVE_PATH
+								, P_TO_PRINT
+								);
+			end if;	
+			[WORD].Exec_Script(V_DATA);
+		end if;
+	end if;
+end;
+end;
+
+execute is
+begin
+	&mSaveStr4User('P_SAVE_PATH', P_SAVE_PATH);
+end;
+end;
+end;

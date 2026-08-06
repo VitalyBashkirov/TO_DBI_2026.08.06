@@ -1,0 +1,35 @@
+class PSH_LEGAL_DATES;
+
+@name('[ПСБ] Добавить')
+constructor PSH_NEW is
+PSH_NEW (
+	@name('Дата')       P_CTRL_DATE in [DATE],
+	@name('Примечание') P_CTRL_NOTE in [MEMO]      default null,
+	@name('Добавил')    P_CTRL_USER in [STRING_60]
+) return ref [PSH_LEGAL_DATES] is
+
+validate is
+begin
+if p_message = 'DEFAULT' then
+	P_CTRL_DATE := ::[SYSTEM].[OP_DATE];
+	P_CTRL_NOTE := this.[CTRL_NOTE];
+	P_CTRL_USER := ::[RUNTIME].[STDLIB].fio(stdlib.userid.[NAME], 'Ф И. О.');
+end if;
+end;
+
+execute is
+same_date INTEGER;
+begin
+	select x(count(x)) in ::[PSH_LEGAL_DATES]
+		where x.[CTRL_DATE] = P_CTRL_DATE
+		into same_date;
+	if same_date = 0 then
+		[CTRL_DATE] := P_CTRL_DATE;
+		[CTRL_NOTE] := P_CTRL_NOTE;
+		[CTRL_USER] := ::[RUNTIME].[STDLIB].fio(stdlib.userid.[NAME], 'Ф И. О.');
+	else
+		pragma error('Указанная дата уже присутствует в перечне!');
+	end if;
+end;
+end;
+end;

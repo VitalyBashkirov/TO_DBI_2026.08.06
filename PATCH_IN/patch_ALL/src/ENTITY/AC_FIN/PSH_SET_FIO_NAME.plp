@@ -1,0 +1,20 @@
+class AC_FIN;
+
+@name('[ПСБ] Указать в наименовании ФИО клиента')
+method PSH_SET_FIO_NAME is
+PSH_SET_FIO_NAME is
+
+execute is
+/*********************************************************************
+Назначение:
+
+kokorin, последнее изменение 10 Сентябрь 2014 г.
+*********************************************************************/
+begin
+	if this.[CLIENT_V] is not null then
+		this.[NAME] := this.[CLIENT_V].[NAME];
+	end if;
+	
+end;
+end;
+end;

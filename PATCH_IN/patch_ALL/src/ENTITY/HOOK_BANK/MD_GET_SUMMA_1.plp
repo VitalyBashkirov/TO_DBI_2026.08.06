@@ -1,0 +1,35 @@
+class HOOK_BANK;
+
+@name('Платежные документы. Получение суммы для бизнес-операции')
+method MD_GET_SUMMA_1 is
+MD_GET_SUMMA_1 (
+	@name('Документ')                 P_DOC        in [MAIN_DOCUM_REF],
+	@name('Тип суммы')                P_TYPE_SUMMA in [SUM_GUIDE_REF],
+	@name('Дополнительные параметры') P_ADDS       in [STRING_32000]   default null
+) return [SUMMA] is
+
+execute is
+findCode	::[SUM_GUIDE].[COD]%type;
+summa		[SUMMA];
+summa_1		[SUMMA];
+acc 		ref [AC_FIN];
+begin
+	--debug_pipe('P_TYPE_SUMMA = '|| P_TYPE_SUMMA.[COD],10);
+	--debug_pipe('P_ADDS = '|| P_ADDS,10);
+	
+	-->> PSH VRI 09/02/2026 CFT-3533 Конверсионная операция UPV 440 (для БО: TAX_PPV_EXEC)
+	-- Cумма подлежащего взысканию налога (в пределах остатка)
+	findCode := P_TYPE_SUMMA.[COD];
+	if findCode = 'PSH_TAX_PPV_OST_SUM' then
+		::[RUNTIME].[STR].get_par(P_ADDS, 'TAX_PP_ORDER_SUM', summa_1);
+		::[RUNTIME].[STR].get_par(P_ADDS, 'TAX_PP_ACC_DT', acc);
+		summa := least(summa_1, acc.[SALDO_NT]);
+		if summa = 0 then summa := summa_1; end if;
+	end if;
+	--<< PSH VRI 09/02/2026 CFT-3533 Конверсионная операция UPV 440 (для БО: TAX_PPV_EXEC)
+
+	--debug_pipe('summa = '|| summa,10);
+	return summa;
+end;
+end;
+end;

@@ -1,0 +1,33 @@
+class MAIN_DOCUM;
+
+@name('[ПСБ] Нумерация СПОД проводки')
+method PSH_NUM_SPOD is
+
+@name('Использованный номер') public P_NEXT [DIG_16];
+PSH_NUM_SPOD is
+
+validate is
+Begin
+	if P_MESSAGE = 'DEFAULT' then
+	P_NEXT:=::[COUNTERS].[SQ].CurSeqNum(::[COUNTERS]([CODE] = 'PSH_SPOD'));
+	end if;
+end;
+
+execute is
+/*********************************************************************
+Назначение:
+
+kurganov, последнее изменение 15 Январь 2015 г.
+*********************************************************************/
+begin
+	if this.[VID_OBOROTA].[SHORT_NAME]!='4' then pragma error('ID='||this%id||chr(10)||'Это не СПОД документ! Изменение невозможно.'); end if;
+ 	if P_NEXT=0 then 	this.[DOCUMENT_NUM]:=1;
+ 						P_NEXT:=::[COUNTERS].[SQ].GetNextCount('PSH_SPOD','ST_CODE');
+ 						P_NEXT:=P_NEXT+1;
+ 	else
+ 	P_NEXT:=::[COUNTERS].[SQ].GetNextCount('PSH_SPOD','ST_CODE');
+ 	this.[DOCUMENT_NUM]:=P_NEXT;
+ 	end if; 	
+end;
+end;
+end;

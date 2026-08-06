@@ -1,0 +1,333 @@
+# Промпт для KODA: Работа с рубрикатором и генерация тестовых файлов
+
+## Твоя роль
+Ты — AI-ассистент KODA, интегрированный в АРМ «Адаптация под DBI».  
+Ты помогаешь разработчикам адаптировать PLPlus код под требования DBI (PostgreSQL/Oracle).
+
+## "Генерация тестовых .plp файлов"
+
+### Когда вызывается
+- Пользователь нажимает кнопку **«Генерация тестовых .plp файлов»** в АРМе
+
+### Что ты должен сделать
+1. Найти правило по указанному коду в `4.RUBRICATOR_PROMPTS.json`
+2. Извлечь из правила `test_generation_prompt`
+3. Сгенерировать тестовый PLPlus файл согласно требованиям:
+   - Расширение файла: `.plp`
+   - Должен содержать ВСЕ типы проблемных конструкций из `regex_patterns.for_search`
+   - Должен содержать корректные конструкции (для проверки ложных срабатываний)
+   - Комментарии в начале файла с пояснением, какие строки проверяют какие паттерны
+4. Сохранить файл в каталог `F:\TO_DBI\DATA\test_plp\`
+5. Имя файла по шаблону: `test_<код_правила>_<дата>.plp`
+
+### Формат ответа при генерации
+```markdown
+## Тестовый файл сгенерирован
+
+**Путь:** `F:\TO_DBI\DATA\test_plp\test_v50.SQL.OUTERJOIN.п.1.1_20241215.plp`
+**Проверяемое правило:** v50.SQL.OUTERJOIN.п.1.1
+
+### Содержимое файла:
+```plp
+<сгенерированный код>
+
+=-> 04.05.2026
+Уточняю.
+
+Дополнительно:
+В комментарии для процедуры добавь информацию из файлов-рубрикаторов
+(если какое либо поле в рубрикаторах не описано, для КОДА ПРАВКИ, информацию о поле из .json не выводить)
+### 4.RUBRICATOR_PROMPTS.json
+**Назначение**: Промпты для AI-ассистента
+**Формат**: JSON с regex-паттернами  
+**Содержит**:
+- `version` — версия формата (2.2.0)
+- `rules` — массив правил с:
+  - `code` — код правила
+  - `short_description` — краткое описание
+  - `search_prompt` — инструкция для поиска
+  - `fix_prompt` — инструкция для исправления
+  - `test_generation_prompt` — инструкция для генерации тестов
+  - `regex_patterns.for_search` — паттерны для поиска
+  - `regex_patterns.for_ignore` — игнорирующие паттерны
+  - `examples` — примеры "было/стало"
+  - `fix_instruction` — пошаговая инструкция
+  - `priority` — приоритет (high/normal/low)
+  - `category` — категория
+**Использует**:
+- `PLPlusScanner` — сканирование файлов
+- `PLPlusFixer` — исправление кода
+- `RubricatorPrompts` — модуль работы с рубрикатором
+
+### 5.RUBRICATOR_PARSER_SQL.json
+**Назначение**: Гибридный SQL-парсер для автоматических преобразований  
+**Формат**: JSON с алгоритмическими правилами  
+**Содержит**:
+- `version` — версия формата (1.0.0)
+- `hybrid_mode` — режим гибридного парсера (true)
+- `rules` — массив правил с:
+  - `rule_code` — код правила
+  - `priority` — приоритет (1/2/3)
+  - `patterns` — массив паттернов:
+    - `name` — уникальное имя
+    - `regex` — регулярное выражение
+    - `description` — описание
+    - `transform_type` — тип преобразования (regex/hybrid/ignore)
+    - `transform` — шаблон замены (для regex)
+    - `algorithmic_hint` — подсказка для алгоритмического парсера
+    - `fallback_instruction` — инструкция для AI (для hybrid)
+    - `example_in` — пример входа
+    - `example_out` — пример выхода
+**Использует**:
+- `sql_parser.py` — алгоритмический парсер
+
+Добавь генерацию описания переменных в процедуре
+Варианты для тестирования нужно брать из документации "Рекомендации по адаптации кода на PLPlus для работы с DBI приложением v50.docx","Программирование_PLPlus_Материалы_курса.doc"
+
+Уточнения для SQL-запросов на примере v50.SQL.OUTERJOIN.п.1.1 
+>>>
+-- ============================================================================
+PROCEDURE v50_SQL_OUTERJOIN_п_1_1 IS
+    v_ref REF [PRICE_LIST];
+    v_result VARCHAR2(4000);
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v50.SQL.OUTERJOIN.п.1.1 Замена (+) на LEFT/RIGHT JOIN =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        select * from t1, t2 where t1.id = t2.id(+);
+        where ac%id = gj.[ACCOUNT](true);
+        where cr.[LIST_PAY] = fo&collection(true);
+        
+        -- [+] ПРАВИЛЬНО
+        select * from t1 left join t2 on t1.id = t2.id;
+        left join [GNI_JOUR] gj on ac%id = gj.[ACCOUNT];
+        left join (::[FACT_OPER] all : fo) on cr.[LIST_PAY] = fo&collection;
+        
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+<<<
+Согласно синтаксиса PL+ и SQL должно быть:
+PROCEDURE v50_SQL_OUTERJOIN_п_1_1 IS
+    v_ref REF [PRICE_LIST];
+    v_result VARCHAR2(4000);
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v50.SQL.OUTERJOIN.п.1.1 Замена (+) на LEFT/RIGHT JOIN =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        select * from t1, t2 where t1.id = t2.id(+)
+        where ac%id = gj.[ACCOUNT](true);
+
+        select * from t1, t2 where t1.id = t2.id(+)
+        where cr.[LIST_PAY] = fo&collection(true);
+        
+        -- [+] ПРАВИЛЬНО
+        select * from t1 left join t2 on t1.id = t2.id
+        left join [GNI_JOUR] gj on ac%id = gj.[ACCOUNT];
+
+        select * from t1 left join t2 on t1.id = t2.id
+        left join (::[FACT_OPER] all : fo) on cr.[LIST_PAY] = fo&collection;
+        
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+==========
+В предыдущем примере код с аналитическими функциями сформировался так
+>>>
+    , st AS (
+        SELECT DISTINCT st(st%collection : collection_id
+                         , analytic(first_value(substr(st.[TO_FILENAME], 3, 1)),
+                                 'over (partition by [1] order by [2] desc)',
+                                 st%collection, st.[IN_FILE_DATETIME]) : val
+                         , analytic(first_value(st.[IN_FILE_DATETIME]),
+                                 'over (partition by [1] order by [2] desc)',
+                                 st%collection, st.[IN_FILE_DATETIME]) : tm)
+        IN ::[GNI_JOUR_HISTORY] collections st
+        WHERE st.[SOC_FUND] IS NULL 
+          AND st.[IN_FILE_DATETIME] < (P_DATE + 1)
+    )
+<<<
+
+в примере ручной адаптации
+>>>
+    , st AS (
+        SELECT DISTINCT st(st%collection : collection_id
+                         , analytic(first_value(substr(st.[TO_FILENAME], 3, 1)),
+                                 'over (partition by [1] order by [2] desc)',
+                                 st%collection, st.[IN_FILE_DATETIME]) : val
+                         , analytic(first_value(st.[IN_FILE_DATETIME]),
+                                 'over (partition by [1] order by [2] desc)',
+                                 st%collection, st.[IN_FILE_DATETIME]) : tm)
+        IN ::[GNI_JOUR_HISTORY] collections st
+        WHERE st.[SOC_FUND] IS NULL 
+          AND st.[IN_FILE_DATETIME] < (P_DATE + 1)
+    )
+<<<
+=-> 05/05/2025
+
+Уточнения для генерации тестовый файл ALL_v50.txt.
+
+Если встречается правило для кода типа
+SELECT * FROM ...
+эти строки обрамляй
+-- begin pl/sql
+-- end pl/sql
+правило для кода типа SELECT * IN ... 
+обрамлять не нужно.
+
+В шапке к процедуре с кодом исправления (правки)
+из 3.RUBRICATOR_FIXES.md
+дополнительно добавляй: Теги
+Из 4.RUBRICATOR_PROMPTS.json добавляй информацию из тегов
+      "documentation_text"
+      "plplus_materials_note"
+      "search_prompt"
+      "code_example_badXXX" (где XXX-порядковый номер code_example_bad)
+      "fix_instruction"
+      "priority"
+      "category": "SQL",
+      "subcategory"
+Если в 4.RUBRICATOR_PROMPTS.json несколько проблемный конструкций в "code_example_badXXX", они все должны присутствовать в коде процедуры.
+Исключение для v50.SQL.OUTERJOIN.п.1.1
+тут используем предоставленный ранее пример (ПРП).
+В ПРП добавляем требования к шапке и обработку
+      "code_example_bad": "select * from t1, t2 where t1.id = t2.id(+)",
+      "code_example_bad2" и "code_example_bad3" уже присутствует в ПРП
+
+
+
+Уточнения:
+В шапке к процедуре с кодом исправления (правки)
+строку 
+-- 3.RUBRICATOR_FIXES.md ...
+не выводим
+Если в 4.RUBRICATOR_PROMPTS.json несколько проблемный конструкций в "code_example_badXXX", они все должны присутствовать в коде процедуры.
+=-> 07/05/2026
+---- 1+ ====
+Продолжаем работу над TestDeepSeek_full.plp
+Уточнение:
+ Если процедура не меняет данные в Базе, добавлять не нужно:
+  savepoint sp1;
+  RAISE;
+  ROLLBACK TO sp1;
+ 
+ Если нужно:
+  после RAISE; добавь комментарий
+  RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+
+СПИСОК ТЕСТИРУЕМЫХ КОДОВ ПРАВИЛ добавь в конце файла.
+На каждое правило формируй тестовую процедуру. В ней должны быть все варианты для кода правила
+Перепиши.
+---- 2+ ----
+Не вижу в шапке описания кода полей из 4.RUBRICATOR_PROMPTS.json:
+Перепиши
+---- 3+ ----
+Уточнение.
+Паттерн процедуры тестового кода на примере v50.SQL.ROWNUM.п.1.2
+-- ============================================================================
+-- Правило: v50.SQL.ROWNUM.п.1.2
+-- Описание: Замена rownum на FETCH FIRST
+-- Категория: SQL
+-- Приоритет: high
+-- Теги: rownum, limit, offset
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Псевдоколонка rownum не поддерживается в PostgreSQL. Использовать FETCH FIRST N ROWS ONLY.
+--   plplus_materials_note: В PL+ rownum используется в WHERE для ограничения выборки. В DBI его нет.
+--   search_prompt: Найти использование псевдоколонки rownum в WHERE, ORDER BY или SELECT. Игнорировать комментарии и строковые литералы.
+--   code_example_bad: select * from t where rownum = 1
+--   code_example_bad2: select * from t where rownum <= 10
+--   fix_instruction: Заменить ROWNUM на FETCH FIRST: - rownum = 1 -> fetch first 1 rows only; - rownum <= N -> fetch first N rows only; - rownum между значениями -> использовать offset on
+[>другие поля из 4.RUBRICATOR_PROMPTS.json, если еще не были выведены ранее]
+-- ============================================================================
+PUBLIC PROCEDURE v50_SQL_ROWNUM_p_1_2 IS
+    v_ref REF [PRICE_LIST]; [>тут переменные, если они были в коде примера и требуется определение их типа]
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v50.SQL.ROWNUM.п.1.2 Замена rownum на FETCH FIRST =-', 0); [>тут код и краткое описание]
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- begin pl/sql
+
+	[>тут все возможные примеры исходного кода их 4.RUBRICATOR_PROMPTS.json с номером и комментарием каждого варианта ]
+	...
+
+        -- end pl/sql
+
+        -- [+] ПРАВИЛЬНО
+        -- begin pl/sql
+
+	[>тут все возможные примеры их 4.RUBRICATOR_PROMPTS.json с номером и комментарием каждого варианта ]
+	...
+
+        -- end pl/sql
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему [>строку выводим, если код меняет базу]
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+---- 4+ ----
+для читабельности 
+строки внутри -- begin pl/sql … -- end pl/sql
+сдвинь вправо.
+Варианты отделяй друг от друга пустой строкой
+Перепиши
+---- 5+ ----
+Пропала шапка с информацией из 3.RUBRICATOR_FIXES.md и 4.RUBRICATOR_PROMPTS.json
+Для информации из 4.RUBRICATOR_PROMPTS.json (только те поля, которые не были отражены ранее из 3.RUBRICATOR_FIXES.md)
+---- 6+ ----
+В строки типа
+-- Правило 1: v50.SQL.OUTERJOIN.п.1.1 - Замена (+) на LEFT/RIGHT JOIN
+добавляй короткое описание
+---- 7+ ----
+После
+-- Правило 15: v50.STOR.DATE.п.2.2 - Замена DATE на DATE_TIME
+есть закомментареный код.
+
+Если вариант правила всего один строка с комментарием -- Вариант 1 не нужна.
+Переделай
+
+Строку с RAISE; создавать не нужно
+
+---- 8+ ----
+В шапке для
+-- 4.RUBRICATOR_PROMPTS.json (дополнительно):
+не увидел ряд значимых тегов. Добавь.
+-- СПИСОК ТЕСТИРУЕМЫХ КОДОВ ПРАВИЛ (HIGH, 48 шт): добавим в конце файла
+Для читабельности 
+ строки внутри -- begin pl/sql … -- end pl/sql
+ сдвинь вправо.
+Добавь комментарии типа
+-- Вариант 1: UDF в WHERE
+Варианты отделяй друг от друга пустой строкой
+Если вариант правила всего один строка с комментарием -- Вариант 1 не нужна.
+
+Перепиши процедуру для
+-- Правило 48: v50.SQL.DDL.п.1.24 - Указание схемы в DDL
+ 
+
+---- 7+ ----
+Нужно ли дарабатывать
+4.RUBRICATOR_PROMPTS.json
+5.RUBRICATOR_PARSER_SQL.json
+?
+=-> 08/05/2026
+----1+ ----
+Меняем терминологию.
+
+Код в "3.RUBRICATOR_FIXES.md" в колонке "Коды Файла.Категории.Исправления.Пункты/Строки" будем называть "Код правила" или "Правило"
+Колонку переименуй в "Код Файла.Категория.Правило.Пункты/Строки".
+Добавь колонку Priority
+
+Опиши, какие обновления в файлах рубрикатора. Состав и структура файлов.

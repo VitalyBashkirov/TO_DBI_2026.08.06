@@ -1,0 +1,176 @@
+class AC_FIN;
+
+@import_plsql(true)
+@name('[ПСБ] Вывод выписки в файл Excel (отдельно по счетам)')
+batch method PSH_OUT_FILE_AC is
+
+@name('Переменная валидатора') public V_EXEC [STRING_32000];
+
+pragma macro(xl, '[OOXML]::[API_XL]');
+pragma macro(lib, '::[SHABLON_DOC].[LIB_OOXML]');
+
+procedure Draw(
+	 P_BEGDATE	date
+	,P_ENDDATE	date
+	,P_ACC		ref [AC_FIN]
+) is
+	iRow	pls_integer;
+	date_pred date;
+	date_end date;
+begin
+	iRow := 8;
+
+	&xl.put(2, 3, P_ACC.[MAIN_V_ID] || ' ' || P_ACC.[NAME]);
+	&xl.put(3, 1, 'За период c '||to_char(P_BEGDATE,'DD.MM.YYYY')||' по '||to_char(P_ENDDATE,'DD.MM.YYYY'));
+	&xl.put(4, 3, to_char(P_BEGDATE,'DD.MM.YYYY'));
+	&xl.cell(4, 4,  abs(::[RUNTIME].[F_5].A('И'||P_ACC||'СВ',P_BEGDATE)), &xl.Get_numFmt ('#,##0.00'), p_horizontal == &xl.xl_ah_left);
+	&xl.put(5, 3, to_char(P_ACC.[DATE_OP],'DD.MM.YYYY'));
+
+----------------------
+     for (select y(
+			  		ANALYTIC(ROW_NUMBER, 'over (order by [1] )',y.[DATE]) :C_NPP
+			        ,y.[DATE] :C_DATE
+			        ,y.[DOC].[DOCUMENT_NUM] :C_NUM_DOC
+					,case when to_char(y.[DT]) = '1' then nvl(y.[SUMMA], 0) else null end 	:C_SUMMA_DT
+					,case when to_char(y.[DT]) = '1' then null else nvl(y.[SUMMA], 0) end	:C_SUMMA_KT
+					,y.[SUMMA_NAT]	:C_SUMMA_NT
+					,y.[DOC].[NAZN] :C_NAZN
+					,case when to_char(y.[DT]) = '1' then y.[DOC].[KL_KT].[0] 			 	  else y.[DOC].[KL_DT].[0] 					end	:C_KL#0
+					,case when to_char(y.[DT]) = '1' then y.[DOC].[KL_KT].[1].[1].[NAME] 	  else y.[DOC].[KL_DT].[1].[1].[NAME]		end	:C_KL#1_CL
+					,case when to_char(y.[DT]) = '1' then y.[DOC].[KL_KT].[1].[1].[INN]	 	  else y.[DOC].[KL_DT].[1].[1].[INN]		end	:C_KL#1_INN
+					,case when to_char(y.[DT]) = '1' then y.[DOC].[KL_KT].[1].[2].[MAIN_V_ID] else y.[DOC].[KL_DT].[1].[2].[MAIN_V_ID]  end	:C_KL#1_ACC
+					,case when to_char(y.[DT]) = '1' then y.[DOC].[KL_KT].[2].[1] 			  else y.[DOC].[KL_DT].[2].[1]				end	:C_KL#2_ACCOUNT
+					,case when to_char(y.[DT]) = '1' then y.[DOC].[KL_KT].[2].[2] 			  else y.[DOC].[KL_DT].[2].[2]				end	:C_KL#2_NAME
+					,case when to_char(y.[DT]) = '1' then y.[DOC].[KL_KT].[2].[INN]			  else y.[DOC].[KL_DT].[2].[INN]			end	:C_KL#2_INN
+					,case when to_char(y.[DT]) = '1' then y.[DOC].[KL_KT].[2].[3].[NAME] 	  else y.[DOC].[KL_DT].[2].[3].[NAME] 		end	:C_KL#2_BANK
+           		  )
+           in P_ACC.[ARC_MOVE]
+           where    y.[DATE] < (P_ENDDATE + 1)
+           		and y.[DATE] >= P_BEGDATE
+           order by y.[DATE]
+     	)
+     loop
+ 		if y.C_NPP = 1 then 
+ 			date_pred := trunc(y.C_DATE);
+ 		elsif date_pred <> trunc(y.C_DATE) then
+           	&xl.merge(iRow, 1, iRow, 3);
+           	&xl.put (iRow,  1, 'Исходящий остаток за '||to_char(date_pred,'DD.MM.YYYY'));
+            &xl.cell(iRow,  4, abs(::[RUNTIME].[F_5].A('И'|| P_ACC ||'СВ', date_pred + 1)), &xl.Get_numFmt ('#,##0.00'), p_horizontal == &xl.xl_ah_right);
+           	&xl.cell(iRow,  5, abs(::[RUNTIME].[F_5].A('И'|| P_ACC ||'СН', date_pred + 1)), &xl.Get_numFmt ('#,##0.00'), p_horizontal == &xl.xl_ah_right);
+           	&xl.merge(iRow, 6, iRow, 11);
+           	&xl.cell(iRow,  6,'(Нац)', p_horizontal == &xl.xl_ah_left);
+           	date_pred := trunc(y.C_DATE);
+           	iRow := iRow + 1;
+   		end if;
+
+ 		&xl.put(iRow,  1, y.C_NPP);
+       	&xl.put(iRow,  2, to_char(y.C_DATE,'DD.MM.YYYY'));
+       	&xl.put(iRow,  3, y.C_NUM_DOC);
+       	&xl.put(iRow,  4, nvl(y.C_KL#2_BANK, P_ACC.[FILIAL].[BANK].[NAME]));
+       	&xl.put(iRow,  5, nvl(y.C_KL#2_ACCOUNT,y.C_KL#1_ACC));
+       	&xl.put(iRow,  6, nvl(y.C_KL#2_NAME,y.C_KL#1_CL));
+       	&xl.put(iRow,  7, nvl(y.C_KL#2_INN,y.C_KL#1_INN));
+       	&xl.cell(iRow,  8, abs(y.C_SUMMA_DT), &xl.Get_numFmt ('#,##0.00'));
+       	&xl.cell(iRow,  9, abs(y.C_SUMMA_KT), &xl.Get_numFmt ('#,##0.00'));
+       	&xl.cell(iRow, 10, abs(y.C_SUMMA_NT), &xl.Get_numFmt ('#,##0.00'));
+       	&xl.put(iRow,  11, y.C_NAZN);
+
+       	date_end := trunc(y.C_DATE);
+       	iRow := iRow + 1;
+     end loop;
+     date_end := nvl(date_end, P_ENDDATE);
+     &xl.merge(iRow, 1, iRow, 3);
+     &xl.put(iRow,  1, 'Исходящий остаток за '||to_char(date_end,'DD.MM.YYYY'));
+     &xl.cell(iRow,  4, abs(::[RUNTIME].[F_5].A('И'|| P_ACC ||'СВ', date_end + 1)), &xl.Get_numFmt ('#,##0.00'), p_horizontal == &xl.xl_ah_right);
+     &xl.cell(iRow,  5, abs(::[RUNTIME].[F_5].A('И'|| P_ACC ||'СН', date_end + 1)), &xl.Get_numFmt ('#,##0.00'), p_horizontal == &xl.xl_ah_right);
+     &xl.merge( iRow, 6, iRow, 11);
+     &xl.cell(iRow,  6,'(Нац)', p_horizontal == &xl.xl_ah_left);	
+     iRow := iRow + 1;
+     &xl.merge(iRow, 1, iRow, 3);
+     &xl.put(iRow,  1, 'Обороты за период выписки Д/К');
+     &xl.cell(iRow,  4, abs(::[RUNTIME].[F_5].A('И'|| P_ACC ||'ДВ',P_BEGDATE,P_ENDDATE)), &xl.Get_numFmt ('#,##0.00'), p_horizontal == &xl.xl_ah_right);
+     &xl.cell(iRow,  5, abs(::[RUNTIME].[F_5].A('И'|| P_ACC ||'КВ',P_BEGDATE,P_ENDDATE)), &xl.Get_numFmt ('#,##0.00'), p_horizontal == &xl.xl_ah_right);
+     &xl.merge(iRow, 6, iRow, 11);
+
+	&xl.Set_Format_Range(7, 1, iRow - 1, 11, p_borderId==&xl.get_border(p_top=='thin',p_bottom=='thin',p_left=='thin',p_right=='thin'));
+end;
+PSH_OUT_FILE_AC (
+	@name('Дата начала периода')    P_BEGDATE   in [DATE],
+	@name('Дата окончания периода') P_ENDDATE   in [DATE],
+	@name('Путь к файлам')          P_FILE_PATH in [STRING_2000]
+) is
+
+validate is
+begin
+	if P_MESSAGE = 'DEFAULT' then
+		P_BEGDATE = P_ENDDATE := ::[SYSTEM].[OP_DATE];
+		P_FILE_PATH	:= ::[DEFVALS].[SLIB].RestoreStr(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_FILE_PATH');		
+	end if;
+end;
+
+execute is
+pragma macro(cp, '::[DOCUMENT].[COPYFILES]');
+L_MESSAGE varchar2(16);
+L_INFO  varchar2(16);
+l_print		boolean;
+l_file_idx	integer;
+n			integer := 0;
+begin
+	if P_BEGDATE is null or P_ENDDATE is null then
+		pragma error('Пожалуйста, заполните обе даты!');
+	end if;
+
+	if P_BEGDATE > P_ENDDATE then
+		pragma error('Дата начала периода больше даты окончания!');
+	end if;
+
+	if P_FILE_PATH is null then
+		pragma error('Укажите путь к файлам');
+	end if;
+
+	l_file_idx := 0;
+	l_print := false;
+	
+	l_file_idx := this.first;
+	while l_file_idx is not null
+	loop
+		--DEBUG_PIPE(&METHOD$ || '  acc= ' ||  this(l_file_idx).[MAIN_V_ID] , 0);
+		L_MESSAGE := 'DEFAULT';
+		L_INFO := null;
+		&lib.xl_init('PSH_OUT_FILE_AC');
+	
+		Draw(
+			P_BEGDATE,
+			P_ENDDATE,
+			this(l_file_idx)
+		);
+
+	--&lib.xl_finish(p_description == &METHOD$NAME || ' за период ' || to_char(P_BEGDATE,'dd.mm.yyyy') || ' - ' || to_char(P_ENDDATE,'dd.mm.yyyy') );
+	::[REPS_DATA].[PSH_LIB_PRINT].xl_finish_1(p_show==false, p_description == &METHOD$NAME || ' за период ' || to_char(P_BEGDATE,'dd.mm.yyyy') || ' - ' || to_char(P_ENDDATE,'dd.mm.yyyy'), 
+					p_save_path == P_FILE_PATH,
+					--p_save_filename == this(l_file_idx).[MAIN_V_ID]||'.xlsx',
+					--p_save_filename == this(l_file_idx).[CLIENT_V].[NAME] || '_' || this(l_file_idx).[MAIN_V_ID]||'.xlsx', 
+					p_save_filename == regexp_replace(this(l_file_idx).[CLIENT_V].[NAME],'[(|)|,|.|!|?|@|#|$|&|*|_|+|=|:|^|%|№|:|;|"|*|/|\|~|`|[|]|]') || '_' || this(l_file_idx).[MAIN_V_ID]||'.xlsx',
+					p_file_idx == l_file_idx
+					);
+
+		l_print := true;
+		n := n + 1;		
+		l_file_idx := this.next(l_file_idx);
+	end loop;
+
+	::[DEFVALS].[SLIB].SaveStr(stdlib.userid,&METHOD$CLASS,&METHOD$SNAME,'P_FILE_PATH',P_FILE_PATH);
+	
+	if l_print then
+		-- Копируем имена фалов в Associative array для последующего удаления
+		::[RUNTIME].[PSH_DELFIOFILES].tbl_F$L.delete;
+		-- Сохраним массив
+		::[RUNTIME].[PSH_DELFIOFILES].tbl_F$L := ::[DOCUMENT].COPYFILES.tbl_F$L;
+		stdio.put_line_buf('<%PLPCALL [RUNTIME].[PSH_NEW_LOC_DIR](%VAR%.V_ASK_USER=>''N'' , %VAR%.V_PATH=>'''  ||  P_FILE_PATH || ''') %>');
+	   	stdio.put_line_buf('<%PLPCALL [RUNTIME].[PSH_COPYFILES](%VAR%.V_COUNT=>'''|| &cp.tbl_F$L.count ||''') %>');
+	   	-- Удалям файлы с ФИО
+		stdio.put_line_buf('<%PLPCALL [RUNTIME].[PSH_DELFIOFILES]() %>');
+	end if;
+end;
+end;
+end;

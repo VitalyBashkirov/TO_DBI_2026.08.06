@@ -1,0 +1,130 @@
+class AC_FIN;
+
+@import_plsql(true)
+@name('[ПСБ] Статистика открытия счетов')
+static method PSH_REP_STAT_FIN is
+PSH_REP_STAT_FIN (
+	@name('На дату') P_DATE in [DATE]
+) is
+
+validate is
+begin
+	if p_message = 'DEFAULT' then
+		p_date := ::[SYSTEM].[OP_DATE];		
+	end if;
+end;
+
+execute is
+pragma macro(xl,'[OOXML]::[API_XL]');
+pragma macro(lib_ooxml,'::[SHABLON_DOC].[LIB_OOXML]');
+pragma macro(width, '[OOXML]::[API_XL].set_column_width([1], iCol, iCol); iCol:=iCol+1;', substitute);
+
+type NumsType is table of number index by string(300);
+
+iRow		integer;
+iCol		integer;
+sDate		string := to_char(P_DATE, 'dd.mm.yyyy');
+amounts		NumsType;
+cnt1		integer;
+cnt2		integer;
+pcz			integer := 3; -- точность округления. знаков после запятой
+det			NumsType;
+name		string(300);
+fmt			string := 'dd.mm.yyyy';
+kol5		integer:=0;
+kol6		integer:=0;
+sum7 		number:=0;
+sum8 		number:=0;
+sum9 		number:=0;
+koll0		integer:=0;
+koll1		integer:=0;
+sum12 		number:=0;
+sum13 		number:=0;
+sum_t 		number:=0;
+StyleCell integer;
+TypeCell string;
+
+
+begin
+	&lib_ooxml.xl_init('PSB_REP_STAT_FIN');
+   iCol := 5;	
+for (
+     SELECT a ( a.dates  :  start_date,least(NEXT_DAY(a.dates, 'ВС'),LAST_DAY(a.dates)) : end_date ) in 
+		(select l(to_date('2024-08-01','yyyy-mm-dd') + LEVEL-1 : dates) in ::[SYSTEM] connect by level <= 100)
+		WHERE TO_CHAR( a.dates,'Dy') = 'Пн' or EXTRACT(a.dates,'DAY')=1 
+	) loop
+     if P_DATE<a.start_date  or ::[system].op_date<a.start_date then exit; end if;
+     &xl.Put(2, iCol , to_char(a.start_date,'dd.mm.yy')|| ' - ' ||to_char(a.end_date,'dd.mm.yy'));
+
+	--	1.1. Новые счета юридических лиц за период
+	 select f (count(f): cnt ) in ::[AC_FIN] where 
+	 (substr(f.[MAIN_V_ID],1,5) in ('40802','40807') or  substr(f.[MAIN_V_ID],1,3) in ('407'))
+	 and  f.[DATE_OP] >= a.start_date and f.[DATE_OP]<=a.end_date 
+      into cnt1;
+	 &xl.Put(4,iCol,cnt1); 
+
+	--1.2. Новые счета физических лиц за период
+	 cnt1:=0;
+	 select f (count(f): cnt ) in ::[AC_FIN] where 
+	 (substr(f.[MAIN_V_ID],1,5) in ('40817','40820') or  substr(f.[MAIN_V_ID],1,3) in ('423'))
+	 and  f.[DATE_OP] >= a.start_date and f.[DATE_OP]<=a.end_date into cnt1;
+	 &xl.Put(7,iCol,cnt1); 
+	--1.3. Средний срок в днях открытия счета
+	 &xl.Put(9,iCol,1); 	 
+	--1.4. Кол-во счетов юридических лиц
+	 select f (count(f): cnt ) in ::[AC_FIN] where 
+	 nvl(f.[DATE_CLOSE],a.end_date+1)>a.end_date and
+	 (substr(f.[MAIN_V_ID],1,5) in ('40802','40807') or  substr(f.[MAIN_V_ID],1,3) in ('407'))
+      into cnt1;
+	 &xl.Put(9,iCol,cnt1); 
+	--1.5. Кол-во счетов физических лиц
+	 select f (count(f): cnt ) in ::[AC_FIN] where 
+	 nvl(f.[DATE_CLOSE],a.end_date+1)>a.end_date and
+	 (substr(f.[MAIN_V_ID],1,5) in ('40817','40820') or  substr(f.[MAIN_V_ID],1,3) in ('423'))
+	 into cnt1;
+	 &xl.Put(12,iCol,cnt1); 
+ 	--1.6. Закрыто счетов за период
+	 select f (count(f): cnt ) in ::[AC_FIN] where 
+	 substr(f.[MAIN_V_ID],1,3) in ('408','407','423') 
+	 and  f.[DATE_CLOSE] >= a.start_date and f.[DATE_CLOSE]<=a.end_date into cnt1;
+	 &xl.Put(13,iCol,cnt1); 
+	--1.7. Кол-во коррсчетов в Российских банках
+	 select f (count(f): cnt ) in ::[AC_FIN] where 
+	 nvl(f.[DATE_CLOSE],a.end_date+1)>a.end_date and
+	 substr(f.[MAIN_V_ID],1,5) in ('30110') 
+      into cnt1;
+	 &xl.Put(14,iCol,cnt1); 
+
+	--1.8. Кол-во корсчетов в иностранных банках
+	 select f (count(f): cnt ) in ::[AC_FIN] where
+	 nvl(f.[DATE_CLOSE],a.end_date+1)>a.end_date and 
+	 substr(f.[MAIN_V_ID],1,5) in ('30114') 
+      into cnt1;
+	 &xl.Put(15,iCol,cnt1); 
+
+	--1.9. Кол-во Российских корсчетов в банке
+	 select f (count(f): cnt ) in ::[AC_FIN] where 
+	 nvl(f.[DATE_CLOSE],a.end_date+1)>a.end_date and
+	 substr(f.[MAIN_V_ID],1,5) in ('30109') 
+      into cnt1;
+	 &xl.Put(16,iCol,cnt1); 
+	
+	--1.10. Кол-во иностранных корсчетов в банке
+	 &xl.Put(17,iCol,0); 
+	
+
+
+
+ 	
+	 
+
+
+	 
+	 iCol:=iCol+1;   
+	end loop;
+	
+	
+	&lib_ooxml.xl_finish(p_description == &METHOD$NAME||' '||sDate);
+end;
+end;
+end;

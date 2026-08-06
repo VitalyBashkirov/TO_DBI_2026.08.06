@@ -1,0 +1,445 @@
+class GUARANTIES;
+
+@import_plsql(true)
+@this(plsql_lock:=false,assert_null:=false)
+@name('[ПСБ] Портфель гарантий в Excel')
+@tag('COPIED')
+method PSH_EXCEL_GUAR is
+
+@name('V_DEST')             public V_DEST           [STRING_32000];
+@name('Файл шаблона excel') public P_FILE_EXECL     [STRING_512];
+@name('Файл для вывода')    public P_FILE_PORT_DATE [STRING_512];
+pragma include(::[RUNTIME].[DEBUG_MACRO]);
+dp integer:=0;	--управление debug_pipe
+dp2 integer:=null;	--управление debug_pipe
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+fmt	   string(10):='dd/mm/yyyy';
+fmtP   string(10):='dd.mm.yyyy';
+fmtHMS string(22):='dd/mm/yyyy HH24:MI:SS';
+fmt24 string(22):='dd/mm/yyyy HH24:MI:SS';
+dfmt string:='9999999999.99'; --'9999,999,999.99';
+--------
+/** /
+-- Объединение ячеек
+excel.Merge(2,1,2,countColumns);
+	2, -- Начать со 2 строки
+	1, -- Начать с 1 колонки
+	2, -- До 2 строки
+	6  -- До 6 колонки
+-- Запись указанного значения в ячейку по указанному адресу
+Excle.Write(  h 	     -1- номер колонки адреса ячейки
+			, w 	     -2- номер строки адреса ячейки
+			, value      -3- Значение для записи в ячейку
+			, Bold	     -4- Признак выделения жирным шрифтом
+			, Italic     -5- Признак выделения шрифта курсивом
+			, p_size     -6- Размер шрифта
+			, FontName   -7- Имя фонта
+			, Allighment -8- Строка симолов-обозначений выравнивания
+			-	по горизонтали:
+				'R'	- вправо
+				'L'	- влево
+				'C'	- по центру
+			-	по вертикали:
+				'B'	- вниз
+				'T'	- вверх
+				'M'	- по центру
+/**/
+BoldTrue	boolean:=true;	/* Признак выделения жирным шрифтом */
+BoldFalse	boolean:=false;	/* Признак выделения жирным шрифтом */
+ItalicTrue	boolean:=true;  /* Признак выделения шрифта курсивом */
+ItalicFalse	boolean:=false; /* Признак выделения шрифта курсивом */
+p_size_14	number:=14;		/* Размер шрифта */
+p_size_12	number:=12;		/* Размер шрифта */
+p_size_10	number:=10;		/* Размер шрифта */
+p_size_8	number:=8;		/* Размер шрифта */
+FontNameNull varchar2(50):=null;	/* Имя фонта */
+
+Allighment_CM	varchar2(10):='CM'; -- Строка симолов-обозначений выравнивания
+Allighment_RT	varchar2(10):='RT'; -- Строка симолов-обозначений выравнивания
+Allighment_C	varchar2(10):='C';  -- по горизонтали:R-вправо L-влево C-по центру
+Allighment_LM	varchar2(10):='LM'; -- по горизонтали:R-вправо L-влево C-по центру
+Allighment_RM	varchar2(10):='RM'; -- по горизонтали:R-вправо L-влево C-по центру
+Allighment_M	varchar2(10):='M';  -- по вертикали:  B-вниз T-вверх M-по центру
+
+iOrientation1 integer:=1;	/* Ориентации страницы. Значения: 1 - Альбомная, 2 - Книжная. */
+iOrientation2 integer:=2;	/* Ориентации страницы. Значения: 1 - Альбомная, 2 - Книжная. */
+
+/** /
+ Необходимо формировать портфель гарантий по разделам (образец прилагается):
+1. Выданные на индивидуальных условиях
+2. ПОТ_1
+3. ПОТ_2
+4. ПОТ_3
+/** /
+function IsGuaranties(r ref [GUARANTIES], P_BEG [DATE]) return string(100) is
+AcGuar ref [AC_FIN];
+ExRazdel string(100):='Выданные на индивидуальных условиях';
+begin
+	AcGuar:=r.[ACC];
+	--for in
+end;
+/**/
+PSH_EXCEL_GUAR (
+	@name('По дату') P_BEG in [DATE]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_BEG := [SYSTEM]::[OP_DATE];
+
+end if;
+-- End initialization of parameters and variables
+declare
+countStrHead	  integer := 3; -- сколько строк занято шапкой
+countColumns	  integer :=29; -- количество постоянных колонок в отчете
+cntrStr			  integer := 0; -- счетчик по строкам
+countStrHead_tmp  integer;
+
+mainTitle varchar2(30) := 'Банковские Гарантии';
+
+type tbl_number is table of number;
+
+column01 varchar2(40) := '№';									--01 
+column02 varchar2(40) := 'Лицевой счет';                        --02 
+column03 varchar2(40) := '№ договора';                          --03 
+column04 varchar2(40) := 'Принципал';                           --04 
+column041 varchar2(40):= 'ОКВЭД Принципала';					--05 -- Башкиров В.Г. 19.08.2020
+column05 varchar2(40) := 'ИНН Принципала';                      --06 
+column06 varchar2(40) := 'Сумма гарантии';                      --07 
+column07 varchar2(40) := 'Бенефициар';                          --08 
+column071 varchar2(40):= 'ИНН бенефициара';						--09 -- Башкиров В.Г. 31.08.2021
+column08 varchar2(40) := '% ставка';                            --10 
+column09 varchar2(40) := 'Категория качества';                  --11 
+column10 varchar2(40) := 'Расчетный % резерва';                 --12 
+column11 varchar2(40) := 'Сумма расчетного резерва';            --13 
+column12 varchar2(40) := 'Наименование ПОТ';                    --14 
+column13 varchar2(40) := 'Сумма обеспечения';                   --15 
+column14 varchar2(40) := 'Наименование обеспечения';            --16 
+column15 varchar2(40) := 'Дата выдачи гарантии';                --17 
+column16 varchar2(40) := 'Дата окончания гарантии';             --18 
+column17 varchar2(40) := 'Дата окончания основного договора';   --19 
+column171 varchar2(40):= 'Сч.учета вознагр-я по гарантиям';		--20 -- Башкиров В.Г. 31.08.2021 (47502) (перед колонкой Сумма выплаченной комиссии)
+column18 varchar2(40) := 'Сумма выплаченной комиссии';          --21 
+column19 varchar2(40) := 'К-во дней до погашения';              --22 
+column191 varchar2(40):= 'Счет учета сформированного РВП';		--23 -- Башкиров В.Г. 31.08.2021 (47425) (перед колонкой Фактически сформированный резерв)
+column20 varchar2(40) := 'Фактически сформированный резерв';    --24 
+column201 varchar2(40):= 'Процент резерва МСФО,%';              --25 -- Башкиров В.Г. 15.10.2021 Процент резерва МСФО,%
+column21 varchar2(40) := 'Порядок выплаты вознаграждения';      --26 
+column22 varchar2(40) := 'Цель гарантии';                       --27 
+column23 varchar2(40) := 'Примечание';                          --28 
+column24 varchar2(40) := 'Гарантии по';                         --29 
+
+nn integer:=0;
+z_ref ref [ZALOG];
+flStepMinus boolean;
+tmpStr string(4000);
+DateTimeEnd date;
+itog tbl_number;
+
+PrimaryOkved [STRING_9];
+ClTmp ref [CLIENT];
+
+ac47502 ref [AC_FIN]; --Сч.учета вознагр-я по гарантиям';	--20 -- Башкиров В.Г. 31.08.2021 (47502) (перед колонкой Сумма выплаченной комиссии)
+ac47425 ref [AC_FIN]; --Счет учета сформированного РВП';	--23 -- Башкиров В.Г. 31.08.2021 (47425) (перед колонкой Фактически сформированный резерв)
+ac47425m [ACCNUM];
+refResPort ref [RES_PORT];
+refResPort_tmp ref [RES_PORT];
+ResPort_name string;
+ResPort_tmp_name string;
+
+
+begin
+	if P_MESSAGE = 'DEFAULT' then -- первый запуск процедуры
+		P_BEG := [SYSTEM].[OP_DATE];
+		excel.Init_Xls;
+		stdio.close_all;
+		stdio.disable_buf;
+		p_info := 'OK';
+	elsif P_MESSAGE = 'VALIDATE' then
+		--debug_pipe('p_info='||p_info||' length(V_DEST)='||length(V_DEST), dp);
+				
+		if p_info = 'OK' then
+			if P_BEG is null then pragma error('Укажите отчетную дату!'); end if;
+
+			if excel.F_Click then
+				excel.F_Click := False;
+				
+				P_FILE_EXECL := trim([SYSTEM_PARAMS]::[GET]('PATH_LOCAL', false),'\')||'\'||to_char(P_BEG,'yyyymmdd')||' Портфель гарантий.xlsx';
+				debug_pipe('Будем создавать:'||P_FILE_EXECL, dp);
+				excel.open_file(P_FILE_EXECL, false, true); -- запуск Excel
+				
+				-- Первая строка
+				debug_pipe(mainTitle, dp2);
+				excel.write(1,1,mainTitle,BoldTrue,ItalicFalse,p_size_14,FontNameNull,Allighment_CM);
+				excel.Merge(1,1,1,countColumns);
+
+				-- Вторая строка
+				
+				excel.write(2,1,'по состоянию на '||to_char(P_BEG+1,fmt),BoldTrue,ItalicFalse,p_size_14,FontNameNull,Allighment_CM);
+				P_BEG:=P_BEG+1;
+				excel.Merge(2,1,2,countColumns);
+				-- Форматирование первых столбцов
+				excel.write(countStrHead,01, column01,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(01,01,  3); --№';                                                                                                                      
+				excel.write(countStrHead,02, column02,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(02,02, 20); --Лицевой счет';                                                                                                           
+				excel.write(countStrHead,03, column03,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(03,03, 10); --№ договора';                                                                                                             
+				excel.write(countStrHead,04, column04,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(04,04, 32); --Принципал';                                                                                                              
+				excel.write(countStrHead,05,column041,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(05,05, 10); --ОКВЭД Принципала';  -- Башкиров В.Г. 19.08.2020                                                                          
+				excel.write(countStrHead,06, column05,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(06,06, 14); --ИНН Принципала';                                                                                                         
+				excel.write(countStrHead,07, column06,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(07,07, 14); --Сумма гарантии';                                                                                                         
+				excel.write(countStrHead,08, column07,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(08,08, 32); --Бенефициар';                                                                                                             
+				excel.write(countStrHead,09,column071,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(09,09, 12); --ИНН бенефициара'; -- Башкиров В.Г. 31.08.2021                                                                            
+				excel.write(countStrHead,10, column08,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(10,10,  6); --% ставка';                                                                                                               
+				excel.write(countStrHead,11, column09,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(11,11,  5); --Категория качества';                                                                                                     
+				excel.write(countStrHead,12, column10,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(12,12,  5); --Расчетный % резерва';                                                                                                    
+				excel.write(countStrHead,13, column11,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(13,13, 14); --Сумма расчетного резерва';                                                                                               
+				excel.write(countStrHead,14, column12,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(14,14,  9); --Наименование ПОТ';                                                                                                       
+				excel.write(countStrHead,15, column13,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(15,15, 14); --Сумма обеспечения';                                                                                                      
+				excel.write(countStrHead,16, column14,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(16,16, 16); --Наименование обеспечения';                                                                                               
+				excel.write(countStrHead,17, column15,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(17,17, 10); --Дата выдачи гарантии';                                                                                                   
+				excel.write(countStrHead,18, column16,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(18,18, 10); --Дата окончания гарантии';                                                                                                
+				excel.write(countStrHead,19, column17,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(19,19, 10); --Дата окончания основного договора';                                                                                      
+				excel.write(countStrHead,20,column171,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(20,20, 20); --Счет учета вознаграждения по гарантиям'; -- Башкиров В.Г. 31.08.2021 (47502) (перед колонкой Сумма выплаченной комиссии)
+				excel.write(countStrHead,21, column18,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(21,21, 12); --Сумма выплаченной комиссии';                                                                                             
+				excel.write(countStrHead,22, column19,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(22,22,  7); --К-во дней до погашения';                                                                                                 
+				excel.write(countStrHead,23,column191,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(23,23, 20); --Счет учета сформированного РВП'; -- Башкиров В.Г. 31.08.2021 (47425) ( перед колонкой Фактически сформированный резерв)  
+				excel.write(countStrHead,24, column20,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(24,24, 14); --Фактически сформированный резерв';                                                                                       
+				excel.write(countStrHead,25,column201,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(25,25,  7); --Процент резерва МСФО,% -- Башкиров В.Г. 15.10.2021 Процент резерва МСФО,%
+				excel.write(countStrHead,26, column21,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(26,26, 12); --Порядок выплаты вознаграждения';                                                                                         
+				excel.write(countStrHead,27, column22,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(27,27, 10); --Цель гарантии';                                                                                                          
+				excel.write(countStrHead,28, column23,BoldTrue,ItalicFalse,p_size_10,FontNameNull,Allighment_CM); excel.Set_Column_Width(28,28, 10); --Примечание';                                                                                                             
+				excel.write(countStrHead,29, column24,BoldTrue,ItalicFalse,p_size_8 ,FontNameNull,Allighment_CM); excel.Set_Column_Width(29,29, 10); --Гарантии по';                                                                                                            
+
+				excel.Wrap_Text (countStrHead,01,countStrHead,countColumns,true); --Устанавка признака переноса текста в диапазоне
+				excel.AutoFitRow(countStrHead,01);	  --Установка свойства автоподбора высоты строк (с какой строки, кол-во строк)
+
+				cntrStr:=countStrHead;
+
+				--Башкиров В.Г. 27.09.2020 --Цветкова Лариса. Если задать портфель на следующую дату, т.е. за дату, когда закрылось обеспечение, то закрытое обеспечение еще показывается, чего быть не должно.
+				ResPort_tmp_name:=' ';
+				itog.delete;
+				for g in ::[GUARANTIES]
+				where nvl(g.[DATE_BEGINING],g.[DATE_BEGIN])<=P_BEG and P_BEG-1<nvl(g.[DATE_CLOSE],g.[DATE_ENDING])
+					-- and IsGuaranties(g) --Башкиров В.Г. 17.05.2021
+					-- and g.[NUM_DOG]='12/2019-44'  --Отладка. ООО "СитиЛюкс СК"
+				order by nvl(::[RES_PORT].[LIB].GetResPort(P_BEG,g,::[TIP_ACC]([COD]='VNB_ACCOUNT')),'1'),nvl(g.[DATE_BEGINING],g.[DATE_BEGIN])
+				loop
+					nn:=nn+1;
+					cntrStr := cntrStr + 1;
+					refResPort:=::[RES_PORT].[LIB].GetResPort(P_BEG,g,::[TIP_ACC]([COD]='VNB_ACCOUNT')); --VNB_ACCOUNT - В/б для учета гарантий
+					ResPort_name:=nvl(nvl(refResPort.[PORT_NAME],::[GUARANTIES].[PSH_L].GetResPortKindName(g,P_BEG)),'Индивидуальные гарантии');					 -- updated CHANGE_SHORT_NAME PSB_L->PSH_L 14/10/25
+					if ResPort_tmp_name<>ResPort_name then 
+					   if  ResPort_tmp_name != ' 'then
+					    	excel.write(cntrStr,04,'Итого по '||ResPort_tmp_name,BoldTrue,ItalicFalse,p_size_12);					  					 
+							excel.write(cntrStr,07,'=SUM(R[-'||(cntrStr-countStrHead_tmp-1)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма гарантии
+							excel.write(cntrStr,13,'=SUM(R[-'||(cntrStr-countStrHead_tmp-1)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма расчетного резерва
+							excel.write(cntrStr,15,'=SUM(R[-'||(cntrStr-countStrHead_tmp-1)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма обеспечения
+							excel.write(cntrStr,21,'=SUM(R[-'||(cntrStr-countStrHead_tmp-1)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма выплаченной комиссии
+							excel.write(cntrStr,24,'=SUM(R[-'||(cntrStr-countStrHead_tmp-1)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--фактически сформированный резерв
+							itog(nvl(itog.last,0)+1):=cntrStr;
+							cntrStr := cntrStr + 1;					   
+					   end if;  --*/
+					   countStrHead_tmp:=cntrStr;
+					   
+   					   
+   					   excel.write(cntrStr,4,nvl(nvl(refResPort.[PORT_NAME],::[GUARANTIES].[PSH_L].GetResPortKindName(g,P_BEG)),'Индивидуальные гарантии'),BoldTrue,ItalicFalse,p_size_12);					  					  -- updated CHANGE_SHORT_NAME PSB_L->PSH_L 14/10/25
+					   cntrStr := cntrStr + 1;					   
+
+					   ResPort_tmp_name:=ResPort_name;
+					end if;--*/
+					 
+					debug_pipe(Rpad(nn,5)||'['||Rpad(cntrStr,5)||']'||g.[VNB_ACCOUNT].[MAIN_V_ID]||' Дог.№'||g.[NUM_DOG],dp2);
+					
+					
+					/** № **/						         excel.write(cntrStr,01,nn,BoldFalse,ItalicFalse,null,FontNameNull,Allighment_CM);
+					/** Лицевой счет **/			         excel.write(cntrStr,02,''''||g.[VNB_ACCOUNT].[MAIN_V_ID]);
+					/** № договора **/				         excel.write(cntrStr,03,''''||g.[NUM_DOG],BoldFalse,ItalicFalse,null,FontNameNull,Allighment_CM);
+					/** Принципал **/				         excel.write(cntrStr,04,g.[PRINCIPAL].[NAME]);
+
+					--Башкиров В.Г. 19.08.2020
+					ClTmp:=g.[PRINCIPAL]; PrimaryOkved:=null; --PRIMARY-Основной
+					for oip in ClTmp.[OKVED_IN_PERIOD] where oip.[PRIMARY] loop	PrimaryOkved:=oip.[OKVED].[CODE]; exit;	end loop;
+					if PrimaryOkved is null then
+						for oip in ClTmp.[OKVED_IN_PERIOD] where oip.[MAIN] loop PrimaryOkved:=oip.[OKVED].[CODE]; exit; end loop;
+					end if;
+					/** /
+					if PrimaryOkved is null then
+						for oip in ClTmp.[OKVED_IN_PERIOD] where oip.[MAIN_FSGS] loop PrimaryOkved:=oip.[OKVED].[CODE]; exit; end loop;
+					end if;
+					if PrimaryOkved is null then
+						for oip in ClTmp.[OKVED_IN_PERIOD] order by nvl(oip.[DATE_END],[SYSTEM].[OP_DATE]) desc, nvl(oip.[DATE_BEGIN],[SYSTEM].[OP_DATE]) desc loop PrimaryOkved:=oip.[OKVED].[CODE]; exit; end loop;
+					end if;
+					/***/
+					if PrimaryOkved is not null then
+						/** ОКВЭД Принципала **/			excel.write(cntrStr,05,''''||PrimaryOkved);
+					end if;
+
+					ac47502:=null; --Сч.учета вознагр-я по гарантиям';	--20 -- Башкиров В.Г. 31.08.2021
+					for ada in g.[ARRAY_DOG_ACC] where ada.[NAME_ACCOUNT]=::[TIP_ACC]([COD]='G_DEMAND_COM') --G_DEMAND_COM - МСФО. Счет требований по уплате комиссии за гарантию
+					loop
+						ac47502:=ada.[ACCOUNT_DOG].[1].[2];
+						exit;
+					end loop;
+					
+					ac47425m:=null; --Счет учета сформированного РВП';	--23 -- Башкиров В.Г. 31.08.2021
+					
+					for rba in ::[RES_BASE_ACCS] all where rba.[PROD_RES]=g%id
+					and rba.[RES_ACC]->(true,::[AC_FIN])[MAIN_V_ID] is not null 
+					loop
+						ac47425m:=rba.[RES_ACC]->(true,::[AC_FIN])[MAIN_V_ID];
+						exit;
+					end loop;
+					if ac47425m is null and refResPort is not null then
+						--refResPort:=::[RES_PORT].[LIB].GetResPort(P_BEG,g,::[TIP_ACC]([COD]='VNB_ACCOUNT')); --VNB_ACCOUNT - В/б для учета гарантий
+						for rba in ::[RES_BASE_ACCS] all where rba.[PROD_RES]=refResPort
+						and rba.[RES_ACC]->(true,::[AC_FIN])[MAIN_V_ID] is not null 
+						loop
+							ac47425m:=rba.[RES_ACC]->(true,::[AC_FIN])[MAIN_V_ID];
+							exit;
+						end loop;
+					end if;
+
+					/** ИНН Принципала **/				     excel.write(cntrStr,06,''''||g.[PRINCIPAL].[INN]);
+					/** Сумма гарантии **/			         excel.write(cntrStr,07,F.a('И'||g.[VNB_ACCOUNT]||'СВ', P_BEG)); --!!! excel.write(cntrStr,07,g.[SUMMA]);
+					/** Бенефициар **/				         excel.write(cntrStr,08,g.[BENEFICIARY].[NAME]);
+					/**!ИНН Бенефициара **/				     excel.write(cntrStr,09,''''||g.[BENEFICIARY].[INN]);
+					/** % ставка **/				         excel.write(cntrStr,10,round(::[GUARANTIES].[PSH_L].GetPrc(g,P_BEG),2),BoldFalse,ItalicFalse,null,FontNameNull,Allighment_CM); -- updated CHANGE_SHORT_NAME PSB_L->PSH_L 14/10/25
+					/** Категория качества **/		         excel.write(cntrStr,11,::[GUARANTIES].[PSH_L].GetServiceQualSign(g,P_BEG),BoldFalse,ItalicFalse,null,FontNameNull,Allighment_CM); -- updated CHANGE_SHORT_NAME PSB_L->PSH_L 14/10/25
+					/** Расчетный % резерва **/		         excel.write(cntrStr,12,::[GUARANTIES].[PSH_L].GetPrcReserv(g,P_BEG),BoldFalse,ItalicFalse,null,FontNameNull,Allighment_CM); -- updated CHANGE_SHORT_NAME PSB_L->PSH_L 14/10/25
+					/** Сумма расчетного резерва **/         excel.write(cntrStr,13,::[GUARANTIES].[PSH_L].GetSumCalcReserv(g,P_BEG)); -- updated CHANGE_SHORT_NAME PSB_L->PSH_L 14/10/25
+					/** Наименование ПОТ **/		         excel.write(cntrStr,14,nvl(refResPort.[PORT_NAME],::[GUARANTIES].[PSH_L].GetResPortKindName(g,P_BEG)),BoldFalse,ItalicFalse,p_size_8); -- updated CHANGE_SHORT_NAME PSB_L->PSH_L 14/10/25
+					--15'Сумма обеспечения';                                   --15,
+					--16'Наименование обеспечения';                            --16,
+					/** Дата выдачи гарантии **/	         excel.write(cntrStr,17,''''||to_char(::[GUARANTIES].[PSH_L].GetDateOutGua(g,P_BEG),fmt)); -- updated CHANGE_SHORT_NAME PSB_L->PSH_L 14/10/25
+					/** Дата окончания гарантии **/	         excel.write(cntrStr,18,''''||to_char(g.[DATE_ENDING],fmt));
+					/** Дата окончания основного договора **/excel.write(cntrStr,19,''''||to_char(to_date(::[GUARANTIES].[PSH_L].GetPropVal(g,P_BEG,::[PROPERTY_GRP]([CODE]='PSB_DATE_END_MAIN_DOG')),fmtP),fmt)); -- updated CHANGE_SHORT_NAME PSB_L->PSH_L 14/10/25
+					/**!Счет учета вознагр-ия по гарантиям**/excel.write(cntrStr,20,''''||ac47502.[MAIN_V_ID]);
+					/** Сумма выплаченной комиссии **/		 excel.write(cntrStr,21,::[GUARANTIES].[PSH_L].GetSumCom(g,P_BEG)); -- updated CHANGE_SHORT_NAME PSB_L->PSH_L 14/10/25
+					/** Кол-во дней до погашения **/		 excel.write(cntrStr,22,''''||::[GUARANTIES].[PSH_L].GetDaysDateEnd(g,P_BEG),BoldFalse,ItalicFalse,null,FontNameNull,Allighment_CM); -- updated CHANGE_SHORT_NAME PSB_L->PSH_L 14/10/25
+					/**!Счет учета сформированного РВП **/   excel.write(cntrStr,23,''''||ac47425m);
+					/** фактически сформированный резерв **/ excel.write(cntrStr,24,::[GUARANTIES].[PSH_L].GetSumFactReserv(g,P_BEG)); -- updated CHANGE_SHORT_NAME PSB_L->PSH_L 14/10/25
+					/** Процент резерва МСФО,%**/			 excel.write(cntrStr,25,round(::[GUARANTIES].[PSH_L].GetPrcDevalHist(g,P_BEG),4),BoldFalse,ItalicFalse,null,FontNameNull,Allighment_CM); --Процент резерва МСФО,% -- Башкиров В.Г. 15.10.2021 Процент резерва МСФО,% -- updated CHANGE_SHORT_NAME PSB_L->PSH_L 14/10/25
+					/** Порядок выплаты вознаграждения **/   excel.write(cntrStr,26,'Единоразово',BoldFalse,ItalicFalse,p_size_8,FontNameNull,Allighment_CM);
+					/** Цель гарантии **/					 excel.write(cntrStr,27,g.[DIC_OBJ_GUAR].[SYS_NAME],BoldFalse,ItalicFalse,p_size_8,FontNameNull,Allighment_LM);
+					/** Примечание **/					     excel.write(cntrStr,28,g.[NOTES],BoldFalse,ItalicFalse,p_size_8,FontNameNull,Allighment_LM);
+					/** Гарантии по **/					     excel.write(cntrStr,29,::[GUARANTIES].[PSH_L].GetPropVal(g%id, P_BEG, ::[PROPERTY_GRP]([CODE]='PSB_ФЗ')),BoldFalse,ItalicFalse,p_size_8,FontNameNull,Allighment_LM); -- updated CHANGE_SHORT_NAME PSB_L->PSH_L 14/10/25
+
+					flStepMinus:=false;
+					for ptl in ::[PART_TO_LOAN] all where ptl.[PRODUCT]=g
+						--Башкиров В.Г. 27.09.2020 --Цветкова Лариса. Письмо Пт 25/09/2020 10:53 Можно что-то сделать, чтобы закрытое обеспечение не попадало в Портфель?
+						--and (ptl.[PRODUCT].[DATE_CLOSE] is null or nvl(ptl.[PRODUCT].[DATE_BEGINING],ptl.[PRODUCT].[DATE_BEGIN])<=P_BEG and P_BEG<=ptl.[PRODUCT].[DATE_CLOSE])
+					loop
+						z_ref:=ptl%parent;
+						
+						--Башкиров В.Г. 27.09.2020 --Цветкова Лариса. Письмо Пт 25/09/2020 10:53 Можно что-то сделать, чтобы закрытое обеспечение не попадало в Портфель?
+						debug_pipe('Договор обеспечения №'||z_ref.[NUM_DOG]||' '||
+							'DATE_BEGINING='||to_char(z_ref.[DATE_BEGINING],fmt)||' '||
+							'DATE_BEGIN='||to_char(z_ref.[DATE_BEGIN],fmt)||' '||
+							'DATE_CLOSE='||to_char(z_ref.[DATE_CLOSE],fmt)||' '||
+							' Сумма:'||z_ref.[SUMMA],dp);
+
+						--Башкиров В.Г. 27.09.2020 --Цветкова Лариса. Письмо Пт 25/09/2020 10:53 Можно что-то сделать, чтобы закрытое обеспечение не попадало в Портфель?
+						--Башкиров В.Г. 27.09.2020 --Цветкова Лариса. Если задать портфель на следующую дату, т.е. за дату, когда закрылось обеспечение, то закрытое обеспечение еще показывается, чего быть не должно.
+						if nvl(z_ref.[DATE_BEGINING],z_ref.[DATE_BEGIN])<=P_BEG and
+						 ((nvl(z_ref.[DATE_BEGINING],z_ref.[DATE_BEGIN])<=P_BEG and P_BEG<z_ref.[DATE_CLOSE]) or z_ref.[DATE_CLOSE] is null)
+						then
+							debug_pipe(' Учитываем',dp);
+							
+							--Сумма обеспечения
+							excel.write(cntrStr,15,z_ref.[SUMMA]); 					
+							--Наименование обеспечения
+							excel.write(cntrStr,16,z_ref.[VID_GUARANTEE].[NAME],BoldFalse,ItalicFalse,p_size_8,FontNameNull,Allighment_LM);
+							debug_pipe(Rpad(nn,5)||'['||Rpad(cntrStr,5)||'] Обеспечение Сумма:'||z_ref.[SUMMA]||' '||z_ref.[VID_GUARANTEE].[NAME],dp2);
+							cntrStr:=cntrStr+1;
+							flStepMinus:=true;
+						else
+							debug_pipe(' Не учитываем',dp);
+						end if;
+					end loop;
+					
+					
+					if flStepMinus then
+						cntrStr:=cntrStr-1;
+					end if;
+				end loop;
+
+				--Cуммы
+				if  ResPort_tmp_name != ' 'then
+				            cntrStr := cntrStr + 1;					   
+					    	excel.write(cntrStr,04,'Итого по '||ResPort_tmp_name,BoldTrue,ItalicFalse,p_size_12);					  					 
+							excel.write(cntrStr,07,'=SUM(R[-'||(cntrStr-countStrHead_tmp-1)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма гарантии
+							excel.write(cntrStr,13,'=SUM(R[-'||(cntrStr-countStrHead_tmp-1)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма расчетного резерва
+							excel.write(cntrStr,15,'=SUM(R[-'||(cntrStr-countStrHead_tmp-1)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма обеспечения
+							excel.write(cntrStr,21,'=SUM(R[-'||(cntrStr-countStrHead_tmp-1)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма выплаченной комиссии
+							excel.write(cntrStr,24,'=SUM(R[-'||(cntrStr-countStrHead_tmp-1)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--фактически сформированный резерв
+							itog(nvl(itog.last,0)+1):=cntrStr;
+							cntrStr := cntrStr + 1;					   
+				 end if;  --*/
+				
+				cntrStr:=cntrStr+1;
+				excel.write(cntrStr,04  ,'ИТОГО',BoldTrue,null,p_size_10,null,Allighment_RM);
+				/*excel.write(cntrStr,07,'=SUM(R[-'||(cntrStr-countStrHead)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма гарантии
+				excel.write(cntrStr,13,'=SUM(R[-'||(cntrStr-countStrHead)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма расчетного резерва
+				excel.write(cntrStr,15,'=SUM(R[-'||(cntrStr-countStrHead)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма обеспечения
+				excel.write(cntrStr,21,'=SUM(R[-'||(cntrStr-countStrHead)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма выплаченной комиссии
+				excel.write(cntrStr,24,'=SUM(R[-'||(cntrStr-countStrHead)||']C:R[-1]C)',BoldTrue,null,p_size_10,null,Allighment_RM);--фактически сформированный резерв --*/
+				tmpStr:='';
+				for i in itog.first..itog.last
+		           loop
+		           tmpStr:=tmpStr||'R[-'||abs(itog(i)-cntrStr)||']C+';
+		           
+				  end loop;
+				  tmpStr:=tmpStr||'0';
+				excel.write(cntrStr,07,'='||tmpStr,BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма гарантии
+				excel.write(cntrStr,13,'='||tmpStr,BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма расчетного резерва
+				excel.write(cntrStr,15,'='||tmpStr,BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма обеспечения
+				excel.write(cntrStr,21,'='||tmpStr,BoldTrue,null,p_size_10,null,Allighment_RM);--Сумма выплаченной комиссии
+				excel.write(cntrStr,24,'='||tmpStr,BoldTrue,null,p_size_10,null,Allighment_RM);--фактически сформированный резерв
+				--*/
+				
+				
+
+				--Задание числового формата
+				excel.Set_number_Format(countStrHead+1,07,cntrStr,07,2, true); --Сумма гарантии
+				excel.Set_number_Format(countStrHead+1,10,cntrStr,10,2, false); --% ставка
+				excel.Set_number_Format(countStrHead+1,13,cntrStr,13,2, true); --Сумма расчетного резерва
+				excel.Set_number_Format(countStrHead+1,15,cntrStr,15,2, true); --Сумма обеспечения
+				excel.Set_number_Format(countStrHead+1,21,cntrStr,21,2, true); --Сумма выплаченной комиссии
+				excel.Set_number_Format(countStrHead+1,24,cntrStr,24,2, true); --фактически сформированный резерв
+				excel.Set_number_Format(countStrHead+1,25,cntrStr,25,2, false); --Процент резерва МСФО,% -- Башкиров В.Г. 15.10.2021 Процент резерва МСФО,%
+
+				-- Рамки
+				cntrStr:=cntrStr-1; --ИТОГО без рамки
+				debug_pipe('<<Рамки>> '||countStrHead||','||1||','||cntrStr||','||countColumns,dp2);
+				excel.BORDERS(countStrHead,1,cntrStr,countColumns,'RLBTVH');
+				
+				DateTimeEnd:=sysdate;
+				tmpStr:='Сформировано '||to_char(DateTimeEnd,fmtHMS)||' __________________________________/'||stdlib.UserId.[NAME]||'/';
+				debug_pipe(tmpStr, dp2);
+				
+				cntrStr:=cntrStr+1;
+				excel.write(cntrStr+1,1,tmpStr,Boldfalse,ItalicFalse,p_size_10);
+				excel.Merge(cntrStr+1,1,cntrStr+1,countColumns);
+
+				--excel.set_orientation(iOrientation2);	--Ориентации страницы. Значения: 1 - Альбомная, 2 - Книжная
+				--excel.fit_in_page_width();				--Вписать данные в страницу по ширине
+				excel.Save_as(P_FILE_EXECL);			--NameFile_OutXlsx);
+
+				excel.Visible;							--Перевод Excel в режим отображения данных
+				excel.Release;							--Закрытие COM интерфейса Excel сервера
+			end if;
+			
+			/*if Length(V_DEST)>0 then
+				debug_pipe('(Размер VB-скрипта:'||Length(V_DEST)||')',dp2);
+			end if;--*/
+			excel.Exec_Script(V_DEST);
+		end if;
+	end if;
+end;
+end;
+end;
+end;

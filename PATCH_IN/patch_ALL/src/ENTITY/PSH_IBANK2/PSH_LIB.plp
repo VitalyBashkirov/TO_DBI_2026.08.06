@@ -1,0 +1,223 @@
+class PSH_IBANK2;
+
+@import_plsql(true)
+@this(plsql_lock:=false,create_on_start:=true)
+@name('[ПСБ] Библиотека функций')
+@tag('COPIED')
+library PSH_LIB is
+public pragma macro(IBANK2LIB, '::[PSH_IBANK2].[PSH_LIB]'); -- updated CHANGE_SHORT_NAME LIB->PSH_LIB 15/10/25
+
+public pragma macro(get_query,
+'function get_query(CODE string(50)) return string(2000) is
+begin
+	CODE := upper(CODE);	
+	if query.exists(CODE) then
+		return query(CODE);
+	else	
+		return null;
+	end if;
+end;');
+pragma include([BANK_CLIENT]::[LIB_MACRO]);
+pragma macro(sp1,'begin [0]:= ''savepoint sp''||[2]||''[1]'' ; end;',process,substitute);
+pragma macro(rb1,'begin [0]:= ''rollback to sp''||[2]||''[1]'' ; end;',process,substitute);
+pragma macro(sp,'&sp1([1],&method$id);',substitute);
+pragma macro(rb,'&rb1([1],&method$id);',substitute);
+
+public function del_ora (str varchar2(32000)) return varchar2(32000) is 
+begin
+	str := replace(str,chr(13),'');
+	str := replace(str,chr(10),'');
+	if instr(str,'ORA-') > 0 then
+		return trim(substr(str, instr(str,':',1,2)+1));
+	else
+		return str;
+	end if;
+end;
+
+--проверка что это наш филиал
+public function our_bank (BANK_CODE varchar2) return ref [BRANCH] is 
+fil ref [BRANCH];
+begin
+	begin
+	locate fil in [BRANCH] where fil.[BANK].[SWIFT_C]=BANK_CODE or fil.[BANK].[BIC]=BANK_CODE;
+		return fil;
+	exception when others then
+		return null;	
+	end;
+end;
+
+--поиск ссылки на внешний документ
+public function get_docref (doc ref [MAIN_DOCUM]) return varchar2 is 
+docref varchar2;
+begin
+docref := null;
+	begin
+		select x(x.[SYS_ID]) in ::[BC_MAP_DOC] all where
+			x.[OBJ_REF]=doc and
+			x.[OBJ_CLASS] = doc%class
+		into docref;	
+	exception when others then null;
+	end;
+	return docref;	
+end;
+pragma restrict_references(get_docref,wnds,trust);
+
+
+
+
+-- Получить ссылку на договор ДБО по внешнему коду клиента
+public function get_dog(EXT_CLIENT_ID string(40)) return ref [BANK_CLIENT] is 
+v_dog	Ref [BANK_CLIENT];
+begin
+	begin
+		locate exact v_dog in ::[PSH_IBANK2] all where v_dog.[COM_STATUS] = ::[COM_STATUS_PRD]([CODE] = 'WORK') and v_dog.[REG_NUMBER] = EXT_CLIENT_ID;
+	exception
+		when NO_DATA_FOUND then
+			v_dog := null;
+		when TOO_MANY_ROWS then
+			v_dog := null;
+	end;
+	return v_dog;
+end;
+-- Получить ссылку на договор ДБО по счету и бику клиента
+-- Получить ссылку на договор ДБО по счету клиента
+public function get_dog(acc ACCNUM, bic string(9)) return ref [BANK_CLIENT] is 
+accs	ref[BC_ACC_PROPS];
+begin
+	begin
+		locate exact accs in ::[BC_ACC_PROPS] all where accs.[ACCOUNT].[MAIN_V_ID] = acc and accs.[ACCOUNT].[FILIAL].[BANK].[BIC] = bic;
+	exception
+		when NO_DATA_FOUND then
+			accs := null;
+		when TOO_MANY_ROWS then
+			accs := null;
+	end;
+	if accs%parent%class = 'PSH_IBANK2' then
+		return accs%parent;
+	else
+		return null;
+	end if;
+end;
+
+
+
+-- номер счета (любой) IBank2
+public function ibank2_acc( bc ref[BANK_CLIENT]) return string(25) is 
+acc ref[BC_ACC_PROPS];
+begin
+     begin
+           locate acc in bc.[ACC_TRACE];
+              return acc.[ACCOUNT].[MAIN_V_ID];
+           exception when NO_DATA_FOUND then
+              return '';
+
+      end;
+end;
+
+-- Получить ссылку на счет
+public function get_acc(acc ACCNUM, bic string(9)) return ref [AC_FIN] is 
+account ref[AC_FIN];
+begin
+	begin
+		locate account in ::[AC_FIN] all where account.[MAIN_V_ID] = acc and account.[FILIAL].[BANK].[BIC] = bic and (account.[DATE_CLOSE] is null or trunc(account.[DATE_CLOSE])=trunc(sysdate));
+	exception when NO_DATA_FOUND then
+		null;
+	end;
+	return account;
+end;
+
+/*
+function get_bank(bank_ref ref [CL_BANK]) return [BC_BANK_REQS] is
+	addr_struct [BC_PAY_ADDRESS];
+	bank_reqs [BC_BANK_REQS];
+begin
+	bank_reqs.[BANK_OPT] := NULL;
+	if bank_ref%class = 'CL_BANK_N' then -- национальный банк
+		select x(x.[NAME], x.[BIC], x.[KS]) in ::[CL_BANK_N] where x%id = bank_ref%id into
+			bank_reqs.[BANK_NAME],
+			bank_reqs.[BANK_BIC],
+			bank_reqs.[BANK_KS];
+		addr_struct.[CITY_STR] := [VIEWFUN].[GetAddress](bank_ref, 'CITY', NULL);
+		addr_struct.[ADDR_STR] := [VIEWFUN].[GetAddress](bank_ref,'DISTRICT, STREET, HOUSE, KORPUS', null);
+	else
+		select x(x.[I_NAME], x.[SWIFT_C]) in ::[CL_BANK_F] where x%id = bank_ref%id into
+			bank_reqs.[BANK_NAME],
+			bank_reqs.[BANK_SWIFT_CODE];
+		bank_reqs.[BANK_KS] := NULL;
+	end if;
+	
+	addr_struct.[COUNTRY_CODE] := bank_ref.[COUNTRY].[CODE];
+	addr_struct.[COUNTRY_NAME] := bank_ref.[COUNTRY].[INAME];
+	
+	bank_reqs.[ADDRESS] := addr_struct;
+	return bank_reqs;
+	exception when NO_DATA_FOUND then
+		 null;
+end;
+*/
+
+public function get_bank(bank_ref ref [CL_BANK]) return [BC_BANK_REQS] is 
+                addr_struct [BC_PAY_ADDRESS];
+                bank_reqs [BC_BANK_REQS];
+begin
+                bank_reqs.[BANK_OPT] := NULL;
+                if bank_ref%class = 'CL_BANK_N' then -- национальный банк
+                               select x(x.[NAME], x.[BIC], x.[BIC], x.[KS]) in ::[CL_BANK_N] where x%id = bank_ref%id into
+                                               bank_reqs.[BANK_NAME],
+                                               bank_reqs.[BANK_BIC],
+                                               bank_reqs.[PSH_BANK_CODE], -- updated CHANGE_QUALIFIER BANK_CODE->PSH_BANK_CODE 13/10/25
+                                               bank_reqs.[BANK_KS];
+                               addr_struct.[CITY_STR] := [VIEWFUN].[GetAddress](bank_ref, 'CITY', NULL);
+                               addr_struct.[ADDR_STR] := [VIEWFUN].[GetAddress](bank_ref,'DISTRICT, STREET, HOUSE, KORPUS', null);
+                else
+                               select x(x.[I_NAME], x.[SWIFT_C], x.[SWIFT_C]) in ::[CL_BANK_F] where x%id = bank_ref%id into
+                                               bank_reqs.[BANK_NAME],
+                                               bank_reqs.[BANK_SWIFT_CODE],
+                                               bank_reqs.[PSH_BANK_CODE]; -- updated CHANGE_QUALIFIER BANK_CODE->PSH_BANK_CODE 13/10/25
+                               bank_reqs.[BANK_KS] := NULL;
+                end if;
+
+                addr_struct.[COUNTRY_CODE] := bank_ref.[COUNTRY].[CODE];
+                addr_struct.[COUNTRY_NAME] := bank_ref.[COUNTRY].[INAME];
+
+                bank_reqs.[ADDRESS] := addr_struct;
+                return bank_reqs;
+                exception when NO_DATA_FOUND then
+                               null;
+end;
+
+
+-- Получить вид пересылки
+public function get_send_type(p_send_type Varchar2) return [VID_SEND_DOCUM]::[COD]%type is 
+v_result	[VID_SEND_DOCUM]::[COD]%type;
+v_ref		[VID_SEND_DOCUM];
+begin
+	begin
+		locate v_ref in ::[VID_SEND_DOCUM] all where Upper(v_ref->[VID_SEND]) = Upper(p_send_type);
+		v_result := v_ref.[COD];
+	exception
+		when NO_DATA_FOUND then
+			v_result := Null;
+	end;
+	return v_result;
+end;
+
+-- Последний Курс банка за день. BUY - покупка банком, SELE - продажа банком
+public function kurs_bank (cod_val varchar2(3), data_val date, tip varchar2(4)) return number is 
+kursi ref [PRICE_LIST];
+kurs number;
+begin
+kursi := ::[PRICE_LIST](CODE='PSH_DBO');
+for kotir in kursi.[ARR_RATES]
+	where 	trunc(kotir.[TER_DATE])=trunc(data_val)
+			and	upper(kotir.[CURRENCY_2].[CUR_SHORT])=upper(cod_val)
+			and upper(kotir.[CURRENCY_1].[CUR_SHORT])='RUB'
+			and upper(kotir.[KOD_OPER].[CODE])=upper(tip)
+			and kotir.[DATE_DEL] is null
+	order by kotir.[TER_DATE]
+loop
+kurs:=kotir.[RATE];
+end loop;	
+return (kurs);	
+end;
+end;

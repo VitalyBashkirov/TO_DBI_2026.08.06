@@ -1,0 +1,48 @@
+class CALC_PARAMS;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Копировать')
+@tag('COPIED')
+method PSH_COPY#AUTO is
+PSH_COPY#AUTO (
+	@name('Наименование')              P#NAME        in [NAME],
+	@name('Код')                       P#CODE        in [STRING_16],
+	@name('Группа')                    P#GROUP       in [STRING_16],
+	@name('Имя метода для вычисления') P#METHOD      in [STRING_16],
+	@name('Класс, содержащий метод')   P#CLASS       in [STRING_16],
+	@name('Тип результата')            P#TYPE_RESULT in [STRING_1],
+	@name('Описание')                  P_NOTE        in [MEMO]
+) is
+
+validate is
+begin
+if p_message = 'DEFAULT' then
+	P#NAME := this.[NAME];
+	P#CODE := this.[CODE];
+	P#GROUP := this.[GROUP];
+	P#METHOD := this.[METHOD];
+	P#CLASS := this.[CLASS];
+	P#TYPE_RESULT := this.[TYPE_RESULT];
+	P_NOTE := this.[NOTE];
+end if;
+end;
+
+execute is
+begin
+	for cp IN [CALC_PARAMS] WHERE cp.[CODE] = P#CODE and this%id != cp%id loop
+	  pragma error( 'Уже есть вычисляемый параметр с кодом: '||P#CODE);
+	end loop;
+	--
+	::[CALC_PARAMS].NEW#AUTO(
+		P#NAME,
+		P#CODE,
+		P#GROUP,
+		P#METHOD,
+		P#CLASS,
+		P#TYPE_RESULT,
+		P_NOTE
+	);
+end;
+end;
+end;

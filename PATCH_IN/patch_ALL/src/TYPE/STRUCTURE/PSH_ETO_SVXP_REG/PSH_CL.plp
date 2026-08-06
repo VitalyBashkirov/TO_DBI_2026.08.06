@@ -1,0 +1,32 @@
+class PSH_ETO_SVXP_REG;
+
+@name('[ПСБ] Common Lib')
+library PSH_CL is
+
+/* Секция глобальных переменных *
+@name('пример переменной 1') public V_EXAMPLE1 [STRING_100];
+@name('пример переменной 2') public V_EXAMPLE2 [NUMBER];
+/* Конец секции глобальных переменных */
+	
+/* Описания */
+public cvEntryTypeDebit		const varchar2(1) := 'D';
+public cvEntryTypeCredit	const varchar2(1) := 'C';
+
+/* Блок инициализации */
+
+/* Описания */
+
+public function getAcFinByNum(pAccNum varchar2) return ref [AC_FIN] is
+begin
+	for (select x(x :c_id)
+		 in ::[AC_FIN]
+		 where x.[MAIN_V_ID] = pAccNum
+		 and x.[DATE_CLOSE] is null
+		)
+	loop
+		return x.c_id;
+	end loop;
+	[MESSAGE].app_error(&METHOD$CLASS || '.' || &METHOD$SNAME || '.getAcFinByNum', 'Не найден счёт ' || pAccNum);
+end;
+
+end; /* конeц library CL */

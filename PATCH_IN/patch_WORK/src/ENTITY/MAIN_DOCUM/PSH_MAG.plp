@@ -1,0 +1,278 @@
+class MAIN_DOCUM;
+
+@name('[ПСБ] Данные журналов')
+@tag('COPIED')
+library PSH_MAG is
+dp	integer:=null;	--управление debug_pipe
+fmt24 string:='dd/mm/yyyy hh24:mi:ss';
+
+/** /
+-- структура журнала истории изменения реквизитов экземпляров
+type VALUES_HISTORY_ITEM_T is RECORD (
+  ID NUMBER,			-- ID записи журнала
+  TIME DATE_TYPE,		-- время записи
+  OBJ_ID [REFSTRING],	-- ID экземпляра
+  CLASS_ID STRING(16),	-- тип экземпляра
+  AUDSID INTEGER,		-- ID сессии пользователя, создавшей запись
+  USER_ID STRING(70),	-- имя пользователя (в формате <ORA_USER>.<OS_USER>)
+  QUAL STRING(700),		-- квалификатор реквизита
+  BASE_ID STRING(16),	-- базовый тип реквизита
+  VALUE STRING (4000),	-- текстовое значение реквизита
+  REFCLASSID STRING(16),-- тип ссылаемого экземпляра (для реквизитов-ссылок или коллекций)
+  REFNAME STRING(1000),	-- имя (умолчательное значение) ссылаемого экземпляра для реквизитов-ссылок,
+						-- или действие (ADD - добавление элемента, DEL - удаление элемента) для реквизитов-коллекций,
+  OBJ_COLL [REFSTRING],	-- ID ссылаемого экземпляра (элемента коллекции) для реквизитов-коллекций,
+  PRIOR_ITEM	INTEGER,-- предыдущая запись (для одинаковых квалификаторов)
+  NEXT_ITEM		INTEGER -- следующая запись (для одинаковых квалификаторов)
+);
+/**/
+
+public Function GetStateMainDocum(InCode string(16)) return string(30) is 
+Ex string(30);
+begin
+	--select t.class_id from ibs.states t where t.class_id=P_HISTORY(P_HISTORY.LAST+n).VALUE in StateStr;
+	if    InCode is null			then return Ex;
+	elsif InCode='PROV'		   		then Ex:='Проведен';
+	elsif InCode='FORM'		   		then Ex:='Не обработан';
+	elsif InCode='TO_RKO'	   		then Ex:='В РКО';
+	elsif InCode='TO_MBR'	   		then Ex:='В РЦ';
+	elsif InCode='DELETED'	   		then Ex:='Ликвидирован';
+	elsif InCode='PODTV'	   		then Ex:='На подтверждение';
+	elsif InCode='PRO'		   		then Ex:='Проконтролировать';
+	elsif InCode='INPUT_BY_OPER'   	then Ex:='Введен операционистом';
+	elsif InCode='TO_KART'	   		then Ex:='В картотеке';
+	elsif InCode='TO_RKO_CUR'	   	then Ex:='На валютный контроль';
+	elsif InCode='VOZV'		   		then Ex:='На возврат';
+	elsif InCode='TO_KASSA'	   		then Ex:='В кассу';
+	elsif InCode='PAY'		   		then Ex:='Оплачен';
+	elsif InCode='ON_DISTR'	   		then Ex:='На распределении';
+	elsif InCode='WAIT_PROV'	   	then Ex:='Ожидает проводки';
+	elsif InCode='TAKE_BY_KASSIR'  	then Ex:='Принят кассиром';
+	elsif InCode='TO_KRED'	   		then Ex:='К бухгалтеру по кредитам';
+	elsif InCode='TO_KRED_INSP'	   	then Ex:='К кредитному инспектору';
+	elsif InCode='WAIT_DVALUT'	   	then Ex:='Ожидает валютирования';
+	elsif InCode='ISNULL'	   		then Ex:='Аннулирован';
+	elsif InCode='TO_OCB'	   		then Ex:='В ОЦБ';
+	elsif InCode='TO_RKO_CUR_SPEC' 	then Ex:='На валютный спец.контроль';
+	elsif InCode='TO_RETURN'	   	then Ex:='Возвратить клиенту';
+	elsif InCode='REGISTER'	   		then Ex:='Реестр инкассо';
+	elsif InCode='TO_DEP'	   		then Ex:='К бухгалтеру по депозитам';
+	elsif InCode='TO_HOZ_DOG'	   	then Ex:='К бухгалтеру по хоз. договорам';
+	else							     Ex:=InCode;
+	end if;
+	return Ex;
+end;
+
+public Function Time_Zone(dt  [DATE_TIME], P_OBJ_ID reference, TimeZone integer default 0) return [DATE_TIME] is 
+begin
+	if TimeZone=1 and dt is not null then
+		var Filial ref [BRANCH];
+		if    P_OBJ_ID%class='DOCUM_RC' then
+			var DocRc ref [DOCUM_RC]:=P_OBJ_ID;
+			Filial:=DocRc.[FILIAL];
+		elsif P_OBJ_ID%parentclass='DOCUMENT' then
+			var Doc ref [DOCUMENT]:=P_OBJ_ID;
+			Filial:=Doc.[FILIAL];
+		elsif P_OBJ_ID%parentclass='PRODUCT'
+		then
+			var Prd ref [PRODUCT]:=P_OBJ_ID;
+			Filial:=Prd.[FILIAL];
+		end if;
+		if nvl(Filial.[DIFFERENCE],0)<>0 then
+			var hh24 integer;
+			var mi string(2);
+			var ss string(2);
+			hh24:=to_number(to_char(dt,'hh24'),'99');
+			mi	:=to_char(dt,'mi');
+			ss	:=to_char(dt,'ss');
+			hh24:=hh24+Filial.[DIFFERENCE];
+			if 0<=hh24 and hh24<24 then
+				return to_date(to_char(dt,'dd/mm/yyyy')||' '||Lpad(hh24,2,'0')||':'||mi||':'||ss,fmt24);
+			elsif 24<=hh24 then
+				hh24:=hh24-24;
+				return to_date(to_char(trunc(dt+1),'dd/mm/yyyy')||' '||Lpad(hh24,2,'0')||':'||mi||':'||ss,fmt24);
+			elsif hh24<0 then
+				hh24:=24+hh24;
+				return to_date(to_char(trunc(dt-1),'dd/mm/yyyy')||' '||Lpad(hh24,2,'0')||':'||mi||':'||ss,fmt24);
+			end if;
+		end if;
+	end if;
+	return dt;
+end;
+public Function GetDateDocMag(P_OBJ_ID reference, TimeZone integer default 0) return [DATE_TIME] is 
+P_HISTORY ::[SYS_DIARYS].[HLIB].VALUES_HISTORY_T;
+dt  [DATE_TIME];
+begin
+	::[SYS_DIARYS].[HLIB].GET_STATE_HISTORY(P_OBJ_ID, P_HISTORY);
+	dt:=Time_Zone(P_HISTORY(P_HISTORY.FIRST).TIME,P_OBJ_ID,TimeZone);
+	return dt;
+end;
+
+public Function GetState(P_OBJ_ID reference, n integer default 0) return string(160) is 
+P_HISTORY ::[SYS_DIARYS].[HLIB].VALUES_HISTORY_T;
+ExStr string(160);
+StateStr string(16);
+begin
+	::[SYS_DIARYS].[HLIB].GET_STATE_HISTORY(P_OBJ_ID, P_HISTORY);
+	
+	begin
+	ExStr:=GetStateMainDocum(P_HISTORY(P_HISTORY.LAST+n).VALUE)||' '||
+		   P_HISTORY(P_HISTORY.LAST+n).USER_ID||' '||
+		   to_char(P_HISTORY(P_HISTORY.LAST+n).TIME,fmt24);
+	exception When OTHERS Then null;
+	end;
+	return ExStr;
+end;
+
+-- FirstSeek=1 - первое появление статуса InCode
+-- FirstSeek=2 - кто перевел из статуса InCode
+-- Function GetLastState(P_OBJ_ID reference, InCode string(16), TypeInfo integer default 0,
+--			FirstSeek integer default 0, TimeZone integer default 0) return string(160);
+public Function GetLastState(P_OBJ_ID reference, InCode string(16), TypeInfo integer default 0, FirstSeek integer default 0, TimeZone integer default 0) return varchar2 is  --string(160) is Башкиров В.Г. 13.09.2012 --string(160)  Башкиров В.Г. 13.09.2012
+P_HISTORY ::[SYS_DIARYS].[HLIB].VALUES_HISTORY_T;
+ExStr 	  string(160);
+ExStrNext string(160);
+StateStr string(16);
+FirstRec integer;
+LastRec	integer;
+md [MAIN_DOCUM_REF];
+idx		integer;
+begin
+	md:=P_OBJ_ID;
+	::[SYS_DIARYS].[HLIB].GET_STATE_HISTORY(P_OBJ_ID, P_HISTORY);
+	begin
+		FirstRec:=P_HISTORY.first;
+		LastRec:=P_HISTORY.last;
+		debug_pipe('KUP_MAG.GetLastState -- FirstRec='||FirstRec||' LastRec='||LastRec||' InCode='||InCode,dp);
+		/** /
+		for i in LastRec..FirstRec where P_HISTORY(i).VALUE=InCode
+		loop
+			if    TypeInfo=1 then Return GetStateMainDocum(P_HISTORY(i).VALUE);
+			elsif TypeInfo=2 then Return NameUser(P_HISTORY(i).USER_ID);
+			elsif TypeInfo=3 then Return to_char(P_HISTORY(i).TIME,fmt24);
+			else				  Return RPad(GetStateMainDocum(P_HISTORY(i).VALUE),30)||' '||
+						   P_HISTORY(i).USER_ID||' '||
+						   to_char(P_HISTORY(i).TIME,fmt24);
+			end if;
+		end loop;
+		
+	 	idx := this.first;
+	 	
+	 	while idx is not null loop
+			char2type(this(idx).[INST_CLASS]%id, 'S');
+			char2type(this(idx).[INST_SELECT].[SHORT_NAME], 'S');
+			char2type(this(idx).[INST_UPDATE].[SHORT_NAME], 'S');
+			char2type(this(idx).[INST_VIEW], 'S');
+			
+			idx := this.next(idx);
+		end loop;
+		/**/
+		idx := P_HISTORY.first;
+		while idx is not null loop
+			--if P_HISTORY(idx).VALUE='FORM' then ExStr:=null; end if;
+			if FirstSeek=2 and ExStr is not null and ExStrNext is null and P_HISTORY(idx).VALUE<>InCode then
+				if    TypeInfo=6 then ExStr:=P_HISTORY(idx).USER_ID; --Башкиров В.Г. 13.09.2012
+				elsif TypeInfo=1 then ExStrNext:=GetStateMainDocum(P_HISTORY(idx).VALUE);
+				elsif TypeInfo=2 then ExStrNext:=NameUser(P_HISTORY(idx).USER_ID);
+				elsif TypeInfo=3 then ExStrNext:=to_char(P_HISTORY(idx).TIME,fmt24);
+									  if TimeZone=1 then
+									  	ExStrNext:=to_char(Time_Zone(to_date(ExStr,fmt24),P_OBJ_ID,TimeZone),fmt24);
+									  end if;
+				elsif TypeInfo=4 then ExStrNext:=to_char(P_HISTORY(idx).TIME,'dd/mm/yyyy');			
+				elsif TypeInfo=5 then ExStrNext:=NameUser(P_HISTORY(idx).USER_ID,1);
+				else				  ExStrNext:=RPad(GetStateMainDocum(P_HISTORY(idx).VALUE),30)||' '||
+							   P_HISTORY(idx).USER_ID||' '||
+							   to_char(Time_Zone(P_HISTORY(idx).TIME,P_OBJ_ID,TimeZone),fmt24);
+				end if;
+			end if;	
+			if P_HISTORY(idx).VALUE=InCode then
+				ExStrNext:=null;
+				if    TypeInfo=6 then ExStr:=P_HISTORY(idx).USER_ID; --Башкиров В.Г. 13.09.2012
+				elsif TypeInfo=1 then ExStr:=GetStateMainDocum(P_HISTORY(idx).VALUE);
+				elsif TypeInfo=2 then ExStr:=NameUser(P_HISTORY(idx).USER_ID);
+				elsif TypeInfo=3 then ExStr:=to_char(P_HISTORY(idx).TIME,fmt24);
+									  if TimeZone=1 then
+									  	ExStr:=to_char(Time_Zone(to_date(ExStr,fmt24),P_OBJ_ID,TimeZone),fmt24);
+									  end if;
+				elsif TypeInfo=4 then ExStr:=to_char(P_HISTORY(idx).TIME,'dd/mm/yyyy');			
+				elsif TypeInfo=5 then ExStr:=NameUser(P_HISTORY(idx).USER_ID,1);
+				else				  ExStr:=RPad(GetStateMainDocum(P_HISTORY(idx).VALUE),30)||' '||
+							   P_HISTORY(idx).USER_ID||' '||
+							   to_char(Time_Zone(P_HISTORY(idx).TIME,P_OBJ_ID,TimeZone),fmt24);
+				end if;
+				if FirstSeek=1 then exit; end if;	
+			end if;
+			debug_pipe('KUP_MAG.GetLastState -- №'||md.[DOCUMENT_NUM]||' '||md.[SUM]||' InCode='||InCode||' FirstRec='||FirstRec||' LastRec='||LastRec||' P_HISTORY('||idx||').VALUE='||RPad(P_HISTORY(idx).VALUE,15)||' '||to_char(P_HISTORY(idx).TIME,fmt24)||' '||Rpad(NameUser(P_HISTORY(idx).USER_ID,2),14)||' ExStr='||ExStr||' ExStrNext='||ExStrNext,dp);
+			idx := P_HISTORY.next(idx);
+		end loop;
+	exception When OTHERS Then null;
+		debug_pipe('KUP_MAG.GetLastState -- exception',dp);
+	end;
+	debug_pipe('KUP_MAG.GetLastState -- FirstSeek='||FirstSeek||' TypeInfo='||TypeInfo||' ExStr='||ExStr||' ExStrNext='||ExStrNext,dp);
+	if FirstSeek=2 then
+		debug_pipe('KUP_MAG.GetLastState -- FirstSeek='||FirstSeek||' TypeInfo='||TypeInfo||' ExStrNext='||ExStrNext,dp);
+		return ExStrNext;
+	end if;
+	debug_pipe('KUP_MAG.GetLastState -- FirstSeek='||FirstSeek||' ExStr='||ExStr,dp);
+	return ExStr;
+end;
+
+--Не обработан IBS.bssdbo 24/03/2009 09:29:20
+public Function NameUser(InCode string(32), TypeInfo integer default 0) return varchar2(100) is 
+vName [NAME];
+i	integer;
+begin
+	i:=InStr(InCode,'.');
+	if i>0 then	vName:=Substr(InCode,1,i-1);
+		for	u in ::[USER] where u.[USERNAME]=vName order by u%ID desc loop
+			if TypeInfo=0 then return u.[NAME];
+			else			   return u%id;
+			end if;
+		end loop;
+	end if;
+	return InCode;
+end;
+
+
+public Function GetTimeDocMag(P_OBJ_ID reference, TimeZone integer default 0) return string is 
+P_HISTORY ::[SYS_DIARYS].[HLIB].VALUES_HISTORY_T;
+dt [DATE_TIME];
+begin
+	::[SYS_DIARYS].[HLIB].GET_STATE_HISTORY(P_OBJ_ID, P_HISTORY);
+	--return to_char(P_HISTORY(P_HISTORY.FIRST).TIME,fmt24);
+	dt:=P_HISTORY(P_HISTORY.FIRST).TIME;
+	if TimeZone=1 then
+		var Filial ref [BRANCH];
+		if    P_OBJ_ID%class='DOCUM_RC' then
+			var DocRc ref [DOCUM_RC]:=P_OBJ_ID;
+			Filial:=DocRc.[FILIAL];
+		elsif P_OBJ_ID%parentclass='DOCUMENT' then
+			var Doc ref [DOCUMENT]:=P_OBJ_ID;
+			Filial:=Doc.[FILIAL];
+		elsif P_OBJ_ID%parentclass='PRODUCT'
+		then
+			var Prd ref [PRODUCT]:=P_OBJ_ID;
+			Filial:=Prd.[FILIAL];
+		end if;
+		if nvl(Filial.[DIFFERENCE],0)<>0 then
+			var hh24 integer;
+			var mi string(2);
+			var ss string(2);
+			hh24:=to_number(to_char(dt,'hh24'),'99');
+			mi	:=to_char(dt,'mi');
+			ss	:=to_char(dt,'ss');
+			hh24:=hh24+Filial.[DIFFERENCE];
+			if 0<=hh24 and hh24<24 then
+				return to_date(to_char(dt,'dd/mm/yyyy')||' '||Lpad(hh24,2,'0')||':'||mi||':'||ss,fmt24);
+			elsif 24<=hh24 then
+				hh24:=hh24-24;
+				return to_date(to_char(trunc(dt+1),'dd/mm/yyyy')||' '||Lpad(hh24,2,'0')||':'||mi||':'||ss,fmt24);
+			elsif hh24<0 then
+				hh24:=24+hh24;
+				return to_date(to_char(trunc(dt-1),'dd/mm/yyyy')||' '||Lpad(hh24,2,'0')||':'||mi||':'||ss,fmt24);
+			end if;
+		end if;
+	end if;
+	return dt;
+end;
+end;

@@ -1,0 +1,1759 @@
+class REPS_DATA;
+
+@import_plsql(true)
+@name('[ПСБ] Библиотека функций для экспорта в XML')
+@tag('COPIED')
+library PSH_LIB_DELTA is
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+dp number:=0; --управление &debug
+dp1 number:=0; --управление &debug
+fmt string(10):='dd/mm/yyyy';
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+------
+pragma include(::[RUNTIME].[LIB_MACRO]);
+pragma include(::[REPS_DATA].[LIB_VIEW]);
+pragma include(::[REPS_DATA].[LIB_TYPE]);
+pragma include(::[REPS_DEBUG].[LIB]);
+
+pragma macro(lf,		'::[REPS_DATA].[LIB_FILE]');
+pragma macro(lib_cl,	'::[REPS_DATA].[LIB_CLIENT]');
+pragma macro(lib_cf,	'::[REPS_COPYFILES].[SLIB]');
+pragma macro(str,		'::[RUNTIME].[STR]');
+
+/**	Структура параметров отчёта
+ *
+ *	@field	rParam			- Ссылка на реализацию
+ *	@field	rBoss			- Ссылка на Руководителя
+ *	@field	rExecutor		- Ссылка на Исполнителя
+ *	@field	vExecutorPhone	- Телефон исполнителя
+ *	@field	rAccountant		- Ссылка на Главного бухгалтера
+ *	@field	vOKUD			- ОКУД формы
+ *	@field	vPeriod			- (опц.) Периодичность сбора отчетности.
+ *							Возможные значения:	Y	- годовая,		HY	- полугодовая,
+ *												Q	- квартальная,	M	- месячная (по умолчанию),
+ *												TD	- декадная,		W	- еженедельная,
+ *												FD	- пятидневная,	D	- суточная,
+ *												NR	- нерегулярная,	OD	- по требованию,
+ *												EMPTY	- заполнять атрибут "Периодичность" не требуется.
+ *	@field	vRepKind		- Вид отчёта
+ *	@field	vLocalFile		- Путь и имя файла экспорта на локальной станции
+ *	@field	vXMLFile		- Имя файла XML экспорта на локальной станции
+ *	@field	rReport			- Ссылка на отчёт
+ *	@field	rBranch			- Ссылка на филиал
+ *	@field	rBank			- Ссылка на банк
+ *	@field	dDate1			- Дата начала отчётного периода
+ *	@field	dDate2			- Дата окончания отчётного периода
+ */
+public type rec_params is record
+	(
+		rParam			ref	[REPS_PARAMS]
+	,	rBoss			ref [USER]
+	,	rExecutor		ref [USER]
+	,	vExecutorPhone	varchar2(32767)
+	,	vExecutorEmail	varchar2(32767)
+	,	rAccountant		ref [USER]
+	,	vOKUD			varchar2(128)
+	,	vPeriod			varchar2(128)			:= 'M'
+	,	vRepKind		varchar2(32767)
+	,	vLocalFile		varchar2(32767)
+	,	vXmlFile		varchar2(32767)
+	,	rReport			ref [REPS]
+	,	rBranch			ref [BRANCH]
+	,	rBank			ref [CL_BANK]
+	,	dDate1			[DATE]
+	,	dDate2			[DATE]
+	);
+
+/** Структура тега
+ *
+ * @field	vTag			- Название тега
+ * @field	mAttrs			- Массив атрибутов (где индекс - название атрибута)
+ * @field	vValue			- Значение тега
+ * @field	vMsgTitle		- Подробное название элемента, используемое для вывода в лог
+ * @field	iClosedIndex	- Индекс последней записи, входящей в подструктуру внутри тега
+ */
+type rec_tag is record
+	(
+		vTag			varchar2(32767)
+	,	mAttrs			&map_str
+	,	vValue			varchar2(32767)
+	,	vMsgTitle		varchar2(32767)
+	,	iClosedIndex	integer
+	);
+
+type arr_tags is table of rec_tag index by binary_integer;
+
+/**
+ *	Структура, содержащая наименования экспортного файла
+ *
+ *	@field	vXmlFileName			- Наименование xml-файла без изменений
+ *	@field	vOutputFileName			- Наименование файла для сохранения
+ */
+public type rec_OutputFileNames is record
+		(
+			vXmlFileName		varchar2(32767)
+		,	vOutputFileName		varchar2(32767)
+		);
+
+
+-- Параметры экспорта
+lrecParam		rec_params;
+-- Массив тегов итогового файла XML
+laXML		arr_tags;
+
+
+/**
+ * Вывод сообщения об ошибке
+ *
+ * @param P_MSG		-	Сообщение об ошибке
+ * @param P_RAISE	-	Признак вывода сообщения с выбросом исключения (иначе вывод в лог)
+ */
+procedure ShowError
+		(
+			P_MSG		varchar2(32767)
+		,	P_RAISE		boolean			default false
+		)
+is
+begin
+	if P_RAISE then
+		pragma error	(P_MSG);
+	else
+		&debug_output	(P_MSG, 0);
+	end if;
+end;
+
+---------------------------
+/**
+ *	Функция формирования наименования файла для экспорта с расширением.
+ *	@param	P_APP_CODE	--	код приложения
+ *	@param	P_PREFIX	--	маска
+ *	@return	Возвращает имя файла с расширением
+ */
+public function SetFileName
+		(
+			P_APP_CODE		varchar2(32767)
+		,	P_PREFIX		varchar2(32767)
+		)
+	return varchar2(32767)
+is
+	vRet	varchar2(32767):= null;
+begin
+	if instr(P_APP_CODE, 'KLIKO') > 0 then
+		vRet	:= P_PREFIX||'.txt';
+
+	elsif instr(P_APP_CODE, 'PSD') > 0 then
+		vRet	:= P_PREFIX||'.ptk';
+
+	elsif instr(P_APP_CODE, 'DBF') > 0 then
+		vRet	:= P_PREFIX||'.dbf';
+
+	elsif instr(P_APP_CODE, 'TELEX') > 0 then
+		vRet	:= P_PREFIX||'.txt';
+	elsif instr(P_APP_CODE, 'PSB') > 0 then --Башкиров В.Г. 20.06.2023 Для Дельты
+		vRet	:= P_PREFIX||'.zip';
+	elsif instr(P_APP_CODE, 'XML') > 0 then
+		vRet	:= P_PREFIX||'.zip';
+	else
+		vRet	:= '';
+	end if;
+
+	&debug(TB$||'.SetFileName <- "'||vRet||'"   P_APP_CODE='||P_APP_CODE||' P_PREFIX='||P_PREFIX,dp)
+	return vRet;
+end;
+---------------------------
+/**
+ * Добавление нового тега в массив тегов
+ *
+ * @param	P_TAG		- Название тега
+ * @param	P_VALUE		- (опц.) Значение тега
+ * @param	P_MSG_TITLE	- (опц.) Полное название тега, используемое для вывода в лог
+ */
+public procedure OpenTag
+		(
+			P_TAG			varchar2(32767)
+		,	P_VALUE			varchar2(32767)		default null
+		,	P_MSG_TITLE		varchar2(32767)		default null
+		)
+is
+	recTag		rec_tag;
+begin
+	recTag.vTag				:= P_TAG;
+
+	if &is_not_empty(P_VALUE) then
+		recTag.vValue		:= P_VALUE;
+	end if;
+
+	if &is_not_empty(P_MSG_TITLE) then
+		recTag.vMsgTitle	:= P_MSG_TITLE;
+	end if;
+
+	laXML(laXML.count + 1)	:= recTag;
+end;
+
+
+/**
+ * Закрытие тега
+ *
+ * @param	P_TAG	- Название тега
+ */
+public procedure CloseTag
+		(
+			P_TAG		varchar2(32767)
+		)
+is
+	bRes	boolean		:= false;
+begin
+	-- Цикл по всем тегам, начиная с конца.
+	-- Тег закрывается в случае, если
+	-- совпадает название И не был закрыт до этого (iClosedIndex пустой).
+	for i in reverse 1 .. laXML.count
+	loop
+		if		laXML(i).vTag = P_TAG
+			and	laXML(i).iClosedIndex is null
+		then
+			laXML(i).iClosedIndex	:= laXML.count;
+			bRes					:= true;
+
+			exit;
+		end if;
+	end loop;
+
+	if not bRes then
+		ShowError('Ошибка формирования файла. Тег ' || P_TAG || ' не закрыт.');
+	end if;
+end;
+
+
+/**
+ * Экранирование символов
+ */
+public function EscapeSym
+		(
+			P_STR	varchar2(32767)
+		)
+	return varchar2(32767)
+is
+	vRes	varchar2(32767);
+begin
+	vRes	:= replace (P_STR,	'&',	'&amp;'		);
+	vRes	:= replace (vRes,	'"',	'&quot;'	);
+	vRes	:= replace (vRes,	'''',	'&apos;'	);
+	vRes	:= replace (vRes,	'<',	'&lt;'		);
+	vRes	:= replace (vRes,	'>',	'&gt;'		);
+	vRes	:= replace (vRes,	'}',	'}}'		);
+	vRes	:= replace (vRes,	'{',	'{{'		);
+
+	return vRes;
+end;
+
+
+/**
+ * Добавление атрибута в массив атрибутов последнего добавленного тега
+ * + проверка на корректность данных (длина, шаблон)
+ *
+ * @param	P_ATTR				- Наименование атрибута
+ * @param	P_VALUE				- Значение атрибута
+ * @param	P_IS_REQUIRED		- (опц.) Признак, что атрибут обязательный, по умолчанию false
+ * @param	P_LEN_MAX			- (опц.) Максимальная длина значения атрибута
+ * @param	P_LEN_MIN			- (опц.) Минимальная длина значения атрибута
+ * @param	P_PATTERN			- (опц.) Шаблон - регулярное выражение, по которому проверяется корректность значения атрибута
+ * @param	P_RAISE				- (опц.) Признак, что формирование файла прервётся в случае, если атрибут не пройдёт проверки
+ */
+public procedure SetAttribute
+		(
+			P_ATTR				varchar2(32767)
+		,	P_VALUE				varchar2(32767)
+		,	P_IS_REQUIRED		boolean				default false
+		,	P_LEN_MAX			integer				default null
+		,	P_LEN_MIN			integer				default null
+		,	P_PATTERN			varchar2(32767)		default null
+		,	P_RAISE				boolean				default false
+		)
+is
+	bIsError	boolean := false;		-- Признак, найдены ли ошибки при проверке корректности значения атрибута
+	vError		varchar2(32767);		-- Текст ошибки
+	vTag		varchar2(32767);		-- Название тега для вывода сообщения
+	recTag		rec_tag;				-- Текущий тег, в который добавляется атрибут
+begin
+	-- Определение записи текущего тега
+	recTag	:=	laXML(laXML.count);
+
+	-- Определение названия тега для вывода сообщения
+	-- (в случае, если не передано входным параметром, то берётся название тега из записи)
+	vTag	:=	coalesce(&set_null(recTag.vMsgTitle),	recTag.vTag);
+
+	if P_ATTR in ('СуммаРасшифр') and instr(P_VALUE,'.')=0 then
+		var vPSB_F135_00 boolean;
+		vPSB_F135_00 := coalesce(::[FP_TUNE].[LIB].get_bool_value('PSB_F135_00', null, false), false);
+		if vPSB_F135_00 then
+			P_VALUE:=P_VALUE||'.00';
+		end if;
+	elsif P_ATTR is null and P_VALUE is not null then	--<Пояснение>0000</Пояснение>
+		P_ATTR:=substr(nvl(P_ATTR,'#'||P_VALUE),1,20);
+	end if;
+	&debug(TB$||'.SetAttribute -- Тэг:'||vTag
+		||' Атрибут:'||iif(length(P_ATTR)>20,P_ATTR,rpad(P_ATTR,20))
+		||' '||iif(P_IS_REQUIRED,'  Обязательный','Необязательный')
+		||' Значение('||lpad(length(P_VALUE),3)||'):"'||P_VALUE||'"'
+		||' '||iif(P_LEN_MIN is null,'','MinДлина:'||P_LEN_MIN)
+		||' '||iif(P_LEN_MAX is null,'','MaxДлина:'||P_LEN_MAX)
+		||' '||iif(P_PATTERN is null,'','Шаблон:'||P_PATTERN)
+		||' '||iif(P_RAISE,'Прервать,если данные не корректны','')
+		,dp1)
+	/** /
+	if vTag in ('Исполнитель') and P_ATTR in ('ФИО') then null;
+		&debug(TB$||'.SetAttribute -- Стек:'||LF$||utils.call_stack,dp1)
+	end if;
+	/**/
+	
+	-- Общий заголовок для ошибки
+	vError	:=		case	when P_IS_REQUIRED	then 'Внимание! '	else ''					end
+				||	vTag			|| ': '
+				||	case	when P_IS_REQUIRED	then 'обязательный'	else 'необязательный'	end
+				||	' атрибут "'	|| P_ATTR || '" ';
+
+
+	-- Проверка на корректность данных:
+
+	-- Проверка, открыт ли тег, в который необходимо добавить атрибут
+	if recTag.iClosedIndex is not null then
+		vError	:= vError || 'исключен из экспорта. Тег уже закрыт.';
+		ShowError (vError, false);
+
+		return;
+	end if;
+
+	-- Проверка на наличие значения
+	if &is_empty(P_VALUE) then
+		-- Если атрибут не обязательный, то при отсутствии данных исключается
+		if not P_IS_REQUIRED then
+			vError	:= vError || 'исключен из экспорта. Нет данных.';
+			ShowError (vError, false);
+
+			return;
+		end if;
+
+		vError		:= vError || 'не заполнен. Нет данных.';
+		bIsError	:= true;
+	else
+		-- регулярка обрабатывает числа начинающиеся с точки, например ".75" заменяется на "0.75"
+		P_VALUE := regexp_replace(P_VALUE, '^\.[0-9]+$', '0' || P_VALUE);
+
+		vError		:= vError || 'некорректен. Формат данных не соответствует требуемому.';
+
+		-- Проверка на соответствие максимальной длине
+		if		P_LEN_MAX is not null
+			and	length(P_VALUE) > P_LEN_MAX
+		then
+			vError		:=		vError
+							||	LF$ || TB$
+							||	'- Длина значения у атрибута не должна превышать ['	|| P_LEN_MAX		|| ']. '
+							||	'Длина у значения - ['								|| length(P_VALUE)	|| '].'
+							;
+
+			bIsError	:=	true;
+		end if;
+
+		-- Проверка на соответствие минимальной длине
+		if		P_LEN_MIN is not null
+			and	length(P_VALUE) < P_LEN_MIN
+		then
+			vError		:=		vError
+							||	LF$ || TB$
+							||	'- Длина значения у атрибута не должна быть меньше ['	|| P_LEN_MIN		|| ']. '
+							||	'Длина у значения - ['									|| length(P_VALUE)	|| '].'
+							;
+
+			bIsError	:=	true;
+		end if;
+
+		-- Проверка на соответствие шаблону
+		if		P_PATTERN is not null
+			and	regexp_count(P_VALUE, P_PATTERN) = 0
+		then
+			vError		:=		vError
+							||	LF$ || TB$
+							||	'- Значение атрибута не соответствует шаблону ['	|| P_PATTERN	|| ']. '
+							||	'Значение атрибута - ['								|| P_VALUE		|| '].'
+							;
+
+			bIsError	:=	true;
+		end if;
+	end if;
+
+	-- Если данные не корректны
+	if bIsError then
+		ShowError (vError, P_RAISE);
+	end if;
+
+	-- Добавление атрибута в массив. В значении атрибута экранируются символы
+	recTag.mAttrs(P_ATTR)	:= EscapeSym(P_VALUE);
+
+	-- Обновление тега
+	laXML(laXML.count)		:= recTag;
+end;
+
+
+/**
+ * Формирование уникального GUID в формате
+ * "6F9619FF-8B86-D011-B42D-00CF4FC994FF"
+ * [\da-fA-F]{8}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{12}]
+ */
+public function GetGUID
+	return varchar2
+is
+	vGuid	varchar2(32) :=sys_guid();
+begin
+	vGuid := lower(vGuid);
+
+	return		substr(vGuid,	1,	8)	|| '-'
+			||	substr(vGuid,	9,	4)	|| '-'
+			||	substr(vGuid,	13,	4)	|| '-'
+			||	substr(vGuid,	17,	4)	|| '-'
+			||	substr(vGuid,	21)
+			;
+end;
+
+
+/**
+ * Получение полного названия периодичности сбора отчетности по коду.
+ * По умолчанию - месячная.
+ *
+ * @param	P_CODE		-	Код периодичности. Возможные значения:	Y	- годовая,		HY	- полугодовая,
+ *																	Q	- квартальная,	M	- месячная (по умолчанию),
+ *																	TD	- декадная,		W	- еженедельная,
+ *																	FD	- пятидневная,	D	- суточная,
+ *																	NR	- нерегулярная,	OD	- по требованию,
+ *																	EMPTY	- атрибут "Периодичность" заполнять не требуется
+ * @return				-	Полное название периодичности
+ */
+function GetPeriodByCode
+		(
+			P_CODE		varchar2(128)
+		)
+	return varchar2(128)
+is
+	vPeriodicity	varchar2(128);	-- Периодичность сбора отчетности
+begin
+	vPeriodicity := 'месячная';
+
+	case P_CODE of
+		:'Y' :
+			vPeriodicity := 'годовая';
+		:'HY':
+			vPeriodicity := 'полугодовая';
+		:'Q' :
+			vPeriodicity := 'квартальная';
+		:'M' :
+			vPeriodicity := 'месячная';
+		:'TD':
+			vPeriodicity := 'декадная';
+		:'W' :
+			vPeriodicity := 'еженедельная';
+		:'FD':
+			vPeriodicity := 'пятидневная';
+		:'D' :
+			vPeriodicity := 'суточная';
+		:'NR':
+			vPeriodicity := 'нерегулярная';
+		:'OD':
+			vPeriodicity := 'по требованию';
+		:'EMPTY':
+			vPeriodicity := null;
+	end;
+
+	return	vPeriodicity;
+end;
+
+
+public function GetRepOKUD
+		(
+			P_REP	ref	[REPS]
+		)
+	return	varchar2(128)
+is
+	vRepCode	varchar2(128);	-- Код отчёта
+	vRepOKUD	varchar2(128);	-- ОКУД формы
+begin
+	vRepCode	:=	P_REP.[CODE];
+	vRepOKUD		:=	'0409' || replace(replace(vRepCode, 'F_', ''), '_APP', '');
+
+	&debug(TB$||'.GetRepOKUD -> vRepCode='||vRepCode||' ОП Отчет:'||P_REP.[NAME],dp1)
+	
+	if instr(utils.call_stack,'F_118')>0 then
+		&debug(TB$||'.GetRepOKUD -- Стек:'||LF$||utils.call_stack,dp1)
+		vRepOKUD := '0409118';
+	else
+		case vRepCode of
+			:'FOR_753':
+				vRepOKUD := 'SOBS';
+			:'F_701':
+				vRepOKUD := '701';
+			:'NORM':
+				vRepOKUD := lrecParam.vOKUD;
+				if vRepOKUD is null and instr(P_REP.[NAME],'0409135')>0 then
+					vRepOKUD:='0409135';
+				end if;
+			:'F_401_APP':
+				vRepOKUD := '0409401';
+			:'F_909_V2':
+				vRepOKUD := '0409909';
+			:'I_110':
+				if lrecParam.vOKUD = '0409118' then
+					vRepOKUD := lrecParam.vOKUD;
+				end if;
+			:'F_250_APP':
+				vRepOKUD := replace(vRepOKUD,'_APP');
+		end;
+	end if;
+	
+	&debug(TB$||'.GetRepOKUD <- vRepOKUD='||vRepOKUD,dp1)
+	return vRepOKUD;
+end;
+
+
+/**
+ * Запись в файл "шапки" отчета
+ * Ограничения реализации:
+ *	Данные для атрибутов "КодТУ", "Факс", "ЭлПочта" в ИБСО не ведутся,
+ *	поэтому в процедуре не создаются.
+ *
+ * @param P_XMLNS				-	Пространство имен (например, urn:cbr-ru:rep0409634:v0.2.4.5)
+ * @param P_DATE_EXP			-	(опц.) Дата формирования экспортного файла
+ * @param P_OKATO_LEN			-	(опц.) Длина ОКАТО.
+ * @param P_VID_REP				-	(опц.) Вид отчета (менее приоритетен, чем параметр из реализации)
+ * @param P_OTCHET_DATE_TYPE	-	(опц.) Дельта от отчётной даты
+ * @param P_RUK_TYPE			-	(опц.) Тег руководителя
+ * @param P_COMPILIER_ATTR		-	(опц.) Атрибуты тега "Составитель" через #
+ */
+public procedure AddHeader
+		(
+			P_XMLNS				varchar2(32767)
+		,	P_DATE_EXP			[DATE_TIME]			default systimestamp
+		,	P_OKATO_LEN			integer				default null
+		,	P_VID_REP			varchar2(32767)		default 'КО'
+		,	P_OTCHET_DATE_TYPE	integer				default 0
+		,	P_RUK_TYPE			varchar2(32767)		default 'Руководитель'
+		,	P_COMPILIER_ATTR	varchar2(32767)		default '#ВидОрг#КодОрг#БИК#ОКАТО#ОКПО#ОГРН#СокрНаимен#Адрес#ДатаПодписания#'
+		)
+is
+	recBrInfo		&lib_cl.tp_recBranchInfo;	-- Информация о филиале
+	vPeriod			varchar2(128);				-- Периодичность сбора отчётности
+	vRepOKUD		varchar2(128);				-- ОКУД формы
+begin
+	-- Код формы
+	vRepOKUD	:= GetRepOKUD(lrecParam.rReport);
+	-- Периодичность сбора отчётности
+	vPeriod		:= GetPeriodByCode(lrecParam.vPeriod);
+	&debug(TB$||'.AddHeader -- Код формы:'||vRepOKUD||' Периодичность сбора отчётности:'||vPeriod||' ВидОтчета:'||P_VID_REP,dp)
+	&debug(TB$||'.AddHeader -- Стек:'||LF$||utils.call_stack,dp1)
+
+	-- Получение информации о филиале
+	recBrInfo	:= &lib_cl.GetBranchInfo(
+											P_BRANCH	==	lrecParam.rBranch
+										,	P_DATE		==	lrecParam.dDate2
+										,	P_BANK		==	lrecParam.rBank
+										,	P_OKATO_LEN	==	P_OKATO_LEN
+										,	P_ADDR_TYPE	==	'FACT'
+										,	P_REP_MODE	==	false
+										);
+
+	--127006, г.Москва, вн.тер.г. муниципальный округ Тверской, ул.Малая Дмитровка, д.14, стр.4.
+	var tmpBank ref [CL_BANK_N];
+	tmpBank:=coalesce(lrecParam.rBranch.[BANK],lrecParam.rParam.[BANK],lrecParam.rParam.[BRANCH].[BANK]);
+	&debug(TB$||'.AddHeader -- (1)recBrInfo.v_PRN_ADDR='||recBrInfo.v_PRN_ADDR||' tmpBank%id='||tmpBank%id,dp1)
+	for	(select a(a.[IMP_STR] :C_IMP_STR) in tmpBank.[ADDRESSES]
+	where a.[TYPE]=::[ADDRESS_TYPE]([KOD]='CORP')
+		and a.[IMP_STR] is not null
+		and a.[FIX_PRINT]
+		)
+	loop
+		recBrInfo.v_PRN_ADDR:=a.C_IMP_STR;
+		&debug(TB$||'.AddHeader -- (2)recBrInfo.v_PRN_ADDR='||recBrInfo.v_PRN_ADDR,dp1)
+		exit;
+	end loop;
+	&debug(TB$||'.AddHeader -- (3)recBrInfo.v_PRN_ADDR='||recBrInfo.v_PRN_ADDR,dp1)
+
+	-- Описательная часть отчета
+	&debug(TB$||'.AddHeader -- vRepOKUD='||vRepOKUD,dp1)
+	OpenTag('Ф' || vRepOKUD);
+
+	-- Пространство имен
+	SetAttribute(
+					P_ATTR			== 'xmlns'
+				,	P_VALUE			== P_XMLNS
+				,	P_IS_REQUIRED	== true
+				);
+	-- Уникальный идентификатор ОЭС
+	SetAttribute(
+					P_ATTR			== 'УникИдОЭС'
+				,	P_VALUE			== GetGUID
+				,	P_IS_REQUIRED	== true
+				);
+	-- Вид ОЭС
+	SetAttribute(
+					P_ATTR			== 'ВидОЭС'
+				,	P_VALUE			== 'Отчетность КО'
+				,	P_IS_REQUIRED	== true
+				);
+	-- Код формы по ОКУД (если ОКУД не задан, указывается условный код)
+	SetAttribute(
+					P_ATTR			== 'КодФормы'
+				,	P_VALUE			== nvl(lrecParam.vOKUD, vRepOKUD)
+				,	P_IS_REQUIRED	== true
+				);
+	-- Код формы по ОКУД, задается при наличии ОКУД
+	SetAttribute(
+					P_ATTR			== 'ОКУД'
+				,	P_VALUE			== lrecParam.vOKUD
+				);
+	-- Вид отчета
+	SetAttribute(
+					P_ATTR			== 'ВидОтчета'
+				,	P_VALUE			== nvl(lrecParam.vRepKind, P_VID_REP)
+				,	P_IS_REQUIRED	== true
+				);
+	-- Отчетная дата в формате CCYY-MM-DD
+	SetAttribute(
+					P_ATTR			== 'ОтчДата'
+				,	P_VALUE			== to_char	(
+														coalesce(lrecParam.dDate2, lrecParam.dDate1)
+													+	P_OTCHET_DATE_TYPE
+												,	'YYYY-MM-DD'
+												)
+				,	P_IS_REQUIRED	== true
+				);
+	-- Периодичность сбора отчетности
+	SetAttribute(
+					P_ATTR			== 'Периодичность'
+				,	P_VALUE			== vPeriod
+				,	P_IS_REQUIRED	== true
+				);
+	-- Дата и время формирования ОЭС в формате YYYY-MM-DDThh:mm:ss
+	SetAttribute(
+					P_ATTR			== 'ДатаВремяФормирования'
+				,	P_VALUE			== to_char(P_DATE_EXP, 'YYYY-MM-DD') || 'T' || to_char(P_DATE_EXP, 'HH24:MI:SS')
+				,	P_IS_REQUIRED	== true
+				);
+
+
+	-- Сведения о составителе
+	OpenTag('Составитель');
+
+	if &in_str(P_COMPILIER_ATTR, 'ВидОрг', '#') > 0 then
+		-- Вид организации, представившей отчет
+		SetAttribute(
+						P_ATTR			== 'ВидОрг'
+					,	P_VALUE			== 'КО'
+					,	P_IS_REQUIRED	== true
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'КодОрг', '#') > 0 then
+		-- Код организации, представившей отчет
+		-- в формате XXXX (регистрационный номер головного офиса) или XXXX/XXXX (филиала),
+		-- очищается от букв и других символов, которые не по маске
+		SetAttribute(
+						P_ATTR			== 'КодОрг'
+					,	P_VALUE			== regexp_replace(recBrInfo.F_REG_NUM, '[^/0-9]')
+					,	P_IS_REQUIRED	== true
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'БИК', '#') > 0 then
+		-- Банковский идентификационный код КО (филиала)
+		SetAttribute(
+						P_ATTR			== 'БИК'
+					,	P_VALUE			== recBrInfo.F_BIC
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'ОКАТО', '#') > 0 then
+		-- Код территории по ОКАТО
+		SetAttribute(
+						P_ATTR			== 'ОКАТО'
+					,	P_VALUE			== recBrInfo.F_OKATO
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'ОКПО', '#') > 0 then
+		-- Код КО (филиала) по ОКПО
+		SetAttribute(
+						P_ATTR			== 'ОКПО'
+					,	P_VALUE			== recBrInfo.F_OKPO
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'ОГРН', '#') > 0 then
+		-- Основной государственный номер КО (филиала)
+		SetAttribute(
+						P_ATTR			== 'ОГРН'
+					,	P_VALUE			== recBrInfo.F_OGRN
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'СокрНаимен', '#') > 0 then
+		-- Сокращенное наименование КО
+		SetAttribute(
+						P_ATTR			== 'СокрНаимен'
+					,	P_VALUE			== recBrInfo.f_BANK_NAME
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'Адрес', '#') > 0 then
+		-- Фактический адрес КО
+		SetAttribute(
+						P_ATTR			== 'Адрес'
+					,	P_VALUE			== recBrInfo.v_PRN_ADDR
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'ДатаПодписания', '#') > 0 then
+		-- Дата подписания отчета
+		SetAttribute(
+						P_ATTR			== 'ДатаПодписания'
+					,	P_VALUE			== to_char(P_DATE_EXP, 'YYYY-MM-DD')
+					,	P_IS_REQUIRED	== true
+					);
+	end if;
+
+	-- Сведения о руководителе
+	OpenTag(P_RUK_TYPE);
+
+	-- Должность
+	SetAttribute(
+					P_ATTR			== 'Должность'
+				,	P_VALUE			== nvl(lrecParam.rBoss.[CASTA].[VALUE], 'Руководитель')
+				,	P_IS_REQUIRED	== true
+				,	P_LEN_MAX		== 255
+				);
+	-- Фамилия, имя, отчество
+	SetAttribute(
+					P_ATTR			== 'ФИО'
+				,	P_VALUE			== ::[RUNTIME].[STDLIB].fio(lrecParam.rBoss.[NAME], 'Ф И О')
+				,	P_IS_REQUIRED	== true
+				,	P_LEN_MAX		== 255
+				);
+
+	CloseTag(P_RUK_TYPE);
+
+
+	-- Сведения о Главном бухгалтере
+	-- Заполняется в случае, если ссылка на главного бухгалтера передана в процедуру
+	if lrecParam.rAccountant is not null then
+		OpenTag('ГлавБух');
+
+		-- Должность
+		SetAttribute(
+						P_ATTR			== 'Должность'
+					,	P_VALUE			== nvl(lrecParam.rAccountant.[CASTA].[VALUE], 'Главный бухгалтер')
+					,	P_IS_REQUIRED	== true
+					,	P_LEN_MAX		== 255
+					);
+		-- Фамилия, имя, отчество
+		SetAttribute(
+						P_ATTR			== 'ФИО'
+					,	P_VALUE			== ::[RUNTIME].[STDLIB].fio(lrecParam.rAccountant.[NAME], 'Ф И О')
+					,	P_IS_REQUIRED	== true
+					,	P_LEN_MAX		== 255
+					);
+
+		CloseTag('ГлавБух');
+	end if;
+
+
+	-- Сведения о исполнителе
+	OpenTag('Исполнитель');
+
+	-- Должность
+	SetAttribute(
+					P_ATTR			== 'Должность'
+				,	P_VALUE			== nvl(lrecParam.rExecutor.[CASTA].[VALUE], 'Главный бухгалтер')
+				,	P_IS_REQUIRED	== true
+				,	P_LEN_MAX		== 255
+				);
+	-- Фамилия, имя, отчество
+	SetAttribute(
+					P_ATTR			== 'ФИО'
+				,	P_VALUE			== ::[RUNTIME].[STDLIB].fio(lrecParam.rExecutor.[NAME], 'Ф И О')
+				,	P_IS_REQUIRED	== true
+				,	P_LEN_MAX		== 255
+				);
+	-- Телефон
+	SetAttribute(
+					P_ATTR			== 'Телефон'
+				,	P_VALUE			== lrecParam.vExecutorPhone
+				,	P_IS_REQUIRED	== true
+				,	P_LEN_MAX		== 255
+				);
+	-- Электронная почта
+	SetAttribute(
+					P_ATTR			== 'ЭлПочта'
+				,	P_VALUE			== lrecParam.vExecutorEmail
+				,	P_LEN_MAX		== 255
+				);
+
+	CloseTag('Исполнитель');
+
+	CloseTag('Составитель');
+end;
+
+
+/**
+ * Запись в файл "подвала" отчета
+ */
+public procedure AddFooter
+is
+	vRepOKUD	varchar2(128);	-- ОКУД формы
+begin
+	-- Код формы
+	vRepOKUD := GetRepOKUD(lrecParam.rReport);
+
+	CloseTag('Ф' || vRepOKUD);
+end;
+
+
+/**
+ * Определение стартовой табуляции в зависимости от уровня тега
+ *
+ * @param	P_LEVEL		- Уровень тега
+ * @return				- Строка с табуляциями
+ */
+function AddTab
+		(
+			P_LEVEL		integer
+		)
+	return varchar(32767)
+is
+	iLevel	integer;
+begin
+	iLevel	:= P_LEVEL - 1;
+
+	if iLevel = 0 then
+		return '';
+	end if;
+
+	return	lpad(TB$, iLevel, TB$);
+end;
+
+
+/**
+ * Очистка кэша
+ */
+public procedure Clear
+is
+begin
+	laXML.delete;
+	&set_zero(lrecParam);
+end;
+
+
+/**
+ * Заполнение массива (списка строк) для записи в файл
+ */
+function GetFileData
+	return &arr_str
+is
+	aData			&arr_str;		-- Массив строк для записи в файл
+	aOpenTags		arr_tags;		-- Массив незакрытых тегов
+	vStr			varchar(32767);	-- Строка для записи
+	iLevel			integer;		-- Уровень тега
+
+	explanBool		boolean;		-- <Пояснение>0000</Пояснение>
+	explanTag		varchar2(32767);
+begin
+	aData.delete;
+
+	aData(aData.count + 1)	:= '<?xml version="1.0" encoding="windows-1251"?>';
+
+	iLevel	:= 0;
+
+	for	i in 1 .. laXML.count	loop
+		-- Изменение уровня тега
+		iLevel	:= iLevel + 1;
+
+		-- Добавление стартовой табуляции
+		vStr	:= AddTab(iLevel);
+
+		-- Открытие тега
+		vStr := vStr || '<' || laXML(i).vTag;
+
+		-- Добавление атрибутов тега
+		explanBool:=false;
+		explanTag:='';
+		&fforeach_rec(vValue, laXml(i).mAttrs, vAttr, null)
+			if substr(vAttr,1,1)='#' then	-- <Пояснение>0000</Пояснение>
+				explanBool:=true;
+				explanTag:=laXML(i).vTag;
+				vStr := vStr || '>' || vValue;
+				&debug(TB$||'.GetFileData -- Тег "'||explanTag||'" Добавление атрибута тега "'||vAttr||'" vValue='||vValue,dp)
+				&debug(substr(TB$||'.GetFileData -- (1)vStr='||vStr,1,2000),dp)
+			else
+				vStr := vStr || ' ' || vAttr || '="' || vValue || '"';
+			end if;
+		&end_foreach;
+
+		-- Добавление значения тега
+		if &is_not_empty(laXml(i).vValue) then
+			vStr := vStr || '>' || laXml(i).vValue;
+
+			-- <Пояснение>0000</Пояснение>
+			if explanBool then &debug(substr(TB$||'.GetFileData -- (2)vStr='||vStr,1,2000),dp) end if;
+		end if;
+
+		-- Закрытие тега в случае, если нет потомков;
+		-- иначе сохранение тега в массив незакрытых тегов
+		if laXml(i).iClosedIndex = i then
+			if laXml(i).vValue is null then
+				-- <Пояснение>0000</Пояснение>
+				if explanBool and explanTag is not null then 
+					vStr := vStr || '</'||explanTag|| '>';
+					&debug(substr(TB$||'.GetFileData -- (3)vStr='||vStr,1,2000),dp)
+				else
+					vStr := vStr || '/>';
+				end if;
+			else
+				vStr := vStr || '</'|| laXml(i).vTag || '>';
+				-- <Пояснение>0000</Пояснение>
+				if explanBool then &debug(substr(TB$||'.GetFileData -- (4)vStr='||vStr,1,2000),dp) end if;
+			end if;
+
+			-- Изменение уровня тега
+			iLevel	:= iLevel - 1;
+		else
+			aOpenTags(i) := laXml(i);
+			vStr := vStr || '>';
+		end if;
+		-- <Пояснение>0000</Пояснение>
+		if explanBool then &debug(substr(TB$||'.GetFileData -- (5)vStr='||vStr||' iLevel='||iLevel,1,2000),dp) end if;
+
+		-- Проверка по массиву незакрытых тегов и их закрытие
+		-- Новый тег - новая строка
+		&rforeach(aOpenTags, j, aOpenTags.last)
+			if	aOpenTags(j).iClosedIndex = i	then
+				-- Сохранение текущей строки в массив
+				aData(aData.count + 1)	:= vStr;
+
+				-- Новая строка. Добавление стартовой табуляции
+				vStr := AddTab(iLevel);
+				-- <Пояснение>0000</Пояснение>
+				if explanBool then &debug(substr(TB$||'.GetFileData -- (6)vStr='||vStr||' -- Новая строка',1,2000),dp) end if;
+
+				-- Закрытие тега
+				vStr := vStr || '</' || aOpenTags(j).vTag || '>';
+				-- <Пояснение>0000</Пояснение>
+				if explanBool then &debug(substr(TB$||'.GetFileData -- (7)vStr='||vStr||' -- Закрытие тега',1,2000),dp) end if;
+
+				-- Удаление записи из массива незакрытых тегов
+				aOpenTags.delete(j);
+				-- Изменение уровня тега
+				iLevel	:= iLevel - 1;
+			end if;
+		&end_foreach;
+
+		aData(aData.count + 1)	:= vStr;
+	end loop;
+
+	-- Очистка кэша
+	Clear;
+
+	return aData;
+end;
+
+
+/**
+ * Формирование имени XML файла
+ */
+function GetXMLFile
+		(
+			P_FILE		varchar2(32767)
+		)
+	return varchar2(32767)
+is
+	vXMLFile	varchar2(32767);
+begin
+	-- Формирование имени XML файла
+	-- Замена расширения на .xml (если оно есть)
+	vXMLFile	:= P_FILE;
+
+	if instr(vXMLFile, '.') > 0 then
+		vXMLFile	:= substr(vXMLFile, 1, instr(vXMLFile, '.', -1)-1);
+	end if;
+
+	vXMLFile	:= vXMLFile || '.xml';
+
+	return vXMLFile;
+end;
+
+
+/**
+ * Сохранение XML файла
+ */
+public procedure SaveFile
+is
+	aData			&arr_str;			-- Массив строк для записи в файл
+	vXmlFile		varchar2(32767);	-- Имя файла xml
+	vZipFile		varchar2(32767);	-- Имя файла zip
+	vFile			varchar2(32767);	-- Полное имя файла (вместе с путем на сервере)
+	vPathLocal		varchar2(32767);	-- Путь на локальной станции
+	vPathServer		varchar2(32767);	-- Путь на сервере
+	vArchStatus		varchar2(32767);	-- Статус архивации (0 - успешно)
+	iCmdCount		integer;			-- Созданные команды в буфер сессии
+begin
+	-- Пути до файла
+	vPathLocal		:= &lf.GetPath(lrecParam.vLocalFile, true);
+	vPathServer		:= &lf.default_server_path;
+
+	-- Имена файлов
+	vZipFile		:= replace(&lf.GetFile(lrecParam.vLocalFile),'.xml','.zip');
+	vXmlFile		:= GetXMLFile(lrecParam.vXmlFile);
+	
+	&debug(TB$||'.SaveFile -- vXmlFile='||vXmlFile||' vPathLocal='||vPathLocal,dp)
+	if instr(vXmlFile,vPathLocal||'\')>0 then
+		vXmlFile	:= replace(vXmlFile,vPathLocal||'\');	-- Ф-634
+	end if;
+	if instr(vXmlFile,vPathLocal)>0 then
+		vXmlFile	:= replace(vXmlFile,vPathLocal);		-- Ф-634
+	end if;
+	vFile			:= &lf.default_server_path || '/' || vXmlFile;
+
+	-- Добавление информации о файле в таблицу [REPS_COPYFILES]
+	vXmlFile		:= &lib_cf.Add	(
+										P_DST_NAME	== vXmlFile
+									,	P_SRC_NAME	== vXmlFile
+									,	P_DST_PATH	== vPathLocal
+									,	P_SRC_PATH	== vPathServer
+									);
+
+	&debug(TB$||'.SaveFile -- Имя файла xml                               '||vXmlFile,dp)
+	&debug(TB$||'.SaveFile -- Имя файла zip                               '||vZipFile,dp)
+	&debug(TB$||'.SaveFile -- Путь на локальной станции                   '||vPathLocal,dp)
+	&debug(TB$||'.SaveFile -- Путь на сервере                             '||vPathServer,dp)
+	&debug(TB$||'.SaveFile -- Полное имя файла (вместе с путем на сервере)'||vFile,dp)
+
+	-- Заполнение массива строк по массиву тегов
+	aData			:= GetFileData;
+	&debug(TB$||'.SaveFile -- Массив строк для записи в файл              '||aData.count,dp)
+
+	-- Запись строк в файл
+	&lf.AppendFile	(
+						P_PATH	== vFile
+					,	P_DATA	== aData
+					);
+
+	-- Очистка массива строк
+	aData.delete;
+
+	-- Архивация файла
+	&debug(TB$||'.SaveFile -- Архивация файла',dp)
+	vArchStatus		:= &lib_cf.arch	(
+										P_FILE_MASK		== vXmlFile
+									,	P_FILE_NAME		== vZipFile
+									,	P_PATH			== vPathLocal
+									);
+
+	-- Определение копируемого файла.
+	-- Если архивация прошла успешно, то копируется архив,
+	-- иначе файл xml
+	&debug(TB$||'.SaveFile -- vArchStatus='||vArchStatus,dp)
+	if vArchStatus = 0 then
+		vFile	:= vZipFile;
+		&debug(TB$||'.SaveFile -- Копируется архив '||vArchStatus,dp)
+	else
+		vFile	:= vXmlFile;
+		&debug(TB$||'.SaveFile -- Копируется файл xml',dp)
+	end if;
+
+	-- Добавление команды в буфер сессии для копирования файла
+	iCmdCount	:= &lib_cf.Copy	(vFile);
+	&debug(TB$||'.SaveFile -- iCmdCount='||iCmdCount,dp)
+	if iCmdCount > 0 then
+		&debug_output('Выгружен файл "' || vFile || '"',	0);
+	end if;
+end;
+
+
+/**
+ * Сохранение XML файла без архивации
+ */
+public procedure SaveDataInFile
+is
+	aData			&arr_str;			-- Массив строк для записи в файл
+	vXmlFile		varchar2(32767);	-- Имя файла xml
+	vFile			varchar2(32767);	-- Полное имя файла (вместе с путем на сервере)
+	vPathLocal		varchar2(32767);	-- Путь на локальной станции
+	vPathServer		varchar2(32767);	-- Путь на сервере
+begin
+	-- Пути до файла
+	vPathLocal		:= &lf.GetPath(lrecParam.vLocalFile, true);
+	vPathServer		:= &lf.default_server_path;
+
+	-- Имена файлов
+	vXmlFile		:= lrecParam.vXmlFile;
+	vFile			:= &lf.default_server_path || '/' || vXmlFile;
+
+	-- Добавление информации о файле в таблицу [REPS_COPYFILES]
+	vXmlFile		:= &lib_cf.Add	(
+										P_DST_NAME	== vXmlFile
+									,	P_SRC_NAME	== vXmlFile
+									,	P_DST_PATH	== vPathLocal
+									,	P_SRC_PATH	== vPathServer
+									);
+	&debug(TB$||'.SaveDataInFile -- Имя файла xml                               '||vXmlFile,dp)
+	&debug(TB$||'.SaveDataInFile -- Полное имя файла (вместе с путем на сервере)'||vFile,dp)
+	&debug(TB$||'.SaveDataInFile -- Путь на локальной станции                   '||vPathLocal,dp)
+	&debug(TB$||'.SaveDataInFile -- Путь на сервере                             '||vPathServer,dp)
+	
+	-- Заполнение массива строк по массиву тегов
+	aData			:= GetFileData;
+	&debug(TB$||'.SaveDataInFile -- Массив строк для записи в файл              '||aData.count,dp)
+
+	-- Запись строк в файл
+	&debug(TB$||'.SaveDataInFile -- Запись строк в файл',dp)
+	&lf.AppendFile	(
+						P_PATH	== vFile
+					,	P_DATA	== aData
+					);
+
+	-- Очистка массива строк
+	aData.delete;
+end;
+
+
+/**
+ * Архивация XML файлов по маске
+ *
+ * @param	P_FILE_MASK		- (опц.) Маска файлов для архивации
+ */
+public procedure ArchXMLFiles
+		(
+			P_FILE_MASK		varchar2(32767)		default null
+		)
+is
+	vZipFile		varchar2(32767);	-- Имя файла zip
+	vFile			varchar2(32767);	-- Полное имя файла (вместе с путем на сервере)
+	vPathLocal		varchar2(32767);	-- Путь на локальной станции
+	vArchStatus		varchar2(32767);	-- Статус архивации (0 - успешно)
+	iCmdCount		integer;			-- Созданные команды в буфер сессии
+begin
+	-- Путь до файла
+	vPathLocal		:= &lf.GetPath(lrecParam.vLocalFile, true);
+
+	-- Имена файлов
+	vZipFile		:= &lf.GetFile(lrecParam.vLocalFile);
+	vFile			:= nvl(P_FILE_MASK, lrecParam.vXmlFile) || '%';
+
+	-- Архивация файлов
+	vArchStatus		:= &lib_cf.arch	(
+										P_FILE_MASK		== vFile
+									,	P_FILE_NAME		== vZipFile
+									,	P_PATH			== vPathLocal
+									);
+
+	-- Определение копируемого файла.
+	-- Если архивация прошла успешно, то копируется архив,
+	-- иначе файлы xml
+	if vArchStatus = 0 then
+		vFile	:= vZipFile;
+	else
+		vFile	:= P_FILE_MASK || '%';
+	end if;
+
+	-- Добавление команды в буфер сессии для копирования файла
+	iCmdCount	:= &lib_cf.Copy	(vFile);
+
+	-- Если выгружен 1 файл, в лог выводится его название
+	if		iCmdCount = 1 then
+		&debug_output('Выгружен файл "'	|| vFile		|| '"',				0);
+	-- Если выгружено более 1 файла, то в лог выводится их количество
+	elsif	iCmdCount > 1 then
+		&debug_output('Выгружено '		|| iCmdCount	|| ' файла(ов)',	0);
+	end if;
+
+	-- Очистка кэша
+	Clear;
+end;
+
+
+/**
+ * Функция инициализации параметров экспорта
+ *
+ * @param P_PARAM	-	Ссылка на реализацию
+ * @param P_STR		-	Строка параметров
+ */
+public procedure Init
+		(
+			P_PARAM		ref [REPS_PARAMS]
+		,	P_STR		varchar2(32767)
+		)
+is
+	vLocalFile	varchar2(32767);
+	tmpLocalPath	varchar2(32767); -- Ф-634
+begin
+	&debug('.Init -- P_PARAM(id:'||P_PARAM%id||') Профиль:'||P_PARAM.[PROF].[CODE]||' Отчет:'||P_PARAM.[REPORT].[CODE],dp)
+	&debug('.Init -- P_STR='||P_STR,dp)
+	
+	Clear;
+
+	-- Ссылка на реализацию
+	lrecParam.rParam			:=	P_PARAM;
+
+	-- Наименование файла экспорта
+	vLocalFile :=	coalesce
+						(
+							&str.get_str_par(P_STR,	'P_FILE_NAME') --F_115
+						,	&str.get_str_par(P_STR,	'P_FILENAME')
+						,	&str.get_str_par(P_STR,	'V_ZIP_NAME') --
+						,	&str.get_str_par(P_STR,	'V_ZIPNAME')
+						,	'delta.zip'
+						);
+	&debug('.Init -- vLocalFile='||vLocalFile,dp)
+
+	-- Путь и имя файла экспорта на локальной станции
+	tmpLocalPath				:=		coalesce -- Ф-634
+											(
+												&str.get_str_par(P_STR, 'P_PATH')
+											,	&str.get_str_par(P_STR, 'V_PATH')
+											,	::[REPS_DATA].[LIB_FILE].default_local_path
+											);
+	&debug('.Init -- tmpLocalPath='||tmpLocalPath,dp)
+	
+	/** /
+	lrecParam.vLocalFile		:=		coalesce
+											(
+												&str.get_str_par(P_STR, 'P_PATH')
+											,	&str.get_str_par(P_STR, 'V_PATH')
+											,	::[REPS_DATA].[LIB_FILE].default_local_path
+											)
+	/**/
+	lrecParam.vLocalFile		:=		iif(instr(vLocalFile,tmpLocalPath)=1,'',trim(tmpLocalPath,'\')||'\')
+								  --||	'\'
+									||	vLocalFile
+									;
+	&debug('.Init -- lrecParam.vLocalFile='||lrecParam.vLocalFile,dp)
+	
+	lrecParam.vXmlFile			:=	coalesce
+										(
+											&str.get_str_par(P_STR, 'P_XMLNAME'	)
+										,	&str.get_str_par(P_STR, 'V_FILENAME')
+										,	vLocalFile
+										);
+	&debug('.Init -- lrecParam.vXmlFile='||lrecParam.vXmlFile,dp)
+
+	-- Получение информации из строки параметров
+	lrecParam.rBoss%id			:=	coalesce
+										(
+											&str.get_num_par(P_STR, 'P_BOSS')
+										,	&str.get_num_par(P_STR, 'V_BOSS')
+										);										-- Ссылка на Руководителя
+	lrecParam.rExecutor%id		:=	coalesce
+										(
+											&str.get_num_par(P_STR, 'P_EXECUTOR')
+										,	&str.get_num_par(P_STR, 'V_USER'	)
+										,	&str.get_num_par(P_STR, 'P_USER'	)
+										);										-- Ссылка на Исполнителя
+	lrecParam.vExecutorPhone	:=	coalesce
+										(
+											&str.get_str_par(P_STR, 'P_PHONE')
+										,	&str.get_str_par(P_STR, 'V_PHONE')
+										);										-- Телефон исполнителя
+	lrecParam.vExecutorEmail	:=	&str.get_str_par(P_STR, 'P_USER_EMAIL');	-- E-mail исполнителя
+	lrecParam.rAccountant%id	:=	coalesce
+										(
+											&str.get_num_par(P_STR, 'P_ACCOUNTANT'	)
+										,	&str.get_num_par(P_STR, 'V_GBUH'		)
+										,	&str.get_num_par(P_STR, 'P_GBUH'		)
+										);										-- Ссылка на Главного бухгалтера
+	lrecParam.vOKUD				:=	&str.get_str_par(P_STR, 'P_OKUD');			-- ОКУД формы
+	lrecParam.vPeriod			:=	&str.get_str_par(P_STR, 'P_PERIOD');		-- Периодичность сбора отчётности
+
+	&debug('.Init -- (1) lrecParam.vPeriod='||lrecParam.vPeriod,dp)
+	--Башкиров В.Г. 23.09.2025 CFT-2486
+	--Ф-0409603 Сведения об открытых корреспондентских счетах и остатках средств на них
+	if lrecParam.vPeriod is null OR vLocalFile like '0409603%FD%' then
+		lrecParam.vPeriod:='FD'; --'пятидневная'
+		&debug('.Init -- (1.F_603) lrecParam.vPeriod='||lrecParam.vPeriod,dp)
+	end if;
+
+	-- Ф-0409601 Отчет об операциях с наличной иностранной валютой и чеками в иностранной валюте
+	if lrecParam.vPeriod is null then
+		--	Флаг с ЭФ "Нерегулярный отчет"
+		var lbIsNonRegularRep boolean;
+		lbIsNonRegularRep	:= nvl(::[RUNTIME].[STR].get_bool_par(P_STR, 'P_IS_NONREGULAR_REP'), false); --	Определение признака нерегулярного отчёта
+		if lbIsNonRegularRep then lrecParam.vPeriod:='OD'; end if; --'OD''по требованию';
+		&debug('.Init -- (2) lrecParam.vPeriod='||lrecParam.vPeriod,dp)
+	end if;
+
+	lrecParam.vRepKind			:=	&str.get_str_par(P_STR, 'P_REP_KIND');		-- Вид отчёта
+
+	-- Если реализация не передана (для отчётов, не переведённых на конфигурацию), то значения берутся из переданных параметров
+	if P_PARAM is not null then
+		lrecParam.rReport		:=	lrecParam.rParam.[REPORT];					-- Ссылка на Отчёт
+		lrecParam.rBranch		:=	lrecParam.rParam.[BRANCH];					-- Ссылка на Филиал
+		lrecParam.rBank			:=	lrecParam.rParam.[BANK];					-- Ссылка на Банк
+		lrecParam.dDate1		:=	lrecParam.rParam.[DATE1];					-- Дата начала отчётного периода
+		lrecParam.dDate2		:=	lrecParam.rParam.[DATE2];					-- Дата окончания отчётного периода
+	else
+		lrecParam.rReport%id	:=	&str.get_str_par(P_STR, 'P_REPORT');		-- Ссылка на Отчёт
+		lrecParam.rBranch%id	:=	&str.get_str_par(P_STR, 'P_BRANCH');		-- Ссылка на Филиал
+		lrecParam.rBank%id		:=	&str.get_str_par(P_STR, 'P_BANK');			-- Ссылка на Банк
+		lrecParam.dDate1		:=	&str.get_date_par(P_STR, 'P_DATE_BEG');		-- Дата начала отчётного периода
+		lrecParam.dDate2		:=	&str.get_date_par(P_STR, 'P_DATE_END');		-- Дата окончания отчётного периода
+	end if;
+end;
+
+
+/**
+ * Получение имен файлов экспорта
+ *
+ * @comment:	Для экспорта в формате Дельта (XML) формируется 2 имени: 1) ZIP-файл, 2) XML-файл
+ *
+ * @param	P_REP:			Отчет
+ * @param	P_PARAM:		Реализация
+ * @param	P_EXP_METH:		Код операции экспорта
+ * @param	P_PERIOD_CODE:	(опц.) Код периодичности отчета (Y, HY, M, ...)
+ * @param	P_SEGMENT:		(опц.) Сегмент
+ * @param	P_DATE_REP:		(опц.) Параметр для использования необходимой даты в имени файла для отчетов с двумя датами
+ *
+ * @return:	Структура имен файлов экспорта
+ */
+public function GetExpFileNames
+					(
+						P_REP			ref	[REPS]
+					,	P_PARAM			ref	[REPS_PARAMS]
+					,	P_EXP_METH			varchar2(32767)
+					,	P_PERIOD_CODE		varchar2(10)	:=	'M'
+					,	P_SEGMENT			varchar2(2)		:=	null
+					,	P_DATE_REP			date			:=	null
+					)
+	return	rec_OutputFileNames
+is
+	recExpFileNames	rec_OutputFileNames;	-- структура имен файлов экспорта
+
+	recRep			[REPS];								-- Структура отчета
+	dRepDate1		date;								-- Отчетная дата 1
+	dRepDate2		date;								-- Отчетная дата 2
+	rBranch		ref	[BRANCH];							-- Филиал
+	rBank		ref	[CL_BANK];							-- Банк
+
+	recBrInfo	::[REPS_DATA].[LIB_CLIENT].tp_recBranchInfo;	-- структура данных филиала
+	vPrefix		varchar(32767);									-- префикс
+	
+	vTmp varchar2(128);
+begin
+	&debug(TB$||'.GetExpFileNames ->         P_REP='||P_REP.[CODE]||'-'||P_REP.[NAME],dp)
+	&debug(TB$||'.GetExpFileNames ->    P_PARAM(id='||P_PARAM%id||') '||to_char(P_PARAM.[DATE1],fmt)||'-'||to_char(P_PARAM.[DATE2],fmt),dp)
+	&debug(TB$||'.GetExpFileNames ->    P_EXP_METH='||P_EXP_METH,dp)
+	&debug(TB$||'.GetExpFileNames -> P_PERIOD_CODE='||P_PERIOD_CODE,dp)
+	&debug(TB$||'.GetExpFileNames ->     P_SEGMENT='||P_SEGMENT,dp)
+	&debug(TB$||'.GetExpFileNames ->    P_DATE_REP='||to_char(P_DATE_REP,fmt),dp)
+
+	recRep := P_REP;
+	-- В случа если параметр P_DATE_REP = null переменные инициализируются значением сегодняшней даты
+	if P_DATE_REP is null then
+		dRepDate1 = dRepDate2	:=	trunc(sysdate) - 1;
+	-- Иначе переменные принимают значение параметра для генерации имени файла с датой, переданной в параметре
+	else
+		dRepDate1 = dRepDate2	:=	P_DATE_REP;
+	end if;
+	&debug(TB$||'.GetExpFileNames -- dRepDate1-dRepDate1='||to_char(dRepDate1,fmt)||'-'||to_char(dRepDate2,fmt),dp)
+
+	-- для экспорта Дельта (XML) формируется 2 имени файлов экспорта: 1) ZIP, 2) XML
+	if P_EXP_METH like '%XML%' or P_EXP_METH like 'EXP%PSB%' then
+		&debug(TB$||'.GetExpFileNames -- P_EXP_METH='||P_EXP_METH||' P_PARAM(id:'||P_PARAM%id||')='||P_PARAM.[REPORT].[CODE]||'-'||P_PARAM.[REPORT].[NAME],dp)
+		-- определение параметров реализации
+		for	(
+				select	rp	(
+								trunc(rp.[DATE1])	:	C_DATE1
+							,	trunc(rp.[DATE2])	:	C_DATE2
+							,	rp.[BRANCH]			:	C_BRANCH
+							,	rp.[BANK]			:	C_BANK
+							)
+				in		::[REPS_PARAMS] all
+				where	rp = P_PARAM
+				fetch	1
+			)
+		loop
+			-- 
+			if P_DATE_REP is null then
+				dRepDate1	:=	rp.C_DATE1;
+				dRepDate2	:=	nvl(rp.C_DATE2, rp.C_DATE1);
+				&debug(TB$||'.GetExpFileNames -- dRepDate1-dRepDate1='||to_char(dRepDate1,fmt)||'-'||to_char(dRepDate2,fmt),dp)
+			end if;
+			rBranch		:=	rp.C_BRANCH;
+			rBank		:=	rp.C_BANK;
+			
+			&debug(TB$||'.GetExpFileNames -- P_DATE_REP='||to_char(P_DATE_REP,fmt)||' dRepDate1-dRepDate2='||to_char(dRepDate1,fmt)||'-'||to_char(dRepDate2,fmt)||' rBranch='||rBranch.[CODE]||' rBank='||rBank.[NAME],dp)
+			exit;
+		end loop;
+
+		-- определение структуры филиала
+		recBrInfo := ::[REPS_DATA].[LIB_CLIENT].GetBranchInfo
+													(
+														P_BRANCH	==	rBranch
+													,	P_DATE		==	dRepDate1
+													,	P_BANK		==	rBank
+													);
+
+		var	nDiffDatesTmp	number;
+
+		-- если расчет НА ДАТУ (в реализации обе даты равны),
+		-- то необходимо отнять один день
+		-- если расчет ЗА ПЕРИОД/ДАТУ (в реализации обе даты разные),
+		-- то отнимать ничего не надо
+		nDiffDatesTmp := bool_num(dRepDate1 <> dRepDate2, 0, 1, 0);
+
+		-- создание префикса согласно шаблону: "<ОКУД формы>_<Код организации (профиль)>_<Отчётная дата>_<Сегмент>"
+		vTmp:=GetRepOKUD(P_REP);
+		&debug(TB$||'.GetExpFileNames -- vTmp='||vTmp,dp)
+	  --vPrefix	:=	GetRepOKUD(P_REP)								||	'_'
+		vPrefix	:=	vTmp											||	'_'
+				||	regexp_replace(recBrInfo.F_REG_NUM, '[^0-9]')	||	'_'
+				||	case P_PERIOD_CODE
+						when 'Y' then
+							'0000'	|| to_char(dRepDate1 - nDiffDatesTmp, 'yyyy')
+						when 'HY' then
+							'00'	|| to_char(dRepDate2 - nDiffDatesTmp, 'q')		|| 'Q' || to_char(dRepDate2 - nDiffDatesTmp, 'yyyy')
+						when 'Q' then
+							'00'	|| to_char(dRepDate1 - nDiffDatesTmp, 'q')		|| 'Q' || to_char(dRepDate1 - nDiffDatesTmp, 'yyyy')
+						when 'M' then
+							'00'	|| to_char(dRepDate1 - nDiffDatesTmp, 'mmyyyy')
+						else
+							to_char(dRepDate1, 'ddmmyyyy')
+					end
+				||	bool_char(P_SEGMENT is not null, ('_' || P_SEGMENT), null);
+
+		if P_PERIOD_CODE = 'TD' and P_REP.[CODE] = 'F_664' then
+			vPrefix := substr(vPrefix, 1, instr(vPrefix,'_')-1) || 'D' || substr(vPrefix, instr(vPrefix,'_'));
+		elsif P_PERIOD_CODE = 'FD' and P_REP.[CODE] = 'F_603' then --Башкиров В.Г. 22.09.2025 CFT-2486 Ф-603-Необходимо, чтобы она выгружалась из ЦФТ в Дельту с признаком <пятидневная>
+			vPrefix := substr(vPrefix, 1, instr(vPrefix,'_')-1) || 'FD' || substr(vPrefix, instr(vPrefix,'_'));
+		end if;
+		&debug(TB$||'.GetExpFileNames -- P_PERIOD_CODE='||P_PERIOD_CODE||' vPrefix='||vPrefix,dp)
+
+	  --recExpFileNames.vOutputFileName	:=	::[INTEGR_FORMS].[RUN_APP].SetFileName(P_EXP_METH, vPrefix);
+		&debug(TB$||'.GetExpFileNames -- (1) P_EXP_METH='||P_EXP_METH,dp)
+		recExpFileNames.vOutputFileName	:=	SetFileName(P_EXP_METH, vPrefix);
+		&debug(TB$||'.GetExpFileNames -- (2) P_EXP_METH='||P_EXP_METH,dp)
+		recExpFileNames.vXmlFileName	:=	vPrefix || '.xml';
+	else
+	  --recExpFileNames.vOutputFileName	:=	::[INTEGR_FORMS].[RUN_APP].SetFileName(P_EXP_METH, recRep.[CODE]);
+		&debug(TB$||'.GetExpFileNames -- (3) P_EXP_METH='||P_EXP_METH,dp)
+		recExpFileNames.vOutputFileName	:=	SetFileName(P_EXP_METH, recRep.[CODE]);
+		&debug(TB$||'.GetExpFileNames -- (4) P_EXP_METH='||P_EXP_METH,dp)
+	end if;
+	&debug(TB$||'.GetExpFileNames <- recExpFileNames.vOutputFileName='||recExpFileNames.vOutputFileName,dp)
+	&debug(TB$||'.GetExpFileNames <- recExpFileNames.vXmlFileName   ='||recExpFileNames.vXmlFileName,dp)
+	return recExpFileNames;
+end;
+--==
+/**
+ *	Процедура формирования заголовка
+ *
+ *	@param P_XMLNS				-	Пространство имен (например, urn:cbr-ru:rep0409634:v0.2.4.5)
+ *	@param P_DATE_EXP			-	(опц.) Дата формирования экспортного файла
+ *	@param P_OKATO_LEN			-	(опц.) Длина ОКАТО.
+ *	@param P_VID_REP			-	(опц.) Вид отчета (менее приоритетен, чем параметр из реализации)
+ *	@param P_OTCHET_DATE_TYPE	-	(опц.) Дельта от отчётной даты
+ *	@param P_RUK_TYPE			-	(опц.) Тег руководителя
+ *	@param P_COMPILIER_ATTR		-	(опц.) Атрибуты тега "Составитель" через #
+ *	@param P_OKUD_REQ			-	Обязательность тега "ОКУД"
+ *	@param P_VID_OTCH_LEN		-	длина дсимволов тега "ВидОтчета"
+ *
+ *	@see AddHeader
+ */
+procedure Add_Header
+		(
+			P_XMLNS				varchar2(32767)
+		,	P_DATE_EXP			[DATE_TIME]			default systimestamp
+		,	P_OKATO_LEN			integer				default null
+		,	P_VID_REP			varchar2(32767)		default 'КО'
+		,	P_OTCHET_DATE_TYPE	integer				default 0
+		,	P_RUK_TYPE			varchar2(32767)		default 'Руководитель'
+		,	P_COMPILIER_ATTR	varchar2(32767)		default '#ВидОрг#КодОрг#БИК#ОКАТО#ОКПО#ОГРН#СокрНаимен#Адрес#ДатаПодписания#'
+		,	P_OKUD_REQ			boolean				default true
+		,	P_VID_OTCH_LEN		integer				default null
+		)
+is
+	recBrInfo		&lib_cl.tp_recBranchInfo;	-- Информация о филиале
+	vPeriod			varchar2(128);				-- Периодичность сбора отчётности
+	vRepOKUD		varchar2(128);				-- ОКУД формы
+begin
+	-- Код формы
+	vRepOKUD	:= GetRepOKUD(lrecParam.rReport);
+	-- Периодичность сбора отчётности
+	vPeriod		:= GetPeriodByCode(lrecParam.vPeriod);
+	-- Получение информации о филиале
+	recBrInfo	:= &lib_cl.GetBranchInfo(
+											P_BRANCH	==	lrecParam.rBranch
+										,	P_DATE		==	lrecParam.dDate2
+										,	P_BANK		==	lrecParam.rBank
+										,	P_OKATO_LEN	==	P_OKATO_LEN
+										,	P_ADDR_TYPE	==	'FACT'
+										,	P_REP_MODE	==	false
+										);
+	-- Описательная часть отчета
+	OpenTag('Ф' || vRepOKUD);
+	-- Пространство имен
+	SetAttribute(
+					P_ATTR			== 'xmlns'
+				,	P_VALUE			== P_XMLNS
+				,	P_IS_REQUIRED	== true
+				);
+	-- Уникальный идентификатор ОЭС
+	SetAttribute(
+					P_ATTR			== 'УникИдОЭС'
+				,	P_VALUE			== GetGUID
+				,	P_IS_REQUIRED	== true
+				);
+	-- Вид ОЭС
+	SetAttribute(
+					P_ATTR			== 'ВидОЭС'
+				,	P_VALUE			== 'Отчетность КО'
+				,	P_IS_REQUIRED	== true
+				);
+	-- Код формы по ОКУД (если ОКУД не задан, указывается условный код)
+	SetAttribute(
+					P_ATTR			== 'КодФормы'
+				,	P_VALUE			== nvl(lrecParam.vOKUD, vRepOKUD)
+				,	P_IS_REQUIRED	== true
+				);
+	-- Код формы по ОКУД, задается при наличии ОКУД
+	SetAttribute(
+					P_ATTR			== 'ОКУД'
+				,	P_VALUE			== lrecParam.vOKUD
+				,	P_IS_REQUIRED	== P_OKUD_REQ
+				);
+	-- Вид отчета
+	SetAttribute(
+					P_ATTR			== 'ВидОтчета'
+				,	P_VALUE			== nvl(lrecParam.vRepKind, P_VID_REP)
+				,	P_IS_REQUIRED	== true
+				,	P_LEN_MAX		== P_VID_OTCH_LEN
+				);
+	-- Отчетная дата в формате CCYY-MM-DD
+	SetAttribute(
+					P_ATTR			== 'ОтчДата'
+				,	P_VALUE			== to_char	(
+														coalesce(lrecParam.dDate2, lrecParam.dDate1)
+													+	P_OTCHET_DATE_TYPE
+												,	'YYYY-MM-DD'
+												)
+				,	P_IS_REQUIRED	== true
+				);
+	-- Периодичность сбора отчетности
+	SetAttribute(
+					P_ATTR			== 'Периодичность'
+				,	P_VALUE			== vPeriod
+				,	P_IS_REQUIRED	== true
+				);
+	-- Дата и время формирования ОЭС в формате YYYY-MM-DDThh:mm:ss
+	SetAttribute(
+					P_ATTR			== 'ДатаВремяФормирования'
+				,	P_VALUE			== to_char(P_DATE_EXP, 'YYYY-MM-DD') || 'T' || to_char(P_DATE_EXP, 'HH24:MI:SS')
+				,	P_IS_REQUIRED	== true
+				);
+	-- Сведения о составителе
+	OpenTag('Составитель');
+
+	if &in_str(P_COMPILIER_ATTR, 'ВидОрг', '#') > 0 then
+		-- Вид организации, представившей отчет
+		SetAttribute(
+						P_ATTR			== 'ВидОрг'
+					,	P_VALUE			== 'КО'
+					,	P_IS_REQUIRED	== true
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'КодОрг', '#') > 0 then
+		-- Код организации, представившей отчет
+		-- в формате XXXX (регистрационный номер головного офиса) или XXXX/XXXX (филиала),
+		-- очищается от букв и других символов, которые не по маске
+		SetAttribute(
+						P_ATTR			== 'КодОрг'
+					,	P_VALUE			== regexp_replace(recBrInfo.F_REG_NUM, '[^/0-9]')
+					,	P_IS_REQUIRED	== true
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'БИК', '#') > 0 then
+		-- Банковский идентификационный код КО (филиала)
+		SetAttribute(
+						P_ATTR			== 'БИК'
+					,	P_VALUE			== recBrInfo.F_BIC
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'ОКАТО', '#') > 0 then
+		-- Код территории по ОКАТО
+		SetAttribute(
+						P_ATTR			== 'ОКАТО'
+					,	P_VALUE			== recBrInfo.F_OKATO
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'ОКПО', '#') > 0 then
+		-- Код КО (филиала) по ОКПО
+		SetAttribute(
+						P_ATTR			== 'ОКПО'
+					,	P_VALUE			== recBrInfo.F_OKPO
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'ОГРН', '#') > 0 then
+		-- Основной государственный номер КО (филиала)
+		SetAttribute(
+						P_ATTR			== 'ОГРН'
+					,	P_VALUE			== recBrInfo.F_OGRN
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'СокрНаимен', '#') > 0 then
+		-- Сокращенное наименование КО
+		SetAttribute(
+						P_ATTR			== 'СокрНаимен'
+					,	P_VALUE			== recBrInfo.vBankLongName
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'Адрес', '#') > 0 then
+		-- Фактический адрес КО
+		SetAttribute(
+						P_ATTR			== 'Адрес'
+					,	P_VALUE			== recBrInfo.v_PRN_ADDR
+					);
+	end if;
+
+	if &in_str(P_COMPILIER_ATTR, 'ДатаПодписания', '#') > 0 then
+		-- Дата подписания отчета
+		SetAttribute(
+						P_ATTR			== 'ДатаПодписания'
+					,	P_VALUE			== to_char(P_DATE_EXP, 'YYYY-MM-DD')
+					,	P_IS_REQUIRED	== true
+					);
+	end if;
+
+	-- Сведения о руководителе
+	OpenTag(P_RUK_TYPE);
+
+	-- Должность
+	SetAttribute(
+					P_ATTR			== 'Должность'
+				,	P_VALUE			== nvl(lrecParam.rBoss.[CASTA].[VALUE], 'Руководитель')
+				,	P_IS_REQUIRED	== true
+				,	P_LEN_MAX		== 255
+				);
+	-- Фамилия, имя, отчество
+	SetAttribute(
+					P_ATTR			== 'ФИО'
+				,	P_VALUE			== ::[RUNTIME].[STDLIB].fio(lrecParam.rBoss.[NAME], 'Ф И О')
+				,	P_IS_REQUIRED	== true
+				,	P_LEN_MAX		== 255
+				);
+
+	CloseTag(P_RUK_TYPE);
+
+
+	-- Сведения о Главном бухгалтере
+	-- Заполняется в случае, если ссылка на главного бухгалтера передана в процедуру
+	if lrecParam.rAccountant is not null then
+		OpenTag('ГлавБух');
+
+		-- Должность
+		SetAttribute(
+						P_ATTR			== 'Должность'
+					,	P_VALUE			== nvl(lrecParam.rAccountant.[CASTA].[VALUE], 'Главный бухгалтер')
+					,	P_IS_REQUIRED	== true
+					,	P_LEN_MAX		== 255
+					);
+		-- Фамилия, имя, отчество
+		SetAttribute(
+						P_ATTR			== 'ФИО'
+					,	P_VALUE			== ::[RUNTIME].[STDLIB].fio(lrecParam.rAccountant.[NAME], 'Ф И О')
+					,	P_IS_REQUIRED	== true
+					,	P_LEN_MAX		== 255
+					);
+
+		CloseTag('ГлавБух');
+	end if;
+
+
+	-- Сведения о исполнителе
+	OpenTag('Исполнитель');
+
+	-- Должность
+	SetAttribute(
+					P_ATTR			== 'Должность'
+				,	P_VALUE			== lrecParam.rExecutor.[CASTA].[VALUE]
+				,	P_IS_REQUIRED	== false
+				,	P_LEN_MAX		== 255
+				);
+	-- Фамилия, имя, отчество
+	SetAttribute(
+					P_ATTR			== 'ФИО'
+				,	P_VALUE			== ::[RUNTIME].[STDLIB].fio(lrecParam.rExecutor.[NAME], 'Ф И О')
+				,	P_IS_REQUIRED	== true
+				,	P_LEN_MAX		== 255
+				);
+	-- Телефон
+	SetAttribute(
+					P_ATTR			== 'Телефон'
+				,	P_VALUE			== lrecParam.vExecutorPhone
+				,	P_IS_REQUIRED	== true
+				,	P_LEN_MAX		== 255
+				);
+	-- Электронная почта
+	SetAttribute(
+					P_ATTR			== 'ЭлПочта'
+				,	P_VALUE			== lrecParam.vExecutorEmail
+				,	P_LEN_MAX		== 255
+				);
+
+	CloseTag('Исполнитель');
+
+	CloseTag('Составитель');
+end;
+/**
+ *	Начиная с 6406-У нужно использовать процедуру AddHeader6406
+ *	Запись в файл "шапки" отчета
+ *	Ограничения реализации:
+ *	Данные для атрибутов "КодТУ", "Факс", "ЭлПочта" в ИБСО не ведутся,
+ *	поэтому в процедуре не создаются.
+ *
+ *	@param P_XMLNS				-	Пространство имен (например, urn:cbr-ru:rep0409634:v0.2.4.5)
+ *	@param P_DATE_EXP			-	(опц.) Дата формирования экспортного файла
+ *	@param P_OKATO_LEN			-	(опц.) Длина ОКАТО.
+ *	@param P_VID_REP			-	(опц.) Вид отчета (менее приоритетен, чем параметр из реализации)
+ *	@param P_OTCHET_DATE_TYPE	-	(опц.) Дельта от отчётной даты
+ *	@param P_RUK_TYPE			-	(опц.) Тег руководителя
+ *	@param P_COMPILIER_ATTR		-	(опц.) Атрибуты тега "Составитель" через #
+ *
+ *	@see AddHeader6406
+ */
+public procedure AddHeader6406
+		(
+			P_XMLNS				varchar2(32767)
+		,	P_DATE_EXP			[DATE_TIME]			default systimestamp
+		,	P_OKATO_LEN			integer				default null
+		,	P_VID_REP			varchar2(32767)		default 'КО'
+		,	P_OTCHET_DATE_TYPE	integer				default 0
+		,	P_RUK_TYPE			varchar2(32767)		default 'Руководитель'
+		,	P_COMPILIER_ATTR	varchar2(32767)		default '#ВидОрг#КодОрг#БИК#ОКАТО#ОКПО#ОГРН#СокрНаимен#Адрес#ДатаПодписания#'
+		)
+is
+	recBrInfo		&lib_cl.tp_recBranchInfo;	-- Информация о филиале
+	vPeriod			varchar2(128);				-- Периодичность сбора отчётности
+	vRepOKUD		varchar2(128);				-- ОКУД формы
+begin
+	Add_Header
+			(
+				P_XMLNS				==P_XMLNS
+			,	P_DATE_EXP			==P_DATE_EXP
+			,	P_OKATO_LEN			==P_OKATO_LEN
+			,	P_VID_REP			==P_VID_REP
+			,	P_OTCHET_DATE_TYPE	==P_OTCHET_DATE_TYPE
+			,	P_RUK_TYPE			==P_RUK_TYPE
+			,	P_COMPILIER_ATTR	==P_COMPILIER_ATTR
+			);
+end;
+end;

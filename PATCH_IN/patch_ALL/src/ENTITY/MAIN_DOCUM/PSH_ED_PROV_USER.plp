@@ -1,0 +1,27 @@
+class MAIN_DOCUM;
+
+@name('[ПСХ] Редактировать пользователей')
+@tag('COPIED')
+batch method PSH_ED_PROV_USER is
+PSH_ED_PROV_USER (
+	@name('Проведено пользователем') P_PROV_USER in [USER_REF],
+	@name('Исполнитель')             P_USER_EX   in [USER_REF],
+	@name('Создано пользователем')   P_DOC_USER  in [USER_REF]
+) is
+
+execute is
+/*********************************************************************
+Назначение:
+
+kokorin, последнее изменение 7 Июль 2014 г.
+*********************************************************************/
+i integer;
+begin
+	 for i in this.first..this.last loop
+	 	this(i).[PROV_USER] := 		nvl(P_PROV_USER, this(i).[PROV_USER]);
+	 	this(i).[USER_EXEC] := 		nvl(P_USER_EX, this(i).[USER_EXEC]);
+	 	this(i).[DOCUMENT_USER] := 	nvl(P_DOC_USER,this(i).[DOCUMENT_USER]);
+	 end loop;
+end;
+end;
+end;

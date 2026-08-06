@@ -1,0 +1,162 @@
+class MAIN_DOCUM;
+
+@name('[ПСБ] 108-Т сводное ПП с описью 2')
+@tag('COPIED')
+batch method PSH_108T_SVOD2 is
+
+@name('V_DEST') public V_DEST [MEMO_32767];
+public vUserFilial ref [BRANCH] 	:= ::[SYSTEM].[VARIABLES].OurBranch;
+PSH_108T_SVOD2 (
+	@name('Подписант')      P_PODPISANT  in [USER_REF],
+	@name('Подписант2')     P_PODPISANT2 in [USER_REF],
+	@name('Филиал')         P_FIL        in [BRANCH_REF],
+	@name('Дата')           P_DATE       in [DATE],
+	@name('Номер сводника') P_NUM_SVOD   in [DIG_6]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATE := [SYSTEM]::[OP_DATE];
+
+end if;
+-- End initialization of parameters and variables
+declare
+
+i 			number;
+vColCount 	number; -- колво колонок в отчете
+vLineCount 	number; -- первая строка в Excel
+vFileName 	varchar2(250); -- имя Excel-шаблона
+sum_itog number:=0;
+rkc ref [CL_BANK_N];
+ocher varchar2(2):=null;
+npp number:=0;
+
+-- Реквизиты подразделений
+PSH_PODR ref [PSH_SPRAV_PODR];
+
+begin
+
+begin
+	select x (x) in ::[PSH_SPRAV_PODR]
+	where (x.[PSH_PODR_DEPART].[CODE]  = substr(stdlib.user_id.[DEPART].[CODE],1,instr(stdlib.user_id.[DEPART].[CODE],'-',1,2)-1)
+				or x.[PSH_PODR_DEPART]=stdlib.user_id.[DEPART])
+		and x.[PSH_PODR_PRINT] into PSH_PODR;
+exception 	when TOO_MANY_ROWS then PSH_PODR:=null;
+			when NO_DATA_FOUND then PSH_PODR:=null;
+end;
+
+  if P_MESSAGE = 'DEFAULT' then -- первый запуск процедуры
+		[EXCEL].Init_Xls;
+		P_FIL:=stdlib.user_id.[FILIAL];
+		P_PODPISANT:=PSH_PODR.[PSH_PODR_RUK];
+		P_PODPISANT2:=PSH_PODR.[PSH_PODR_BUH];
+					
+  elsif P_MESSAGE = 'VALIDATE' then -- переход между полями
+
+		if p_info = 'OK' then
+  			
+  			if P_DATE is null then
+  				pragma error('Дата обязательно для заполнения!');
+  			end if;
+
+  			if P_FIL is null then
+  				pragma error('Филилал обязательно для заполнения!');
+  			end if;
+  			
+  			vFileName := 'PSH_108Т.xls';
+  			  			  	
+			if [EXCEL].F_Click then
+				[EXCEL].F_Click := False;
+
+				vColCount := 154; -- всего колонок в отчете
+				vLineCount := 26; -- первая строка в Excel
+				i:=vLineCount;
+				
+				-- обнуляем переменные
+				
+				
+				-- запуск Excel
+				[EXCEL].open_file(::[REPS].[SLIB].GetPath('PATH_PRINT_EXCEL', vFileName),false);
+
+				for r in ::[CL_BANK_N] where r.[BIC]=P_FIL.[BANK].[BIC_MASTER]
+				loop
+				rkc:=r;
+				end loop;
+				
+
+				[EXCEL].Write(7,  46, P_FIL.[BANK].[NAME]);
+				[EXCEL].Write(8,  46, P_FIL.[BANK].[BIC]);
+				[EXCEL].Write(9,  46, P_FIL.[BANK].[KS]);
+				[EXCEL].Write(10, 46, rkc.[LONG_NAME]);
+				[EXCEL].Write(11, 46, rkc.[BIC]);
+				
+				[EXCEL].Write(14, 56, P_NUM_SVOD);
+				[EXCEL].Write(14, 71, to_char(P_DATE,'DD'));
+				--[EXCEL].Write(14, 77, to_char(P_DATE,'MONTH'));
+				[EXCEL].Write(14, 77, ::[USER].[PSH_KAV].kav_data_propis(P_DATE,'M'));
+				[EXCEL].Write(14, 93, to_char(P_DATE,'YYYY'));
+				
+				--[EXCEL].Write(16, 14, 'ЭЛЕКТРОННО');
+
+				-- цикл по договорам
+			for e in this.first..this.last loop
+		
+				npp:=npp+1;
+				sum_itog:=sum_itog+nvl(this(e).[SUM],this(e).[SUM_PO]);
+				if ocher is null then ocher:=this(e).[PRIORITET];
+				elsif ocher!=this(e).[PRIORITET] then stdio.put_line_buf('ОЧЕРЕДИ В ДОКУМЕНТАХ ОТЛИЧАЮТСЯ!');
+				end if;
+				-- вывод в Ексель
+				
+				[EXCEL].Write(i, 1, 	npp);
+				[EXCEL].Write(i, 8, 	''''||this(e).[VID_DOC].[SHORT_CODE]);
+				[EXCEL].Write(i, 22, 	this(e).[DOCUMENT_NUM]);
+				[EXCEL].Write(i, 37, 	to_char(this(e).[DATE_DOC],'DD.MM.YYYY'));
+				[EXCEL].Set_number_Format(i, 52,i, 52,2);
+				[EXCEL].Write(i, 52, 	nvl(this(e).[SUM],this(e).[SUM_PO]));
+				[EXCEL].Write(i, 67, 	this(e).[ACC_DT].[MAIN_V_ID]);
+				[EXCEL].Write(i, 85, 	this(e).[KL_KT].[2].[3].[BIC]);
+				[EXCEL].Write(i, 103, 	this(e).[KL_KT].[2].[3].[KS]);
+				[EXCEL].Write(i, 121, 	this(e).[KL_KT].[2].[1]);
+				i:=i+1;
+				[EXCEL].Ins_Row(i);
+				[EXCEL].PasteSpecial(i-1,1,i-1,vColCount,i,1,i,vColCount);
+				
+				
+				
+				end loop;
+/*				--[EXCEL].Borders(vLineCount, 1, i-1, vColCount, 'RLBTVH'); 		-- границы всюду
+
+				i:=i+2;
+				[EXCEL].Write(i, 1, 'Итого сумма: '|| to_char(sum_itog,'999G999G999D99')||' ('||::[RUNTIME].[STDLIB].N2Str(sum_itog,'RUB')||')',true,false,null,16);
+				i:=i+2;
+				[EXCEL].Write(i, 1, 'Всего документов: '||doc_itog,true,false,null,16);
+				i:=i+2;
+				[EXCEL].Write(i, 8,::[CASE_GRAM].[LIB].get_case(P_PODPISANT.[CASTA].[DECL_CAST], ::[CASE_GRAM]([CODE]='И')),true,false,null,16,'R');
+				[EXCEL].Borders(i, 9, i, 9, 'BV');
+				[EXCEL].Write(i, 10,::[RUNTIME].[STDLIB].FIO(P_PODPISANT.[NAME]),true,false,null,16);
+				i:=i+2;				
+				[EXCEL].Write(i, 8,::[CASE_GRAM].[LIB].get_case(P_PODPISANT2.[CASTA].[DECL_CAST], ::[CASE_GRAM]([CODE]='И')),true,false,null,16,'R');
+				[EXCEL].Borders(i, 9, i, 9, 'BV');
+				[EXCEL].Write(i, 10,::[RUNTIME].[STDLIB].FIO(P_PODPISANT2.[NAME]),true,false,null,16);*/
+				
+				[EXCEL].Write(18, 23, ocher);
+				[EXCEL].Write(20, 18, ::[RUNTIME].[STDLIB].N2Str(sum_itog,'RUB'));	
+				[EXCEL].Set_number_Format(i+1, 52,i+1, 52,2);
+				[EXCEL].Write(i+1, 52, sum_itog);
+				[EXCEL].Delete_Row(i);		
+
+				[EXCEL].Visible;
+				[EXCEL].Release;
+				
+			end if;
+			
+			[EXCEL].Exec_Script(V_DEST);	
+		end if;	
+  end if;
+end;
+end;
+end;
+end;

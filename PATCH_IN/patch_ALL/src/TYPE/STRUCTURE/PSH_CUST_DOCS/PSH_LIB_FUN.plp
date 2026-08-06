@@ -1,0 +1,1333 @@
+class PSH_CUST_DOCS;
+
+@import_plsql(true)
+@name('[ПСБ] Библиотека функций')
+@tag('COPIED')
+library PSH_LIB_FUN is
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB_TC]); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+pragma include (::[DEBUG_TRIGGER].[MACRO_LIB]);
+							
+-- оригинальное значение в виде даты
+public pragma macro(curdate_d, '::[PSH_CUST_DOCS].[PSH_LIB_FUN].curdate([1])', substitute); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25 -- updated CHANGE_SHORT_NAME LIB_FUN->PSH_LIB_FUN 15/10/25
+
+-- значение, приведенное к формату YYYYMMDD (например, для имени файла)
+public pragma macro(curdate_f, 'to_char(::[PSH_CUST_DOCS].[PSH_LIB_FUN].curdate([1]), ''YYYYMMDD'')', substitute); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25 -- updated CHANGE_SHORT_NAME LIB_FUN->PSH_LIB_FUN 15/10/25
+
+-- значение, приведенное к формату YYYY-MM-DD (для включения в xml-документ)
+public pragma macro(curdate_x, 'to_char(::[PSH_CUST_DOCS].[PSH_LIB_FUN].curdate([1]), &libtc.dateFormat)', substitute); -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25 -- updated CHANGE_SHORT_NAME LIB_FUN->PSH_LIB_FUN 15/10/25
+
+public function checkApp(p_codeApp varchar2) return varchar2 is
+v_res		boolean;
+begin
+	if p_codeApp='1B028090' then --Проверка по XSD электронных документов, направляемых в таможенный орган. Если отключено, ответ должен формироваться сразу
+		p_codeApp:='PSB_1B028090';
+		&debug('Проверка приложения p_codeApp = ' || p_codeApp, 0)
+		if p_codeApp is not null then
+			v_res := nvl(&ft.get_bool_value(p_codeApp, null, '0'), false);
+			
+			if not v_res then
+				&debug('Приложение с кодом "' || p_codeApp ||'" не включено!', 0)
+				return 'Приложение с кодом "' || p_codeApp ||'" не включено!';	
+			end if;
+			
+		end if;	
+	end if;
+	return null;
+end;
+
+-- Проверка включения приложений с ошибкой.
+public procedure checkAppErr(p_codeApp varchar2) is
+v_res varchar2(32000);
+begin
+	v_res := checkApp(p_codeApp);
+	if v_res is not null then
+		pragma error(v_res);
+	end if;
+end;
+
+function needNote return boolean is
+begin
+	return &ft.get_bool_value('CUST_USE_IC_DESC', null, '0');
+end;
+
+public procedure setError(p_errors in out &libtc.T_Errors,  p_text ::[TAX_ERROR].[ERR_TEXT]%type, p_type ::[TAX_ERROR].[ERR_TYPE]%type, p_code ::[TAX_ERROR].[CODE]%type default null, p_value ::[TAX_ERROR].[VALUE]%type default null) is
+v_rec	[TAX_ERROR];
+begin
+	&debug('>> setError ', 0)
+	
+	&debug(' p_text =' || p_text , 0)
+	&debug(' p_type =' || p_type , 0)
+	
+	
+	if not (p_type is null or p_text is null) then
+		
+		v_rec.[ERR_TEXT]:= substr(p_text, 1, v_rec.[ERR_TEXT]%size);--порежем чтобы не переполнялось
+		v_rec.[ERR_TYPE]:= p_type;
+		v_rec.[CODE] 	:= p_code;
+		v_rec.[VALUE] 	:= p_value;
+		
+		&debug(' p_errors.count =' || p_errors.count , 0)	
+
+		p_errors(p_errors.count + 1) := v_rec;
+
+	end if;
+end;
+
+public procedure pushErrors(p_errors in out &libtc.T_errors, p_doc ref [PSH_CUST_DOCS]) is -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+n integer;
+begin
+	&debug('>> checkDoc.pushError ',0)
+
+	::[HOOK].[PSB_CUST_CH_FILE](p_errors, p_doc);
+
+	if p_errors.count > 0 then
+		--вставим все ошибки
+		&debug('>> p_errors.err_text.count > 0 ',0)
+		n := p_errors.first;
+		while n is not null loop
+		
+			&debug('v_rec.[ERR_TEXT] ' || p_errors(n).[ERR_TEXT],0)
+			&debug('v_rec.[ERR_TYPE] ' || p_errors(n).[ERR_TYPE],0)
+			
+			p_doc.[ERRORS]%insert(p_errors(n));
+			n := p_errors.next(n);
+		end loop;
+	
+	end if;	
+end;
+
+public function checkStrValue(
+	  p_value		varchar2(32767)
+	, p_name		varchar2(32767)
+	, p_errors		in out &libtc.T_Errors
+	, p_required	boolean
+	, p_minLength	integer
+	, p_maxLength	integer
+	, p_pattern		varchar2(32767) default null
+	, p_legalValue	varchar2(32767) default null
+)
+return varchar2(32767) is
+	v_error ::[TAX_ERROR].[ERR_TEXT]%type;
+	v_value	varchar2(32767);
+begin
+	&debug('>> checkStrValue', 0)
+	
+	&debug('p_value =' || p_value, 0)
+	&debug('p_name =' || p_name, 0)
+	&debug('p_required =' || p_required, 0)
+	&debug('p_minLength =' || p_minLength, 0)
+	&debug('p_maxLength =' || p_maxLength, 0)
+	&debug('p_pattern =' || p_pattern, 0)
+	
+	v_value	:= p_value;
+	
+	if p_value is null and p_required then
+		v_error := p_name || ': Отсутствует обязательное поле';
+	elsif not p_value is null then
+		
+		if length(p_value) < p_minLength or length(p_value) > p_maxLength then 		
+			v_error := p_name || ': Длина значения не соответствует ограничениям';
+			v_value := substr(p_value, 1, p_maxLength);
+		end if;
+		
+		if v_error is null and not p_pattern is null and not regexp_like(p_value, p_pattern) then
+			v_error := p_name || ': Значение не соответствует шаблону';
+		end if;
+
+		if v_error is null and not p_legalValue is null and not regexp_like(p_value, p_legalValue) then
+			v_error := p_name || ': Неверное значение реквизита';
+		end if;
+
+	end if;
+	&debug('v_error =' || v_error, 0)
+	
+	setError(p_errors, v_error, '13', substr(p_name, 1, ::[TAX_ERROR].[CODE]%size) , substr(p_value, 1, ::[TAX_ERROR].[VALUE]%size));
+	
+	&debug('<< checkStrValue', 0)
+	return v_value;
+end;
+
+public function checkDateValue(p_value		varchar2(32767)
+						, p_name		varchar2(32767)
+						, p_errors		in out &libtc.T_Errors
+						, p_required	boolean)
+return date is
+	v_error 	::[TAX_ERROR].[ERR_TEXT]%type;
+	v_date		date;
+begin
+	&debug('>> checkDateValue', 0)
+	
+	&debug('p_value =' || p_value, 0)
+	&debug('p_name =' || p_name, 0)
+	&debug('p_required =' || p_required, 0)
+
+	if p_value is null and p_required then
+		v_error := p_name || ': Отсутствует обязательное поле';
+	elsif not p_value is null then
+		if not regexp_like(p_value, '\d{4}-\d{2}-\d{2}') then
+			v_error := p_name || ': Некорректная дата';
+		else	
+			begin
+				v_date := to_date(p_value, 'YYYY-MM-DD');
+			exception when others then
+				v_error := p_name || ': Некорректная дата';
+			end;
+		end if;
+	end if;
+	
+	&debug('v_error =' || v_error, 0)
+	
+	setError(p_errors, v_error, '13', substr(p_name, 1, ::[TAX_ERROR].[CODE]%size) , substr(p_value, 1, ::[TAX_ERROR].[VALUE]%size));
+	
+	&debug('<< checkDateValue', 0)
+	return v_date;
+end;
+
+public function checkCust(
+	p_node &xml.DOMNode,
+	p_errors in out &libtc.T_Errors,
+	p_xpath varchar2(32767) default null,
+	p_prefix varchar2(128) default null
+) return &libtc.r_custOffice is
+	v_nodeList &xml.DOMNodeList;
+	v_childNode &xml.DOMNode;
+	v_cust &libtc.r_custOffice;
+	v_codeExists boolean := false;
+begin
+	if not &xml.IsNull(p_node) then
+		v_nodeList := &xml.GetChildNodes(p_node);
+		if not &xml.IsNull(v_nodeList) then
+			for i in 0..&xml.GetLength(v_nodeList) loop
+				v_childNode := &xml.Item(v_nodeList, i);
+				case &xml.GetNodename(v_childNode) of
+					:p_prefix || 'Code':
+						v_codeExists := true;
+						v_cust.Code := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), p_prefix || 'Code', p_errors, true, 2, 8, '^(\d{2}|\d{5}|\d{8})$');
+					:p_prefix || 'OfficeName':
+						v_cust.Name := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), p_prefix || 'OfficeName', p_errors, false, 1, 50);
+				end;
+			end loop;
+		end if;
+	end if;
+	
+	if not v_codeExists then
+		if p_xpath is null then
+			&libfun.setError(p_errors, 'Отсутствует обязательное поле', '13', p_prefix || 'Code');
+		else
+			&libfun.setError(p_errors, p_xpath||'/'||p_prefix||'Code: Отсутствует обязательный элемент','13');
+		end if;
+	end if;
+	
+	return v_cust;
+end;
+
+public function checkFIO(
+	p_node &xml.DOMNode,
+	p_errors in out &libtc.T_Errors,
+	p_xpath varchar2(32767) default null
+) return &libtc.r_fio is
+	v_nodeList &xml.DOMNodeList;
+	v_childNode &xml.DOMNode;
+	v_fio &libtc.r_fio;
+	v_exAttr &libtc.T_CheckXML;
+begin
+	if not &xml.IsNull(p_node) then
+		v_nodeList := &xml.GetChildNodes(p_node);
+		if not &xml.IsNull(v_nodeList) then
+			for i in 0..&xml.GetLength(v_nodeList) loop
+				v_childNode := &xml.Item(v_nodeList, i);
+				case &xml.GetNodename(v_childNode) of
+					:'PersonSurname':
+						v_exAttr('surname') := '1';
+						v_fio.Surname := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'PersonSurname', p_errors, true, 1, 150);
+					:'PersonName':
+						v_exAttr('name') := '1';
+						v_fio.Name := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'PersonName', p_errors, true, 1, 150);
+					:'PersonMiddleName':
+						v_fio.MiddleName := &libfun.checkStrValue(&xml_getNodeValue(v_childNode), 'PersonMiddleName', p_errors, false, 1, 150);
+				end;
+			end loop;
+		end if;
+	end if;
+	
+	if not v_exAttr.exists('surname') then
+		if p_xpath is null then
+			&libfun.setError(p_errors, 'Отсутствует обязательное поле', '13', 'PersonSurname');
+		else
+			&libfun.setError(p_errors, p_xpath||'/PersonSurname: Отсутствует обязательный элемент','13');
+		end if;
+	end if;
+	if not v_exAttr.exists('name') then
+		if p_xpath is null then
+			&libfun.setError(p_errors, 'Отсутствует обязательное поле', '13', 'PersonName');
+		else
+			&libfun.setError(p_errors, p_xpath||'/PersonName: Отсутствует обязательный элемент','13');
+		end if;
+	end if;
+	
+	return v_fio;
+end;
+
+public function checkPerson
+(
+	  p_node &xml.DOMNode
+	, p_errors in out &libtc.T_Errors
+	, p_required_nodes varchar2(32767) default null
+	, p_xpath varchar2(32767) default null 
+)
+return &libtc.r_person
+is
+	nodeList	&xml.DOMNodeList;
+	childNode	&xml.DOMNode;
+	person		&libtc.r_person;
+	v_exAttr	&libtc.T_CheckXML;
+	v_tblNodes	rtl.string_table;
+begin
+	person.FIO := checkFIO(p_node, p_errors, p_xpath);
+	
+	if not &xml.isNull(p_node) then
+		nodeList := &xml.getChildNodes(p_node);
+		if not &xml.isNull(nodeList) then
+			for i in 0..&xml.getLength(nodeList) loop
+				childNode := &xml.item(nodeList, i);
+				case &xml.getNodename(childNode) of
+					:'PersonPost':
+						v_exAttr('post') := '1';
+						person.Post := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'PersonPost', p_errors, true, 1, 250);
+					:'IssueDate':
+						v_exAttr('date') := '1';
+						person.DateSign := &libfun.checkDateValue(&xml_getNodeValue(childNode), 'IssueDate', p_errors, true);
+					:'Phone':
+						v_exAttr('phone') := '1';
+						person.Phone := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'Phone', p_errors, false, 1, 24);
+				end;
+			end loop;
+		end if;
+	end if;
+	
+	-- Переберем наименования обязательных узлов из параметра p_required_nodes
+	if p_required_nodes is not null then
+		v_tblNodes := STR_2.split(p_required_nodes);
+		if v_tblNodes.count > 0 then
+			for i in v_tblNodes.first..v_tblNodes.last loop
+			   	if     v_tblNodes(i) like '%PersonPost%' and not v_exAttr.exists('post')
+			   		or v_tblNodes(i) like '%Phone%' and not v_exAttr.exists('phone')
+			   		or v_tblNodes(i) like '%IssueDate%' and not v_exAttr.exists('date')
+			   	then
+					if p_xpath is null then
+						&libfun.setError(p_errors, 'Отсутствует обязательное поле', '13', v_tblNodes(i));
+					else
+						&libfun.setError(p_errors, p_xpath||'/'||v_tblNodes(i)||': Отсутствует обязательный элемент', '13');
+					end if;
+			   	end if;
+			end loop;
+		end if;
+	end if;
+	
+	return person;	
+end;
+
+public function checkCustDoc
+(
+	  p_node &xml.DOMNode
+	, p_errors in out &libtc.T_Errors
+	, p_required_nodes varchar2(32767) default null
+	, p_xpath varchar2(32767) default null 
+)
+return &libtc.r_custDoc
+is
+	nodeList	&xml.DOMNodeList;
+	childNode	&xml.DOMNode;
+	docum		&libtc.r_custDoc;
+	v_exAttr	&libtc.T_CheckXML;
+	v_tblNodes	rtl.string_table;
+begin
+	if not &xml.isNull(p_node) then
+		nodeList := &xml.getChildNodes(p_node);
+		if not &xml.isNull(nodeList) then
+			for i in 0..&xml.getLength(nodeList) loop
+				childNode := &xml.item(nodeList, i);
+				case &xml.getNodename(childNode) of
+					:'PrDocumentName':
+						v_exAttr('name') := '1';
+						docum.Name := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'PrDocumentName', p_errors, true, 1, 250);
+					:'PrDocumentNumber':
+						v_exAttr('number') := '1';
+						docum.DocNum := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'PrDocumentNumber', p_errors, true, 1, 50);
+					:'DRP_DocNumber':
+						v_exAttr('number') := '1';
+						docum.DocNum := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'DRP_DocNumber', p_errors, true, 1, 50);
+					:'PrDocumentDate':
+						v_exAttr('date') := '1';
+						docum.DocDate := &libfun.checkDateValue(&xml_getNodeValue(childNode), 'PrDocumentDate', p_errors, true);
+					:'DRP_DocDate':
+						v_exAttr('date') := '1';
+						docum.DocDate := &libfun.checkDateValue(&xml_getNodeValue(childNode), 'DRP_DocDate', p_errors, true);
+					:'AccountPayer':
+						v_exAttr('acc') := '1';
+						docum.PayerAcc := &libfun.checkStrValue(&xml_getNodeValue(childNode), 'AccountPayer', p_errors, true, 20, 20, '\d{20}');
+				end;
+			end loop;
+		end if;
+	end if;
+	
+	-- Переберем наименования обязательных узлов из параметра p_required_nodes
+	if p_required_nodes is not null then
+		v_tblNodes := STR_2.split(p_required_nodes);
+		if v_tblNodes.count > 0 then
+			for i in v_tblNodes.first..v_tblNodes.last loop
+			   	if     v_tblNodes(i) like '%Name%' and not v_exAttr.exists('name')
+			   		or v_tblNodes(i) like '%Number%' and not v_exAttr.exists('number')
+			   		or v_tblNodes(i) like '%Date%' and not v_exAttr.exists('date')
+			   		or v_tblNodes(i) like '%AccountPayer%' and not v_exAttr.exists('acc')
+			   	then
+					if p_xpath is null then
+						&libfun.setError(p_errors, 'Отсутствует обязательное поле', '13', v_tblNodes(i));
+					else
+						&libfun.setError(p_errors, p_xpath||'/'||v_tblNodes(i)||': Отсутствует обязательный элемент', '13');
+					end if;
+			   	end if;
+			end loop;
+		end if;
+	end if;
+	
+	return docum;
+end;
+
+public function getGUI(p_dash boolean default true) return varchar2(36)
+is
+	gui varchar2(32);
+begin
+	gui := rawtohex(sys_guid());
+	if p_dash then
+		return regexp_replace(gui, '(.{8})(.{4})(.{4})(.{4})(.{12})', '\1-\2-\3-\4-\5');
+	end if;
+	return gui;
+end;
+
+public function getDocGUI(p_doc ref [PSH_CUST_DOCS]) return varchar2(36) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+is
+	v_xmltype xmltype;
+	v_gui varchar2(36);
+begin
+	v_xmltype := xmltype(p_doc.[FILE_CONTENT]);
+	if v_xmltype is not null and v_xmltype.existsNode('/*/*:DocumentID') = 1 then
+			v_gui := substr(v_xmltype.extract('/*/*:DocumentID/text()').getStringVal(), 1, 36);
+	end if;
+	return v_gui;
+end;
+
+public function getPath return varchar2 is
+begin
+	return nvl(&ft.get_str_value('CUST_PATH', null, '0'), './741');
+end;
+
+public function getDocType(p_fileName varchar2) return ref [PSH_CUST_DOC_TYP] is -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+v_res	ref [PSH_CUST_DOC_TYP]; -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+v_code 	varchar2(3);
+begin
+	v_code := substr(upper(p_fileName), 1, 3);
+	
+	begin
+		locate v_res in ::[PSH_CUST_DOC_TYP] where v_res.[CODE] = v_code; -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+	exception when no_data_found then
+		pragma error('Не найден тип документа по коду <'|| v_code ||'>');
+	end;
+	return v_res;
+end;
+
+public function getXMLFromCLOB(P_CLOB [CLOB]) return xmlType is
+begin
+	return xmltype.createxml(P_CLOB);
+exception when others then -- важно перехватить любые ошибки разбора xml
+	return null;
+end;
+
+public function ExtractDateFromXML(P_XML xmlType, P_PATH varchar2) return [DATE] is
+begin
+	return to_date(P_XML.extract(P_PATH).GetStringVal(), 'YYYY-MM-DD');
+exception when others then  -- важно перехватить любые ошибки преобразования строки в дату
+	return null;
+end;
+
+public procedure getTuneDelivery(p_docIn ref [PSH_CUST_DOCS_IN], p_docType ref [PSH_CUST_DOC_TYP], p_sysAbs out ::[PSH_CUST_DOCS].[PSH_LIB_TC].T_sysAbs) is -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25 -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25 -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+docIn	[PSH_CUST_DOCS_IN]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+n		integer;
+begin
+	&debug('>> getTuneDelivery ', 0)
+	&debug('p_docIn = ' || p_docIn, 0)
+	&debug('p_docType = ' || p_docType, 0)
+	
+	docIn := p_docIn;
+	for (
+			select	distinct x(x.[SYS_AB] : sys)
+			in		::[PSH_CUST_DELIVER] all -- updated CHANGE_QUALIFIER PSB_CUST_DELIVER->PSH_CUST_DELIVER 08/10/25
+			where	x.[DOC_TYPE] = p_docType
+				and x.[BRANCH] = docIn.[BRANCH]
+	) loop
+		p_sysAbs(p_sysAbs.count).[SYS_AB] := x.sys;		
+	end loop;
+	
+	&debug('p_sysAbs.count = ' || p_sysAbs.count, 0)	
+	if p_sysAbs.count > 0 then
+		n := p_sysAbs.first;
+		while n is not null loop
+			&debug('p_sysAbs.count = ' || p_sysAbs(n).[SYS_AB].[CODE], 0)
+
+			n := p_sysAbs.next(n);
+		end loop;
+	end if;
+end;
+
+/**
+ * Смена статуса одного документа с вызовом хука CUST_CHANGE_ST
+ * @param p_docIn		ссылка на входящий документ налогового органа
+ * @param p_state		состояние для смены
+ */
+public procedure setState(p_docIn ref [PSH_CUST_DOCS_IN], p_state ::[PSH_CUST_DOCS].[DOC_STATE]%type) is -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25 -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+docStateTab TFileStates;
+begin
+	addDoc(docStateTab, p_docIn, p_state);
+	p_docIn.[DOC_STATE] := p_state;
+	::[HOOK].[PSB_CUST_CH_ST](docStateTab);
+end;
+
+/**
+ * Функция определения состояния документа по состояниям его запросов
+ * @param p_doc		ссылка на документ налогового органа
+ * @param p_excReq	ссылка на запрос, который следует исключить из анализа (востребовано, например, при удалении запроса)
+ * @result			возвращает:
+ * 								состояние stAnswExc (исключительная ситуация) - если есть запросы в исключении
+ * 								состояние stAnswer (отклики получены) - если по всем запросам получены ответы
+ * 								состояние sttoSend (запросы отправлены) - если есть запросы без ответа
+ * 								состояние stPodtv (подтверждено) - если нет запросов
+ */
+public function getAnswState(p_doc ref [PSH_CUST_DOCS], p_excReq ref [PSH_CUST_REQS] default null) return varchar2(16) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25 -- updated CHANGE_QUALIFIER PSB_CUST_REQS->PSH_CUST_REQS 08/10/25
+is
+allCount integer := 0;
+excCount integer := 0;
+ansCount integer := 0;
+begin
+	for (
+		select	x(
+					  analytic(count(1), 'over()') : allCnt
+					, analytic(count(case when x.[STATE_REQ] = &libtc.stRAnswered then 1 end), 'over ()') : ansCnt
+					, analytic(count(case when x.[STATE_REQ] = &libtc.stRExcept then 1 end), 'over ()') : excCnt
+				)
+		in		::[PSH_CUST_REQS] all -- updated CHANGE_QUALIFIER PSB_CUST_REQS->PSH_CUST_REQS 08/10/25
+		where	x.[DOC] = p_doc
+			and (x != p_excReq or p_excReq is null)
+			
+	) loop 
+		allCount := x.allCnt;
+		ansCount := x.ansCnt;
+		excCount := x.excCnt;
+		
+		exit;
+	end loop;
+
+	if allCount = 0 then
+		return &libtc.stPodtv;
+		
+	elsif excCount > 0 then
+		return &libtc.stAnswExc;
+		
+	elsif allCount - ansCount = 0 then
+		return &libtc.stAnswer;
+	
+	else
+		return &libtc.stSendReqs;
+		
+	end if;
+end;
+
+public procedure setExist(p_checkXML in out &libtc.T_CheckXML, p_key varchar2 ,p_value boolean default true) is
+begin
+	&debug( '>> setExist', 0)
+	if p_key is not null then
+		&debug( 'p_key: ' || p_key, 0)
+
+		p_checkXML(p_key) := case p_value when true then '1' else '0' end;
+		&debug( 'p_checkXML(p_key): ' || p_checkXML(p_key), 0)
+	end if;
+	&debug( '<< setExist', 0)
+end;
+
+public procedure checkExists(p_checkXML &libtc.T_CheckXML, p_errors in out &libtc.T_Errors) is
+i	varchar2;
+begin
+	&debug( '>> checkExists', 0)
+	if p_checkXML.count > 0 then
+
+		i := p_checkXML.first;
+		
+		while i is not null loop
+			&debug( 'p_checkXML('||i||'): ' || p_checkXML(i), 0)
+			
+			if p_checkXML(i) = '0' then
+				setError(p_errors, i || ': Отсутствует обязательный элемент', '13');
+			end if;
+			i := p_checkXML.next(i);
+		end loop;
+	end if;
+	&debug( '<< checkExists', 0)
+end;
+
+public function get_xpath(p_node &xml.DOMNode) return varchar2 is
+	v_node &xml.DOMNode := p_node;
+	v_xpath varchar2(32767);
+begin
+	while not &xml.isNull(v_node) and not &xml.isNull(&xml.getParentNode(v_node)) loop
+		v_xpath := '/'||&xml.getNodeName(v_node)||v_xpath;
+		v_node := &xml.getParentNode(v_node);
+	end loop;
+	return v_xpath;
+end;
+
+procedure addTextNode(p_doc &xml.DOMDocument, p_parent &xml.DOMNode, p_name varchar2, p_text [STRING_1000]) is
+begin
+	if p_text is not null then
+		&xml.appendChild(&xml.appendChild(p_parent, &xml.makeNode(&xml.createElement(p_doc, p_name))),
+							&xml.makeNode(&xml.createTextNode(p_doc, p_text)));
+	end if;
+end;
+
+public function addNode
+	( p_doc			&xml.DOMDocument
+	, p_parent 		&xml.DOMNode
+	, p_name 		varchar2(32767)
+	, p_value		varchar2(32767) default null
+	, p_required	boolean default false
+	)
+return &xml.DOMNode is
+	v_node 		&xml.DOMNode;
+	v_nameAttr	varchar2(32767);
+begin
+	if p_name is not null then
+		if p_name like '@%' then
+			v_nameAttr := substr(p_name,2);
+			if p_value is not null then
+				&xml.setAttribute(&xml.makeElement(p_parent), v_nameAttr, p_value);
+			elsif p_value is null and p_required then
+				pragma error('Не указано значение обязательного атрибута <' || v_nameAttr || '>, путь: ' || get_xpath(p_parent));
+			end if;
+		elsif p_name like '#%' then
+			v_nameAttr := substr(p_name,2);
+			if p_value is not null then
+				addTextNode(p_doc, p_parent, v_nameAttr, p_value);
+			elsif p_value is null and p_required then
+				pragma error('Не указано значение обязательного атрибута <' || v_nameAttr || '>, путь: ' || get_xpath(p_parent));
+			end if;			
+		else
+			v_node := &xml.appendChild(p_parent,&xml.makeNode(&xml.createElement(p_doc,p_name)));
+			if p_value is not null then
+				&xml.appendChild(v_node,&xml.makeNode(&xml.createTextNode(p_doc,p_value)));
+			end if;
+		end if;
+	end if;
+
+	return v_node;
+end;
+
+public procedure copyNode(p_doc &xml.DOMDocument, p_node &xml.DOMNode, p_data XMLType)
+is
+tempDoc	&xml.DOMDocument;
+node1	&xml.DOMNode;
+node2	&xml.DOMNode;
+begin
+	tempDoc:= &xml.newDomDocument(p_data.GetClobVal());
+	node1 := &xml.getFirstChild(&xml.makeNode(tempDoc));
+	node2 := &xml.ImportNode(p_doc, &xml.CloneNode(node1, true), true);
+	node2 := &xml.appendChild(p_node, node2);
+	&xml.freeDocument(tempDoc);	
+end;
+
+public function getDogFromName(p_filename varchar2(128)) return ref [PSH_FTS_AGR] is -- updated CHANGE_QUALIFIER PSB_FTS_AGR->PSH_FTS_AGR 08/10/25
+v_on_date date;
+begin
+	v_on_date := to_date(substr(p_filename, 22, 8), 'YYYYMMDD');
+	
+	&debug('>> getBrFromName',0)
+	&debug('На дату: ' || v_on_date,0)
+
+	-- проверка БИК в имени файла
+	for (
+			select	x(
+						  x					: dog
+						, x.[FILIAL]		: filial
+					)
+			in		::[PSH_FTS_AGR] all -- updated CHANGE_QUALIFIER PSB_FTS_AGR->PSH_FTS_AGR 08/10/25
+			where	(x.[DATE_BEGIN] is null or x.[DATE_BEGIN] <= v_on_date)
+		 		and (x.[DATE_END] is null or x.[DATE_END] >= v_on_date)
+	) loop
+		&debug('Договор для филиала: ' || x.filial,0)
+		if &libtc.branchesInfo.exists(x.filial) and substr(&libtc.branchesInfo(x.filial).f_bicF, 3) = substr(p_filename, 5, 7) then
+			&debug('Нашли договор: ' || x.dog,0)
+			return x.dog;
+
+		end if;	
+	end loop;					
+	&debug('Не нашли договор',0)
+	return null;
+end;
+
+public function getBranch(
+	p_bic ::[CL_BANK_N].[BIC]%type,
+	p_name varchar2(250) default null, -- наименование банка по XSD может иметь длину 250 символов
+	p_date [DATE] default null
+) return ref [BRANCH] is
+	
+	v_date [DATE];
+	idx integer;
+	
+	type TCurBranches is
+		select	br (br : branch, br.[CODE] : code, nvl(cl_req.[NAME], cl.[NAME]) : name)
+		in
+			::[BRANCH]
+			left outer join (::[CL_BANK_N] all : cl_bank_req) on br.[BANK_REQ] = cl_bank_req -- банк для определения реквизитов может быть не указан
+			join (::[CL_BANK_N] all : cl_bank) on br.[BANK] = cl_bank -- банк указан всегда
+			left outer join (::[CLIENT] all : cl_req) on cl_bank_req = cl_req
+			join (::[CLIENT] all : cl) on cl_bank = cl
+		where
+			br.[INTERNAL]
+			and case when cl_bank_req is not null then cl_bank_req.[BIC] else cl_bank.[BIC] end = p_bic -- если указан банк для определения реквизитов то берем БИК из него, иначе с основного банка.
+			and (br.[DATE_BEGIN] is null or br.[DATE_BEGIN] <= v_date)
+			and (br.[DATE_END] is null or br.[DATE_END] >= v_date)
+			
+		union
+		
+		select	br (br : branch, br.[CODE] : code, cp_part.[NAME] : name)
+		in ::[BRANCH]
+		join (::[CL_PART] all : cp_part) on cp_part = br.[BANK_REQ]
+		where
+			br.[INTERNAL]
+			and br.[BANK].[BIC] = p_bic
+			and (br.[DATE_BEGIN] is null or br.[DATE_BEGIN] <= v_date)
+			and (br.[DATE_END] is null or br.[DATE_END] >= v_date)
+		order by br.[CODE];
+	
+	CurBranches TCurBranches;
+	BranchRec TCurBranches%rowtype;
+	
+	Type TBranches is table of TCurBranches;
+	Branches TBranches;
+	
+	function normalize_str(p_str string(4000)) return string(4000) is
+	begin
+		return upper(regexp_replace(p_str, '[[:space:][:punct:]]', ''));
+	end;
+	
+begin
+	
+	if p_bic is null then
+		return null;
+	end if;
+	
+	v_date	:= nvl(p_date, trunc(sysdate));
+	CurBranches.open;
+	CurBranches.fetch(Branches);
+	CurBranches.close;
+	
+	if Branches.count = 1 then
+		-- Если филиал с таким БИК единственный - возвращаем его
+		&debug ('Обнаружен единственный филиал '||Branches(Branches.first).branch%id, 0)
+		return Branches(Branches.first).branch;
+	elsif Branches.count > 1 then
+		&debug ('Найдено несколько филиалов, сравниваем наименование c '|| p_name, 0)
+		idx := Branches.first;
+		while idx is not null loop
+			if normalize_str(Branches(idx).name) = normalize_str(p_name) then
+				return Branches(idx).branch;
+			end if;
+			idx := Branches.next(idx);
+		end loop;
+		&debug ('Нет филиалов с похожим наименованием', 0)
+	else
+		&debug ('Филиал не определен', 0)
+		return null;
+	end if;
+	
+end;
+
+function addPT(
+	  p_doc &xml.DOMDocument
+	, p_node &xml.DOMNode
+	, p_filename ::[PSH_CUST_DOCS].[FILE_NAME]%type -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	, p_branch ref [BRANCH] default null
+	, p_check_date [DATE_TIME] default null
+)
+return &xml.DOMNode
+is
+v_nodeFile 		&xml.DOMNode;
+begin
+	v_nodeFile := addNode(p_doc, p_node, 'Файл');
+	addNode(p_doc, v_nodeFile, '@xmlns', 'urn:cbr-741P:PT:v1.01..3');
+	addNode(p_doc, v_nodeFile, '@ИдПодтв', GetGUI);
+	addNode(p_doc, v_nodeFile, '@ИмяФайла', regexp_replace(p_filename, '(.*)(\..*)', '\1'));
+	addNode(p_doc, v_nodeFile, '@ДатаВремяПроверки', regexp_replace(to_char(nvl(p_check_date, &curdate_d(coalesce(p_branch, ::[SYSTEM].[VARIABLES].OURBRANCH))), 'YYYY-MM-DD hh24:mi:ss'),'\s', 'T'));
+	return v_nodeFile;
+end;
+
+-- 0 - обработка завершена
+-- 1 - дальнейшая обработка
+
+public function formPT(p_doc ref [PSH_CUST_DOCS_IN]) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+return integer is
+v_doc_in	[PSH_CUST_DOCS_IN]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+v_doc		&xml.DOMDocument;
+v_node		&xml.DOMNode;
+v_node1		&xml.DOMNode;
+v_node2		&xml.DOMNode;
+v_node3		&xml.DOMNode;
+v_outDocRef	ref [PSH_CUST_DOCS_OU]; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+v_outClob	[CLOB];
+v_filename	::[PSH_CUST_DOCS].[FILE_NAME]%type; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+v_res		integer;
+begin
+	v_doc_in := p_doc;
+	if v_doc_in.[DOC_STATE] not in (&libtc.stChecked, &libtc.stCheckErr) then
+		return null;
+	end if;
+	
+	v_doc := &xml.NewDomDocument;
+	v_node := &xml.makeNode(v_doc);
+	
+	v_filename := regexp_replace(v_doc_in.[FILE_NAME], '(.*)(\..*)', '\1');
+
+	v_node1 := addPT(v_doc, v_node, v_doc_in.[FILE_NAME], v_doc_in.[BRANCH], v_doc_in.[CHECK_DATE]);
+	
+	if v_doc_in.[DOC_STATE] = &libtc.stChecked then
+		v_node2 := addNode(v_doc, v_node1, 'РезПроверки');
+		v_node3 := addNode(v_doc, v_node2, '@КодРезПроверки', '01');		
+		v_res	:= 1;			
+	elsif v_doc_in.[DOC_STATE] = &libtc.stCheckErr then
+		for (select x(
+						 x.[ERR_TYPE]	: errCode
+						,x.[ERR_TEXT]	: errText
+					)
+		in v_doc_in.[ERRORS]
+		) loop
+			v_node2 := addNode(v_doc, v_node1, 'РезПроверки');
+			v_node3 := addNode(v_doc, v_node2, '@КодРезПроверки', x.errCode);					
+			v_node3 := addNode(v_doc, v_node2, '@Пояснение', x.errText);					
+		end loop;
+		v_res := 0;
+	end if;
+	
+	dbms_lob.createtemporary(v_outClob, true);
+	
+	&xml.writeToCLOB(v_doc,v_outClob);			
+			
+	&debug('v_outClob = ' || v_outClob, 0)
+			
+	&xml.freedocument(v_doc);
+	
+	v_outDocRef := ::[PSH_CUST_DOCS_OU].[PSH_NEW_AUTO]( -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+											P_FILE_NAME 	== formOutFileName(p_doc, &libtc.typePT1, null)		--Имя файла
+											,P_FILE_CONTENT	== v_outClob										--Содержимое файла
+											,P_FILE_CR_DATE == null												--Дата создания файла
+											,P_DOC_CR_DATE	== &curdate_d(getDogFromName(v_doc_in.[FILE_NAME]).[FILIAL]) --Дата создания документа
+											,P_VERSION		== null												--Версия формата
+											,P_DOC_TYPE		== &libtc.typePT1									--Тип документа
+											,P_BRANCH		== v_doc_in.[BRANCH]								--Филиал
+											);
+	
+	&lib.linkDoc(p_doc, v_outDocRef, &libtc.lnkConfirm1);
+	
+	return v_res;
+end;
+
+public function formPT2Finish(
+	p_doc ref [PSH_CUST_DOCS_IN], -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+	p_branch ref [BRANCH],
+	p_errors &libtc.T_Errors
+) return &libtc.R_docOut is
+	v_doc		&xml.DOMDocument;
+	v_node		&xml.DOMNode;
+	v_node1		&xml.DOMNode;
+	v_node2		&xml.DOMNode;
+	v_node3		&xml.DOMNode;
+	v_outClob	[CLOB];
+	n 			integer;
+	v_doc_out	&libtc.R_docOut;
+begin
+	&debug('>> formPT2Finish', 0)
+
+	&debug('p_doc = ' || p_doc, 0)
+	&debug('p_branch = ' || p_branch, 0)
+
+	if not p_doc is null then
+		v_doc := &xml.NewDomDocument;
+		v_node := &xml.makeNode(v_doc);									
+		v_node1 := addPT(v_doc, v_node, p_doc.[FILE_NAME], p_branch);
+
+		n := p_errors.first;
+		while n is not null loop
+			&debug('Код ошибки = ' || p_errors(n).[ERR_TYPE], 0)							
+			&debug('Пояснение = ' || p_errors(n).[ERR_TEXT], 0)		
+			
+			v_node2 := addNode(v_doc, v_node1, 'РезПроверки');	
+			v_node3 := addNode(v_doc, v_node2, '@КодРезПроверки', substr(p_errors(n).[ERR_TYPE], 1, 2));
+			v_node3 := addNode(v_doc, v_node2, '@Пояснение', p_errors(n).[ERR_TEXT]);
+			
+			n := p_errors.next(n);
+		end loop;
+		
+		dbms_lob.createtemporary(v_outClob, true);
+		&xml.writeToCLOB(v_doc,v_outClob);			
+		&debug('v_outClob = ' || v_outClob, 0)
+		&xml.freedocument(v_doc);
+		
+		v_doc_out.r_clob 	:= v_outClob;
+		v_doc_out.r_docType	:= &libtc.typePT2;
+		v_doc_out.r_fileName:= formOutFileName(p_doc, v_doc_out.r_docType, p_branch);
+		v_doc_out.r_branch	:= p_branch;
+		v_doc_out.r_link	:= &libtc.lnkConfirm2;
+		
+		return v_doc_out;
+	end if;
+	
+	return null;
+end;
+
+public function formPT2(p_doc ref [PSH_CUST_DOCS_IN], p_branch ref [BRANCH], p_errors &libtc.T_Errors) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+return &libtc.R_docOut is
+v_docOut	&libtc.R_docOut;
+n 			integer;
+v_text		varchar2(512);
+v_reviewErr	boolean;
+
+begin
+&debug('>> formPT2', 0)
+
+&debug('p_doc = ' || p_doc%id, 0)
+
+	if not p_doc is null then
+		&debug('p_errors.count = ' || p_errors.count, 0)
+		if p_errors.count > 0 then
+			v_reviewErr := nvl(&ft.get_bool_value('CUST_REVIEW_EXEC_ERR',null, '0'), false);
+			
+			n := p_errors.first;
+			
+			while n is not null loop
+				&debug('n = ' || n, 0)							
+				&debug('p_errors.[ERR_CODE] = ' || p_errors(n).[ERR_TYPE], 0)							
+				&debug('p_errors.[VALUE] = ' || p_errors(n).[VALUE], 0)		
+				&debug('p_errors.[ERR_TEXT] = ' || p_errors(n).[ERR_TEXT], 0)		
+				
+				if not needNote or p_errors(n).[ERR_TEXT] is null then
+					
+					case p_errors(n).[ERR_TYPE] of
+						:'21':
+							v_text := 'Электронный документ ошибочно направлен таможенным органом не в тот банк, подразделение Банка России';
+						:'22':
+							v_text := 'В банке, подразделении Банка России, обслуживающем счета, отсутствует номер счета, указанный в электронном документе, сформированном таможенным органом';
+						:'23':	
+							v_text := 'Наименование клиента не соответствует номеру счета клиента, указанному в электронном документе, сформированном таможенным органом';
+						:'24':
+							v_text := 'В банке, подразделении Банка России, обслуживающим счета, отсутствует клиент с указанным ИНН/КПП';
+						:'31':
+							v_text := 'Невозможно исполнить документ таможенного органа';
+					end;
+
+					&debug('v_text = ' || v_text, 0)										
+					p_errors(n).[ERR_TEXT] := v_text;
+					
+				else
+					p_errors(n).[ERR_TEXT] := substr(p_errors(n).[ERR_TEXT], 1, 512);
+					
+				end if;
+				
+
+				p_errors(n).[VALUE] := null;
+				
+				-- если включена, тогда в массив
+				if v_reviewErr then
+					p_doc.[EXEC_ERRS].[NEW_AUTO](
+						p_branch		--Филиал
+						,p_errors(n)	--Ошибки
+					);
+					
+				end if;				
+				n := p_errors.next(n);
+			end loop;
+			
+			-- если настройка выключена, тогда создаем сразу
+			if not v_reviewErr then
+				v_docOut := formPT2Finish(p_doc, p_branch, p_errors);
+			end if;
+			
+		end if;
+	end if;
+	
+	return v_docOut;
+end;
+
+public function normtErr(p_errBranch &libtc.t_errIC) return &libtc.t_errors
+is
+recErr	[TAX_ERROR];
+tabErr	&libtc.t_errors;
+idx		integer;
+begin
+	-- перекладываем в результат
+	idx := p_errBranch.first;
+	while idx is not null loop		
+		if not p_errBranch(idx).f_del and p_errBranch(idx).f_code is not null then
+			recErr.[ERR_TYPE] := p_errBranch(idx).f_code;
+			if p_errBranch(idx).f_desc <> 'EMPTY' or p_errBranch(idx).f_desc is not null then
+				recErr.[ERR_TEXT] := substr(p_errBranch(idx).f_desc, 1, recErr.[ERR_TEXT]%size);
+			else
+				recErr.[ERR_TEXT] := null;
+			end if;
+			recErr.[VALUE] := p_errBranch(idx).f_value;
+
+			tabErr(tabErr.count + 1) := recErr;
+		end if;
+						
+		idx := p_errBranch.next(idx);
+	end loop;
+	
+	&debug('tabErr.count ' || tabErr.count, 0)
+	return tabErr;
+end;
+
+/*Работа с ошибками с учетом приоритета, добавления/удаления для корректного формирования подтверждения2*/
+public procedure setErrorIC(p_table in out &libtc.t_errIC
+					--таблица с ошибками
+					, p_code varchar2(2)
+					--код ошибки как в формате
+					, p_value varchar2
+					--ключ для хранения ошибки
+					, p_pr integer
+					--приоритет ошибки
+					, p_del boolean default false
+					--признак удаления
+					, p_desc varchar2(512) default null
+					--описание для подтверждения2
+					) is
+v_j 		integer;
+v_buf		&libtc.r_errIC;
+v_buf1		&libtc.r_errIC;
+v_addBuf	boolean;
+begin
+	&debug('>> setErrorIC ', 0)
+	&debug('Код ' || p_code, 0)
+	&debug('Описание ' || p_desc, 0)
+	&debug('Значение '|| p_value, 0)
+	&debug('Приоритет ' || p_pr, 0)
+	&debug('Признак удаления ' || p_del, 0)
+	&debug('Количество записей в таблице ' || p_table.count, 0)
+
+	v_buf.f_code 	:= p_code;
+	v_buf.f_value 	:= substr(p_value, 1, v_buf.f_value%size);
+	v_buf.f_pr 		:= p_pr;	
+	v_buf.f_del 	:= p_del;	
+	v_buf.f_desc 	:= p_desc;	
+	v_addBuf 		:= false;
+	
+	-- если есть элементы, тогда вставляем в начало своего приоритета
+	if p_table.count > 0 then
+		v_j := p_table.first;
+		
+		while v_j is not null loop
+			&debug('Таблица. Индекс:	' || v_j, 0)
+			&debug('Таблица. Приоритет:	' || p_table(v_j).f_pr, 0)
+			&debug('Таблица. Значение:	' || p_table(v_j).f_value, 0)
+			&debug('Таблица. Удаление:	' || p_table(v_j).f_del, 0)
+			
+			-- если приоритет элемента меньше приоритета запрошенного
+			if p_table(v_j).f_pr < p_pr then
+				-- и элемент удален, тогда ничего не делаем. Если не удален, то может быть удален позже, поэтому запись добавляем
+				if p_table(v_j).f_del then
+					exit; -- не добавляем
+				end if;
+			
+			elsif p_table(v_j).f_pr = p_pr then -- если приоритет элемента равен нашему приоритету, тогда сравниваем текст и вставляем в конец, а все двигаем вниз
+				if p_table(v_j).f_value = p_value then
+					&debug('Приоритеты совпали ', 0)
+					&debug('Снимаем признак добавления', 0)
+					v_addBuf := false;
+
+					if not p_del and get_err_prior(p_table(v_j).f_code) > get_err_prior(p_code) then
+						-- обновляем
+						p_table(v_j).f_code := p_code;
+						p_table(v_j).f_desc := p_desc;
+					elsif get_err_prior(p_table(v_j).f_code) = get_err_prior(p_code) then
+						-- проверим описание
+						if needNote then
+							if p_table(v_j).f_desc is null and v_buf.f_desc is not null then
+								-- было пустое пояснение, а пришло не пустое - заменяем
+								p_table(v_j).f_desc := v_buf.f_desc;
+							elsif p_table(v_j).f_desc <> v_buf.f_desc and v_buf.f_desc is not null then
+								-- были получены разные пояснения из разных компонент, описание стираем, оно будет сформировано по общим правилам
+								p_table(v_j).f_desc := 'EMPTY';
+							end if;
+						end if;
+					end if;
+
+					if p_del then
+						-- Здесь нельзя выходить, потому что признак удаления устанавливается и меньшему приоритету.
+						&debug('Нужно удалить', 0)
+						p_table(v_j).f_del := p_del;
+					else
+						&debug('Не нужно добавлять', 0)
+						exit; -- значит информация об этом значении есть
+					end if;
+				
+				else
+				
+					-- Нужно добавить последний элемент.
+					-- Если будут записи с низшим приоритетом (приоритет больше переданного), тогда v_addBuf все равно в следующем условии установится.
+					-- Если не будет, тогда добавится переданый в конец.
+					&debug('Устанавливаем признак добавления', 0)
+					v_addBuf := true;	
+				end if;
+		
+			elsif p_table(v_j).f_pr > p_pr then -- если дошли до этого, значит значения нет и его нужно добавить									
+				&debug('Меньший приоритет удаляем безусловно', 0)
+				p_table(v_j).f_del := true;						
+				
+				v_buf1 := p_table(v_j);					
+				p_table(v_j) := v_buf;					
+				v_buf := v_buf1;	
+				
+				if not v_addBuf then --and not v_existVal then
+					&debug('Признак добавления не установлен', 0)
+					&debug('Устанавливаем признак добавления', 0)
+					v_addBuf := true;
+				end if;								
+			end if;
+
+			v_j := p_table.next(v_j);	
+		end loop;
+	else	
+		v_addBuf := true;
+	end if;
+	
+	if v_addBuf then
+		-- сохраняем последний
+		v_j := nvl(p_table.last, 0) + 1;
+		&debug('Сохраняем последний', 0)
+		&debug('Порядковый номер ' || v_j, 0)
+		p_table(v_j)	:= v_buf;			
+	end if;	
+end;
+
+public function GetPT1Name(p_doc ref [PSH_CUST_DOCS_IN]) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_IN->PSH_CUST_DOCS_IN 08/10/25
+return varchar2 is
+v_pt1name	::[PSH_CUST_DOCS].[FILE_NAME]%type; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+begin
+	&debug('>> GetPT1Name ',0)
+	
+	begin
+		select x(x.[DOC_RESULT].[FILE_NAME])
+			in ::[PSH_CUST_LINK] all -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+			where x.[DOC_ORIGIN] = p_doc
+			and x.[LINK_TYPE] = &libtc.lnkConfirm1
+			fetch 1
+			into v_pt1name;
+		return regexp_substr(v_pt1name, '[^\.]*');
+	exception when no_data_found then
+		return null;
+	end;
+		
+end;
+
+-- определение филиала, осуществляющего электронный обмен для филиала, указанного параметром
+public function getBranch4Exch(p_branch ref [BRANCH]) return ref [BRANCH] is
+v_dog ref [PSH_FTS_AGR]; -- updated CHANGE_QUALIFIER PSB_FTS_AGR->PSH_FTS_AGR 08/10/25
+begin
+	&debug('>> getBranch4Exch',0)
+	
+	select	x(x)
+	in		::[PSH_FTS_AGR] all -- updated CHANGE_QUALIFIER PSB_FTS_AGR->PSH_FTS_AGR 08/10/25
+	where	(x.[FILIAL] = p_branch
+				or
+			exists(select y(1) in x.[FILIAL_ARR] where y.[FILIAL] = p_branch))
+		and (x.[DATE_BEGIN] is null or x.[DATE_BEGIN] <= trunc(sysdate))
+		and (x.[DATE_END] is null or x.[DATE_END] >= trunc(sysdate))
+	into	v_dog;
+	
+	&debug(' Договор = ' || v_dog,0)
+	
+	return v_dog.[FILIAL];
+	
+exception
+	when NO_DATA_FOUND then
+		return null;
+	when TOO_MANY_ROWS then
+		pragma error('Невозможно однозначно определить договор электронного обмена для '||p_branch.[SHORTLABEL]||', БИК '||p_branch.[BANK].[BIC]);
+end;
+
+public function formOutFileName(
+	p_docIn ref [PSH_CUST_DOCS],		-- входящий документ -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	p_type ref [PSH_CUST_DOC_TYP],	-- тип исходящего документа -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+	p_branch ref [BRANCH]			-- филиал
+)
+return ::[PSH_CUST_DOCS].[FILE_NAME]%type is -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	v_res 		::[PSH_CUST_DOCS].[FILE_NAME]%type; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	v_fileName	::[PSH_CUST_DOCS].[FILE_NAME]%type; -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+	v_sendCount	integer;
+	infNum		integer;
+begin
+	&debug('>> formOutFileName', 0)
+	if not (p_docIn is null or p_type is null) then
+		
+		v_fileName := regexp_substr(p_docIn.[FILE_NAME], '[^\.]*');
+		&debug('v_fileName = ' || v_fileName, 0)
+		
+		if p_type not in (&libtc.typePT1, &libtc.typePT2) then
+			begin
+				-- посчитать максимальное значение этого типа в зависимостях от исходного документа
+				select x(max(to_number(substr(x.[DOC_RESULT].[FILE_NAME], 4, 1)))) in ::[PSH_CUST_LINK] where x.[DOC_ORIGIN] = p_docIn and x.[DOC_RESULT].[DOC_TYPE] = p_type -- updated CHANGE_QUALIFIER PSB_CUST_LINK->PSH_CUST_LINK 08/10/25
+				into v_sendCount;
+				v_sendCount := nvl(v_sendCount,1);
+			exception
+				when others then
+					null;
+			end;
+			&debug('v_sendCount = ' || v_sendCount, 0)
+		end if;
+		
+		v_res := substr(p_type.[CODE] || v_sendCount || '_' || v_fileName, 1, v_res%size);
+		
+		if p_type = &libtc.typeBFN then
+			begin
+				-- порядковый номер файла Сведений об остатках в текущем календарном году
+				select	x(max(to_number(substr(x.[FILE_NAME], instr(x.[FILE_NAME], '_', -1)+1, 6))))
+				in		::[PSH_CUST_DOCS_OU] all -- updated CHANGE_QUALIFIER PSB_CUST_DOCS_OU->PSH_CUST_DOCS_OU 08/10/25
+				where	x.[DOC_TYPE] = &libtc.typeBFN
+					and substr(x.[FILE_NAME], instr(x.[FILE_NAME], '_', -1, 2)+1, 4) = to_char(sysdate, 'yyyy')
+				into	infNum;
+			exception
+				when others then
+					null;
+			end;
+			infNum := nvl(infNum, 0) + 1;
+			&debug('infNum = ' || infNum, 0)
+			v_res := substr(v_res || '_' || &curdate_f(p_branch) || '_' || lpad(infNum, 6, '0'), 1, v_res%size);
+		end if;
+		
+	end if;
+	
+	v_res := substr(v_res || '.xml', 1, v_res%size);
+	
+	&debug('v_res = ' || v_res, 0)
+	&debug('<< formOutFileName', 0)
+	return v_res;
+end;
+
+-- Получение номеров по счетчикам
+public function GetNextInfoNumber(p_branch in ref [BRANCH], p_code ::[COUNTERS].[CODE]%type default null) return integer is
+v_counter_name	::[COUNTERS].[CODE]%type;
+v_next_number	integer;
+v_br_code		::[BRANCH].[CODE]%type;
+sq				ref [COUNTERS];
+begin
+	v_br_code := p_branch.[CODE];
+	v_counter_name := nvl(p_code, 'CUST_COUNTER') || '_' || v_br_code;
+	
+	begin
+		locate sq in ::[COUNTERS] where sq.[CODE] = v_counter_name;
+		&debug('В справочнике "'||::[COUNTERS]%classname||'" есть счетчик с кодом "'||v_counter_name||'"', 0)
+	exception when no_data_found then
+		sq := ::[COUNTERS].[NEW#AUTO](	v_counter_name
+										, 'Счетчик для сведений об остатках денежных средств для филиала '|| v_br_code
+										, P_NULL_OP_DATE == ::[PERIODS_OPER]([CODE] = 'D')
+										, P_INIT_BY_RECREATE == true
+									);
+		&debug('В справочник "'|| ::[COUNTERS]%classname ||'" добавлен счетчик с кодом "'||v_counter_name||'"',0)
+	end;
+		
+	v_next_number := ::[COUNTERS].[SQ].GetNextCount( sq%id, 'ST_ID');
+	
+	return v_next_number;
+end;
+
+-- корректировка даты по настройке TAX_TIME_OFFSET
+-- отнимается от p_date TAX_TIME_OFFSET/60/24
+-- p_date по умолчанию sysdate
+public function curdate(p_branch ref [BRANCH] default null, p_date date default null) return date is
+v_date date;
+v_diff_tune pls_integer;
+v_diff_br pls_integer;
+begin
+	p_branch := nvl(p_branch, ::[SYSTEM].[VARIABLES].OURBRANCH);
+	v_diff_br := nvl(p_branch.[DIFFERENCE], 0);
+	v_date := nvl(p_date, sysdate);
+	v_diff_tune := nvl(&ft.get_num_value('CUST_TIME_OFFSET'), 0);
+	return v_date - v_diff_tune/60/24 + v_diff_br/24;
+end;
+
+-- Извлечение текста ошибки из объекта XMLType
+public function getErrorNote(p_xml_type XMLType, p_path varchar2) return varchar2(512) is
+begin
+	if needNote and p_xml_type.existsNode(p_path||'/@Пояснение') = 1 then
+		return substr(replace(p_xml_type.extract(p_path||'/@Пояснение').getStringVal(), '&quot;', '"'), 1, 512);
+	else
+		return null;
+	end if;
+end;
+
+-- Извлечение текста ошибки из объекта DOMElement
+public function getErrorNote(p_elem &xml.DOMElement) return varchar2(512) is
+begin
+	if needNote then
+		return substr(replace(&xml.getAttribute(p_elem, 'Пояснение'), '&quot;', '"'), 1, 512);
+	end if;
+end;
+
+public type TFileStates is table of [PSH_CUST_DREF_ST]; -- updated CHANGE_QUALIFIER PSB_CUST_DREF_ST->PSH_CUST_DREF_ST 08/10/25
+
+public procedure addDoc(p_states_tab in out TFileStates, p_doc ref [PSH_CUST_DOCS], p_new_state ::[PSH_CUST_DOCS].[DOC_STATE]%type) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+is
+v_idx integer;
+begin
+	v_idx := p_states_tab.count+1;
+	p_states_tab(v_idx).[CUST_DOC] := p_doc;
+	p_states_tab(v_idx).[START_STATE] := p_doc.[DOC_STATE];
+	p_states_tab(v_idx).[END_STATE] := p_new_state;
+end;
+
+public function get_err_prior(p_err_code string(2)) return pls_integer
+is
+v_prior pls_integer;
+begin
+	v_prior := case p_err_code
+						    when '31' then 1
+							when '22' then 2
+							when '23' then 3
+							when '24' then 4
+							when '21' then 5
+				end;
+	
+	return v_prior;
+end;
+
+public function getBP(p_doc ref [PSH_CUST_DOCS]) return varchar2(100) -- updated CHANGE_QUALIFIER PSB_CUST_DOCS->PSH_CUST_DOCS 08/10/25
+is
+	docType ref [PSH_CUST_DOC_TYP]; -- updated CHANGE_QUALIFIER PSB_CUST_DOC_TYP->PSH_CUST_DOC_TYP 08/10/25
+	codeBO varchar2(100);
+begin
+	docType := p_doc.[DOC_TYPE];
+
+	if docType.[BUS_PRS]%size(1) > 0 then
+		begin
+			for
+				(
+					select	x(x.[CODE_BO] : BO)
+					in		docType.[BUS_PRS]
+					where	x.[VERSION] = p_doc.[VERSION] or x.[VERSION] is null
+					order by x.[VERSION] asc nulls last
+				)
+			loop
+				codeBO := x.BO;
+			end loop;
+		exception
+			when NO_DATA_FOUND then null;
+		end;
+	end if;
+	
+	return codeBO;
+end;
+end;

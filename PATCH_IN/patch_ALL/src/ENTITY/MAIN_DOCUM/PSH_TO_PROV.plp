@@ -1,0 +1,26 @@
+class MAIN_DOCUM;
+
+@name('[ПСБ] Перевести документ из состояния "%" - > "Проведен"')
+@tag('COPIED')
+method PSH_TO_PROV is
+PSH_TO_PROV is
+
+execute is
+
+begin
+
+		this.[SET_INSERT]
+		(
+			null
+			, null
+			, this.[DATE_DOC]
+
+		);
+ this.[DATE_VAL]:=this.[DATE_DOC]; 
+ -- this.[DATE_EXEC]:=this.[DATE_DOC];
+ --this.[DOCUMENT_DATE]:=this.[DATE_DOC];
+ 
+ this%state:= 'PROV';
+end;
+end;
+end;

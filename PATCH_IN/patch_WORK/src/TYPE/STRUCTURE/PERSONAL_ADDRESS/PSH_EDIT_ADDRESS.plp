@@ -1,0 +1,911 @@
+class PERSONAL_ADDRESS;
+
+@import_plsql(true)
+@this(assert_null:=false)
+@name('[ПСБ] Редактировать адрес')
+@tag('COPIED')
+static method PSH_EDIT_ADDRESS is
+
+@name('Ссылка на адресный объект') public V_ADDR_OBJ_REF [ADDRESS_OBJ_REF];
+@name('Адресный объект строкой')   public V_STR          [MEMO];
+@name('Дом (ссылка) строкой')      public V_STR_HOUSE    [MEMO];
+@name('Список домов')              public V_HOUSE_ARR    [LIST_DOMA_ARR];
+@name('Выбор № дома')              public V_HOUSE_REF    [LIST_DOMA_REF];
+@name('Адрес строкой')             public V_IMP_STR      [MEMO];
+@name('V_VB')                      public V_VB           [STRING_32000];
+@name('Тип адресного деления')     public V_STRUCT       [ONE_FROM_THREE];
+@name('ОКТМО')                     public V_OKTMO        [OKTMO_REF];
+--Башкиров В.Г. 12.02.2025 CFT-464
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+dp  integer:=0; --управление debug_pipe
+dp1 integer:=0;	--управление debug_pipe
+dp10 integer:=null;	--управление debug_pipe
+
+fmt	   string(10):='dd/mm/yyyy';
+fmt24  string(22):='dd/mm/yyyy HH24:MI:SS';
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+vThis [PERSONAL_ADDRESS];
+nADMorMUN number(1);
+V_IMP_STR_OLD [MEMO]; --Башкиров В.Г. 03.03.2025
+
+
+pragma include(::[RUNTIME].[DEBUG_MACRO]);
+pragma include([RUNTIME].[DEBUG_MACRO]);
+pragma include([PERSONAL_ADDRESS].[LIB]);
+
+v_addr_obj_exp	::[PERSONAL_ADDRESS].[API_LIB].addr_obj_expanded_rectype%type;
+v_addr_obj_cur_ref	[ADDRESS_OBJ_REF];
+v_oktmo_cur_ref ref [OKTMO];
+
+v_addr_cur [PERSONAL_ADDRESS];
+tn_no_str_addr	boolean;
+tn_kladr_zip	boolean;
+tn_strong_street  boolean;
+
+korpus_shortname const varchar2(10)	:= 'к';
+
+V_KLADR_MODE number;
+V_AUTO_ZIP boolean;
+
+V_COUNTRY ref [COUNTRY];
+-->>>> Перед BASE$SETVARS
+ 
+ --Башкиров В.Г. 20.02.2025
+public function calc_Imp_Str(P_ADDR [PERSONAL_ADDRESS])
+return [STRING_250] is
+	vStruct0 number(1);
+	ret_str [STRING_250];
+begin
+	if not coalesce(P_ADDR.[FIX_PRINT], false) then --Не "Ручной ввод"
+
+		vStruct0:=::[HOOK_BANK].[GET_PRINT_ADDR_1].Get_ADM_or_MUN(P_ADDR);
+		&debug('.calc_Imp_Str --- Пересчитываем в ::[PERSONAL_ADDRESS].[PSH_SLIB].get_str_for_personal_address  vStruct0='||vStruct0,dp) -- updated CHANGE_SHORT_NAME PSB_SLIB->PSH_SLIB 14/10/25
+		ret_str := ::[PERSONAL_ADDRESS].[PSH_SLIB].get_str_for_personal_address(P_ADDR, vStruct0); -- updated CHANGE_SHORT_NAME PSB_SLIB->PSH_SLIB 14/10/25
+		&debug('.calc_Imp_Str -<- '||iif(vStruct0=2,'2-муниципал','1-адм')||' ret_str='||ret_str,dp)
+
+	elsif coalesce(P_ADDR.[IMP_STR], '~NULL~') <> coalesce(ret_str, '~NULL~') then
+		P_ADDR.[IMP_STR] := ret_str;
+		&debug('.calc_Imp_Str -<- Ручной ввод. '||iif(vStruct0=2,'2-муниципал','1-адм')||' ret_str='||ret_str,dp)
+	end if;
+	return ret_str;
+end;
+
+public function get_addr_obj_str
+	(
+	V_ADDR_OBJ_REF ::[PERSONAL_ADDRESS].[API_LIB].addr_obj_expanded_rectype%type
+	,V_STRUCT_0 number(1) default null
+	)
+return [MEMO]
+is
+	v_str [MEMO];
+	
+	procedure add_str (p_title varchar2(100), p_put_str varchar2(1000)) is
+	begin
+		if p_put_str is not null then
+			if v_str is not null then
+				v_str := v_str || NL$;
+			end if;
+			v_str := v_str || p_title || case when length(p_title) < 8 then TB$ end || p_put_str || ';';
+		end if;
+	end;
+begin
+	if v_addr_obj_exp.country.full_name       is not null then null; &debug('.get_addr_obj_str ->- v_addr_obj_exp.country       Страна                          ='||v_addr_obj_exp.country.full_name,dp10)
+	end if;
+	if v_addr_obj_exp.region.full_name        is not null then null; &debug('.get_addr_obj_str ->- v_addr_obj_exp.region        Регион                          ='||v_addr_obj_exp.region.full_name,dp10)
+	end if;
+	if v_addr_obj_exp.region_code             is not null then null; &debug('.get_addr_obj_str ->- v_addr_obj_exp.region_code   Код региона (субъекта РФ)       ='||v_addr_obj_exp.region_code  ,dp10)
+	end if;
+	if v_addr_obj_exp.region_city.full_name   is not null then null; &debug('.get_addr_obj_str ->- v_addr_obj_exp.region_city   Ссылка на город для региона     ='||v_addr_obj_exp.region_city.full_name,dp10)
+	end if;
+	if v_addr_obj_exp.district.full_name      is not null then null; &debug('.get_addr_obj_str ->- v_addr_obj_exp.district      Адм/муниципал район/округ       ='||v_addr_obj_exp.district.full_name,dp10)
+	end if;
+	if v_addr_obj_exp.district_city.full_name is not null then null; &debug('.get_addr_obj_str ->- v_addr_obj_exp.district_city Город для района,если он городом='||v_addr_obj_exp.district_city,dp10)
+	end if;
+	if v_addr_obj_exp.settlement.full_name    is not null then null; &debug('.get_addr_obj_str ->- v_addr_obj_exp.settlement    Гор./сельское поселение         ='||v_addr_obj_exp.settlement.full_name,dp10)
+	end if;
+	if v_addr_obj_exp.city.full_name          is not null then null; &debug('.get_addr_obj_str ->- v_addr_obj_exp.city          Город                           ='||v_addr_obj_exp.city.full_name,dp10)
+	end if;
+	if v_addr_obj_exp.town.full_name          is not null then null; &debug('.get_addr_obj_str ->- v_addr_obj_exp.town          Населённый пункт                ='||v_addr_obj_exp.town.full_name,dp10)
+	end if;
+	if v_addr_obj_exp.subarea.full_name       is not null then null; &debug('.get_addr_obj_str ->- v_addr_obj_exp.subarea       Элемент ПС                      ='||v_addr_obj_exp.subarea.full_name,dp10)
+	end if;
+	if v_addr_obj_exp.street.full_name        is not null then null; &debug('.get_addr_obj_str ->- v_addr_obj_exp.street        Улица                           ='||v_addr_obj_exp.street.full_name,dp10)
+	end if;
+	
+	V_STRUCT_0:=coalesce(V_STRUCT_0,V_STRUCT.[0]);
+	&debug('.get_addr_obj_str ->- V_STRUCT_0='||V_STRUCT_0,dp10)
+	
+	v_str := null;
+	if V_STRUCT_0 = 1 then
+		add_str('Страна:', V_ADDR_OBJ_REF.COUNTRY.full_name);
+		add_str('Регион:', V_ADDR_OBJ_REF.REGION.full_name);
+		add_str('Район:', V_ADDR_OBJ_REF.DISTRICT.full_name);
+		add_str('Город:', V_ADDR_OBJ_REF.CITY.full_name);
+		add_str('Населённый пункт:', V_ADDR_OBJ_REF.TOWN.full_name);
+		add_str('ЭПС:', V_ADDR_OBJ_REF.subarea.full_name);
+		add_str('Улица:', V_ADDR_OBJ_REF.street.full_name);
+	elsif V_STRUCT_0 = 2 then
+		add_str('Страна:', V_ADDR_OBJ_REF.COUNTRY.full_name);
+		add_str('Регион:', V_ADDR_OBJ_REF.REGION.full_name);
+		add_str('Муниципальный район:', V_ADDR_OBJ_REF.DISTRICT.full_name);
+		add_str('Городское/сельское поселение:', V_ADDR_OBJ_REF.SETTLEMENT.full_name);
+		add_str('Город:', V_ADDR_OBJ_REF.CITY.full_name);
+		add_str('Населённый пункт:', V_ADDR_OBJ_REF.TOWN.full_name);
+		add_str('ЭПС:', V_ADDR_OBJ_REF.subarea.full_name);
+		add_str('Улица:', V_ADDR_OBJ_REF.street.full_name);
+	end if;
+	v_str:=rtrim(v_str, ';');
+	&debug('.get_addr_obj_str -<- v_str='||v_str,dp10)
+	return v_str;
+end;
+
+public function getAddrObjStr
+		/* Получение адреса строкой */
+	( p_addr [PERSONAL_ADDRESS]
+		/* Ссылка на Адрес */
+	, p_obj ref [ADDRESS_OBJ]
+		/* Ссылка на адресный объект */
+	, p_struct number default null
+		/* Структура адресного деления: 1 - административно-территориальное, 2 - муниципальное */
+	, p_oktmo ref [OKTMO] default null
+		/* Ссылка на ОКТМО, используется для муниципального деления (p_struct=2). Если значение не передано - берется с p_obj */
+	)
+	/* адрес строкой */
+return [MEMO]
+is
+  --v_addr_obj_exp ::[PERSONAL_ADDRESS].[API_LIB].addr_obj_expanded_rectype%type;
+	ret_str [MEMO];
+begin
+	::[HOOK_BANK].[GET_PRINT_ADDR_1].GetInfoPersonalAddress(p_addr,'.getAddrObjStr ->- Что в p_addr.');
+	&debug('.getAddrObjStr ->-    p_obj='||p_obj,dp)
+	&debug('.getAddrObjStr ->- p_struct='||p_struct,dp)
+	&debug('.getAddrObjStr ->-  p_oktmo='||p_oktmo,dp)
+
+	if p_struct is null then
+		p_struct := ::[HOOK_BANK].[GET_PRINT_ADDR_1].Get_ADM_or_MUN(p_addr);
+		&debug('.getAddrObjStr --- p_struct='||p_struct,dp)
+	end if;
+	if p_oktmo is null then
+		p_oktmo := ::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_OKTMO_REF;
+		&debug('.getAddrObjStr ---  p_oktmo='||p_oktmo,dp)
+	end if;
+	
+	v_addr_obj_exp := ::[PERSONAL_ADDRESS].[API_LIB].get_addr_obj_expanded(p_obj, p_struct, p_oktmo);
+	ret_str := ::[PERSONAL_ADDRESS].[PSH_EDIT_ADDRESS].get_addr_obj_str(v_addr_obj_exp, p_struct); -- updated CHANGE_SHORT_NAME PSB_EDIT_ADDRESS->PSH_EDIT_ADDRESS 14/10/25
+	&debug('.getAddrObjStr -<-  ret_str='||ret_str,dp)
+	return ret_str;
+end;
+PSH_EDIT_ADDRESS (
+	@name('Адрес')                                P_ADDR         in out [PERSONAL_ADDRESS],
+	@name('Поля, недоступные для редактирования') P_FLD_DISABLED in     [STRING_32000]     default null,
+	@name('Тип адресного деления')                P_STRUCT       in     [SHORT2]           default null
+) is
+
+validate is
+	v_list_house rtl.string_table;
+	idx integer;
+
+	d [LIST_DOMA];
+	type h_data_t is table of [LIST_DOMA];
+	h_data h_data_t;
+
+	v_strHouse		::[PERSONAL_ADDRESS].[HOUSE];	
+	v_strSeparators	varchar2(4000);
+	v_house	[HOUSES];
+	v_house_name ::[HOUSES].[NAME]%type;
+
+	v_city ref [NAMES_CITY];
+	v_street ref [STREET];
+-->>>> Перед BASE$VALIDATE
+	procedure setHouseStr is
+		v_house_obj_rectype ::[PERSONAL_ADDRESS].[API_LIB].house_obj_rectype%type;
+		procedure add_str (p_put_str1 varchar2(1000), p_put_str2 varchar2(1000)) is
+		begin
+			if p_put_str2 is not null then
+				if V_STR_HOUSE is not null then
+					V_STR_HOUSE := V_STR_HOUSE || '; ';
+				end if;
+				V_STR_HOUSE := rtrim(V_STR_HOUSE || p_put_str1 || ' ' || p_put_str2);
+			end if;
+		end;
+	begin
+		V_STR_HOUSE := null;
+	
+		if P_ADDR.[HOUSE_REF] is not null then
+			v_house_obj_rectype := ::[PERSONAL_ADDRESS].[API_LIB].get_house_obj(P_ADDR.[HOUSE_REF]);
+			add_str(v_house_obj_rectype.NUM.TYPE_NAME, v_house_obj_rectype.NUM.NUM);
+			add_str(v_house_obj_rectype.NUM_ADD1.TYPE_NAME, v_house_obj_rectype.NUM_ADD1.NUM);
+			add_str(v_house_obj_rectype.NUM_ADD2.TYPE_NAME, v_house_obj_rectype.NUM_ADD2.NUM);
+
+			if v_house_obj_rectype.is_actual then
+				[CSMD].Set_Validate_Prop (V_VB, 'P_ADDR.HOUSE_REF.NAME', 'P', '.ForeColor = vbBlack');
+			else
+				[CSMD].Set_Validate_Prop (V_VB, 'P_ADDR.HOUSE_REF.NAME', 'P', '.ForeColor = vbRed');
+			end if;
+		end if;
+	end;
+
+	procedure SetDisabledField is
+	begin
+		if instr(P_FLD_DISABLED, 'POST_CODE') > 0 then
+			::[RUNTIME].[CSMD].Disable(v_vb, 'P_ADDR.POST_CODE', equal_name==true);
+		end if;
+		if instr(P_FLD_DISABLED, 'STREET_STR') > 0 then
+			::[RUNTIME].[CSMD].Disable(v_vb, 'P_ADDR.STREET_STR', equal_name==true);
+		end if;
+		if instr(P_FLD_DISABLED, 'DISTRICT') > 0 then
+			::[RUNTIME].[CSMD].Disable(v_vb, 'P_ADDR.DISTRICT', equal_name==true);
+			::[RUNTIME].[CSMD].Disable(v_vb, 'P_ADDR.DISTRICT.NAME', equal_name==true);
+		end if;
+		if instr(P_FLD_DISABLED, 'FLAT') > 0 then
+			::[RUNTIME].[CSMD].Disable(v_vb, 'P_ADDR.FLAT', equal_name==true);
+		end if;
+		if instr(P_FLD_DISABLED, 'METRO_STATIONS') > 0 then
+			::[RUNTIME].[CSMD].Hide(v_vb, 'P_ADDR.METRO_STATIONS');
+		end if;
+		if instr(P_FLD_DISABLED, 'IMP_STR') > 0 or instr(P_FLD_DISABLED, 'FIX_PRINT') > 0 then
+			::[RUNTIME].[CSMD].Disable(v_vb, 'V_IMP_STR', 'V', equal_name==true);
+			::[RUNTIME].[CSMD].Disable(v_vb, 'P_ADDR.FIX_PRINT', equal_name==true);
+		end if;
+		if instr(P_FLD_DISABLED, 'REG_DATE') > 0 then
+			::[RUNTIME].[CSMD].Disable(v_vb, 'P_ADDR.REG_DATE', equal_name==true);
+		end if;
+		if instr(P_FLD_DISABLED, 'REG_END_DATE') > 0 then
+			::[RUNTIME].[CSMD].Disable(v_vb, 'P_ADDR.REG_END_DATE', equal_name==true);
+		end if;
+		if instr(P_FLD_DISABLED, 'REG_PLACE_NAME') > 0 then
+			::[RUNTIME].[CSMD].Disable(v_vb, 'P_ADDR.REG_PLACE_NAME', equal_name==true);
+		end if;
+		if instr(P_FLD_DISABLED, 'REG_PLACE_CODE') > 0 then
+			::[RUNTIME].[CSMD].Disable(v_vb, 'P_ADDR.REG_PLACE_CODE', equal_name==true);
+		end if;
+	end;
+	
+	procedure setEnableFixPrintAndImpStr is
+	begin
+
+		if tn_no_str_addr and v_country = ::[SYSTEM].[COUNTRY] then
+			::[RUNTIME].[CSMD].Disable(v_vb, 'V_IMP_STR', 'V');
+			::[RUNTIME].[CSMD].Disable(v_vb, 'P_FIX_PRINT');
+		else
+			if coalesce(P_ADDR.[FIX_PRINT], false) then
+				::[RUNTIME].[CSMD].Enable(v_vb, 'V_IMP_STR', 'V');
+			else
+				::[RUNTIME].[CSMD].Disable(v_vb, 'V_IMP_STR', 'V');
+			end if;
+			::[RUNTIME].[CSMD].Enable(v_vb, 'P_FIX_PRINT');
+		end if;
+		SetDisabledField;
+	end;
+	
+	procedure SetShowDate is
+	begin
+		if P_ADDR.[TYPE] = ::[ADDRESS_TYPE]([KOD]='TEMPORARY_REG') then
+			::[RUNTIME].[CSMD].Show(v_vb, 'P_ADDR.REG_END_DATE');
+			::[RUNTIME].[CSMD].Command(v_vb, 'lblRegDate.Caption="Дата регистрации"');
+		elsif P_ADDR.[TYPE] = ::[ADDRESS_TYPE]([KOD]='REAL_LIVE') then
+			::[RUNTIME].[CSMD].Hide(v_vb, 'P_ADDR.REG_END_DATE');
+			::[RUNTIME].[CSMD].Command(v_vb, 'lblRegDate.Caption="Проживает по адресу с"');
+		else
+			::[RUNTIME].[CSMD].Command(v_vb, 'lblRegDate.Caption="Дата регистрации"');
+			::[RUNTIME].[CSMD].Hide(v_vb, 'P_ADDR.REG_END_DATE');
+		end if;
+	end;
+	
+	procedure setEnableHouse is
+	begin
+		if V_KLADR_MODE = 4 or P_ADDR.[HOUSE_REF] is not null and not regexp_like(P_ADDR.[HOUSE_REF].[NAME],',|[ЧН]\(|\d-\d') then 
+			::[RUNTIME].[CSMD].Disable(v_vb, 'P_ADDR.HOUSE', equal_name==true);
+		else
+			::[RUNTIME].[CSMD].Enable(v_vb, 'P_ADDR.HOUSE', equal_name==true);
+		end if;
+	end;
+	
+	procedure SetEnableStreetStr is
+	begin
+		if V_KLADR_MODE >= 3 or ::[PERSONAL_ADDRESS].[API_LIB].get_street(P_ADDR.[ADDR_OBJ]) is not null then
+			::[RUNTIME].[CSMD].Disable(v_vb, 'P_ADDR.STREET_STR');
+		else
+			::[RUNTIME].[CSMD].Enable(v_vb, 'P_ADDR.STREET_STR');
+		end if;
+	end;
+
+	----
+	-- function get_addr_obj_str (V_ADDR_OBJ_REF ::[PERSONAL_ADDRESS].[API_LIB].addr_obj_expanded_rectype%type) return [MEMO] is
+	--  перенесено в puplic function, в локальные описания
+	----
+
+	procedure get_addr_obj_exp is
+	begin
+		v_addr_obj_exp := ::[PERSONAL_ADDRESS].[API_LIB].get_addr_obj_expanded(P_ADDR.[ADDR_OBJ], V_STRUCT.[0], V_OKTMO);
+		V_STR := get_addr_obj_str(v_addr_obj_exp); 
+	end;
+	
+	procedure calc_Imp_Str is 
+		v_personal_addr [PERSONAL_ADDRESS];
+		vStruct0 number(1); --Башкиров В.Г. 19.02.2025
+	begin
+		if not coalesce(P_ADDR.[FIX_PRINT], false) then
+			v_personal_addr%init;
+			v_personal_addr := P_ADDR;
+
+			/** /
+			P_ADDR.[IMP_STR] := ::[PERSONAL_ADDRESS].[LIB].Get_For_Print ( v_personal_addr );
+			V_IMP_STR := P_ADDR.[IMP_STR];
+			/**/
+			--Башкиров В.Г. 19.02.2025
+			vStruct0:=::[HOOK_BANK].[GET_PRINT_ADDR_1].Get_ADM_or_MUN(P_ADDR);
+			&debug('.calc_Imp_Str --- Вызываем ::[PERSONAL_ADDRESS].[PSH_SLIB].get_str_for_personal_address  vStruct0='||vStruct0,dp) -- updated CHANGE_SHORT_NAME PSB_SLIB->PSH_SLIB 14/10/25
+			V_IMP_STR := ::[PERSONAL_ADDRESS].[PSH_SLIB].get_str_for_personal_address(v_personal_addr, vStruct0); -- updated CHANGE_SHORT_NAME PSB_SLIB->PSH_SLIB 14/10/25
+			&debug('.calc_Imp_Str -<- '||iif(V_STRUCT.[0]=2,'2-муниципал','1-адм')||' V_IMP_STR='||V_IMP_STR,dp)
+
+		elsif coalesce(P_ADDR.[IMP_STR], '~NULL~') <> coalesce(V_IMP_STR, '~NULL~') then
+			P_ADDR.[IMP_STR] := V_IMP_STR;
+		end if;
+	end;
+
+	-- Установка признака автоматического вычисления индекса
+	procedure set_auto_zip(p_init boolean := false) is
+		v_city ref [NAMES_CITY];
+		v_street ref [STREET];
+	begin
+		if tn_kladr_zip or P_ADDR.[POST_CODE] is null then
+			v_Auto_Zip	:= true;
+		else
+			v_city := ::[PERSONAL_ADDRESS].[API_LIB].get_city(P_ADDR.[ADDR_OBJ]);
+			v_street := ::[PERSONAL_ADDRESS].[API_LIB].get_street(P_ADDR.[ADDR_OBJ]);
+			v_Auto_Zip := coalesce((P_ADDR.[POST_CODE] = coalesce(P_ADDR.[HOUSE_REF].[ZIP],v_street.[ZIP],v_city.[ZIP],chr(0))),true) and (coalesce(p_init,false) or coalesce(v_Auto_Zip,true));
+		end if;
+	end;
+	
+	-- установка индекса
+	procedure set_zip(p_zip_changed boolean := false) is
+		v_city ref [NAMES_CITY];
+		v_street ref [STREET];
+	begin
+		if v_Auto_Zip and (tn_kladr_zip or not coalesce(p_zip_changed,false)) then
+			v_city := ::[PERSONAL_ADDRESS].[API_LIB].get_city(P_ADDR.[ADDR_OBJ]);
+			v_street := ::[PERSONAL_ADDRESS].[API_LIB].get_street(P_ADDR.[ADDR_OBJ]);
+			P_ADDR.[POST_CODE] := coalesce(P_ADDR.[HOUSE_REF].[ZIP],v_street.[ZIP],v_city.[ZIP], case when p_zip_changed then P_ADDR.[POST_CODE] end);
+		end if;
+	end;
+	
+	procedure check_city is
+		v_ao_ref	[ADDRESS_OBJ_REF] := null;
+		v_ao_exp	::[PERSONAL_ADDRESS].[API_LIB].addr_obj_expanded_rectype%type;
+		v_city ref [NAMES_CITY];
+		v_street ref [STREET];
+	begin
+		
+		v_city := ::[PERSONAL_ADDRESS].[API_LIB].get_city(P_ADDR.[ADDR_OBJ]);
+		v_street := ::[PERSONAL_ADDRESS].[API_LIB].get_street(P_ADDR.[ADDR_OBJ]);
+		
+		if V_KLADR_MODE >= 1 then
+			v_ao_ref := P_ADDR.[DISTRICT];
+			v_ao_exp := ::[PERSONAL_ADDRESS].[API_LIB].get_addr_obj_expanded(v_ao_ref);
+			if v_city <> coalesce (v_ao_exp.TOWN.ID, v_ao_exp.CITY.ID, v_ao_exp.district_city, v_ao_exp.region_city) or v_city is null then
+				P_ADDR.[DISTRICT] := null;
+			end if;
+		end if;
+						
+		if v_street is null and V_KLADR_MODE >= 3 then
+			P_ADDR.[STREET_STR] := null;
+		end if;
+	end;
+	
+	function str2arr
+		(p_str varchar2(32767)
+		,p_delimiter varchar2(128) := ','
+		)
+		return rtl.string_table
+	is
+		v_arr rtl.string_table;
+		v_pos1 pls_integer := 1;
+		v_pos2 pls_integer;
+		v_one varchar2(32767);
+		v_str_size constant integer := length(p_str);
+		v_dlm_size constant integer := length(p_delimiter);
+	begin
+		if p_str is null or p_delimiter is null then
+			return v_arr;
+		end if;
+		loop
+			v_pos2 := instr(p_str,p_delimiter,v_pos1);
+			v_one := trim(substr(p_str, v_pos1, case when v_pos2 > 0 then v_pos2 else v_str_size + 1 end - v_pos1));
+			if v_one is not null then
+				v_arr(v_arr.count+1) := v_one;
+			end if;
+			exit when v_pos2 = 0 or v_pos2 is null;
+			v_pos1 := v_pos2 + v_dlm_size;
+		end loop;
+		return v_arr;
+	end;
+	
+	function get_kladr_house_list_nums (p_intervals varchar2(1000)) return rtl.string_table is
+	-- Функция возвращает массив номеров по списку с интервалами номеров в формате КЛАДР.
+	-- Номера/интервалы разделены запятыми. В интервале номера разделяются знаком "-". Номера могут ограничиваться только чётными "Ч(2-8)" или нечётными "Н(1-9)".
+		v_result rtl.string_table;
+		v_tokens rtl.string_table;
+		procedure parse_interval(p_interval varchar2(1000)) is
+			v_min integer;
+			v_max integer;
+			v_step integer := 1;
+			v_interval varchar2(1000) := p_interval;
+			v_odd boolean; 
+		begin
+			v_odd := case substr(v_interval,1,1) when 'Ч' then true when 'Н' then false end; -- Определяем признак четных/нечетных номеров
+			if v_odd is not null then -- Если есть признак чётности/нечетности
+				v_interval := regexp_substr(v_interval,'[^()]+',2); -- убираем его из строки вместе со скобками, оставляя только интервал 
+				v_step := 2;
+			end if;
+			v_min := to_number(regexp_substr(v_interval,'^\d+'));
+			v_max := to_number(regexp_substr(v_interval,'\d+$'));
+			if mod(v_min,2) != (case when v_odd then 0 when not v_odd then 1 end) then
+				v_min := v_min + 1; -- Приводим минимальный номер к нужной чётности
+			end if;
+			while v_min <= v_max loop -- Получаем номера из интервала
+				v_result(v_result.count+1) := v_min;
+				v_min := v_min + v_step;
+			end loop;
+		end;
+	begin
+		v_tokens := str2arr(regexp_replace(p_intervals,'\s+'));-- Номера/интервалы разделены запятыми
+		for i in 1..v_tokens.count loop
+			if regexp_like(v_tokens(i),'^[ЧН]\(.*\)$') or regexp_like(v_tokens(i),'^\d+-\d+$') then -- Это интервал
+				parse_interval(v_tokens(i));
+			else -- Отдельный номер
+				v_result(v_result.count+1) := v_tokens(i);
+			end if;
+		end loop;
+		return v_result;
+	end;
+	
+begin
+-->>>> Перед BASE$VALIDATE
+	--Башкиров В.Г. 12.02.2025 CFT-464
+	&debug('p_message.p_info='||p_message||'.'||p_info,dp)
+	if p_message = 'DEFAULT' then
+		&debug(utils.call_stack, dp1)
+	end if;	
+
+	if P_MESSAGE = 'DEFAULT' then --v-- EDIT#AUTO_EXT
+		::[HOOK_BANK].[GET_PRINT_ADDR_1].GetInfoPersonalAddress(P_ADDR,'(1.0)Что в P_ADDR.');
+		vThis:=P_ADDR; -- EDIT#AUTO_EXT
+		V_IMP_STR_OLD:=P_ADDR.[IMP_STR]; --Башкиров В.Г. 03.03.2025
+		&debug('->===(1) Расширение '||&METHOD$SNAME||': p_message.p_info='||p_message||'.'||p_info||' ===>- V_ADDR_OBJ_REF='||V_ADDR_OBJ_REF%class||'.'||V_ADDR_OBJ_REF%id||' '||V_ADDR_OBJ_REF.[FULL_NAME]||' ['||V_ADDR_OBJ_REF.[OKTMO].[CODE]||']-'||V_ADDR_OBJ_REF.[OKTMO].[NAME]||' V_IMP_STR_OLD='||V_IMP_STR_OLD,dp)
+		::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_STRUCT_0:=vThis.[INPUT_STRUCT]; -- 1-Адм/2-Муниципал Башкиров В.Г. 27.01.2025
+		::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_OKTMO_REF:=vThis.[OKTMO]; -- ОКТМО
+		
+		::[HOOK_BANK].[GET_PRINT_ADDR_1].GetInfoPersonalAddress(vThis, '(1.1)Что в vThis.');
+		nADMorMUN:=::[HOOK_BANK].[GET_PRINT_ADDR_1].Get_ADM_or_MUN(vThis);
+		&debug('     (1) Деление:'||::[HOOK_BANK].[GET_PRINT_ADDR_1].iif(nADMorMUN=2,'Муниципал','Админ')||' g_V_OKTMO_REF=['||::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_OKTMO_REF.[CODE]||']-'||::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_OKTMO_REF.[NAME],dp)
+
+		&debug('>V_IMP_STR='||V_IMP_STR,dp)
+		V_IMP_STR:=::[HOOK_BANK].[GET_PRINT_ADDR_1](vThis);
+		&debug('>>V_IMP_STR='||V_IMP_STR,dp)
+	end if;
+
+	if p_info in ('%PARAM%.P_ADDR.HOUSE','%PARAM%.P_ADDR.KORPUS') then
+		&debug('->===(2) Расширение '||&METHOD$SNAME||': p_message.p_info='||p_message||'.'||p_info||' ===>- V_ADDR_OBJ_REF='||V_ADDR_OBJ_REF%class||'.'||V_ADDR_OBJ_REF%id||' '||V_ADDR_OBJ_REF.[FULL_NAME]||' ['||V_ADDR_OBJ_REF.[OKTMO].[CODE]||']-'||V_ADDR_OBJ_REF.[OKTMO].[NAME],dp)
+		
+		::[HOOK_BANK].[GET_PRINT_ADDR_1].GetInfoPersonalAddress(vThis,'(2)Что в vThis.');
+		nADMorMUN:=::[HOOK_BANK].[GET_PRINT_ADDR_1].Get_ADM_or_MUN(vThis);
+		&debug('     (2) Деление:'||::[HOOK_BANK].[GET_PRINT_ADDR_1].iif(nADMorMUN=2,'Муниципал','Админ')||' g_V_OKTMO_REF=['||::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_OKTMO_REF.[CODE]||']-'||::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_OKTMO_REF.[NAME],dp)
+
+		&debug('(2)P_ADDR.HOUSE&P_ADDR.KORPUS='||P_ADDR.HOUSE||'&'||P_ADDR.KORPUS,dp)
+		&debug('(2)P_ADDR.HOUSE_REF          =['||P_ADDR.HOUSE_REF.[OKTMO].[CODE]||']-'||P_ADDR.HOUSE_REF.[OKTMO].[NAME]||' '||P_ADDR.HOUSE_REF.[NAME],dp)
+		&debug('(2)V_HOUSE_REF.[REC_DOMA]    ='||V_HOUSE_REF.[REC_DOMA],dp)
+		&debug('(2)P_ADDR.KORPUS             ='||P_ADDR.KORPUS,dp)
+		&debug('(2)V_OKTMO                   =['||V_OKTMO.[CODE]||']-'||V_OKTMO.[NAME],dp)
+	end if;
+
+	/**/
+	if p_info='%VAR%.V_STRUCT.0' then -- Башкиров В.Г. 19.02.2025
+		::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_STRUCT_0:=V_STRUCT.[0];
+		vThis:=P_ADDR;
+		&debug('(1)V_STRUCT.[0]='||V_STRUCT.[0]||' vThis.[INPUT_STRUCT]='||vThis.[INPUT_STRUCT]||' vThis.[FIX_PRINT]='||vThis.[FIX_PRINT],dp)
+		-- Башкиров В.Г. 20.02.2025
+		if V_STRUCT.[0]<>vThis.[INPUT_STRUCT] or vThis.[FIX_PRINT] then 
+			&debug('(1)Сбросим "Адрес строкой" для пересчета',dp)
+			vThis.[INPUT_STRUCT]:=V_STRUCT.[0]; vThis.[IMP_STR]:=null; 
+		end if;
+		V_IMP_STR:=::[HOOK_BANK].[GET_PRINT_ADDR_1](vThis);
+		&debug('>>(1)V_IMP_STR='||V_IMP_STR,dp)
+	end if;
+	/**/
+	--^-- EDIT#AUTO_EXT
+
+
+	if P_MESSAGE = 'DEFAULT' and P_INFO is null or P_MESSAGE = 'VALIDATE' and P_INFO = '%PLPCALL%' then
+		
+		::[RUNTIME].[STORAGE_MGR].init_temp_table('LIST_DOMA');
+		::[RUNTIME].[CSMD].Init_Form(V_VB, &METHOD$CLASS, &METHOD$SNAME );
+
+		P_ADDR.[ADDR_OBJ] := coalesce(P_ADDR.[ADDR_OBJ]%id, P_ADDR.[STREET_REF]%id, P_ADDR.[CITY]%id, P_ADDR.[DISTRICT]%id); -- TODO: удалить после удаления реквизитов
+		V_ADDR_OBJ_REF := P_ADDR.[ADDR_OBJ];
+		v_addr_obj_cur_ref := P_ADDR.[ADDR_OBJ];
+		V_STRUCT.[0] := coalesce(P_ADDR.[INPUT_STRUCT], 1);
+		P_STRUCT := V_STRUCT.[0];
+		V_OKTMO := P_ADDR.[OKTMO];
+		
+		get_addr_obj_exp;
+		tn_no_str_addr := ::[FP_TUNE].[LIB].get_bool_value ('NO_STR_ADDR', throw_error == '0');
+		tn_kladr_zip := coalesce(::[FP_TUNE].[LIB].get_bool_value('STRONG_KLADR', ::[FP_TUNE].[LIB].set_canons('<KLADR_REQ>', 'ZIP'), '0'), false);
+		tn_strong_street := coalesce(::[FP_TUNE].[LIB].get_bool_value('STRONG_KLADR', ::[FP_TUNE].[LIB].set_canons('<KLADR_REQ>', 'STREET'), '0'), true);
+		
+		set_auto_zip(true);
+		
+		v_city := ::[PERSONAL_ADDRESS].[API_LIB].get_city(P_ADDR.[ADDR_OBJ]);
+		v_country := coalesce(v_country, v_city.[COUNTRY]);
+		if v_country is null and P_ADDR.[IMP_STR] is null then
+			v_country := ::[SYSTEM].[COUNTRY];
+		end if;
+
+		V_KLADR_MODE := ::[PERSONAL_ADDRESS].[LIB].GET_KLADR_MODE(P_ADDR.[TYPE], v_city, V_COUNTRY);
+		V_IMP_STR := P_ADDR.[IMP_STR];
+		
+		setShowDate;
+		setEnableHouse;
+		setHouseStr;
+		SetEnableStreetStr;
+		setEnableFixPrintAndImpStr;
+		
+		v_addr_cur%init;
+		v_addr_cur := P_ADDR;
+		v_oktmo_cur_ref := V_OKTMO;
+		
+		::[HOOK_BANK].[GET_PRINT_ADDR_1].GetInfoPersonalAddress(P_ADDR,'(2.0)Что в P_ADDR.');
+		&debug('>>>    V_IMP_STR    ='||V_IMP_STR,dp)
+		&debug('>>> (1)V_IMP_STR_OLD='||V_IMP_STR_OLD,dp)
+		V_IMP_STR_OLD:=V_IMP_STR;
+		&debug('>>> (2)V_IMP_STR_OLD='||V_IMP_STR_OLD,dp)
+		vThis:=P_ADDR;
+		::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_OKTMO_REF=V_OKTMO:=vThis.[OKTMO];
+		::[HOOK_BANK].[GET_PRINT_ADDR_1].GetInfoPersonalAddress(vThis, '(2.1)Что в  vThis.');
+	elsif P_MESSAGE = 'VALIDATE' then
+
+		::[RUNTIME].[CSMD].Init_Form(V_VB, null, null);
+		
+		if P_INFO = 'OK' then
+			if instr(P_FLD_DISABLED, 'METRO_STATIONS') = 0 then
+			--	Проверяем, если заполнен массив станций метро, а мы изменили адрес:
+				if P_ADDR.[METRO_STATIONS]%size(1) > 0 then
+					if		(v_addr_cur.[HOUSE_REF] != coalesce (P_ADDR.[HOUSE_REF], -1))
+						or	(v_addr_cur.[ADDR_OBJ] != coalesce (P_ADDR.[ADDR_OBJ], -1))
+						or	(v_addr_cur.[HOUSE] != coalesce (P_ADDR.[HOUSE], '-'))
+						or	(v_addr_cur.[KORPUS] != coalesce (P_ADDR.[KORPUS], '-'))
+						or	(v_addr_cur.[IMP_STR] != coalesce (P_ADDR.[IMP_STR], '-'))
+					then
+						::[RUNTIME].[CSMD].command(V_VB, 'if MsgBox("Адрес объекта был изменен. Возможно, существует необходимость в изменении станций метро. Продолжить?", vbQuestion + vbYesNo) <> vbYes Then' || NL$ ||
+											'	Main = null' || NL$ ||
+											'end if' || NL$);
+					end if;
+				end if;
+			end if;
+			if V_STRUCT.[0] = 2 then 
+				P_ADDR.[OKTMO] := coalesce(V_OKTMO, P_ADDR.[HOUSE_REF].[OKTMO], P_ADDR.[ADDR_OBJ].[OKTMO]);
+			end if;
+			P_ADDR.[INPUT_STRUCT] := V_STRUCT.[0];
+			
+			--Башкиров В.Г. 12.09.2025
+			&debug('<<<P_ADDR.IMP_STR='||P_ADDR.IMP_STR,dp)
+			P_ADDR.[IMP_STR]:=V_IMP_STR;
+			::[HOOK_BANK].[GET_PRINT_ADDR_1].GetInfoPersonalAddress(P_ADDR,'<P_ADDR');
+			::[HOOK_BANK].[GET_PRINT_ADDR_1].GetInfoPersonalAddress(vThis, '<vThis');
+			&debug('<<<     V_IMP_STR='||V_IMP_STR,dp)
+			&debug('<<<P_ADDR.IMP_STR='||P_ADDR.IMP_STR,dp)
+			
+		elsif P_INFO = 'CANCEL' then
+			P_ADDR := v_addr_cur;
+		end if;
+		
+		if P_INFO = 'P_ADDR.FIX_PRINT' then
+			if coalesce(P_ADDR.[FIX_PRINT], false) then
+				::[RUNTIME].[CSMD].Enable(v_vb, 'V_IMP_STR', 'V');
+			else
+				::[RUNTIME].[CSMD].Disable(v_vb, 'V_IMP_STR', 'V');
+			end if;
+			
+		end if;
+		
+		if P_INFO = 'UPDATE_ADDR_OBJ' then
+			V_STRUCT.[0] := coalesce(P_STRUCT, V_STRUCT.[0], 1);
+			if coalesce(v_addr_obj_cur_ref, 1) <> coalesce(V_ADDR_OBJ_REF,2) or (V_OKTMO is not null and coalesce(v_oktmo_cur_ref, 1) <> coalesce(V_OKTMO, 2))  then
+				P_ADDR.[ADDR_OBJ] := V_ADDR_OBJ_REF;
+				P_ADDR.[OKTMO] := V_OKTMO;
+				get_addr_obj_exp;
+				v_street := ::[PERSONAL_ADDRESS].[API_LIB].get_street(P_ADDR.[ADDR_OBJ]);
+				
+				P_ADDR.[STREET_STR] := v_street.[SHORT_NAME]; 
+
+				if P_ADDR.[HOUSE] is not null then
+					declare
+						V_HOUSE_REF ref [HOUSES];
+					begin
+						locate V_HOUSE_REF in ::[HOUSES] where V_HOUSE_REF.[AOGUID] = P_ADDR.[ADDR_OBJ] 
+						and upper(V_HOUSE_REF.[NAME])= upper(P_ADDR.[HOUSE]) 
+						and upper(coalesce(P_ADDR.[KORPUS], '~NULL~')) = upper(coalesce(V_HOUSE_REF.[KORP]||V_HOUSE_REF.[STRUCNUM], '~NULL~'))
+						and (V_OKTMO is null or V_OKTMO is not null and V_HOUSE_REF.[OKTMO] = V_OKTMO)
+						and coalesce(V_HOUSE_REF.[ARCHAIC], false) = false;
+						P_ADDR.[HOUSE_REF] := V_HOUSE_REF;
+					exception when NO_DATA_FOUND then
+						P_ADDR.[HOUSE_REF] := null;
+					end;
+				end if;
+
+				V_KLADR_MODE := ::[PERSONAL_ADDRESS].[LIB].GET_KLADR_MODE(P_ADDR.[TYPE], null, V_COUNTRY);
+				v_addr_obj_cur_ref := P_ADDR.[ADDR_OBJ];
+				
+				check_city;
+				
+				v_oktmo_cur_ref := V_OKTMO;
+				SetEnableStreetStr;
+				setEnableFixPrintAndImpStr;
+				P_INFO := 'ZIP_UPD';
+			end if;
+		end if;
+
+		if P_INFO = 'P_ADDR.HOUSE_REF' then
+			if P_ADDR.[HOUSE_REF] is null then
+				P_ADDR.[HOUSE] = P_ADDR.[KORPUS] = V_HOUSE_REF := null;
+			elsif P_ADDR.[HOUSE_REF].[HOUSEGUID] is null then
+				v_list_house.delete;
+				V_HOUSE_ARR%delete;
+				V_HOUSE_REF := null;
+				V_HOUSE_ARR := rtl.next_value('SEQ_ID');
+				v_list_house := get_kladr_house_list_nums(P_ADDR.[HOUSE_REF].[NAME]);
+
+				idx := v_list_house.first;
+
+				while idx is not null loop
+					d.[HOUSE] := v_list_house(idx);
+					d.[REC_DOMA] := P_ADDR.[HOUSE_REF]%id;
+					d.[SORT_HOUSE] := coalesce(regexp_substr(v_list_house(idx), '\d{1,6}'), 999999);
+					h_data(h_data.count + 1) := d;
+					idx := v_list_house.next(idx);
+				end loop;
+				
+				insert into V_HOUSE_ARR for i in h_data loop
+					r(
+						r.[HOUSE] = h_data(i).[HOUSE]
+						, r.[REC_DOMA] = h_data(i).[REC_DOMA]
+						, r.[SORT_HOUSE] = h_data(i).[SORT_HOUSE]
+					 );
+				
+				if V_HOUSE_ARR%size(0) > 1 then
+					for (select x(x:id) in V_HOUSE_ARR fetch 1)
+					loop
+						V_HOUSE_REF := x.id;
+						P_ADDR.[HOUSE] := V_HOUSE_REF.[HOUSE];
+						P_ADDR.[KORPUS] := null;
+						exit;
+					end loop;
+				end if;
+			else
+				P_ADDR.[HOUSE] := P_ADDR.[HOUSE_REF].[NAME];
+				P_ADDR.[KORPUS] := P_ADDR.[HOUSE_REF].[KORP];
+				V_HOUSE_REF := null;
+			end if;
+			
+			P_ADDR.[HOUSE] := replace(P_ADDR.[HOUSE], '*');
+			P_ADDR.[KORPUS] := replace(P_ADDR.[KORPUS], '*');
+		
+			if P_ADDR.[KORPUS] is not null then
+				if not (
+					   instr(upper(P_ADDR.[KORPUS]), 'СТР') = 1
+					or instr(upper(P_ADDR.[KORPUS]), 'СООР') = 1
+					or instr(upper(P_ADDR.[KORPUS]), 'ЛИТЕР') = 1
+					or instr(upper(P_ADDR.[KORPUS]), 'КОРПУС') = 1
+					or regexp_instr(upper(P_ADDR.[KORPUS]), '^К\d+.*$') > 0
+					)
+				then
+					v_strHouse := substr(P_ADDR.[HOUSE] || korpus_shortname || P_ADDR.[KORPUS], 1, v_strHouse%size);
+				else
+					v_strHouse := substr(P_ADDR.[HOUSE] || P_ADDR.[KORPUS], 1, v_strHouse%size);
+				end if;
+			else
+				v_strHouse := P_ADDR.[HOUSE];
+			end if;
+
+			if P_ADDR.[HOUSE_REF] is not null then
+				v_house := P_ADDR.[HOUSE_REF];
+				V_OKTMO := coalesce(v_house.[OKTMO], V_OKTMO);
+				P_ADDR.[OKTMO] := V_OKTMO;
+				get_addr_obj_exp;
+			end if;
+			if v_house.[HOUSEGUID] is not null then
+				P_ADDR.[HOUSE]	:= case when v_house.[ESTSTATUS].[CODE] = '1'and v_house.[ESTSTATUS].[EST_STR_STAT] = true then coalesce(v_house.[ESTSTATUS].[SHORT_NAME],'влд')
+									when v_house.[ESTSTATUS].[CODE] = '3'and v_house.[ESTSTATUS].[EST_STR_STAT] = true then coalesce(v_house.[ESTSTATUS].[SHORT_NAME],'двлд')
+								end ||v_house.[NAME];
+				P_ADDR.[KORPUS]	:= v_house.[KORP]||case when v_house.[STRSTATUS].[CODE] != 0 and v_house.[STRSTATUS].[EST_STR_STAT] = false then v_house.[STRSTATUS].[SHORT_NAME]||v_house.[STRUCNUM] end;
+			else
+				v_strSeparators := ::[FP_TUNE].[LIB].get_str_value('SEPARAT_HOUSE_KLADR', ::[FP_TUNE].[LIB].set_canons('ADDRESS_TYPE', P_ADDR.[TYPE]%id), '0');
+				if v_strSeparators is not null then
+					P_ADDR.[HOUSE]	:= regexp_replace(v_strHouse, '(\D*\d+\D*)((' || '('||replace(replace(rtrim(ltrim(v_strSeparators, ','),','), ' '), ',', ')|(')||')' || ').+)', '\1');
+					P_ADDR.[KORPUS]	:= regexp_replace(regexp_replace(v_strHouse, '^'||P_ADDR.[HOUSE]), '^'||korpus_shortname);
+				else
+					P_ADDR.[HOUSE]	:= v_strHouse;
+					P_ADDR.[KORPUS] := null;
+				end if;
+			end if;
+			P_INFO := 'ZIP_UPD';
+		end if;
+		
+		if P_INFO = '%VAR%.V_HOUSE_REF' then
+			P_ADDR.[HOUSE] := V_HOUSE_REF.[HOUSE];
+		end if;
+		
+		if P_INFO in ('P_ADDR.HOUSE', 'P_ADDR.KORPUS') then
+			if P_ADDR.[HOUSE] is not null then
+				P_ADDR.[HOUSE] := trim(P_ADDR.[HOUSE]);
+				P_ADDR.[KORPUS] := trim(P_ADDR.[KORPUS]);
+				P_ADDR.[HOUSE_REF] := null;
+					
+				for (
+					select v_sprav(
+						v_sprav%id: I_D
+						, v_sprav.[HOUSEGUID]: GUID
+						, v_sprav.[NAME]: NAMEHOUSE
+						, v_sprav.[KORP]: KORP
+						, v_sprav.[STRUCNUM]: STRUCTNUM
+						, v_sprav.[STRSTATUS].[SHORT_NAME]: STRSTATUS
+						, case v_sprav.[ESTSTATUS].[CODE] when 1 then 'влд' when 3 then 'двлд' end : ESTSTATUS
+						, v_sprav.[ENDDATE] : ENDDATE
+						)
+					in ::[HOUSES] all
+					where v_sprav.[AOGUID]%id= P_ADDR.[ADDR_OBJ]
+					and v_sprav.[HOUSEGUID] is not null
+					and upper(v_sprav.[NAME])= upper(P_ADDR.[HOUSE])
+					and coalesce(v_sprav.[ARCHAIC], false) = false
+					order by
+						case when v_sprav.[HOUSEGUID] is not NULL then 1 else 2 end
+						, case when v_sprav.[ESTSTATUS] is not NULL then 1 else 2 end
+					)
+				loop
+					v_house_name := v_sprav.[KORP]||bool_char(v_sprav.[STRUCTNUM] is not null, coalesce(v_sprav.[STRSTATUS],'стр')||v_sprav.[STRUCTNUM], null);
+					if P_ADDR.[KORPUS] is null and v_house_name is null or v_house_name =  P_ADDR.[KORPUS] then
+						P_ADDR.[HOUSE_REF] := v_sprav.I_D;
+						exit;
+					end if;
+				end loop;
+			end if;
+			P_INFO := 'ZIP_UPD';
+		end if;
+ 		
+		if P_INFO = 'P_ADDR.POST_CODE' then
+			set_auto_zip(false);
+			set_zip(true);
+		end if;
+		
+		if P_INFO = 'ZIP_UPD' and p_message != 'DEFAULT' then
+			set_zip(false);
+			setHouseStr;
+			calc_imp_str;
+			setEnableHouse;
+		end if;
+
+		if P_INFO in ('P_ADDR.FIX_PRINT', 'P_ADDR.TYPE', 'P_ADDR.POST_CODE', 'P_ADDR.STREET_STR', 'P_ADDR.DISTRICT', 'P_ADDR.HOUSE', 'P_ADDR.KORPUS', 'P_ADDR.FLAT', '%VAR%.V_IMP_STR', '%VAR%.V_HOUSE_REF') then
+			calc_imp_str;
+		end if;
+		
+		if P_INFO = '%VAR%.V_STRUCT.0' then
+			P_STRUCT := V_STRUCT.[0];
+			if V_STRUCT.[0] = 2 then
+				V_OKTMO := coalesce(V_OKTMO, P_ADDR.[HOUSE_REF].[OKTMO], P_ADDR.[ADDR_OBJ].[OKTMO]);
+			end if;			
+			get_addr_obj_exp;
+		end if;
+		
+	end if;
+
+	--v-- EDIT#AUTO_EXT
+	if P_MESSAGE = 'VALIDATE' then
+		&debug('->===(3) Расширение '||&METHOD$SNAME||': p_message.p_info='||p_message||'.'||p_info||' ===>- V_ADDR_OBJ_REF='||V_ADDR_OBJ_REF%class||'.'||V_ADDR_OBJ_REF%id||' '||V_ADDR_OBJ_REF.[FULL_NAME]||' ['||V_ADDR_OBJ_REF.[OKTMO].[CODE]||']-'||V_ADDR_OBJ_REF.[OKTMO].[NAME],dp)
+		nADMorMUN:=::[HOOK_BANK].[GET_PRINT_ADDR_1].Get_ADM_or_MUN(vThis);
+		&debug('     (3) Деление:'||::[HOOK_BANK].[GET_PRINT_ADDR_1].iif(nADMorMUN=2,'Муниципал','Админ')||' g_V_OKTMO_REF=['||::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_OKTMO_REF.[CODE]||']-'||::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_OKTMO_REF.[NAME],dp)
+		
+		if nADMorMUN=2 then --p_info in ('ZIP_UPD') or nADMorMUN=2
+			if p_info in ('P_ADDR.HOUSE','P_ADDR.KORPUS','ZIP_UPD') then
+				&debug('(3)P_ADDR.HOUSE&P_ADDR.KORPUS=' ||P_ADDR.HOUSE||'&'||P_ADDR.KORPUS,dp)
+				&debug('(3)P_ADDR.HOUSE_REF          =['||P_ADDR.HOUSE_REF.[OKTMO].[CODE]||']-'||P_ADDR.HOUSE_REF.[OKTMO].[NAME]||' '||P_ADDR.HOUSE_REF.[NAME],dp)
+				&debug('(3)V_HOUSE_REF.[REC_DOMA]    =' ||V_HOUSE_REF.[REC_DOMA],dp)
+				&debug('(3)P_ADDR.KORPUS             =' ||P_ADDR.KORPUS,dp)
+				&debug('(3)V_OKTMO                   =['||V_OKTMO.[CODE]||']-'||V_OKTMO.[NAME],dp)
+
+				if P_ADDR.HOUSE_REF.[OKTMO]=V_OKTMO or P_ADDR.HOUSE_REF.[OKTMO] is null then null;
+				else
+				V_OKTMO:=P_ADDR.HOUSE_REF.[OKTMO];
+				::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_OKTMO_REF:=V_OKTMO;
+				&debug('(4)V_OKTMO           =['||V_OKTMO.[CODE]||']-'||V_OKTMO.[NAME]||' g_V_OKTMO_REF='||::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_OKTMO_REF.[CODE],dp)
+				end if;
+			end if;
+			/** /
+			&debug('Вызываем ::[PERSONAL_ADDRESS].[PSB_EDIT#AUTO].calc_Imp_Str',dp)
+			::[PERSONAL_ADDRESS].[PSB_EDIT#AUTO].calc_Imp_Str(V_ADDR_OBJ_REF
+				,P_ADDR.FIX_PRINT
+				,V_ADDR_OBJ_REF
+				,V_OKTMO
+				,P_ADDR.POST_CODE
+				,P_ADDR.STREET_STR
+				,P_ADDR.HOUSE_REF
+				,P_ADDR.HOUSE
+				,P_ADDR.KORPUS
+				,P_ADDR.FLAT
+				,P_ADDR.DISTRICT
+				,P_ADDR.IMP_STR
+				,P_ADDR.METRO_STATIONS
+				,P_ADDR.TYPE
+				,P_ADDR.REG_DATE
+				,P_ADDR.REG_END_DATE
+				);
+			/**/
+			calc_Imp_Str;
+		end if;
+		/** /
+		if p_info='%VAR%.V_STRUCT.0' then
+			::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_STRUCT_0:=V_STRUCT.[0]; -- 1-Адм/2-Муниципал Башкиров В.Г. 27.01.2025
+			vThis:=P_ADDR;
+			&debug('(2)V_STRUCT.[0]='||V_STRUCT.[0]||' vThis.[INPUT_STRUCT]='||vThis.[INPUT_STRUCT]||' vThis.[FIX_PRINT]='||vThis.[FIX_PRINT],dp)
+			-- Башкиров В.Г. 20.02.2025
+			if V_STRUCT.[0]<>vThis.[INPUT_STRUCT] or vThis.[FIX_PRINT] then
+				&debug('(2)Сбросим "Адрес строкой" для пересчета',dp)
+				vThis.[INPUT_STRUCT]:=V_STRUCT.[0]; vThis.[IMP_STR]:=null; 
+			end if;
+			V_IMP_STR:=::[HOOK_BANK].[GET_PRINT_ADDR_1](vThis);
+			&debug('>>(2)V_IMP_STR='||V_IMP_STR,dp)
+		end if;
+		/**/
+		-- Башкиров В.Г. 03.03.2025 P_FIX_PRINT -> P_ADDR.FIX_PRINT
+		if p_info in ('%VAR%.V_STRUCT.0','P_ADDR.FIX_PRINT') then
+			vThis:=P_ADDR; -- Башкиров В.Г. 03.03.2025 
+			::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_STRUCT_0:=V_STRUCT.[0]; -- 1-Адм/2-Муниципал Башкиров В.Г. 27.01.2025
+			&debug('(5)V_STRUCT.[0]='||V_STRUCT.[0]||' vThis.[INPUT_STRUCT]='||vThis.[INPUT_STRUCT]||' P_ADDR.FIX_PRINT='||P_ADDR.FIX_PRINT,dp)
+			&debug('(5)vThis.[IMP_STR]='||vThis.[IMP_STR],dp)
+			&debug('(5)V_IMP_STR_OLD  ='||V_IMP_STR_OLD,dp)
+			-- Башкиров В.Г. 20.02.2025
+			if V_STRUCT.[0]<>vThis.[INPUT_STRUCT] and not nvl(vThis.[FIX_PRINT],false) then
+				&debug('(5)Сбросим "Адрес строкой" для пересчета',dp)
+				vThis.[INPUT_STRUCT]:=V_STRUCT.[0]; vThis.[IMP_STR]:=null; 
+			end if;
+			if p_info='P_ADDR.FIX_PRINT' then
+				&debug('(5) vThis.[FIX_PRINT]="'|| vThis.[FIX_PRINT]||'" P_ADDR.FIX_PRINT="'||P_ADDR.FIX_PRINT||'"',dp)
+				if vThis.[FIX_PRINT]<>P_ADDR.FIX_PRINT or vThis.[IMP_STR]<>V_IMP_STR_OLD then
+					vThis.[FIX_PRINT]:=P_ADDR.FIX_PRINT;
+				  --if P_ADDR.[FIX_PRINT] and P_ADDR.[IMP_STR] is not null then
+					if P_ADDR.[FIX_PRINT] and V_IMP_STR_OLD is not null then
+					  --vThis.[IMP_STR]:=P_ADDR.[IMP_STR];
+						V_IMP_STR=vThis.[IMP_STR]:=V_IMP_STR_OLD; --Башкиров В.Г. 03.03.2025
+						&debug('(5)'||'Установим "Ручной режим" Восстановили "Адрес строкой" '||vThis.[IMP_STR],dp)
+					else
+						&debug('(5)'||'Установим "Ручной режим" Сбросим "Адрес строкой"',dp)
+						vThis.[IMP_STR]:=null;
+					end if;
+				end if;
+			end if;
+		end if;
+	end if;
+
+	::[HOOK_BANK].[GET_PRINT_ADDR_1].GetInfoPersonalAddress(P_ADDR,'(6.0)Что в P_ADDR.');
+	::[HOOK_BANK].[GET_PRINT_ADDR_1].GetInfoPersonalAddress(vThis, '(6.1)Что в vThis.');
+	nADMorMUN:=::[HOOK_BANK].[GET_PRINT_ADDR_1].Get_ADM_or_MUN(vThis);
+
+	-- Башкиров В.Г. 03.03.2025
+	--V_STR:=::[PERSONAL_ADDRESS].[PSH_EDIT_ADDRESS].getAddrObjStr(vThis, vThis.[ADDR_OBJ], V_STRUCT.[0], V_OKTMO); -- updated CHANGE_SHORT_NAME PSB_EDIT_ADDRESS->PSH_EDIT_ADDRESS 14/10/25
+	--&debug('V_STR='||V_STR,dp)
+
+	&debug('     (7) Деление:'||::[HOOK_BANK].[GET_PRINT_ADDR_1].iif(nADMorMUN=2,'Муниципал','Админ')||' g_V_OKTMO_REF=['||::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_OKTMO_REF.[CODE]||']-'||::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_OKTMO_REF.[NAME],dp)
+	&debug('-<=== '||&METHOD$SNAME||' ===<- V_ADDR_OBJ_REF='||V_ADDR_OBJ_REF%class||'.'||V_ADDR_OBJ_REF%id||' '||V_ADDR_OBJ_REF.[FULL_NAME]||' ['||V_ADDR_OBJ_REF.[OKTMO].[CODE]||']-'||V_ADDR_OBJ_REF.[OKTMO].[NAME],dp)
+	--^-- EDIT#AUTO_EXT
+end;
+
+execute is
+begin
+	null;
+	::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_STRUCT_0:=null; -- 1-Адм/2-Муниципал Башкиров В.Г. 27.01.2025
+	::[HOOK_BANK].[GET_PRINT_ADDR_1].g_V_OKTMO_REF:=null; -- ОКТМО
+end;
+end;
+end;

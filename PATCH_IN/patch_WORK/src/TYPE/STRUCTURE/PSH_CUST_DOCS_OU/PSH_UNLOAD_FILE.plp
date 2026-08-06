@@ -1,0 +1,32 @@
+class PSH_CUST_DOCS_OU;
+
+@import_plsql(true)
+@name('[ПСБ] 6.1.Выгрузить файл')
+@tag('COPIED')
+batch method PSH_UNLOAD_FILE is
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB]);
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB_TC]);
+PSH_UNLOAD_FILE is
+
+execute is
+
+v_tab_docs	&lib.T_Doc;
+v_doc_state	::[PSH_CUST_DOCS].[DOC_STATE]%type;
+begin
+
+	for i in 1..this.count loop
+		v_doc_state := this(i).[DOC_STATE];
+	
+		if v_doc_state = &libtc.stNEW then	
+			v_tab_docs(i).doc			:= this(i);
+			v_tab_docs(i).doc_type		:= this(i).[DOC_TYPE];
+			v_tab_docs(i).doc_state		:= v_doc_state;
+			v_tab_docs(i).doc_content	:= this(i).[FILE_CONTENT];
+			v_tab_docs(i).doc_fname		:= this(i).[FILE_NAME];
+		end if;
+	end loop;
+
+	&lib.unload_files(v_tab_docs);
+end;
+end;
+end;

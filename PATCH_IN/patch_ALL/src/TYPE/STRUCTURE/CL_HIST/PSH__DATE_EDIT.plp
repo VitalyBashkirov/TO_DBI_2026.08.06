@@ -1,0 +1,23 @@
+class CL_HIST;
+
+@name('[ПСБ] Изменить Дата изменения (списком)')
+method PSH__DATE_EDIT is
+PSH__DATE_EDIT (
+	@name('Дата изменения') P_DATE_EDIT in [DATE]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATE_EDIT := this.[DATE_EDIT];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+begin
+	this.[DATE_EDIT]:=P_DATE_EDIT;
+end;
+end;
+end;

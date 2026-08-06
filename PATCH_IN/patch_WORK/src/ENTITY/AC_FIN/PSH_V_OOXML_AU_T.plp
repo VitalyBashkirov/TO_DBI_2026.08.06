@@ -1,0 +1,311 @@
+class AC_FIN;
+
+@import_plsql(true)
+@name('[ПСБ] выписка в OOXML аудит (со временем проводки)')
+@tag('COPIED')
+static method PSH_V_OOXML_AU_T is
+
+@name('Только проведенные после') public V_AFTER [TIME_DATE];
+dp number:=0; -- управление debug_pipe
+fmt24 string(21):='DD.MM.YYYY HH24:MI:SS';
+fmt_o_clock string(10):='HH24:MI:SS';
+function iif(u boolean, v1 varchar2, v2 varchar2) return varchar2 is begin if u then return v1; end if; return v2; end;
+
+public function TimeBefore(dt [DATE_TIME], t [TIME_DATE]) return number is
+ret_bool number:=1;
+d1 [DATE_TIME];
+d2 [DATE_TIME];
+begin
+	debug_pipe(to_char(dt,fmt24)||'>'||to_char(t,fmt24),dp);
+	if t is null then
+		return ret_bool;
+	end if;
+
+	d1:=to_date(to_char(dt,fmt24),fmt24);
+	d2:=to_date(substr(to_char(d1,fmt24),1,11)||substr(t,12,8),fmt24);
+	debug_pipe(to_char(d1,fmt24)||'-'||to_char(d2,fmt24),dp);
+	
+	if d1>d2 then
+		ret_bool:=0;
+	end if;
+	return ret_bool;
+end;
+
+public function TimeAfter (dt [DATE_TIME], t [TIME]) return number is
+ret_bool number:=1;
+d1 [DATE_TIME];
+d2 [DATE_TIME];
+begin
+	if t is null then
+		return ret_bool;
+	end if;
+
+	d1:=to_date(to_char(dt,fmt24),fmt24);
+	d2:=to_date(substr(to_char(d1,fmt24),1,11)||substr(to_char(t),12,8),fmt24);
+	
+	if d1<d2 then
+		ret_bool:=0;
+	end if;
+	return ret_bool;
+end;
+PSH_V_OOXML_AU_T (
+	@name('Дата начала периода')          P_BEGDATE   in [DATE],
+	@name('Дата окончания периода')       P_ENDDATE   in [DATE],
+	@name('Филиал')                       P_FIL       in [BRANCH_REF],
+	@name('Включать счета с 0 остатками') P_ZERO_OST  in [BOOLEAN],
+	@name('Включать счета с 0 оборотами') P_ZERO_OBOR in [BOOLEAN],
+	@name('Маска счётов')                 P_MASK      in [ACCNUM],
+	@name('Только проведенные до')        P_BEFORE    in [TIME_DATE]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_BEGDATE := [SYSTEM]::[OP_DATE];
+	P_ENDDATE := [SYSTEM]::[OP_DATE];
+
+end if;
+-- End initialization of parameters and variables
+declare
+pragma macro(xl,'[OOXML]::[API_XL]');
+xl_out		blob:= empty_blob();
+vRepId		string;
+font 		integer;
+bord 		integer;
+format_text integer;
+format_num	integer;
+i 			number;
+j 			number;
+vColCount 	number; -- колво колонок в отчете
+date_pred date;
+date_end date;
+msg1 string(100);
+msg2 string(100);
+begin
+
+  if P_MESSAGE = 'DEFAULT' then -- первый запуск процедуры
+		P_ZERO_OST:=false;
+		P_ZERO_OBOR:=false;
+		P_FIL := STDLIB.USERID.FILIAL;
+							
+  elsif P_MESSAGE = 'VALIDATE' then -- переход между полями
+
+		if p_info = 'OK' then
+		
+  			if P_BEGDATE is null or P_ENDDATE is null then
+  				pragma error('Необходимо указать период!');
+  			end if;
+  			
+  			if P_BEGDATE < to_date('01.01.2013','DD.MM.YYYY') then
+  				pragma error('Начало не может быть ранее 01.01.2013!');
+  			end if;
+  			
+  			if P_FIL is null then
+  				pragma error('Необходимо указать филиал!');
+  			end if;
+  			
+  			if nvl(substr(P_MASK,1,1),'r') not in ('0','1','2','3','4','5','6','7','8','9') then
+  				pragma error('Необходимо указать маску!');
+  			end if;
+
+			[SHABLON_DOC]::[LIB_OOXML].load_blob('PSH_VIPISKA',xl_out);
+			-- [SHABLON_DOC]::[LIB_OOXML].load_blob('PSH_FISH',xl_out);			
+ 			If not [OOXML]::[API_XL].open_file(xl_out) Then				
+				pragma error('Ошибка преобразования шаблона !');
+			End If;  			  			  	
+
+-->>>>>>> Работаем с Ексель
+				vColCount := 11; -- всего колонок в отчете
+				i := 2; -- первая строка в Excel
+				font:=&xl.get_font(	p_name		== 'Times New Roman',p_fontsize	== 11, p_bold	== true);
+				bord:=&xl.get_border( p_top		== &xl.xl_b_thin, p_bottom	== &xl.xl_b_thin, p_left	== &xl.xl_b_thin, p_right	== &xl.xl_b_thin);
+				format_text:=&xl.get_numFmt('@');
+				format_num:=&xl.get_numFmt('###,###,###,###,##0.00');	
+/*
+debug_pipe('font='||font,0);
+debug_pipe('bord='||bord,0);	
+debug_pipe('format_text='||format_text,0);
+debug_pipe('format_num='||format_num,0);	
+*/		
+				&xl.set_column(1,p_fontId==font,p_horizontal==&xl.xl_ah_right,p_vertical==&xl.xl_av_top);
+				&xl.set_column(2,p_fontId==font,p_horizontal==&xl.xl_ah_left,p_vertical==&xl.xl_av_top);
+				&xl.set_column(3,p_fontId==font,p_horizontal==&xl.xl_ah_left,p_vertical==&xl.xl_av_top);
+				&xl.set_column(4,p_fontId==font,p_horizontal==&xl.xl_ah_left,p_vertical==&xl.xl_av_top,p_wrapText==true);--&xl.xl_b_thin);
+				&xl.set_column(5,p_fontId==font,p_horizontal==&xl.xl_ah_left,p_vertical==&xl.xl_av_top);
+				&xl.set_column(6,p_fontId==font,p_horizontal==&xl.xl_ah_left,p_vertical==&xl.xl_av_top);
+				
+				&xl.set_column(7,p_fontId==font,p_horizontal==&xl.xl_ah_left,p_vertical==&xl.xl_av_top,p_wrapText==true);--&xl.xl_b_thin);
+				&xl.set_column(9,p_numFmtId==format_num,p_fontId==font,p_horizontal==&xl.xl_ah_right,p_vertical==&xl.xl_av_top);
+				&xl.set_column(10,p_numFmtId==format_num,p_fontId==font,p_horizontal==&xl.xl_ah_right,p_vertical==&xl.xl_av_top);
+				&xl.set_column(11,p_numFmtId==format_num,p_fontId==font,p_horizontal==&xl.xl_ah_right,p_vertical==&xl.xl_av_top);
+				&xl.set_column(12,p_fontId==font,p_horizontal==&xl.xl_ah_left,p_vertical==&xl.xl_av_top,p_wrapText==true);--&xl.xl_b_thin);				
+
+				&xl.set_column_width(8,1,1);
+				&xl.set_column_width(10,2,2);
+				&xl.set_column_width(12,3,3);
+				&xl.set_column_width(30,4,4);
+				&xl.set_column_width(21,5,5);
+				&xl.set_column_width(21,6,6);
+				
+				&xl.set_column_width(30,7,7);
+				&xl.set_column_width(14,8,11);
+				&xl.set_column_width(120,12,12);
+
+				-- цикл по договорам
+				for ACC in ::[AC_FIN] where  ACC.[FILIAL]=P_FIL and
+											 (ACC.[DATE_CLOSE] is null or ACC.[DATE_CLOSE]>=P_BEGDATE)
+											and ACC.[DATE_OP]<=P_ENDDATE
+											and ACC.[MAIN_V_ID] like (P_MASK||'%')
+											and (
+											abs(::[RUNTIME].[F_5].A('И'||ACC||'СВ',P_ENDDATE+1))>0
+											or abs(::[RUNTIME].[F_5].A('И'||ACC||'ДВ',P_BEGDATE,P_ENDDATE))>0
+											or abs(::[RUNTIME].[F_5].A('И'||ACC||'КВ',P_BEGDATE,P_ENDDATE))>0
+											)
+									order by ACC.[MAIN_V_ID]
+
+
+					 loop
+				msg1 := iif(P_BEFORE is null,'','   Только проведенные до '  ||substr(P_BEFORE,12,8)||' включительно');
+				msg2 := iif(V_AFTER is null,'','   Только проведенные после '||substr(V_AFTER,12,8)||' включительно');
+				debug_pipe(msg1,dp);
+				debug_pipe(msg2,dp);
+				
+				&xl.Put(i,1,'Выписка по счету');
+				&xl.Put(i,3,ACC.[MAIN_V_ID]||' '||ACC.[NAME]||'  Сформировано '||to_char(sysdate,fmt24)||msg1||msg2);
+				&xl.merge(i,3,i,11);
+				&xl.Set_Format_Range(i,3,i,3,p_fontId==font,p_horizontal==&xl.xl_ah_left,p_vertical==&xl.xl_av_top);
+				i:=i+1;
+				&xl.Put(i,1,'За период c '||to_char(P_BEGDATE,'DD.MM.YYYY')||' по '||to_char(P_ENDDATE,'DD.MM.YYYY'));
+				i:=i+1;
+				&xl.Put(i,1,'Входящий остаток на '||to_char(P_BEGDATE,'DD.MM.YYYY'));
+				&xl.Put(i,4,to_char(abs(::[RUNTIME].[F_5].A('И'||ACC||'СВ',P_BEGDATE)),'99999999999D99'));
+				i:=i+1;
+				&xl.Put(i,1,'Дата открытия счёта '||to_char(ACC.[DATE_OP],'DD.MM.YYYY'));
+				i:=i+2;
+				j:=i;
+				&xl.Put(i,1,'№ п.п');	
+				&xl.Put(i,2,'Дата/время');
+				&xl.set_column_width
+						( 17	-- Значение ширины колонки *
+						, 2		--min номер колонки
+						, 2		--max номер колонки
+						, 1		--Номер листа
+						);
+				&xl.Put(i,3,'№ докум');
+				&xl.Put(i,4,'Банк корресп.');
+				
+				&xl.Put(i,5,'Счёт. Выписки');
+				&xl.Put(i,6,'Счёт. Корресп.');
+				&xl.Put(i,7,'Назв.корресп.');
+				&xl.Put(i,8,'ИНН.корресп.');
+				&xl.Put(i,9,'Сумма ДТ');
+				&xl.Put(i,10,'Сумма КТ');
+				&xl.Put(i,11,'Сумма НАЦ');
+				&xl.Put(i,12,'Назначение платежа');
+				i:=i+1;
+				
+
+				     for (select y(--y%id :C_ID
+					  	  --ANALYTIC(ROW_NUMBER, 'over (order by [1] )',y.[DATE]) C_NPP
+					  		ANALYTIC(ROW_NUMBER, 'over (order by [1] )',y.[DOC].[DATE_PROV]) C_NPP
+					      --,y.[DATE] :C_DATE
+					        ,y.[DOC].[DATE_PROV] :C_DATE
+					        ,y.[DOC].[DOCUMENT_NUM] :C_NUM_DOC
+							,decode( to_char(y.[DT]), '1', nvl(y.[SUMMA], 0),null)	:C_SUMMA_DT
+							,decode( to_char(y.[DT]), '1', null,nvl(y.[SUMMA], 0))	:C_SUMMA_KT
+							,y.[SUMMA_NAT]	:C_SUMMA_NT
+							,y.[DOC].[NAZN] :C_NAZN
+							,decode( to_char(y.[DT]), '1', y.[DOC].[KL_KT].[0]		, y.[DOC].[KL_DT].[0]		)	:C_KL#0
+							,decode( to_char(y.[DT]), '1', y.[DOC].[KL_KT].[1].[1].[NAME]	, y.[DOC].[KL_DT].[1].[1].[NAME]	)	:C_KL#1_CL
+							,decode( to_char(y.[DT]), '1', y.[DOC].[KL_KT].[1].[1].[INN]	, y.[DOC].[KL_DT].[1].[1].[INN]	)	:C_KL#1_INN
+							,decode( to_char(y.[DT]), '1', y.[DOC].[KL_KT].[1].[2].[MAIN_V_ID]	, y.[DOC].[KL_DT].[1].[2].[MAIN_V_ID]	)	:C_KL#1_ACC
+							,decode( to_char(y.[DT]), '1', y.[DOC].[KL_KT].[2].[1]	, y.[DOC].[KL_DT].[2].[1]	)	:C_KL#2_ACCOUNT
+							,decode( to_char(y.[DT]), '1', y.[DOC].[KL_KT].[2].[2]	, y.[DOC].[KL_DT].[2].[2]	)	:C_KL#2_NAME
+							,decode( to_char(y.[DT]), '1', y.[DOC].[KL_KT].[2].[INN]	, y.[DOC].[KL_DT].[2].[INN]	)	:C_KL#2_INN
+							,decode( to_char(y.[DT]), '1', y.[DOC].[KL_KT].[2].[3].[NAME]	, y.[DOC].[KL_DT].[2].[3].[NAME])	:C_KL#2_BANK
+				           )in acc.[ARC_MOVE]
+				           where trunc(y.[DATE])<=trunc(P_ENDDATE)
+				           and trunc(y.[DATE])>=trunc(P_BEGDATE)
+				           and TimeBefore(y.[DATE],P_BEFORE)=1
+				           and TimeAfter(y.[DATE],V_AFTER)=1
+				           ----без переоценки
+				           --and (y.[DOC].[KOD_NAZN_PAY] is null or (y.[DOC].[KOD_NAZN_PAY].[KOD_NAZN] not in ('RECONT','RECONT+','RATEDIFF','SALE_MINUS','SALE_PLUS')))
+				           ----только клиентские
+				           --and (upper(nvl(y.[DOC].[ACC_DT].[CLIENT_R].[NAME],y.[DOC].[ACC_DT].[CLIENT_V].[NAME])) not like '%ПРОМСЕЛЬХОЗБАНК%'
+				           --  or upper(nvl(y.[DOC].[ACC_KT].[CLIENT_R].[NAME],y.[DOC].[ACC_KT].[CLIENT_V].[NAME])) not like '%ПРОМСЕЛЬХОЗБАНК%')
+				           order by y.[DOC].[DATE_PROV] --order by y.[DATE]
+				     )loop
+				     		/**/
+				     		if y.C_NPP=1 then date_pred:=to_date(y.C_DATE); end if;
+				
+				     		if trunc(date_pred)!=trunc(to_date(y.C_DATE)) and y.C_NPP>1 then
+				           	&xl.merge(i,1,i,3);
+				           	&xl.Put(i,1,'Исходящий остаток за '||to_char(date_pred,'DD.MM.YYYY'));
+				           	&xl.Put(i,4,abs(::[RUNTIME].[F_5].A('И'||ACC||'СВ',trunc(date_pred)+1)));
+				           	&xl.Put(i,5,abs(::[RUNTIME].[F_5].A('И'||ACC||'СН',trunc(date_pred)+1)));
+				           	&xl.Set_Format_Range(i,4,i,5,p_numFmtId==format_num,p_fontId==font,p_borderId==bord,p_horizontal==&xl.xl_ah_right,p_vertical==&xl.xl_av_top);
+				           	&xl.merge(i,6,i,11);
+				           	&xl.Put(i,6,'(Нац)');
+				           	&xl.Set_Format_Range(i,6,i,6,p_fontId==font,p_horizontal==&xl.xl_ah_left,p_vertical==&xl.xl_av_top);
+				
+				           	date_pred:=y.C_DATE;
+				           	i:=i+1;
+			           		end if;
+			           		/**/
+				           	
+				     		&xl.Put(i,1,y.C_NPP);
+				     		&xl.Set_Format_Range(i,1,i,1,p_horizontal==&xl.xl_ah_right);
+				           	&xl.Put(i,2,to_char(y.C_DATE,fmt24));
+				           	&xl.Put(i,3,y.C_NUM_DOC);
+				           	&xl.Put(i,4,nvl(y.C_KL#2_BANK,acc.[FILIAL].[BANK].[NAME]));
+				           	&xl.Put(i,5,ACC.[MAIN_V_ID]);
+				           	&xl.Put(i,6,nvl(y.C_KL#2_ACCOUNT,y.C_KL#1_ACC));
+				           	&xl.Put(i,7,nvl(y.C_KL#2_NAME,y.C_KL#1_CL));
+				           	&xl.Put(i,8,nvl(y.C_KL#2_INN,y.C_KL#1_INN));
+				           	&xl.Put(i,9,abs(y.C_SUMMA_DT));
+				           	&xl.Put(i,10,abs(y.C_SUMMA_KT));
+				           	&xl.Put(i,11,abs(y.C_SUMMA_NT));
+				           	&xl.Set_Format_Range(i,11,i,11,p_numFmtId==format_num,p_horizontal==&xl.xl_ah_right);
+				            &xl.Set_Format_Range(i,12,i,12,p_horizontal==&xl.xl_ah_left,p_vertical==&xl.xl_av_top);
+				           	&xl.Put(i,12,y.C_NAZN);
+				           	date_end:=y.C_DATE;
+				           	i:=i+1;
+
+				           	
+				     end loop;
+				     date_end:=nvl(date_end,P_ENDDATE);
+				     if P_BEFORE is null and V_AFTER is null then
+					     &xl.merge(i,1,i,3);
+					     &xl.Put(i,1,'Исходящий остаток за '||to_char(date_end,'DD.MM.YYYY'));
+					     &xl.Put(i,5,abs(::[RUNTIME].[F_5].A('И'||ACC||'СН',trunc(date_end)+1)));
+					     &xl.Put(i,4,abs(::[RUNTIME].[F_5].A('И'||ACC||'СВ',trunc(date_end)+1)));
+					     &xl.Set_Format_Range(i,4,i,5,p_numFmtId==format_num,p_fontId==font,p_borderId==bord,p_horizontal==&xl.xl_ah_right,p_vertical==&xl.xl_av_top);
+					     &xl.merge(i,6,i,11);
+					     &xl.Put(i,6,'(Нац)');	
+					     i:=i+1;
+					     &xl.merge(i,1,i,3);
+					     &xl.Put(i,1,'Обороты за период выписки Д/К');
+					     &xl.Put(i,4,abs(::[RUNTIME].[F_5].A('И'||ACC||'ДВ',P_BEGDATE,P_ENDDATE)));
+					     &xl.Put(i,5,abs(::[RUNTIME].[F_5].A('И'||ACC||'КВ',P_BEGDATE,P_ENDDATE)));
+				     end if;
+					     &xl.Set_Format_Range(i,4,i,5,p_numFmtId==format_num,p_fontId==font,p_borderId==bord,p_horizontal==&xl.xl_ah_right,p_vertical==&xl.xl_av_top);
+					     &xl.merge(i,6,i,11);
+					     &xl.Set_Format_Range(j,1,i,vColCount,p_borderId==bord);
+					     i:=i+3;
+				end loop;
+				
+--<<<<<<<
+			&xl.set_orientation(p_orientation==1);	
+			&xl.set_PaperSize(10);
+			&xl.fit_in_page_width;
+			&xl.finish(xl_out);		
+			-- Отправка файла отчёта пользователю на клиентскую машину
+			vRepId	:= [OOXML]::[API_ORSA].putReport2Run(xl_out,'xlsx','Выписку сформировал:'||STDLIB.USERID.NAME);
+
+		end if;	
+  end if;
+end;
+end;
+end;
+end;

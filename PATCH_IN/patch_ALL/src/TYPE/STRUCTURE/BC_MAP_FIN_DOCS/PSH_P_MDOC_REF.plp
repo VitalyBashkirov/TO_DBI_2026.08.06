@@ -1,0 +1,28 @@
+class BC_MAP_FIN_DOCS;
+
+@name('[ПСБ] Редактировать Ссылку на платежный документ')
+method PSH_P_MDOC_REF is
+PSH_P_MDOC_REF (
+	@name('Ссылка на платежный документ') P_MDOC_REF in [MAIN_DOCUM_REF]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_MDOC_REF := this.[MDOC_REF];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+/*********************************************************************
+Назначение:
+
+bashkirov, последнее изменение 11 Ноябрь 2019 г.
+*********************************************************************/
+begin
+	this.[MDOC_REF]:=P_MDOC_REF;
+end;
+end;
+end;

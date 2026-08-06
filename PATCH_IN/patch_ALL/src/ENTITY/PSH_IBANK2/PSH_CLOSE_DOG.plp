@@ -1,0 +1,39 @@
+class PSH_IBANK2;
+
+@optimize(declarations:=true,this:=false,code:=true,descriptions:=true)
+@name('[ПСБ] Закрыть договор')
+@tag('COPIED')
+method PSH_CLOSE_DOG is
+dt date;
+PSH_CLOSE_DOG (
+	@name('Дата закрытия договора') P_DATE_CLOSE in [DATE]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_DATE_CLOSE := [SYSTEM]::[OP_DATE];
+end if;
+-- End initialization of parameters and variables
+begin
+	for i in [ac_fin] where i.client_v=this.[CLIENT] and i.date_close is not null order by i.date_close desc loop
+		dt := i.date_close;
+		exit;
+	end loop;
+	for i in [ac_fin] where i.client_v=this.[CLIENT] and i.date_close is not null order by i.date_close desc loop
+		dt := greatest(dt,i.date_close);
+		exit;
+	end loop;
+	p_date_close := nvl(dt,p_date_close);
+end;
+end;
+
+execute is
+
+begin
+	this.[DATE_CLOSE] := dt;
+	this.[COM_STATUS] := ::[COM_STATUS_PRD]([CODE] = 'CLOSE');
+end;
+end;
+end;

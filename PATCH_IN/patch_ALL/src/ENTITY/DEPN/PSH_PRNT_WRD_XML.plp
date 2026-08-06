@@ -1,0 +1,1738 @@
+class DEPN;
+
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('[ПСБ] Печать в WORD (OOXML)')
+@tag('COPIED')
+method PSH_PRNT_WRD_XML is
+
+@name('Данные для вывода')               public V_DATA                 [STRING_32000];
+@name('Класс')                           public V_CLASS                [STRING_32000];
+@name('Шаблон документа')                public V_FILE_NAME            [SHABLON_DOC_REF];
+@name('Клиент/Банк')                     public V_CLIENT_BANK          [CASE_BETWEEN_TWO];
+@name('Банк')                            public V_OUR_BANK             [CL_CORP_REF];
+@name('Массив должностных лиц (банк)')   public V_ALL_BOSS_B           [PERSONS_POS_ARR];
+@name('Должность 1(банк)')               public V_CASTA_1B             [PERSONS_POS_REF];
+@name('Должность 2(банк)')               public V_CASTA_2B             [PERSONS_POS_REF];
+@name('Массив должностных лиц (клиент)') public V_ALL_BOSS_C           [PERSONS_POS_ARR];
+@name('Должность 1(клиент)')             public V_CASTA_1C             [PERSONS_POS_REF];
+@name('Должность 2(клиент)')             public V_CASTA_2C             [PERSONS_POS_REF];
+@name('Клиент')                          public V_CLIENT               [CLIENT_REF];
+@name('Папка платежей')                  public V_FOLDER_PAY           [FOLDER_PAY_REF];
+@name('Ссылка на себя')                  public V_THIS                 [DEPN_REF];
+@name('Строка валидатора')               public V_DEST_STR             [STRING_32000];
+@name('Печатные формы')                  public V_PRINT_FORMS table of [TEMPLATE_SERVICE];
+-- коды для пакетной печатной формы
+public gcn_MethodClass			const [STRING_100] := 'ПП_КЛАСС';				-- короткое имя ТБП операции
+public gcn_MethodCode			const [STRING_100] := 'ПП_ОПЕРАЦИЯ';			-- короткое имя операции
+public gcn_PrintTrust			const [STRING_100] := 'ПП_ДОВЕР';				-- признак печати доверенности
+public gcn_CashTransactions	const [STRING_100] := 'ПП_НАЛ_ОПЕР';			-- признак операции через кассу
+public gcn_IntTransfer			const [STRING_100] := 'ПП_ВНУТР_ПЕРЕЧ';			-- признак перечисления внутри банка
+public gcn_ExtTransfer			const [STRING_100] := 'ПП_ВНЕШ_ПЕРЕЧ';			-- признак внешнего перечисления
+public gcn_RestartContract		const [STRING_100] := 'ПП_ПЕРЕОФОРМ';			-- признак переоформления договора
+public gcn_CodeCurRecip		const [STRING_100] := 'ПП_ВАЛ_ПОЛУЧ';			-- сокращенное наименование валюты получателя
+public gcn_TrustOperation		const [STRING_100] := 'ПП_ДОВЕР_ОПЕР';			-- доверенность операции (идентификатор)
+public gcn_CurrencyRecip		const [STRING_100] := 'ПП_ИД_ВАЛ_ПОЛУЧ';		-- валюта получателя (идентификатор)
+public gcn_ProductRecip		const [STRING_100] := 'ПП_ПРОД_ПОЛУЧ';			-- продукт получателя (идентификатор)
+public gcn_SumOperation		const [STRING_100] := 'ПП_СУММА_ОПЕР';			-- сумма операции (списания, зачисления)
+
+pragma include(::[DEPN].[LIB_MACRO]);
+pragma include(::[DEPN].[DEBUG_MACRO]);
+pragma include(::[RUNTIME].[MACRO_LIB]);
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+pragma macro(lp,'::[SHABLON_DOC].[LIB_OOXML]');
+pragma macro(wd,'::[OOXML].[API_DOC_SAX]');
+
+-- Шаблон адреса
+V_ADR_MASK			varchar2(100);
+
+-- Реквизиты клиента
+V_CITY_C			ref [NAMES_CITY];--"Населенный пункт"
+V_OKATO_C			[STRING_2000];--"ОКАТО_клиент"
+V_ADRESS_C			[STRING_2000];--"Адрес (клиент)"
+V_ADRESS_C_POST		[STRING_2000];--"Почтовый адрес (клиент)"
+
+V_DEF_1C			[STRING_2000];--"Основание подписи 1(клиент)"
+V_CASTA_C1_RP		[STRING_2000];--"Родительный падеж должности 1(клиент)"
+V_FIO_C1_RP			[STRING_2000];--"Родительный падеж ФИО 1(клиент)"
+V_F_IO_1C			[STRING_2000];--"Фамилия И.О. 1(клиент)"
+V_PHONE_1C			[STRING_2000];--"Телефон 1(клиент)"
+
+V_DEF_2C			[STRING_2000];--"Основание подписи 2(клиент)"
+V_CASTA_C2_RP		[STRING_2000];--"Родительный падеж должности 2(клиент)"
+V_FIO_C2_RP			[STRING_2000];--"Родительный падеж ФИО 2(клиент)"
+V_F_IO_2C			[STRING_2000];--"Фамилия И.О. 2(клиент)"
+V_PHONE_2C			[STRING_2000];--"Телефон 2(клиент)"
+
+-- Реквизиты банка
+V_CITY_B			ref [NAMES_CITY];--"Населенный пункт"
+
+V_BIC_B				[STRING_2000];--"Бик банк"
+V_KS_B				[STRING_2000];--"Корр счет_банк"
+V_OKONH_B			[STRING_2000];--"ОКОНХ_банк"
+V_CONTACTS_B		[STRING_2000];--"Контакты_банк"
+V_OKATO_B			[STRING_2000];
+V_ADRESS_B			[STRING_2000];--"Адрес банк"
+V_ADRESS_B_POST		[STRING_2000];--"Почтовый адрес банк"
+
+V_DEF_1B			[STRING_2000];--"Основание подписи 1(банк)"
+V_CASTA_B1_RP		[STRING_2000];--"Родительный падеж должности 1(банк)")
+V_FIO_B1_RP			[STRING_2000];--"Родительный падеж ФИО 1(банк)"
+V_F_IO_1B			[STRING_2000];--"Фамилия И.О. 1(банк)"
+V_PHONE_11B			[STRING_2000];--"Телефон 1(банк)"
+V_PHONE_12B			[STRING_2000];--"Телефон 2(банк)"
+
+V_DEF_2B			[STRING_2000];--"Основание подписи 2(банк)"
+V_CASTA_B2_RP		[STRING_2000];--"Родительный падеж должности 2(банк)"
+V_FIO_B2_RP			[STRING_2000];--"Родительный падеж ФИО 2(банк)"
+V_F_IO_2B			[STRING_2000];--"Фамилия И.О. 2(банк)"
+V_PHONE_21B			[STRING_2000];--"Телефон 1(банк)"
+V_PHONE_22B			[STRING_2000];--"Телефон 2(банк)"
+
+V_OKPO			varchar2;
+V_OGRN			varchar2;
+
+type RecInfoThirdPart is record
+(
+	Depn			[DEPN]
+	,OnDate			DATE
+	,ThirdPart		ref [CLIENT]
+	,ThirdName		::[CLIENT].[NAME]%type
+	,City			ref [NAMES_CITY]
+	,Addres			[STRING_250]
+	,AddresPost		[STRING_250]
+	,Okato			[STRING_20]
+	,Doc			[CERTIFICATE]
+	,Def			[STRING_2000]			-- Основание подписи
+	,Casta			ref [PERSONS_POS]		-- Должность
+	,CastaRp		[STRING_2000]			-- Родительный падеж должности 1(клиент)
+	,FioRp			::[CLIENT].[NAME]%type	-- Родительный падеж ФИО
+	,F_IO			::[CLIENT].[NAME]%type	-- Фамилия И.О.
+	,Phone			[STRING_2000]			-- Телефон
+	,Phone2			[STRING_2000]			-- Телефон2
+	,Trust			ref [TRUST_FOR_PROD]	-- Ссылка на доверенность
+);
+l_InfoThirdPart		RecInfoThirdPart;
+
+type RecDetailPrintOper is record
+(
+	Deposit			ref [DEPN],
+	MethodClass		[STRING_16],
+	MethodCode		[STRING_16],
+	AddParams		[STRING_32000]
+);
+type TabAddDetailPrintOper is table of RecDetailPrintOper;
+DetailPrintOperList	TabAddDetailPrintOper;	-- Список реквизитов операций печати
+DetailPrintFormList	TabAddDetailPrintOper;	-- Список реквизитов печатных форм
+
+type Rec_Tags is record
+(
+	ResourceOper	string
+	,Value			varchar2(32000)
+);
+type TAB_Tags is table of Rec_Tags index by string;
+
+t_DopTags			TAB_Tags;	-- Локальные тэги
+t_Tags				TAB_Tags;	-- Все тэги
+
+function GetInfThirdPart
+(
+	p_Depn			ref	[DEPN],
+	p_Date			date,
+	p_info			varchar2(100)
+)
+return varchar2(32000)
+is
+	retVal			GetInfThirdPart%type;
+	ClientV			ref [CLIENT];
+	Payer 			ref [CLIENT];
+begin
+	if l_InfoThirdPart.Depn%ID is null or l_InfoThirdPart.Depn%ID <> p_Depn%id then
+		-- Кешируем
+		l_InfoThirdPart				:=	null;
+		l_InfoThirdPart.Depn		:=	p_Depn;
+		-- Посмотрим открывали мы депозит по доверенности или с регистрацией волеизъявления
+		l_InfoThirdPart.Trust%id	:=	p_Depn.[PROPERTY_ARR]([PROPERTY_TYPE] = ::[PROPERTY_TYPE]([CODE] = 'TRUST_REF')).[REF_VALUE]%id;
+		if l_InfoThirdPart.trust is not null then
+			ClientV						:=	p_Depn.[CLIENT];							-- Владелец депозита (на тот момент)	
+			Payer						:=  nvl(p_Depn->(::[DEPOSIT_PRIV])[PAYER],l_InfoThirdPart.trust.[TRUST_CLIENT]);	-- Вноситель
+			l_InfoThirdPart.ThirdPart	:=	l_InfoThirdPart.trust.[TRUST_CLIENT];		-- Третье лицо
+			l_InfoThirdPart.ThirdName	:=	l_InfoThirdPart.trust.[TRUST_CLIENT].[NAME];-- Наимен. третьего лица (в случае незарег. клиента)
+	/*	else		
+			-- Получим третье лицо на дату
+			::[OP_D_THIRD_PARTY].[LIB_THIRD_PART].GetPayerAndThirdPart
+			(
+				p_Depn 			==	p_Depn						-- Депозит
+				,p_Date 		==	p_Date						-- Дата
+				,pOut_Client	==	ClientV						-- Владелец депозита (на тот момент)
+				,pOut_Payer		==	Payer						-- Вноситель
+				,pOut_ThirdPart	==	l_InfoThirdPart.ThirdPart	-- Третье лицо
+				,pOut_ThirdName	==	l_InfoThirdPart.ThirdName	-- Наимен. третьего лица (в случае незарег. клиента)
+			);
+	*/	end if;
+			
+		if l_InfoThirdPart.ThirdPart is not null then
+			-- Адреса клиента
+			::[DEPN_INTERFACE].[PRX_CLIENT].GetAddressClient
+			(
+				l_InfoThirdPart.ThirdPart
+				,V_ADR_MASK
+				,l_InfoThirdPart.City												
+				,l_InfoThirdPart.Addres
+				,l_InfoThirdPart.AddresPost
+				,l_InfoThirdPart.Okato
+			);
+			::[DEPN_INTERFACE].[PRX_CLIENT].GetCastClient
+			(
+				l_InfoThirdPart.ThirdPart
+				,l_InfoThirdPart.Casta
+				,l_InfoThirdPart.Def
+				,l_InfoThirdPart.CastaRp
+				,l_InfoThirdPart.FioRp
+				,l_InfoThirdPart.F_IO
+				,p_Date
+				,V_CLASS
+			);
+			-- Телефоны клиента
+			::[DEPN_INTERFACE].[PRX_CLIENT].GetPhoneClient
+			(
+				l_InfoThirdPart.ThirdPart
+				,l_InfoThirdPart.Phone
+				,l_InfoThirdPart.Phone2
+			);
+		end if;
+	end if;
+	p_info	:= substr(p_info, length('THIRD_PART_') + 1);
+	&debug('p_info: '||p_info, 0)
+	if p_info = 'OKATO' then -- ОКАТО_клиент
+		retVal	:= l_InfoThirdPart.Okato;
+	elsif p_info = 'CITY_NAME' then -- Населенный_пункт
+		retVal	:=  l_InfoThirdPart.City.[NAME];
+	elsif p_info = 'CITY_PEOPLE_PLACE' then -- Тип_населенного_пункта
+		retVal	:=  l_InfoThirdPart.City.[KIND].[SHORT_NAME];
+	elsif p_info = 'ADRESS' then -- Адрес_клиент
+		retVal	:=  l_InfoThirdPart.Addres;
+	elsif p_info = 'ADRESS_POST' then -- Почтовый_адрес_клиент
+		retVal	:=  l_InfoThirdPart.AddresPost;
+	elsif p_info = 'DEF' then -- Основание_подписи_1клиент
+		retVal	:=  l_InfoThirdPart.Def;
+	elsif p_info = 'CASTA_RANGE_VALUE' then -- Должность_1клиент
+		retVal	:=  l_InfoThirdPart.Casta.[RANGE].[VALUE];
+	elsif p_info = 'CASTA_RP' then -- Родительный_падеж_должности_1клиент
+		retVal	:=  l_InfoThirdPart.CastaRp;
+	elsif p_info = 'NAME' then -- ФИО_1клиент
+		retVal	:=  l_InfoThirdPart.ThirdName;
+	elsif p_info = 'CASTA_NAME' then -- ФИО_1клиент
+		retVal	:=  nvl(l_InfoThirdPart.Casta.[FASE].[NAME], l_InfoThirdPart.ThirdName);
+	elsif p_info = 'FIO_RP' then -- Родительный_падеж_ФИО_1клиент
+		retVal	:=  l_InfoThirdPart.FioRp;
+	elsif p_info = 'F_IO' then -- Фамилия_ИО_1клиент
+		retVal	:=  l_InfoThirdPart.F_IO;
+	elsif p_info = 'PHONE' then -- Телефон_1клиент
+		retVal	:=  l_InfoThirdPart.Phone;
+	elsif p_info = 'PHONE_2' then -- Телефон
+		retVal	:=  l_InfoThirdPart.Phone;
+	elsif p_info = 'TRUST_NUM' then -- Номер доверенности
+		retVal	:=  l_InfoThirdPart.trust.[DOCUMENT_UNO];
+	elsif p_info = 'TRUST_DT' then -- Дата доверенности
+		retVal	:=  to_char(l_InfoThirdPart.trust.[BEGIN_DATE],'dd.mm.yyyy');	
+	end if;
+	&debug('retVal: '||retVal, 0)
+	return retVal;
+end;
+
+procedure GetClientReq
+(
+	IdClient		ref [CLIENT],
+	OnDate			date
+)
+is
+begin
+	V_CASTA_1C		:= null;
+	V_DEF_1C		:= null;
+	V_CASTA_C1_RP	:= null;
+	V_FIO_C1_RP		:= null;
+	V_F_IO_1C		:= null;
+	V_CASTA_2C		:= null;
+	V_DEF_2C		:= null;
+	V_CASTA_C2_RP	:= null;
+	V_FIO_C2_RP		:= null;
+	V_F_IO_2C		:= null;
+	V_OKPO			:= null;
+	V_OGRN			:= null;
+	-- Адреса клиента
+	::[DEPN_INTERFACE].[PRX_CLIENT].GetAddressClient
+	(
+		IdClient
+		,V_ADR_MASK
+		,V_CITY_C												
+		,V_ADRESS_C
+		,V_ADRESS_C_POST
+		,V_OKATO_C
+	);
+	if IdClient%class in (::[CL_ORG]%class, ::[CL_BANK]%class, ::[CL_BANK_N]%class) then
+		/*	Если на клиенте адрес задан строкой, то после вызова GetAddressClient значение переменной
+			V_OKATO_C будет пустым, т.к. там ОКАТО берется с города */
+		if V_OKATO_C is null then
+			V_OKATO_C := GetOkatoCode(IdClient);
+			&debug('После вызова GetAddressClient ОКАТО не определен. Значение ОКАТО с клиента: ' || V_OKATO_C, 0)
+		end if;
+		V_ALL_BOSS_C := IdClient->(::[CL_CORP])[ALL_BOSS];
+		-- 1-ая подпись со стороны клиента
+		for ( 	select AllBOSS (AllBOSS%id : ID)
+				in V_ALL_BOSS_C all
+				where AllBOSS.[CHIEF] and AllBOSS.[SIGN_TODAY]
+		)loop
+			V_CASTA_1C := AllBOSS.[ID];
+			exit;
+		end loop;
+		::[DEPN_INTERFACE].[PRX_CLIENT].GetCastClient
+		(
+			IdClient
+			,V_CASTA_1C
+			,V_DEF_1C
+			,V_CASTA_C1_RP
+			,V_FIO_C1_RP
+			,V_F_IO_1C
+			,OnDate
+			,V_CLASS
+		);
+		-- 2-ая подпись со стороны клиента
+		for ( 	select AllBOSS (AllBOSS%id : ID)
+				in V_ALL_BOSS_C all
+				where AllBOSS.[GENERAL_ACC] and AllBOSS.[SIGN_TODAY]
+		)loop
+			V_CASTA_2C := AllBOSS.[ID];
+			exit;
+		end loop;
+		::[DEPN_INTERFACE].[PRX_CLIENT].GetCastClient
+		(
+			IdClient
+			,V_CASTA_2C
+			,V_DEF_2C
+			,V_CASTA_C2_RP
+			,V_FIO_C2_RP
+			,V_F_IO_2C
+			,OnDate
+			,V_CLASS
+		);
+		declare
+			v_client_info	::[DEPN_INTERFACE].[PRX_CLIENT].ClCorpRegInfo%type;
+		begin
+			v_client_info := ::[DEPN_INTERFACE].[PRX_CLIENT].GetCorpRegInfo(IdClient);
+			V_OKPO := v_client_info.[okpo_code];
+			if ::[DEPN_INTERFACE].[PRX_CLIENT].RESIDENT(IdClient) then
+				V_OGRN := coalesce(v_client_info.ogrn, v_client_info.reg_num);
+			else
+				V_OGRN := v_client_info.reg_num;
+			end if;
+		end;
+	elsif IdClient%class = ::[CL_PRIV]%class then
+		V_ALL_BOSS_C := null;
+		-- 1-ая подпись со стороны клиента
+		::[DEPN_INTERFACE].[PRX_CLIENT].GetCastClient
+		(
+			IdClient
+			,V_CASTA_1C
+			,V_DEF_1C
+			,V_CASTA_C1_RP
+			,V_FIO_C1_RP
+			,V_F_IO_1C
+			,OnDate
+			,V_CLASS
+		);
+	end if;
+	-- Телефоны клиента
+	::[DEPN_INTERFACE].[PRX_CLIENT].GetPhoneClient
+	(
+		IdClient
+		, V_PHONE_1C
+		, V_PHONE_2C
+	);
+end;
+
+procedure GetBankReq
+/* Процедура получает информацию о данном банке. */
+(
+	IdBank			ref	[CL_CORP]		/* Процедура получает информацию о данном банке. */
+	, OnDate		date				/* на дату */
+)
+is
+begin
+	V_ALL_BOSS_B	:=	IdBank.[ALL_BOSS];
+	V_CASTA_1B = V_CASTA_2B	:=	null;
+	::[DEPN_INTERFACE].[PRX_CLIENT].GetInfoBank(bank 				== IdBank
+												, BIC 				== V_BIC_B
+												, KS 				== V_KS_B
+												, OKONH_B 			== V_OKONH_B
+												, CONTACTS_B 		== V_CONTACTS_B
+												, city 				== V_CITY_B
+												, mask 				== V_ADR_MASK
+												, ADRESS_B 			== V_ADRESS_B
+												, ADRESS_B_POST 	== V_ADRESS_B_POST
+												, OKATO_B 			== V_OKATO_B
+												, CASTA_B1 			== V_CASTA_1B
+												, DEF_B1 			== V_DEF_1B
+												, CASTA_B1_RP 		== V_CASTA_B1_RP
+												, FIO_B1_RP 		== V_FIO_B1_RP
+												, F_IO_B1 			== V_F_IO_1B
+												, CASTA_B2 			== V_CASTA_2B
+												, DEF_B2 			== V_DEF_2B
+												, CASTA_B2_RP 		== V_CASTA_B2_RP
+												, FIO_B2_RP 		== V_FIO_B2_RP
+												, F_IO_B2 			== V_F_IO_2B
+												, DATE_ON 			== OnDate
+												, p_class 			== V_CLASS
+												);
+	-- Телефоны банка
+	::[DEPN_INTERFACE].[PRX_CLIENT].GetPhoneClient(cli 		== V_CASTA_1B.[FASE]
+												, phone1 	== V_PHONE_11B
+												, phone2 	== V_PHONE_12B
+												);
+	::[DEPN_INTERFACE].[PRX_CLIENT].GetPhoneClient(cli 		== V_CASTA_2B.[FASE]
+												, phone1 	== V_PHONE_21B
+												, phone2 	== V_PHONE_22B
+												);
+end;
+
+procedure SetBankRepr
+(
+	p_on_date		date,	
+	p_bank_repr		ref	[USER],
+	p_bank_repr_2	ref	[USER]
+)
+is
+	bank_repr		ref	[USER];
+	type pers_post is select prs(prs : prs_id)
+	in ::[PERSONS_POS] all
+	where prs%collection = V_ALL_BOSS_B
+	and prs.[FASE] = (select usr(usr.[CL_PRIV_REF]) in ::[USER] all where usr = bank_repr)
+	order by prs desc;
+begin
+	if p_bank_repr is not null then
+		bank_repr	:=	p_bank_repr;
+		V_CASTA_1B	:=	null;
+		for prs in cursor pers_post
+		loop
+			V_CASTA_1B	:=	prs.prs_id;			
+			exit;
+		end loop;
+		::[DEPN_INTERFACE].[PRX_CLIENT].GetCastClient
+		(
+			V_OUR_BANK
+			,V_CASTA_1B
+			,V_DEF_1B
+			,V_CASTA_B1_RP
+			,V_FIO_B1_RP
+			,V_F_IO_1B
+			,p_on_date
+			,V_CLASS
+		);
+		::[DEPN_INTERFACE].[PRX_CLIENT].GetPhoneClient
+		(
+			V_CASTA_1B.[FASE]
+			,V_PHONE_11B
+			,V_PHONE_12B
+		);
+	end if;
+	if p_bank_repr_2 is not null then
+		bank_repr	:=	p_bank_repr_2;
+		V_CASTA_2B	:=	null;
+		for prs in cursor pers_post
+		loop
+			V_CASTA_2B	:=	prs.prs_id;			
+			exit;
+		end loop;
+		::[DEPN_INTERFACE].[PRX_CLIENT].GetCastClient
+		(
+			V_OUR_BANK
+			,V_CASTA_2B
+			,V_DEF_2B
+			,V_CASTA_B2_RP
+			,V_FIO_B2_RP
+			,V_F_IO_2B
+			,p_on_date
+			,V_CLASS
+		);
+		::[DEPN_INTERFACE].[PRX_CLIENT].GetPhoneClient
+		(
+			V_CASTA_2B.[FASE]
+			,V_PHONE_21B
+			,V_PHONE_22B
+		);
+	end if;
+end;
+
+-- Получение информации по продукту.
+public function GetPrdInfo
+(
+	p_Tag				varchar2(100),
+	IdPrd				ref [DEPN],
+	OnDate				date,
+	p_AddPar			varchar2(32000) default null
+)
+return varchar2(32000) is 
+	CurUser			ref	[USER];
+	retval			varchar2(32000);
+begin
+	&sp(GPI)
+	&debug('GetPrdInfo...', 0)
+	if substr(p_Tag, -1) in ('0', '1', '2', '3', '4', '5', '6', '7', '8', '9') then -- Исключаем кодики оканчивающиеся на цифру
+		p_Tag := substr(p_Tag, 1, length(p_Tag) - 1);
+	end if;
+
+	if p_Tag =	'BANK_NAME_C' then -- В_банке
+		retval	:=  V_OUR_BANK.[NAME];
+	elsif p_Tag	=	'KS_C' then -- Корр_счет
+		retval	:=  ::[CL_BANK_N].[LIB].GetBankReqOnDate(V_OUR_BANK,'KS',OnDate);
+	elsif p_Tag	=	'BIC_C' then -- Бик
+		retval	:=  ::[CL_BANK_N].[LIB].GetBankReqOnDate(V_OUR_BANK,'BIC',OnDate);
+	-- Реквизиты клиента
+	elsif p_Tag	=	'OKATO_C' then -- ОКАТО_клиент
+		retval	:=  V_OKATO_C;
+	elsif p_Tag	=	'CITY_C_NAME' then -- Населенный_пункт
+		retval	:=  V_CITY_C.[NAME];
+	elsif p_Tag	=	'CITY_C_PEOPLE_PLACE' then -- Тип_населенного_пункта
+		retval	:=  V_CITY_C.[KIND].[SHORT_NAME];	
+	elsif p_Tag	=	'ADRESS_C' then -- Адрес_клиент
+		retval	:=  V_ADRESS_C;
+	elsif p_Tag	=	'ADRESS_C_POST' then -- Почтовый_адрес_клиент
+		retval	:=  V_ADRESS_C_POST;
+	elsif p_Tag	=	'DEF_1C' then -- Основание_подписи_1клиент
+		retval	:=  V_DEF_1C;
+	elsif p_Tag	=	'CASTA_C1_RANGE_VALUE' then -- Должность_1клиент
+		retval	:=  V_CASTA_1C.[RANGE].[VALUE];
+	elsif p_Tag	=	'CASTA_C1_RP' then -- Родительный_падеж_должности_1клиент
+		retval	:=  V_CASTA_C1_RP;
+	elsif p_Tag	=	'CASTA_C1_NAME' then -- ФИО_1клиент
+		retval	:=  nvl(V_CASTA_1C.[FASE].[NAME], V_CLIENT.[NAME]);
+	elsif p_Tag	=	'FIO_C1_RP' then -- Родительный_падеж_ФИО_1клиент
+		retval	:=  V_FIO_C1_RP;
+	elsif p_Tag	=	'F_IO_1C' then -- Фамилия_ИО_1клиент
+		retval	:=  V_F_IO_1C;
+	elsif p_Tag	=	'PHONE_1C' then -- Телефон_1клиент
+		retval	:=  V_PHONE_1C;
+	elsif p_Tag	=	'DEF_2C' then -- Основание подписи 2(клиент)
+		retval	:=  V_DEF_2C;
+	elsif p_Tag	=	'CASTA_C2_RANGE_VALUE' then -- Должность_2клиент
+		retval	:=  V_CASTA_2C.[RANGE].[VALUE];
+	elsif p_Tag	=	'CASTA_C2_RP' then -- Родительный падеж должности 2(клиент)
+		retval	:=  V_CASTA_C2_RP;
+	elsif p_Tag	=	'CASTA_C2_NAME' then -- ФИО 2(клиент)
+		retval	:=  V_CASTA_2C.[FASE].[NAME];
+	elsif p_Tag	=	'FIO_C2_RP' then -- Родительный падеж ФИО 2(клиент)
+		retval	:=  V_FIO_C2_RP;
+	elsif p_Tag	=	'F_IO_2C' then -- Фамилия_ИО_2клиент
+		retval	:=  V_F_IO_2C;
+	elsif p_Tag	=	'PHONE_2C' then -- Телефон_2клиент
+		retval	:=  V_PHONE_2C;
+	-- Реквизиты банка
+	elsif p_Tag	=	'BANK_NAME' then -- Наименование банка
+		retval	:=  V_OUR_BANK.[NAME];
+	elsif p_Tag	=	'CITY_B_NAME' then -- Населенный_пункт
+		retval	:=  V_CITY_B.[NAME];
+	elsif p_Tag	=	'CITY_B_PEOPLE_PLACE' then -- Тип_населенного_пункта
+		retval	:=  V_CITY_B.[KIND].[SHORT_NAME];
+	elsif p_Tag	=	'FORMA_B' then -- Прав_форма_банк
+		retval	:=  V_OUR_BANK.[FORMA].[NAME];
+	elsif p_Tag	=	'OUR_BANK_NAME' then -- Наименование_банк
+		retval	:=  V_OUR_BANK.[NAME];
+	elsif p_Tag	=	'INN_B' then -- ИНН_банк
+		retval	:=  V_OUR_BANK.[INN];
+	elsif p_Tag	=	'BIC_B' then -- БИК_банк
+		retval	:=  V_BIC_B;
+	elsif p_Tag	=	'CORR_ACC_B' then -- Корр_счет_банк
+		retval	:=  V_KS_B;
+	elsif p_Tag	=	'OKONH_B' then -- ОКОНХ_банк
+		retval	:=  V_OKONH_B;
+	elsif p_Tag	=	'OKPO_B' then -- ОКПО_банк
+		retval	:=  V_OUR_BANK.[KOD_OKPO];
+	elsif p_Tag	=	'CONTACTS_B' then -- Контакты_банк
+		retval	:=  V_CONTACTS_B;
+	elsif p_Tag	=	'ADRESS_B' then -- Адрес_банк
+		retval	:=  V_ADRESS_B;
+	elsif p_Tag	=	'ADRESS_B_POST' then -- Почтовый_адрес_банк
+		retval	:=  V_ADRESS_B_POST;
+	elsif p_Tag	=	'BANK_OGRN'	 then --ОГРН банка
+		retval	:=	::[BRANCH].[SLIB].GET_OGRN(IdPrd.[FILIAL]);
+	elsif p_Tag	=	'BANK_KPP'	then --КПП банка
+		retval  :=	V_OUR_BANK.[KPP];
+	elsif p_Tag	=	'DEF_1B' then -- Основание_подписи_1банк
+		retval	:=  V_DEF_1B;
+	elsif p_Tag	=	'CASTA_B1_RANGE_VALUE' then -- Должность_1банк
+		retval	:=  V_CASTA_1B.[RANGE].[VALUE];
+	elsif p_Tag	=	'CASTA_B1_RP' then -- Родительный_падеж_должности_1банк
+		retval	:=  V_CASTA_B1_RP;
+	elsif p_Tag	=	'CASTA_B1_NAME' then -- ФИО_1банк
+		retval	:=  V_CASTA_1B.[FASE].[NAME];
+	elsif p_Tag	=	'FIO_B1_RP' then -- Родительный_падеж_ФИО_1банк
+		retval	:=  V_FIO_B1_RP;
+	elsif p_Tag	=	'F_IO_1B' then -- Фамилия_ИО_1банк
+		retval	:=  V_F_IO_1B;
+	elsif p_Tag	=	'PHONE_11B' then -- Телефон_1_банка
+		retval	:=  V_PHONE_11B;
+	elsif p_Tag	=	'PHONE_12B' then -- Телефон_2_банка
+		retval	:=  V_PHONE_12B;
+	elsif p_Tag	=	'DEF_2B' then -- Основание_подписи_2банк
+		retval	:=  V_DEF_2B;
+	elsif p_Tag	=	'CASTA_B2_RANGE_VALUE' then -- Должность_2банк
+		retval	:=  V_CASTA_2B.[RANGE].[VALUE];
+	elsif p_Tag	=	'CASTA_B2_RP' then -- Родительный_падеж_должности_2банк
+		retval	:=  V_CASTA_B2_RP;
+	elsif p_Tag	=	'CASTA_B2_NAME' then -- ФИО_2_банк
+		retval	:=  V_CASTA_2B.[FASE].[NAME];
+	elsif p_Tag	=	'FIO_B2_RP' then -- Родительный_падеж_ФИО_2банк
+		retval	:=  V_FIO_B2_RP;
+	elsif p_Tag	=	'F_IO_2B' then -- Фамилия_ИО_2банк
+		retval	:=  V_F_IO_2B;
+	elsif p_Tag	=	'PHONE_21B' then -- Телефон_1_банка
+		retval	:=  V_PHONE_21B;
+	elsif p_Tag	=	'PHONE_22B' then -- Телефон_2_банка
+		retval	:=	V_PHONE_22B;
+	-- Сведения о пользователе
+	elsif p_Tag like 'USER_%' then
+		CurUser	:=	stdlib.UserId;
+		p_Tag	:=	substr(p_Tag, 6);
+		if p_Tag	=	'NAME' then
+			retval	:=	CurUser.[NAME];
+		elsif p_Tag	=	'RANGE' then
+			retval	:=	CurUser.[CASTA].[VALUE];
+		elsif p_Tag in ('PHONE', 'PHONE1U', 'PHONE2U') then
+			declare
+				phone1		varchar2(2000);
+				phone2		varchar2(2000);
+				retphone	varchar2(2000);
+			begin
+				::[DEPN_INTERFACE].[PRX_CLIENT].GetPhoneClient
+				(
+					CurUser.[CL_PRIV_REF]
+					, phone1
+					, phone2
+				);
+				if p_Tag = 'PHONE1U' then
+					retphone	:=	phone1;
+				elsif p_Tag = 'PHONE2U' then
+					retphone	:=	phone2;
+				else
+					if phone1 is not null then
+						retphone	:=	phone1;
+						if phone2 != phone1 then
+							retphone	:=	retphone || '; ' || phone2;
+						end if;
+					else
+						retphone	:=	phone2;
+					end if;
+				end if;
+				retval	:=	retphone;
+			end;
+		else
+			retval	:=	CurUser.[NAME];
+		end if;
+	-- код или наименование участника расчетов банка
+	elsif p_Tag like 'CL_PART_%' then
+		retval	:=	'';
+		p_Tag	:=	substr(p_Tag, 9);
+		for (
+			select cl(cl.[CODE] : code, cl.[NAME] : name)
+			in ::[CL_PART] all
+			where cl.[BANK]%id = V_OUR_BANK%id
+			and cl.[DATE_CL] is null
+		)
+		loop
+			if p_Tag = 'CODE' then
+				retval	:=	cl.code;
+			else
+				retval	:=	cl.name;
+			end if;
+			exit;
+		end loop;
+	-- Информация о третьем лице
+	elsif p_Tag like 'THIRD_PART_%' then
+		retval	:=	GetInfThirdPart(IdPrd, OnDate, p_Tag);
+	elsif p_TAG = 'OKPO' then
+		retval := V_OKPO;
+	elsif p_TAG = 'OGRN' then
+		retval := V_OGRN;
+	elsif p_Tag = 'PRC_RATE' then
+		retval := rtrim(trim(to_char(::[DEPN].[GET_NUM].PRC_RATE(IdPrd, OnDate, null), '990d0000')), '0');
+		retval := rtrim(rtrim(retval, '.'), ',');
+	elsif p_Tag = 'GMIR' then
+		retval := ltrim(to_char(::[DEPN].[GET_NUM].GMIR(IdPrd, OnDate, null), '999999990d000'));
+	elsif p_Tag like '___!_GMIR' escape '!' then
+		declare
+			adds	varchar2(32000);
+		begin
+			::[RUNTIME].[STR].set_par(adds, 'ON_DATE', OnDate);
+			retval := IdPrd.[GET_VALUE](p_Tag, adds);
+			retval := ltrim(to_char(retval, '999999990d000'));
+		end;
+	else
+		-- Все остальное ищем в Get_Value
+		declare
+			adds	varchar2(32000);
+		begin
+			::[RUNTIME].[STR].set_par(adds, 'ON_DATE', OnDate);
+			return IdPrd.[GET_VALUE](p_Tag, adds);
+		end;
+	end if;
+	
+	&debug('retval: '||retval, 0)
+	return retval;
+exception when others then	
+	-- Причина перехвата others: для совместимости предыдущей печати оставлена обработка others
+	&rb(GPI)
+	return null;
+end;
+
+-- добавить реквизиты клиента в строку дополнительных параметров
+procedure AddClientReq
+(
+	p_AddPar		in out	varchar2,
+	p_ClientReq		in		[PAY_WAY]
+)
+is
+begin	
+	-- безналичное списание
+	if p_ClientReq.[0] = 1 then
+	
+		::[RUNTIME].[STR].set_par(p_AddPar, 'PP_REQ_RECIP.0',		p_ClientReq.[0]);
+		
+		-- клиент банка
+		if p_ClientReq.[MEMO].[0] = 1 then
+			
+			::[RUNTIME].[STR].set_par(p_AddPar, 'PP_REQ_RECIP.MEMO.0',			p_ClientReq.[MEMO].[0]);
+			::[RUNTIME].[STR].set_par(p_AddPar, 'PP_REQ_RECIP.MEMO.1.1',		p_ClientReq.[MEMO].[1].[1]%id);
+			::[RUNTIME].[STR].set_par(p_AddPar, 'PP_REQ_RECIP.MEMO.1.2',		p_ClientReq.[MEMO].[1].[2]%id);
+			
+		-- не клиент банка
+		elsif p_ClientReq.[MEMO].[0] = 2 then
+			
+			::[RUNTIME].[STR].set_par(p_AddPar, 'PP_REQ_RECIP.MEMO.0',			p_ClientReq.[MEMO].[0]);
+			::[RUNTIME].[STR].set_par(p_AddPar, 'PP_REQ_RECIP.MEMO.2.1',		p_ClientReq.[MEMO].[2].[1]);
+			::[RUNTIME].[STR].set_par(p_AddPar, 'PP_REQ_RECIP.MEMO.2.2',		p_ClientReq.[MEMO].[2].[2]);
+			::[RUNTIME].[STR].set_par(p_AddPar, 'PP_REQ_RECIP.MEMO.2.3',		p_ClientReq.[MEMO].[2].[3]%Id);
+			::[RUNTIME].[STR].set_par(p_AddPar, 'PP_REQ_RECIP.MEMO.2.FRIENDS',	p_ClientReq.[MEMO].[2].[FRIENDS]%id);
+			::[RUNTIME].[STR].set_par(p_AddPar, 'PP_REQ_RECIP.MEMO.2.INN',		p_ClientReq.[MEMO].[2].[INN]);
+			::[RUNTIME].[STR].set_par(p_AddPar, 'PP_REQ_RECIP.MEMO.2.KPP',		p_ClientReq.[MEMO].[2].[KPP]);
+			::[RUNTIME].[STR].set_par(p_AddPar, 'PP_REQ_RECIP.MEMO.2.PART',		p_ClientReq.[MEMO].[2].[PART]%id);
+			
+		end if;
+	-- наличное списание
+	elsif p_ClientReq.[0] = 2 then
+		::[RUNTIME].[STR].set_par(p_AddPar, 'PP_REQ_RECIP.0',		p_ClientReq.[0]);
+		::[RUNTIME].[STR].set_par(p_AddPar, 'PP_REQ_RECIP.CASH',	p_ClientReq.[CASH]%id);
+	end if;				
+end;--AddClientReq
+
+-- Добавление реквизитов операции в список атрибутов печати.
+public procedure AddDetailPrintOper
+(
+	p_AddPar			in	[STRING_32000],
+	p_MethodClass		in	[STRING_16],
+	p_MethodCode		in	[STRING_16],
+	p_Deposit			in	ref [DEPN],
+	p_Trust				in	ref [TRUST_FOR_PROD]	default null,
+	p_ClientReq			in	[PAY_WAY] 				default null,
+	p_FinToolRecip		in	ref [FT_MONEY]			default null,
+	p_Restart			in	[BOOLEAN]				default null,
+	p_ProdRecip			in	ref	[DEPN]				default null,
+	p_SumOper			in	[SUMMA202]				default null
+) is 
+	AddPar				[STRING_32000]	:=	p_AddPar;
+	detail_print		RecDetailPrintOper;
+begin
+	-- занесем реквизиты операции в строку дополнительных параметров
+	if p_Trust is not null then
+		::[RUNTIME].[STR].set_par( AddPar, gcn_PrintTrust,		true );
+		::[RUNTIME].[STR].set_par( AddPar, gcn_TrustOperation,	p_Trust%id );
+	end if;
+	if p_ClientReq.[0] = 1 and p_ClientReq.[MEMO].[0] = 1 then
+		::[RUNTIME].[STR].set_par( AddPar, gcn_IntTransfer,		true );
+	elsif p_ClientReq.[0] = 1 and p_ClientReq.[MEMO].[0] = 2 then
+		::[RUNTIME].[STR].set_par( AddPar, gcn_ExtTransfer,		true );
+	elsif p_ClientReq.[0] = 2 then
+		::[RUNTIME].[STR].set_par( AddPar, gcn_CashTransactions,	true );
+	end if;
+	AddClientReq( AddPar, p_ClientReq );
+	if p_FinToolRecip is not null then
+		::[RUNTIME].[STR].set_par( AddPar, gcn_CodeCurRecip,		p_FinToolRecip.[CUR_SHORT] );
+		::[RUNTIME].[STR].set_par( AddPar, gcn_CurrencyRecip,		p_FinToolRecip%id );
+	end if;
+	if p_Restart then
+		::[RUNTIME].[STR].set_par( AddPar, gcn_RestartContract,	true );		
+	end if;
+	if p_ProdRecip is not null then
+		::[RUNTIME].[STR].set_par( AddPar, gcn_ProductRecip,		p_ProdRecip%id );
+	end if;
+	if p_SumOper is not null then
+		::[RUNTIME].[STR].set_par( AddPar, gcn_SumOperation,		p_SumOper );
+	end if;
+	-- свернем некоторые операции на базовые для пакетной печати
+	if p_MethodClass = 'DEPN' and p_MethodCode = 'CANC_TERM_AVANS' then
+		::[RUNTIME].[STR].set_par( AddPar, gcn_MethodClass,			p_MethodClass );
+		::[RUNTIME].[STR].set_par( AddPar, gcn_MethodCode,			'CANC_TERM' );
+	elsif p_MethodClass = 'DEPOSIT_MULT' then
+		::[RUNTIME].[STR].set_par( AddPar, gcn_MethodClass,			'DEPN' );
+		if p_MethodCode = 'NEW#AUTO_MLT' then
+			::[RUNTIME].[STR].set_par( AddPar, gcn_MethodCode,		'NEW#AUTO' );
+		elsif p_MethodCode = 'EDIT#AUTO_MLT' then
+			::[RUNTIME].[STR].set_par( AddPar, gcn_MethodCode,		'EDIT#AUTO' );
+		else
+			::[RUNTIME].[STR].set_par( AddPar, gcn_MethodCode,		p_MethodCode );	
+		end if;
+	else
+		::[RUNTIME].[STR].set_par( AddPar, gcn_MethodClass,			p_MethodClass );
+		::[RUNTIME].[STR].set_par( AddPar, gcn_MethodCode,			p_MethodCode );
+	end if;
+	-- занесем аттрибуты печати в массив
+	detail_print.Deposit		:=	p_Deposit;
+	detail_print.MethodClass	:=	p_MethodClass;
+	detail_print.MethodCode		:=	p_MethodCode;
+	detail_print.AddParams		:=	AddPar;
+	DetailPrintOperList(DetailPrintOperList.count + 1) := detail_print;
+
+end;--AddDetailOper
+
+-- Получим операцию печати из настройки
+function GetPrintWordOper
+(
+	p_Deposit			in	ref [DEPN],
+	p_MethodClass		in	[STRING_16],
+	p_MethodCode		in	[STRING_16]
+)
+return ref [VID_OPER_DOG]
+is
+	ret_print_oper		ref [VID_OPER_DOG];
+	method_ref			ref	[METHOD];
+	canons				[STRING_2000];
+begin
+	&debug('Зашли в GetPrintWordOper...', 0)	
+	&debug('p_MethodClass = ' || p_MethodClass, 0)
+	&debug('p_MethodCode	= ' || p_MethodCode, 0)
+	if p_MethodClass is not null and p_MethodCode is not null then
+			
+		for (
+			select a (a : id) in ::[METHOD] all
+			where a.[CLASS_ID]%id = p_MethodClass and a.[SHORT_NAME] = p_MethodCode
+		)
+		loop
+			method_ref	:=	a.id;
+		end loop;
+		&debug('method_ref	= ' || method_ref%id, 0)
+		
+		if method_ref is not null then
+			
+			canons	:= ::[FP_TUNE].[LIB].set_canons(::[METHOD]%class, method_ref%id);
+			&debug('canons	= ' || canons, 0)
+			
+			ret_print_oper%id	:=	::[FP_TUNE].[LIB].get_ref_value('PRINT_WORD_OPER_DEFAULT', canons, '0')%id;
+			&debug('ret_print_oper	= ' || ret_print_oper%id, 0)
+		end if;
+	end if;
+	-- если в настройке логики продукта операции печати не настроен шаблон, то операция печати не задана
+	if ret_print_oper is not null then
+		if p_Deposit.[GET_NUM_TUNE]('SHBL_'||ret_print_oper.[CODE]) is null then
+			ret_print_oper := null;
+		end if;
+	end if;
+	
+	&debug('Вышли из GetPrintWordOper...', 0)
+	return ret_print_oper;
+end;
+
+-- Получим операцию печати из настройки
+function GetPrintWordOperDefault return ref [VID_OPER_DOG]
+is
+	ret_print_oper		ref [VID_OPER_DOG];
+begin
+	-- операцию печати определяем по первому ("ведущему") элементу списка атрибутов печати
+	if DetailPrintOperList.count > 0 then
+		ret_print_oper	:=	GetPrintWordOper
+		(
+			DetailPrintOperList(1).Deposit,
+			DetailPrintOperList(1).MethodClass,
+			DetailPrintOperList(1).MethodCode
+		);
+	end if;
+	return ret_print_oper;
+end;
+
+-- Определяем пакетный шаблон или нет
+function IsPackageShablon
+(
+	p_ShablonDoc		in	ref [SHABLON_DOC]
+)
+return [BOOLEAN]
+is
+	quant				integer := 0;
+begin
+	if p_ShablonDoc is not null then
+		select prf(count(prf)) in ::[PRN_FORMS] where prf.[PKG_TEMPLATE] = p_ShablonDoc into quant;
+	end if;
+	return quant > 0;
+end;
+
+procedure FillPrintForms
+(
+	p_ShablonDoc		in	ref [SHABLON_DOC],
+	p_FolderPay			in	ref	[FOLDER_PAY]
+)
+is
+	type t_print_form_list is table of [TEMPLATE_SERVICE];
+	print_form_list		t_print_form_list;
+	print_form			[TEMPLATE_SERVICE];
+	detail_print_list	TabAddDetailPrintOper;
+	detail_print		RecDetailPrintOper;
+	idx					number;
+	print_oper			ref [VID_OPER_DOG];
+	print_template		ref [SHABLON_DOC];
+begin
+	V_PRINT_FORMS.delete;		-- очищаем грид печатных форм
+	DetailPrintFormList.delete;	-- очищаем список депозитов формы
+	
+	-- заполняем грид печатных форм только для пакетной печати, иначе выходим
+	if p_ShablonDoc is null or not IsPackageShablon(p_ShablonDoc) then
+		return;
+	end if;
+	
+	&debug('Начало обработки условий печатных форм пакета', 0)
+	print_form_list.delete;
+	detail_print_list.delete;
+	idx := 0;
+	&debug('Размер списка реквизитов операций печати = ' || to_char(DetailPrintOperList.count), 0)
+	for i in 1 .. DetailPrintOperList.count
+	loop		
+		if DetailPrintOperList(i).Deposit = DetailPrintOperList(1).Deposit
+			and DetailPrintOperList(i).MethodClass = DetailPrintOperList(1).MethodClass
+			and DetailPrintOperList(i).MethodCode = DetailPrintOperList(1).MethodCode
+		then
+			-- для элементов списка атрибутов печати сходных с ведущим
+			-- при возможной смене пакетного шаблона используем его
+			print_template := p_ShablonDoc;
+		else
+			-- для остальных считываем из настройки
+			print_oper	:=	GetPrintWordOper
+			(
+				DetailPrintOperList(i).Deposit,
+				DetailPrintOperList(i).MethodClass,
+				DetailPrintOperList(i).MethodCode
+			);
+			print_template%id	:=	DetailPrintOperList(i).Deposit.[GET_NUM_TUNE]('SHBL_'||print_oper.[CODE]);
+		end if;
+		
+		&debug('Пакетный шаблон ' || print_template.[NAME], 0)
+
+		for (
+			select prf(tmp.[TEMPLATE] : template, tmp.[CONDITION] : condition)
+			in ::[PRN_FORMS], (::[PRINT_SERVICE] all : srv), (::[TEMPLATE_SERVICE] all : tmp) all
+			where prf.[PKG_TEMPLATE] = print_template
+			and prf.[PRINT_SERVICE] = srv%id
+			and srv.[TEMPLATES] = tmp%collection
+			and tmp.[TEMPLATE] is not null
+			order by srv.[NAME], tmp%id
+		)
+		loop
+			&debug('Шаблон (простой) ' || prf.template.[NAME], 0)
+			print_form.[TEMPLATE]		:= prf.template;
+			-- вычислим условие печатной формы
+			-- если условие не задано, то понимаем как безусловную печать
+			print_form.print_sign	:= nvl(::[CALC_PARAMS].[EXEC_BOOL_EXP]( prf.condition, p_FolderPay, DetailPrintOperList(i).Deposit, DetailPrintOperList(i).AddParams ), true);
+
+			detail_print.Deposit	:= DetailPrintOperList(i).Deposit;
+			detail_print.MethodClass:= DetailPrintOperList(i).MethodClass;
+			detail_print.MethodCode	:= DetailPrintOperList(i).MethodCode;
+			detail_print.AddParams	:= DetailPrintOperList(i).AddParams;
+
+			idx := idx + 1;
+			print_form_list(idx)	:= print_form;			
+			detail_print_list(idx)	:= detail_print;
+		end loop;
+	end loop;
+	&debug('Окончание обработки условий печатных форм пакета', 0)
+	
+	-- заполняем грид печатных форм
+	idx := 0;
+	for i in 1 .. print_form_list.count
+	where print_form_list(i).print_sign
+	loop
+		idx := idx + 1;
+		V_PRINT_FORMS(idx)			:= print_form_list(i);
+		DetailPrintFormList(idx)	:= detail_print_list(i);
+	end loop;
+	for i in 1 .. print_form_list.count
+	where not print_form_list(i).print_sign
+	loop
+		idx := idx + 1;
+		V_PRINT_FORMS(idx)			:= print_form_list(i);
+		DetailPrintFormList(idx)	:= detail_print_list(i);
+	end loop;
+end;
+
+procedure ValidatePrnOper
+(
+	p_depn			ref	[DEPN],
+	p_prn_oper		ref	[VID_OPER_DOG],
+	p_on_date		date
+)
+is
+	r_sign_user_1	ref [USER];
+	r_sign_user_2	ref [USER];
+	r_file_name_tmp	ref [SHABLON_DOC];
+	
+begin
+	if p_prn_oper is not null then
+	
+		for (	select x (	x.[SHABLON]	:	PATTERN
+							,x.[SIGN_1]	:	SIGN_1
+							,x.[SIGN_2]	:	SIGN_2)
+				in ::[PRINT_TUNE] all
+				where	x%collection = V_THIS.[VID_DOG].[PRINT_PATTERNS]
+					and x.[VID_OPER] = P_PRN_OPER)
+		loop
+			&debug('Шаблон найден на виде договора', 0)
+			r_file_name_tmp := x.PATTERN;
+			r_sign_user_1 := x.SIGN_1;
+			r_sign_user_2 := x.SIGN_2;
+		end loop;
+		
+		if r_file_name_tmp is null then
+			&debug('Шаблон не найден на виде договора, поиск в тонкой натройке', 0)
+			r_file_name_tmp%id := V_THIS.[GET_NUM_TUNE]('SHBL_'||p_prn_oper.[CODE]);
+			r_sign_user_1 := V_THIS.[GET_USER_TUNE]('VOS1_'||p_prn_oper.[CODE]);
+			r_sign_user_2 := V_THIS.[GET_USER_TUNE]('VOS2_'||p_prn_oper.[CODE]);
+		end if;
+	
+		V_FILE_NAME	:=	r_file_name_tmp;
+		
+		-- установим должностные лица банка
+		SetBankRepr
+		(
+			p_on_date,
+			r_sign_user_1,
+			r_sign_user_2
+		);		
+	end if;
+end;
+
+procedure Initialization
+(
+	p_depn			ref	[DEPN],
+	p_on_date		in	out	date,
+	p_prn_oper		in	out	ref	[VID_OPER_DOG],
+	p_shablon		ref	[SHABLON_DOC],
+	p_add_par		[STRING_32000]
+)
+is
+	deposit			[DEPN];
+begin
+	deposit			:=	p_depn;	-- кэшируем структуру для уменьшения запросов к базе
+	V_THIS			:=	p_depn;
+	V_CLASS			:=	deposit%class;
+	V_CLIENT		:=	deposit.[CLIENT];
+	V_ADR_MASK		:=	'POST_CODE,REGION_NCT,DISTRICT,CITY,STREET,HOUSE,KORPUS,FLAT';
+	if p_on_date is null then
+		-- для многофилиальности операционный день инициализируем по филиалу продукта
+		p_on_date	:=	::[SYSTEM].[VARIABLES].Br2OpDate(deposit.[FILIAL]);
+	end if;
+	
+	GetClientReq(V_CLIENT, p_on_date);
+	V_OUR_BANK		:=	::[CL_BANK_N].[LIB].GetBankByDepart(deposit.[DEPART]);
+	GetBankReq(V_OUR_BANK, p_on_date);
+		
+	if p_prn_oper is null and V_FOLDER_PAY is not null then
+		-- Если нам дали папку - определим операцию печати
+		begin
+			&sp(PF)
+			p_prn_oper := &GET_NUM(PRN_FOR, p_depn, 'PRN_FOR_'||V_FOLDER_PAY%id,null);
+		exception when others then 
+			-- Причина перехвата others: В случае если не найдена операция печати
+			&rb(PF)
+			p_prn_oper := null;
+		end;					
+	end if;
+
+	-- Получим шаблон для печати
+	V_FILE_NAME	:=	null;
+	if p_shablon is not null then
+		V_FILE_NAME	:=	p_shablon;
+	else
+		ValidatePrnOper(p_depn, p_prn_oper, p_on_date);
+		
+		if V_FILE_NAME is null then
+			for (
+				select sh(sh : id) in ::[SHABLON_DOC] all
+				where sh.[GRP_CODE] is not null
+				and instr(sh.[GRP_CODE], deposit%class) > 0
+				order by sh
+			)
+			loop
+				V_FILE_NAME	:=	sh.id;
+				exit;
+			end loop;
+		end if;
+	end if;
+	
+	-- установим должностные лица банка
+	SetBankRepr
+	(
+		p_on_date,
+		::[RUNTIME].[STR].get_num_par(p_add_par, 'BANK_REPR'),
+		::[RUNTIME].[STR].get_num_par(p_add_par, 'BANK_REPR_2')
+	);
+end;
+
+-- Добавление ресурса для дополнительного тэга
+-- Добавление ресурса для дополнительного тэга.
+public procedure AddDopTag
+(
+	p_TagName			varchar2(128),
+	p_Resource			varchar2(128),
+	p_Value				varchar2(32000) default null
+) is 
+	TagName			p_TagName%type	:=	upper(p_TagName);
+begin
+	if TagName is null then
+		pragma error('Не задано название тэга для печати');
+	end if;
+
+	if t_DopTags.exists(TagName) then
+		pragma error('Дублирование добавления дополнительного тэга '||p_TagName);
+	end if;
+	
+	if p_Value is null and p_Resource is null then
+		pragma error('Для тэга "'||p_TagName||'" не указаны ресурс и значение');
+	end if;
+	
+	t_DopTags(TagName).ResourceOper	:=	p_Resource;
+	t_DopTags(TagName).Value		:=	p_Value;
+end;
+
+function GetValue
+(
+	p_TagName		varchar2(128),
+	p_Resource		varchar2(128),
+	p_Depn			ref [DEPN],
+	p_Date			date,
+	p_AddPar		varchar2(32000) default null
+)
+return varchar2(32000)
+is
+	RetVal			GetValue%type;
+	TagName			p_TagName%type	:=	upper(p_TagName);
+	ResourceTag		p_Resource%type;
+begin
+	&sp(GV)
+	&debug('GetValue...', 0)
+	&debug('p_TagName: '	||	p_TagName, 0)
+	&debug('p_Resource: '	||	p_Resource, 0)
+	&debug('p_Depn: '		||	p_Depn%id, 0)
+	&debug('p_Date: '		||	to_char(p_Date, 'dd/mm/yyyy'), 0)
+	&debug('p_AddPar: '		||	p_AddPar, 0)
+	
+	if TagName is null then
+		return null;
+	end if;
+	
+	if t_Tags.exists(TagName) then
+		RetVal		:= t_Tags(TagName).Value;
+		ResourceTag	:= t_Tags(TagName).ResourceOper;
+	end if;
+	
+	if RetVal is null then
+		&nvl(ResourceTag, p_Resource)
+		
+		&debug('Получение значения тэга из Точки Расширения', 0)
+		RetVal	:= ::[HOOK].[DEPN_PRINT]
+		(
+			P_TAG		==	p_TagName		-- Тэг для печати
+			,P_RESOURCE	==	ResourceTag		-- Ресурс
+			,P_DEPN		==	p_Depn			-- Депозит
+			,P_DATE		==	p_Date			-- Дата
+			,P_ADD_PAR	==	p_AddPar		-- Доп. параметры
+		);
+	end if;
+	
+	&debug('GetValue. Возвращаем: '||RetVal, 0)
+	return RetVal;
+	
+exception when others then -- для совместимости предыдущей печати оставлена обработка others
+	&rb(GV)
+	&debug('GetValue. Ошибка: '||RetVal, 0)
+	pragma error('Ошибка получения значения тэга "'||p_TagName||'": '||&sqlerrm2str);
+end;
+
+-- Перенос значений из дополнительной таблицы тэгов в таблицу тэгов
+procedure SetExtTagTable
+is
+	Indx	string;
+begin
+	if t_DopTags.count = 0 then
+		return;
+	end if;
+	
+	Indx	:= t_DopTags.first;
+	while Indx is not null
+	loop
+		if not t_Tags.exists(Indx) then
+			t_Tags(Indx)	:= t_DopTags(Indx);
+		end if;
+		
+		Indx	:= t_DopTags.next(Indx);
+	end loop;
+end;
+
+procedure InitializTag
+is
+begin
+	-- Очистка таблицы тэгов
+	t_Tags.delete;
+
+	-- Перенос значений из дополнительной таблицы тэгов в таблицу тэгов
+	SetExtTagTable;
+
+	--Очистка дополнительной таблицы тэгов
+	t_DopTags.delete;
+end;
+
+function PrintWordXML
+(
+	p_depn			ref	[DEPN],
+	p_date			date,
+	p_shablon		ref	[SHABLON_DOC],
+	p_resource		varchar2(128),
+	p_add_par		varchar2(32000)
+)
+return string
+is
+	-- вычисление значения поля
+	function  calc_field
+	(
+		p_field_code varchar2(128)
+	)
+	return varchar2(4000)
+	is
+		ret_val 	varchar2(32000);
+	begin
+		ret_val := GetValue
+		(
+			p_TagName	== p_field_code,
+			p_Resource	== p_resource,
+			p_Depn		== p_depn,
+			p_Date		== p_date,
+			p_AddPar	== p_add_par
+		);
+		return nvl(substr(ret_val, 1, 4000), ' ');
+	end;
+	
+	-- заполнение текстовых полей шаблона
+	procedure fill_textfields
+	is
+		fields		constant.MEMO_TABLE_S;
+		code		string;
+	begin
+		&debug('run fill_textfields', 0)
+		fields	:= &wd.GetTextFields;
+		code	:= fields.first;
+
+		for i in 1..fields.count loop  --(+)24.3.05
+			if code is null then code := fields.next(code); 
+			else exit;
+			end if;
+		end loop;
+
+		while code is not null
+		loop
+			fields(code)	:= calc_field(code);
+			&debug('CODE : ' || code || ' ; VALUE := ' || fields(code), 0)
+			code	:= fields.next(code);
+		end loop;
+		&wd.PutTextFields(fields);
+	end;
+
+	-- заполнение переменных шаблона
+	procedure fill_docvars
+	is
+		fields		constant.MEMO_TABLE_S;
+		code		string;
+	begin
+		&debug('run fill_docvars', 0)
+		fields	:= &wd.GetDocVars;
+		code	:= fields.first;
+
+		for i in 1..fields.count loop  --(+)24.3.05
+			if code is null then code := fields.next(code); 
+			else exit;
+			end if;
+		end loop;
+
+		while code is not null
+		loop
+			fields(code)	:= calc_field(code);
+			&debug('CODE : ' || code || ' ; VALUE := ' || fields(code), 0)
+			code	:= fields.next(code);
+		end loop;
+		&wd.PutDocVars(fields);
+	end;
+
+	-- заполнение переменных из колонтитулов
+	procedure fill_headfootervars
+	is
+		fields		constant.MEMO_TABLE_S;
+		code		string;
+	begin
+		&debug('run fill_headfootervars', 0)
+		fields	:= &wd.GetHeadFooterVars;
+		code	:= fields.first;
+
+		for i in 1..fields.count loop  --(+)24.3.05
+			if code is null then code := fields.next(code); 
+			else exit;
+			end if;
+		end loop;
+
+		while code is not null
+		loop
+			fields(code)	:= calc_field(code);
+			&debug('CODE : ' || code || ' ; VALUE := ' || fields(code), 0)
+			code	:= fields.next(code);
+		end loop;
+		&wd.PutHeadFooterVars(fields);
+	end;
+
+	-- заполнение составных полей шаблона
+	procedure fill_complexfields
+	is
+		fields		constant.MEMO_TABLE_S;
+		code		string;
+	begin
+		&debug('run fill_complexfields', 0)
+		fields	:= &wd.GetComplexFields;
+		code	:= fields.first;
+
+		for i in 1..fields.count loop  --(+)24.3.05
+			if code is null then code := fields.next(code); 
+			else exit;
+			end if;
+		end loop;
+
+		while code is not null
+		loop
+			if code != 'FORMTEXT' then
+				fields(code)	:= calc_field(code);
+				&debug('CODE : ' || code || ' ; VALUE := ' || fields(code), 0)
+			else
+				fields.delete(code);
+			end if;
+			code	:= fields.next(code);
+		end loop;
+		&wd.PutComplexFields(fields);
+	end;
+	
+	-- заполнение полей шаблона
+	procedure fill_fields
+	is
+	begin
+		fill_textfields;
+		fill_docvars;
+		fill_headfootervars;
+		fill_complexfields;
+	end;
+	
+	rep_id			string;
+	description		string;
+begin
+	&debug('p_depn: '		||p_depn%id, 0)
+	&debug('p_date: '		||to_char(p_date, 'dd/mm/yyyy'), 0)
+	&debug('p_shablon: '	||p_shablon.[NAME], 0)
+	&debug('p_resource: '	||p_resource, 0)
+	&debug('p_add_par: '	||p_add_par, 0)
+	
+	&lp.wd_init(p_shablon_ref == p_shablon, p_filial == p_depn.[FILIAL]);
+
+	-- заполнение шаблона
+	fill_fields;
+
+ 	declare
+		docx	blob := empty_blob();
+ 	begin
+		&wd.finish(docx);
+		description	:=	coalesce( p_shablon.[NAME], p_shablon.[CODE] );
+
+		rep_id	:=	::[OOXML].[API_ORSA].putReport(docx, 'docx', p_description == description);
+
+ 	end;
+ 	return rep_id;
+end;
+
+procedure ClearVariable
+is
+begin
+	V_DATA			:= null;
+	V_CLASS			:= null;
+	V_FILE_NAME		:= null;
+	V_CLIENT_BANK	:= null;
+	V_OUR_BANK		:= null;
+	V_ALL_BOSS_B	:= null;
+	V_CASTA_1B		:= null;
+	V_CASTA_2B		:= null;
+	V_ALL_BOSS_C	:= null;
+	V_CASTA_1C		:= null;
+	V_CASTA_2C		:= null;
+	V_CLIENT		:= null;
+	V_FOLDER_PAY	:= null;
+	V_THIS			:= null;
+	V_PRINT_FORMS.delete;
+	
+	V_ADR_MASK		:= null;
+	V_CITY_C		:= null;
+	V_OKATO_C		:= null;
+	V_ADRESS_C		:= null;
+	V_ADRESS_C_POST	:= null;
+	V_DEF_1C		:= null;
+	V_CASTA_C1_RP	:= null;
+	V_FIO_C1_RP		:= null;
+	V_F_IO_1C		:= null;
+	V_PHONE_1C		:= null;
+	V_DEF_2C		:= null;
+	V_CASTA_C2_RP	:= null;
+	V_FIO_C2_RP		:= null;
+	V_F_IO_2C		:= null;
+	V_PHONE_2C		:= null;
+	V_CITY_B		:= null;
+	V_BIC_B			:= null;
+	V_KS_B			:= null;
+	V_OKONH_B		:= null;
+	V_CONTACTS_B	:= null;
+	V_OKATO_B		:= null;
+	V_ADRESS_B		:= null;
+	V_ADRESS_B_POST	:= null;
+	V_DEF_1B		:= null;
+	V_CASTA_B1_RP	:= null;
+	V_FIO_B1_RP		:= null;
+	V_F_IO_1B		:= null;
+	V_PHONE_11B		:= null;
+	V_PHONE_12B		:= null;
+	V_DEF_2B		:= null;
+	V_CASTA_B2_RP	:= null;
+	V_FIO_B2_RP		:= null;
+	V_F_IO_2B		:= null;
+	V_PHONE_21B		:= null;
+	V_PHONE_22B		:= null;
+	l_InfoThirdPart	:= null;
+	DetailPrintOperList.delete;
+	DetailPrintFormList.delete;
+	t_DopTags.delete;
+	t_Tags.delete;
+end;
+
+public function GetOkatoCode
+/* Функция для получения ОКАТО с клиента */
+(
+	p_CLIENT_REF	ref [CLIENT]
+	/* Ссылка на клиента */
+)
+/* Возвращаемое значение - ОКАТО */
+return varchar2(11) is 
+	v_okato	varchar2(11);
+begin
+	-- значение ОКАТО берем из реквизита "Код ОКАТО" на клиенте
+	for (	select x(x.[OKATO_CODE]	:	OKATO_CODE)
+			in ::[CLIENT] all
+			where x = p_CLIENT_REF
+			fetch 1)
+	loop
+		v_okato := x.OKATO_CODE;
+		exit;
+	end loop;
+	return v_okato;
+end;
+PSH_PRNT_WRD_XML (
+	@name('Дата печати')                     P_ON_DATE       in [DATE],
+	@name('Операция печати')                 P_PRN_OPER      in [VID_OP_KRED_REF],
+	@name('Консольный вызов')                P_CONSOLE       in [BOOLEAN]         default null,
+	@name('Полное имя файла для сохранения') P_FILE_NAME_OUT in [FILE$PATH]       default null,
+	@name('Доп. Параметры')                  P_ADD_PAR       in [STRING_32000]    default null,
+	@name('Шаблон')                          P_SHABLON       in [SHABLON_DOC_REF] default null,
+	@name('Показать печать')                 P_SHOW_PRINT    in [BOOLEAN]         default null
+) return [STRING] is
+
+validate is
+procedure ValidPrintPackage
+(
+	p_ShablonDoc		ref [SHABLON_DOC]
+)
+is
+begin
+	FillPrintForms(p_ShablonDoc, V_FOLDER_PAY);
+	if IsPackageShablon(p_ShablonDoc) then
+		::[RUNTIME].[CSMD].Enable(V_DEST_STR, 'V_PRINT_FORMS', 'V');
+	else
+		::[RUNTIME].[CSMD].Disable(V_DEST_STR, 'V_PRINT_FORMS', 'V');
+	end if;
+end;
+
+begin
+	if &Default_Mes and p_info is null or (&Validate_Mes and p_info = '%PLPCALL%') then
+		
+		P_CONSOLE	:=	true;
+		::[RUNTIME].[CSMD].Init_Form(V_DEST_STR, &METHOD$CLASS, &METHOD$SNAME); -- Инициализация формы
+		
+		-- получим операцию печати по умолчанию из настройки
+		P_PRN_OPER	:=	nvl(GetPrintWordOperDefault, P_PRN_OPER);
+		
+		Initialization(this, P_ON_DATE, P_PRN_OPER, P_SHABLON, P_ADD_PAR);
+		
+		ValidPrintPackage(V_FILE_NAME);
+
+		-- при заданной настройке операции печати в случае пакетного шаблона
+		-- блокируем все элементы смены шаблона
+		if P_PRN_OPER is not null and IsPackageShablon(V_FILE_NAME) then
+			::[RUNTIME].[CSMD].Disable(V_DEST_STR, 'P_PRN_OPER');
+			::[RUNTIME].[CSMD].Disable(V_DEST_STR, 'V_FILE_NAME', 'V');
+			::[RUNTIME].[CSMD].Disable(V_DEST_STR, 'V_FOLDER_PAY', 'V');
+		end if;
+	
+		::[DEPN].[GET].SetFolder(p_Folder == V_FOLDER_PAY);
+		
+	elsif &Validate_Mes then
+
+		::[RUNTIME].[CSMD].Init_Form(V_DEST_STR, null, null);
+	
+		if p_info = 'CANCEL' then		
+			::[DEPN].[GET].SetFolder(p_Folder == null);
+			ClearVariable;	-- чистим переменные операции
+		elsif p_info = 'P_PRN_OPER' then
+			ValidatePrnOper(this, P_PRN_OPER, P_ON_DATE);
+			ValidPrintPackage(V_FILE_NAME);
+		elsif p_info = '%VAR%.V_FOLDER_PAY' then
+			if V_FOLDER_PAY is not null then
+				begin
+					&sp(PRN)
+					P_PRN_OPER := &GET_NUM(PRN_FOR, this, 'PRN_FOR_'||V_FOLDER_PAY%id,null);
+				exception when others then 
+				-- Причина перехвата others: В случае если не найдена операция печати
+					&rb(PRN)
+					P_PRN_OPER := null;
+				end;					
+				ValidatePrnOper(this, P_PRN_OPER, P_ON_DATE);
+				ValidPrintPackage(V_FILE_NAME);
+			end if;
+			::[DEPN].[GET].SetFolder(p_Folder == V_FOLDER_PAY);
+		elsif p_info = '%VAR%.V_OUR_BANK' then
+			if V_OUR_BANK is null then
+				pragma error('Укажите банк для печати.');
+			end if;
+			GetBankReq(V_OUR_BANK, P_ON_DATE);
+		elsif p_info = 'P_ON_DATE' then
+			if P_ON_DATE is null then
+				pragma error('Укажите дату...');
+			end if;
+		elsif p_info = '%VAR%.V_FILE_NAME' then
+			ValidPrintPackage(V_FILE_NAME);
+		elsif p_info = '%VAR%.V_CASTA_1C' then
+			::[DEPN_INTERFACE].[PRX_CLIENT].GetCastClient
+			(
+				V_CLIENT
+				,V_CASTA_1C
+				,V_DEF_1C
+				,V_CASTA_C1_RP
+				,V_FIO_C1_RP
+				,V_F_IO_1C
+				,P_ON_DATE
+				,V_CLASS
+			);
+		elsif p_info = '%VAR%.V_CASTA_2C' then
+			::[DEPN_INTERFACE].[PRX_CLIENT].GetCastClient
+			(
+				V_CLIENT
+				,V_CASTA_2C
+				,V_DEF_2C
+				,V_CASTA_C2_RP
+				,V_FIO_C2_RP
+				,V_F_IO_2C
+				,P_ON_DATE
+				,V_CLASS
+			);
+		elsif p_info = '%VAR%.V_CASTA_1B' then
+			::[DEPN_INTERFACE].[PRX_CLIENT].GetCastClient
+			(
+				V_OUR_BANK
+				,V_CASTA_1B
+				,V_DEF_1B
+				,V_CASTA_B1_RP
+				,V_FIO_B1_RP
+				,V_F_IO_1B
+				,P_ON_DATE
+				,V_CLASS
+			);
+			::[DEPN_INTERFACE].[PRX_CLIENT].GetPhoneClient
+			(
+				V_CASTA_1B.[FASE]
+				,V_PHONE_11B
+				,V_PHONE_12B
+			);
+		elsif p_info = '%VAR%.V_CASTA_2B' then
+			::[DEPN_INTERFACE].[PRX_CLIENT].GetCastClient
+			(
+				V_OUR_BANK
+				,V_CASTA_2B
+				,V_DEF_2B
+				,V_CASTA_B2_RP
+				,V_FIO_B2_RP
+				,V_F_IO_2B
+				,P_ON_DATE
+				,V_CLASS
+			);
+			::[DEPN_INTERFACE].[PRX_CLIENT].GetPhoneClient
+			(
+				V_CASTA_2B.[FASE]
+				,V_PHONE_21B
+				,V_PHONE_22B
+			);
+		end if;
+	end if;
+	
+	--Расширение
+	if p_message = 'DEFAULT' then
+		if this.[DEPART].[CODE] like '001-6%' then
+			V_CASTA_1B=V_CASTA_2B:=null;
+			for ab in this.[FILIAL].[BANK].[ALL_BOSS]
+			where ab.[SIGN_TODAY] and ab.[WORK_END] is null
+			loop
+				for mr in ab.[MARK_PERS] where mr.[MARK].[CODE]='PSB_DEPN_SIGN_1' loop
+					V_CASTA_1B:=ab;
+					exit;
+				end loop;
+				for mr in ab.[MARK_PERS] where mr.[MARK].[CODE]='PSB_DEPN_SIGN_2' loop
+					V_CASTA_2B:=ab;
+					exit;
+				end loop;
+				if V_CASTA_1B is not null and V_CASTA_2B is not null then
+					exit;
+				end if;
+			end loop;
+		end if;
+
+		V_FILE_NAME:=null;
+		if (this.[DATE_ENDING]<=::[SYSTEM].[OP_DATE] or this.[DATE_ENDING] is null)
+		and this.[DATE_BEGIN] <>::[SYSTEM].[OP_DATE]
+		and this.[COM_STATUS]=::[COM_STATUS_PRD]([CODE]='WORK')
+		then
+			P_PRN_OPER:=::[VID_OPER_DOG]([SYS_NAME]='Печать "Закрытие, расторжение"');
+			V_FILE_NAME:=::[SHABLON_DOC]([CODE]='PSH_Заявление на закрытие вклада');
+		elsif this.[DATE_BEGIN]=::[SYSTEM].[OP_DATE]
+		or    this.[COM_STATUS]=::[COM_STATUS_PRD]([CODE]='WAIT_CONF')
+		then
+			P_PRN_OPER:=::[VID_OPER_DOG]([SYS_NAME]='Печать депозитного договора в WORD');
+		end if;
+		if P_PRN_OPER is not null then
+			null;
+		end if;
+
+	elsif p_info='P_PRN_OPER' then
+		V_FILE_NAME:=null;
+		if P_PRN_OPER=::[VID_OPER_DOG]([SYS_NAME]='Печать депозитного договора в WORD') then
+			if lower(this.[VID_DOG].[NAME]) like '%до востребования%' then
+				if this.[DEPART].[CODE] like '001-6%' then
+					 V_FILE_NAME:=::[SHABLON_DOC]([CODE]='До востребования Энгельс');
+				else V_FILE_NAME:=::[SHABLON_DOC]([CODE]='до востребования (Москва)');
+				end if;
+			end if;
+		elsif P_PRN_OPER=::[VID_OPER_DOG]([SYS_NAME]='Печать "Закрытие, расторжение"') then
+			V_FILE_NAME:=::[SHABLON_DOC]([CODE]='PSH_Заявление на закрытие вклада');
+		end if;
+	end if;
+	------------
+end;
+
+execute is
+/*
+ *	Дата		Автор			BFS			Описание
+ *	----------	--------------	----------	---------------------------------------------------
+ *	29.04.2015	khasenov		RP0082357	Новая операция, реализующая печать в OOXML.
+ *  22.09.2015	nechaev			RP0374806   В функции GetPrdInfo  получение БИК и корсчета реализовано через вызов ::[CL_BANK_N].[LIB].GetBankReqOnDate (из истории реквизитов на дату).
+ *	28.04.2016	akhmadiev		RP0489949	При выборе шаблона печати добавлен анализ реквизита "Шаблоны печати" на виде депозитного договора.
+ *	02.06.2016	akhmadiev		RP0530021	Внеcены изменения в алгоритм определния ОКАТО.
+ *	05.09.2016	akhmadiev		RP0507846	Рефакторинг GET'ов
+ *	20.10.2016	burganov		RP0540508	В секции "Проверка" при валидации '%VAR%.V_FOLDER_PAY' и в процедуре Initialization добавлен обработчик ошибки, в случае если не найдена операция печати
+ *	14.02.2016	akhmadiev		RP0487313	Добавлена обработка кодиков OGRN и OKPO.
+ *	20.04.2017	akhmadiev		RP0555942	Добавлена обработка тега PRC_RATE. Обработка добавлена специально, т.к. без дополнительной обработки %% ставка меньше единицы отображается некорректно.
+ *											Например ставка 0.5 в документе отображается как .5
+ *	15.04.2019	akhmadiev		RP0605061	Добавлено форматирование выч. параметра GMIR
+*/
+
+	rep_id		string;
+begin
+	
+	if not nvl(P_CONSOLE, false) then
+
+		if P_PRN_OPER is null and P_SHABLON is null then
+			pragma error('Не задан вид операции или шаблон для печати');
+		end if;
+		
+		Initialization(this, P_ON_DATE, P_PRN_OPER, P_SHABLON, P_ADD_PAR);
+		
+		if V_FILE_NAME is null then
+			pragma error('Для операции печати "'||P_PRN_OPER.[SYS_NAME]||'" не настроен шаблон');
+		end if;
+
+		FillPrintForms(V_FILE_NAME, V_FOLDER_PAY);
+		
+		::[DEPN].[GET].SetFolder(p_Folder == V_FOLDER_PAY);		
+	end if;
+	
+	-- инициализация тэгов
+	InitializTag;
+	
+	if V_FILE_NAME is null then
+		pragma error('Не задан шаблон для печати');
+	end if;
+	
+	
+	-- Печатаем
+	if IsPackageShablon(V_FILE_NAME) then
+		
+		for i in 1 .. V_PRINT_FORMS.count
+		where V_PRINT_FORMS(i).print_sign
+		loop
+			rep_id	:=	PrintWordXML
+			(
+				DetailPrintFormList(i).Deposit,
+				P_ON_DATE,
+				V_PRINT_FORMS(i).[TEMPLATE],
+				&Method$ID,
+				DetailPrintFormList(i).AddParams
+			);
+
+			stdio.put_line_buf('<%PLPCALL [OOXML].[SHOW](%VAR%.V_REPID =>'''||rep_id||''')%>');
+
+		end loop;
+		rep_id	:=	'';
+	else
+		rep_id	:=	PrintWordXML
+		(
+			this,
+			P_ON_DATE,
+			V_FILE_NAME,
+			&Method$ID,
+			P_ADD_PAR
+		);
+
+			if P_FILE_NAME_OUT is not null then
+				-- если файл для сохранения задан, то просто сохраняем печатный документ в заданный файл
+				stdio.put_line_buf('<%PLPCALL [OOXML].[SAVE_AS](%VAR%.V_REPID =>'''||rep_id||''',%VAR%.V_FILE_NAME =>''' || P_FILE_NAME_OUT || ''')%>');
+			elsif nvl(P_SHOW_PRINT, true) then
+				-- если файл для сохранения не задан, то по умолчанию показываем печатный документ
+				stdio.put_line_buf('<%PLPCALL [OOXML].[SHOW](%VAR%.V_REPID =>'''||rep_id||''')%>');
+			end if;
+
+	end if;
+	
+	::[DEPN].[GET].SetFolder(p_Folder == null);
+	
+	ClearVariable;	-- чистим переменные операции
+	
+	return rep_id;
+end;
+end;
+end;

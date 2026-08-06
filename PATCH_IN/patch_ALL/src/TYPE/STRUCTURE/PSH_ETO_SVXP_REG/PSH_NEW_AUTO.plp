@@ -1,0 +1,50 @@
+class PSH_ETO_SVXP_REG;
+
+@name('[ПСБ] Добавить')
+@tag('CREATED')
+constructor PSH_NEW_AUTO is
+PSH_NEW_AUTO (
+	@name('File Id')		P_FILE_ID		in [VARCHAR_36],
+	@name('File type')		P_FILE_TYPE		in [STRING_8],
+	@name('Start date')		P_START_DATE	in [DATE],
+	@name('End date')		P_END_DATE		in [DATE],
+	@name('Inst Id')		P_INST_ID		in [SHORT4],
+	@name('File date')		P_FILE_DATE		in [DATE],
+	@name('State')			P_STATE			in [SHORT2],
+	@name('Raw xml')		P_RAW_XML		in [CLOB],
+	@name('Operations')		P_OPERATIONS	in [PSH_ETO_S_OP_ARR],
+	@name('CIT Request')	P_CIT_REQUEST	in [CIT_IN_REQUE_REF] default null
+) return ref [PSH_ETO_SVXP_REG] is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_FILE_ID := this.[FILE_ID];
+	P_FILE_TYPE := this.[FILE_TYPE];
+	P_START_DATE := this.[START_DATE];
+	P_END_DATE := this.[END_DATE];
+	P_INST_ID := this.[INST_ID];
+	P_FILE_DATE := this.[FILE_DATE];
+	P_STATE := this.[STATE];
+	P_OPERATIONS := this.[OPERATIONS];
+	P_CIT_REQUEST := this.[CIT_REQUEST];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+begin
+	[FILE_ID] := P_FILE_ID;
+	[FILE_TYPE] := P_FILE_TYPE;
+	[START_DATE] := P_START_DATE;
+	[END_DATE] := P_END_DATE;
+	[INST_ID] := P_INST_ID;
+	[FILE_DATE] := P_FILE_DATE;
+	[STATE] := P_STATE;
+	[RAW_XML] := P_RAW_XML;
+	[OPERATIONS] := P_OPERATIONS;
+	[CIT_REQUEST] := P_CIT_REQUEST;
+end;
+end;
+end;

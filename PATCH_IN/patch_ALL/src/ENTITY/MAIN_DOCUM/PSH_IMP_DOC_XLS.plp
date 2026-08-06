@@ -1,0 +1,240 @@
+class MAIN_DOCUM;
+
+@import_plsql(true)
+@name('[ПСБ] Импорт документов из XLS')
+@tag('COPIED')
+static method PSH_IMP_DOC_XLS is
+
+@name('Данные при импорте с клиент-скрипта') public V_DATA [STRING_32000];
+@name('V_DEST')                              public V_DEST [STRING_32000];
+@name('Филиал')                              public C_FIL  [BRANCH_REF];
+@name('Дата проводки')                       public C_DATE [DATE];
+public pragma include('[UNIVERS_IMP]::[VND_CASH_LIB]');
+public pragma include('[RUNTIME]::[MACRO_LIB]');
+dp2 integer:=0; --управление debug_pipe
+
+row_cnt			integer;
+err_cnt			integer;
+DEF_DOG			[TRC];
+DEF_CL_PART		[CL_PART];
+
+pragma macro(nvl_part, 'CL_PART_OLD.[1] := nvl(CL_PART_STR.[1], CL_PART_OLD.[1]);', substitute);
+pragma macro(nvl_dog, 'DOG_OLD.[1] := nvl(DOG_STR.[1], DOG_OLD.[1]);', substitute);
+
+function create_script (P_FILE 			varchar(200)
+					   ,P_COLUMN_CNT	integer
+					   ,P_INFO			varchar2
+					   ,P_START_LINE	integer
+					   ,P_START_COL		integer
+					   ) return varchar(32000) is
+begin
+	return 'Set fso = CreateObject("Scripting.FileSystemObject")
+			If Not fso.FileExists( "' || P_FILE ||' ") Then
+				MsgBox "Не найден файл " &  "' || P_FILE ||' " & "!"
+				Set fso = Nothing
+			Else
+				Set e = Createobject("Excel.Application")
+				e.Workbooks.Open ( "' || P_FILE ||' ")
+				
+				i     		= '|| P_START_LINE ||'
+				LineStr		= "AAA"
+		
+				if ' || P_COLUMN_CNT || ' >= 0 then			
+					Do While LineStr <> ""
+						LineStr = ""
+						TextData = ""
+						For j = ' || P_START_COL || ' to ' || P_COLUMN_CNT || ' + ' || P_START_COL || ' - 1
+							Value = e.Worksheets(1).Cells(i, j).Value
+							TextData = TextData & Trim(Value) & "~"
+							LineStr = LineStr & Trim(Value)
+						Next
+						if LineStr <> "" Then
+							Call Form1.ScriptServerValidate(OK, "' || P_INFO || '")
+						End if
+						i = i + 1
+					Loop
+				end if			
+				e.ActiveWorkbook.Close	
+			End	If			
+					
+			Set e = Nothing
+			Set fso = Nothing';	
+end;
+PSH_IMP_DOC_XLS (
+	@name('Локальный путь к файлу')       P_LOCAL_PATH     in [FILE$LOAD],
+	@name('Количество полей для импорта') P_CNT_FIELDS     in [SHORT5],
+	@name('Первая строка сверху')         P_FIRST_LINE_UP  in [SHORT5],
+	@name('Первый столбец слева')         P_FIRST_COL_LEFT in [SHORT5],
+	@name('Создатель документа')          P_USER 		   in [USER_REF]
+) is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	C_DATE := [SYSTEM]::[OP_DATE];
+end if;
+-- End initialization of parameters and variables
+declare
+V_VAR			varchar2(128);
+C_DT ref [AC_FIN];
+C_KT ref [AC_FIN];
+C_SUM number;
+C_NAZN varchar2(1000);
+DOC ref [MAIN_DOCUM];
+tip_doc ref [NAME_PAYDOC];
+temp varchar2(1000);
+
+vMULTICURR ref [TRANSVAL_DOC];
+C_SUM_DT [SUMMA];
+C_SUM_KT [SUMMA];
+vRATE_DT [SUMMA_16_6];
+vRATE_KT [SUMMA_16_6];
+
+Begin
+	if P_MESSAGE = 'DEFAULT' then
+		P_LOCAL_PATH.[SRC_TYPE] := false;
+		P_FIRST_LINE_UP 	:= 1;
+		P_FIRST_COL_LEFT 	:= 1;
+		P_CNT_FIELDS		:= 4;
+		row_cnt				:= 0;
+		err_cnt				:= 0;
+		C_FIL := ::[USER].[LIB].userid().FILIAL;
+		
+		
+	end if;
+
+	if P_MESSAGE = 'VALIDATE' then
+		if p_info = 'OK' then
+			if P_USER is null then
+				pragma error('Необходимо обязательно заполнить поле создатель документа!');
+			end if;
+
+			V_DEST := create_script(P_LOCAL_PATH.[SRC_PATH] || P_LOCAL_PATH.[SRC_NAME]
+								   ,P_CNT_FIELDS
+								   ,'XLS'
+								   ,nvl(P_FIRST_LINE_UP, 1)
+								   ,nvl(P_FIRST_COL_LEFT, 1)
+								   );
+		elsif p_info = 'XLS' then
+			&inc(row_cnt)
+			
+			
+			begin
+				
+				&GetNextStr(temp, V_DATA, '~')
+				
+				debug_pipe('------------ row_cnt='||row_cnt,dp2);
+				debug_pipe('(0)temp   ='||temp,dp2);
+				debug_pipe('(0)V_DATA ='||V_DATA,dp2);
+				
+				begin
+				--select x(x) in [AC_FIN] where x.[MAIN_V_ID]=temp and x.[FILIAL]=C_FIL into C_DT;
+				select x(x) in [AC_FIN] where x.[MAIN_V_ID]=temp and x.[FILIAL]=C_FIL and x.[DATE_CLOSE] is null into C_DT; -- Кокорин АС 02.08.2017 По просьбе Кузнецовой исключаем закрытые
+				exception when TOO_MANY_ROWS then debug_pipe('2 счета в ЦФТ:'||temp, 0); C_DT := null;
+						  when NO_DATA_FOUND then debug_pipe('Cчет не найден:'||temp, 0);C_DT := null;
+				end;
+	
+				&GetNextStr(temp, V_DATA, '~')
+				debug_pipe('(1)temp   ='||temp,dp2);
+				debug_pipe('(1)V_DATA ='||V_DATA,dp2);
+
+				
+				begin
+				--select x(x) in [AC_FIN] where x.[MAIN_V_ID]=temp and x.[FILIAL]=C_FIL into C_KT;
+				select x(x) in [AC_FIN] where x.[MAIN_V_ID]=temp and x.[FILIAL]=C_FIL and x.[DATE_CLOSE] is null into C_KT; -- Кокорин АС 02.08.2017 По просьбе Кузнецовой исключаем закрытые
+				exception when TOO_MANY_ROWS then debug_pipe('2 счета в ЦФТ:'||temp, 0);C_KT := null;
+						  when NO_DATA_FOUND then debug_pipe('Cчет не найден:'||temp, 0);C_KT := null;
+				end;
+	
+				
+				&GetNextStr(temp, V_DATA, '~')
+				C_SUM:=to_number(replace(temp,',','.'));
+
+				debug_pipe('(2)temp   ='||temp,dp2);
+				debug_pipe('(2)V_DATA ='||V_DATA,dp2);
+				debug_pipe('(2)C_SUM  ='||C_SUM,dp2);
+
+
+				&GetNextStr(C_NAZN, V_DATA, '~')
+				
+				if    substr(C_DT.[MAIN_V_ID],1,1) in ('8','9') then tip_doc:=::[NAME_PAYDOC]([CODE] = 'ВНЕБ_ПРИХ_РАСХ');
+				elsif substr(C_DT.[MAIN_V_ID],1,5) in ('30601') or
+					  substr(C_KT.[MAIN_V_ID],1,5) in ('30601') then tip_doc:=::[NAME_PAYDOC]([CODE] = 'БЕЗН_МЕМО_ОРД');
+				elsif substr(C_DT.[MAIN_V_ID],1,3) in ('407') or
+					  substr(C_KT.[MAIN_V_ID],1,3) in ('407') then tip_doc:=::[NAME_PAYDOC]([CODE] = 'БЕЗН_БАНК_ОРД');
+									  
+				else 												 tip_doc:=::[NAME_PAYDOC]([CODE] = 'БЕЗН_МЕМО_ОРД');
+				
+				end if;
+				
+				--Башкиров В.Г. 30.10.2018 Доработана загрузка валютных документов по заявке Иютиной М.В.
+				vMULTICURR	:=null;
+				C_SUM_DT	:=C_SUM;
+				C_SUM_KT	:=null;
+				vRATE_DT 	:=null;
+				vRATE_KT 	:=null;
+				if (C_DT.[FINTOOL]<>[SYSTEM].[SYS_MAIN_VAL] or C_KT.[FINTOOL]<>[SYSTEM].[SYS_MAIN_VAL]) and C_DT.[FINTOOL]<>C_KT.[FINTOOL]
+				then
+					vMULTICURR:=::[TRANSVAL_DOC]([NAME]='Мультивалютность');
+				end if;
+				if C_DT.[FINTOOL]<>[SYSTEM].[SYS_MAIN_VAL] then	
+					C_SUM_DT:=C_SUM;
+					vRATE_DT:=::[DOCUMENT].[LIB_CUR].Get_rate(C_DT.[FINTOOL],C_DATE);
+				end if;
+				if C_KT.[FINTOOL]<>[SYSTEM].[SYS_MAIN_VAL] then	
+					C_SUM_KT:=C_SUM;
+					vRATE_KT:=::[DOCUMENT].[LIB_CUR].Get_rate(C_KT.[FINTOOL],C_DATE);
+					if C_DT.[FINTOOL]=[SYSTEM].[SYS_MAIN_VAL] then
+					   C_SUM_DT:=C_SUM_KT*vRATE_KT;
+					else
+						if C_DT.[FINTOOL]=C_KT.[FINTOOL] then
+							null;
+						else
+					   		pragma error('Ош. определения сумм по ДТ/КТ');
+						end if;
+					end if;
+				end if;
+				
+				doc:=::[MAIN_DOCUM].[NEW#AUTO].new(P_DOCUMENT_NUM == row_cnt							-- Номер
+											     ,P_DATE_DOC    == C_DATE								-- Дата документа
+												 ,P_VID_DOC     == tip_doc								-- Вид документа
+												 ,P_ACC_DT  	== C_DT									-- Счет Дт
+												 ,P_SUM_DT  	== C_SUM_DT								-- Сумма Дт.
+												 ,P_ACC_KT  	== C_KT									-- Счет Кт
+												 ,P_SUM_KT  	== C_SUM_KT 	--ACC_ABS.[SALDO_NT]	-- Сумма Кт.
+												 ,P_SUM_NT  	== null --trunc((C_SUM*::[DOCUMENT].[LIB_CUR].Get_rate(C_DT.[FINTOOL],C_DATE)),2) -- Сумма Нац.
+												 ,P_DATE_VAL	== C_DATE								-- Дата валютирования
+												 ,P_NUM2		== null									-- Резервный параметр
+												 ,P_MULTICURR 	== vMULTICURR 							-- Свойство валютности
+												 ,P_NAZN		== C_NAZN	 							-- Назначение платежа
+												 ,P_KOD_NAZN    == null 								-- Код назначения
+												 ,P_PRODUCT_DT	== null									-- Продукт Дт
+												 ,P_PRODUCT_KT	== null									-- Продукт Кт
+												 ,P_RECALC_NT	== null									-- Пересчитывать нац. покрытие
+												 );
+				doc.[PRIORITET]:=5;	
+				doc.[RATE_DT]  :=vRATE_DT;
+				doc.[RATE_KT]  :=vRATE_KT;
+				doc.[DOCUMENT_USER] := P_USER;
+				if substr(C_DT.[MAIN_V_ID],1,5)='30110' or substr(C_KT.[MAIN_V_ID],1,5)='30110' then
+					doc.[KL_DT].[2].[PART]	:= 1878116;
+	            	doc.[KL_KT].[2].[PART]	:= 1878116;
+				end if;
+			exception when others then
+				&inc(err_cnt)
+				debug_pipe('Ошибка на строке '||row_cnt||': '||&sqlerrm2str|| utils.call_stack, 0);
+			end;
+		end if;
+	end if;
+End;
+end;
+
+execute is
+begin
+	debug_pipe('Обработали: '||row_cnt||' записей, из них с ошибками: ' || err_cnt || '!', 0);
+	
+	&free_cash
+end;
+end;
+end;

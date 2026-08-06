@@ -1,0 +1,30 @@
+class PSH_CUST_DOCS_IN;
+
+@name('[ПСБ] 3.1.Сформировать подтверждение о получении документа')
+@tag('COPIED')
+batch method PSH_FORM_CONF is
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB]);
+pragma include(::[PSH_CUST_DOCS].[PSH_LIB_TC]);
+PSH_FORM_CONF is
+
+execute is
+/*********************************************************************
+Формирование подтверждений по входящим файлам.
+*********************************************************************/
+v_tab_docs	&lib.T_Doc;
+v_doc_state	::[PSH_CUST_DOCS].[DOC_STATE]%type;
+begin
+	for i in 1..this.count loop
+		v_doc_state := this(i).[DOC_STATE];
+	
+		if v_doc_state in (&libtc.stChecked, &libtc.stCheckErr) then		
+			v_tab_docs(i).doc		:= this(i);
+			v_tab_docs(i).doc_type	:= this(i).[DOC_TYPE];
+			v_tab_docs(i).doc_state	:= v_doc_state;
+		end if;
+	end loop;
+
+	&lib.form_confirm(v_tab_docs);
+end;
+end;
+end;

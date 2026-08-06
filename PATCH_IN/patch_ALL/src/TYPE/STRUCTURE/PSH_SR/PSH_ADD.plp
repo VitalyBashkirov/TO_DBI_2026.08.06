@@ -1,0 +1,29 @@
+class PSH_SR;
+
+@name('[ПСБ] Добавить')
+@tag('CREATED')
+constructor PSH_ADD is
+PSH_ADD (
+	@name('Уникальный ключ пользовательской сессии') P_GUID   in [STRING_32],
+	@name('ID экземпляра')                           P_DOC_ID in [NUM20]
+) return ref [PSH_SR] is
+
+validate is
+begin
+-- Start initialization of parameters and variables
+if p_message = 'DEFAULT' then
+	P_GUID := this.[GUID];
+	P_DOC_ID := this.[DOC_ID];
+end if;
+-- End initialization of parameters and variables
+end;
+
+execute is
+begin
+	-- Установка значения реквизита "Уникальный ключ пользовательской сессии"
+	[GUID] := P_GUID;
+	-- Установка значения реквизита "ID экземпляра"
+	[DOC_ID] := P_DOC_ID;
+end;
+end;
+end;

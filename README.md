@@ -16,6 +16,75 @@
 - 13 тыс. представлений
 - 12 млн строк кода дистрибутива + тысячи строк локального кода
 
+## 🚀 Запуск с помощью Docker
+
+### Бейджик сборки
+
+[![Docker Build & Publish](https://github.com/VitalyBashkirov/TO_DBI_2026.08.06/actions/workflows/docker-build.yml/badge.svg)](https://github.com/VitalyBashkirov/TO_DBI_2026.08.06/actions/workflows/docker-build.yml)
+
+[![ghcr.io/vitalybashkirov/to_dbi_arm](https://img.shields.io/badge/registry-GHCR-blue)](https://github.com/VitalyBashkirov/TO_DBI_2026.08.06/pkgs/container/to_dbi_arm)
+
+### Быстрый старт
+
+```bash
+# Сборка образа
+docker build -t to_dbi_arm .
+
+# Запуск в GUI-режиме (Linux с X11)
+docker run -it \
+  -v $(pwd)/PATCH_IN:/app/PATCH_IN \
+  -v $(pwd)/PATCH_OUT:/app/PATCH_OUT \
+  -v /tmp/.X11-unix:/tmp/.X11-unix:ro \
+  -e DISPLAY=$DISPLAY \
+  to_dbi_arm
+```
+
+### Запуск в headless-режиме (CI / сервер)
+
+```bash
+# Сканирование + исправление без GUI
+docker run --rm \
+  -e MODE=headless \
+  -e SRC_DIR=patch_WORK \
+  -e DST_DIR=patch_WORK \
+  -v $(pwd)/PATCH_IN:/app/PATCH_IN \
+  -v $(pwd)/PATCH_OUT:/app/PATCH_OUT \
+  -v $(pwd)/logs:/app/logs \
+  to_dbi_arm
+```
+
+### Использование docker-compose
+
+```bash
+# Запуск приложения + тестовая БД
+docker-compose up -d app
+
+# Запуск с тест-раннером
+docker-compose up --abort-on-container-exit test-runner
+
+# Остановка и очистка
+docker-compose down -v
+```
+
+### Переменные окружения
+
+| Переменная     | Описание                           | Значение по умолчанию |
+|---------------|------------------------------------|----------------------|
+| `MODE`        | Режим работы: `gui` или `headless` | `gui`               |
+| `SRC_DIR`     | Каталог в PATCH_IN                 | `patch_WORK`         |
+| `DST_DIR`     | Каталог в PATCH_OUT                | `patch_WORK`         |
+| `LOG_LEVEL`   | Уровень логирования                | `INFO`               |
+
+### Точки монтирования (volumes)
+
+| Контейнер         | Хост                  | Назначение                    |
+|-------------------|-----------------------|-------------------------------|
+| `/app/PATCH_IN`   | `./PATCH_IN`          | Исходный код для адаптации    |
+| `/app/PATCH_OUT`  | `./PATCH_OUT`         | Результаты адаптации          |
+| `/app/logs`       | `./logs_container`    | Логи приложения              |
+
+---
+
 ## 🏗 Архитектура решения
 
 Система строится на трёхуровневой архитектуре ЦФТ:
@@ -75,18 +144,28 @@
 ## 📂 Структура репозитория
 
 TO_DBI/
-├── docs/                      # Документация
-│   ├── adaptation_guide.md    # Руководство по адаптации кода
-│   ├── migration_checklist.md # Чеклист миграции
-│   └── dbi_requirements.md    # Требования DBI к локальному коду
-├── src/                       # Адаптированный локальный код
-│   ├── oracle/                # Исходный код (Oracle)
-│   ├── postgres/              # Адаптированный код (PostgreSQL)
-│   └── migration_scripts/     # Скрипты миграции
-├── tests/                     # Тестовые пакеты
-│   ├── regress/               # DBI Regress (регрессионные тесты)
-│   └── perform/               # DBI perform (нагрузочные тесты)
-├── docker/                    # Docker-конфигурация для тестовых полигонов
+├── SRC/                       # Исходный код Python-приложения
+│   ├── gui_app.py             # Главный файл (GUI-приложение)
+│   ├── analyzer/              # Модуль сканирования кода
+│   ├── fixer/                 # Модуль исправления кода
+│   ├── utils/                 # Утилиты (кодировки и др.)
+│   └── rubricator_prompts.py  # Рубрикатор правил
+├── PATCH_IN/                  # Входные данные (исходный код банка)
+│   ├── patch_WORK/            # Рабочий каталог
+│   ├── patch_RV/              # Каталог RV
+│   └── patch_ALL/             # Полный каталог
+├── PATCH_OUT/                 # Выходные данные (результат)
+├── RubricatorTemp/            # Правила адаптации
+├── DATA/                      # Данные рубрикатора
+├── logs/                      # Логи приложения
+├── docker/                    # Docker-конфигурация
+├── .github/                   # CI/CD (GitHub Actions)
+│   └── workflows/
+│       └── docker-build.yml   # Сборка и публикация образа
+├── Dockerfile                 # Контейнер приложения
+├── docker-compose.yml         # Локальная разработка
+├── entrypoint.sh              # Точка входа контейнера
+├── requirements.txt           # Python-зависимости
 └── README.md
 
 ## 📚 Полезные источники
@@ -105,6 +184,31 @@ TO_DBI/
 
 ## 📄 Лицензия
 Внутренний проект банка. Распространение ограничено.
+
+## 🐳 Образ в реестре
+
+Docker-образ публикуется в **GitHub Container Registry (GHCR)**:
+
+```
+ghcr.io/vitalybashkirov/to_dbi_arm:latest
+```
+
+### Pull образа
+
+```bash
+docker pull ghcr.io/vitalybashkirov/to_dbi_arm:latest
+```
+
+### Публикация нового образа
+
+Образ собирается автоматически при push в ветку `main` или создании тега `v*`:
+
+```bash
+git tag v26.2.006
+git push origin v26.2.006
+```
+
+---
 
 ## 🤝 Как помочь проекту
 1. Изучите [руководство по адаптации кода](docs/adaptation_guide.md)

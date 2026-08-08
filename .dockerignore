@@ -1,0 +1,97 @@
+# ============================================================
+# .dockerignore — Исключить ненужные файлы из Docker-контекста
+# ============================================================
+
+# Git
+.git/
+.gitignore
+.gitattributes
+.git_broken_backup/
+
+# Логи (внутри проекта, не нужны в образе)
+logs/
+logs_Deep/
+logs_container/
+*.log
+
+# Временные файлы
+temp/
+*.tmp
+*.pyc
+__pycache__/
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Данные (монтируются через volumes, не копируем)
+PATCH_IN/
+PATCH_OUT/
+patch_WORK*/
+patch_TEST_DS/
+patch_ALL/
+patch_RV/
+patch_WORK.pck
+patch_RV.pck
+patch_ALL.pck
+
+# Докментация (не нужна в образе)
+*.md
+*.docx
+*.doc
+*.txt
+!requirements.txt
+!Dockerfile
+!docker-compose.yml
+!entrypoint.sh
+!.dockerignore
+!.github/
+
+# Тесты (не нужны в prod-образе)
+test_*.py
+apply_fix_test.py
+check_rules.py
+fix_json*.py
+analyze_rubricator.py
+final_check.py
+run_scanner.py
+test_ai_*.py
+test_direct_*.py
+test_final*.py
+test_fixer*.py
+test_gui_*.py
+test_ignore.py
+test_line*.py
+test_patterns*.py
+test_scanner*.py
+
+# Промты и данные
+ПРОМТы/
+DATA/
+
+# Старые версии GUI
+gui_app_OLD.py
+gui_app_NEW.py
+gui_app_v25_backup.py
+
+# Docker
+docker/
+
+# Скрипты разработки
+fix_rubricator.py
+update_rubricator.py
+test_patterns.py
+check_patterns.py
+
+# ALM
+ALGORITHM_FLOWCHART*
+RULES_SUMMARY.md
+FIX_INSTRUCTIONS.md
+INSTRUCTIONS_ARH_RUN.md
+README_GIT.md

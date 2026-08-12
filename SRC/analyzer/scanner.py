@@ -576,20 +576,22 @@ class PLPlusScanner:
             total_issues = len(self.issues)
             total_rules = len(stats)
             ai_count = len(self.ai_results)
-            log_callback(f"\n{'=' * 70}", 'info')
+            sep = '=' * 70
+            dash = '-' * 70
+            log_callback(f"\n{sep}", 'info')
             log_callback('ИТОГОВАЯ СТАТИСТИКА ПО ВИДАМ КОДОВ ПРАВИЛ', 'info')
-            log_callback(f'{'=' * 70}', 'info')
+            log_callback(sep, 'info')
             log_callback(f'Всего файлов просканировано:    {files_scanned}', 'info')
             log_callback(f'Всего проблем найдено:         {total_issues}', 'info')
             log_callback(f'Всего видов кодов правил:      {total_rules}', 'info')
             if ai_count > 0:
                 log_callback(f'Из них с AI-анализом:          {ai_count}', 'info')
-            log_callback(f'{'=' * 70}', 'info')
+            log_callback(sep, 'info')
             log_callback('Распределение по кодам правил (по убыванию):', 'info')
-            log_callback(f'{'-' * 70}', 'info')
+            log_callback(dash, 'info')
             for rule_code, count in sorted(stats.items(), key=lambda x: (-x[1], x[0])):
                 log_callback(f'  {rule_code}: {count}', 'info')
-            log_callback(f'{'=' * 70}', 'info')
+            log_callback(sep, 'info')
         
         return {
             'files_scanned': files_scanned,
@@ -775,18 +777,20 @@ def main():
     # Вывод итоговой статистики в консоль
     total_issues = stats['total_issues']
     total_rules = len(stats['by_type'])
-    print(f"\n{'=' * 70}")
+    sep = '=' * 70
+    dash = '-' * 70
+    print(f"\n{sep}")
     print('ИТОГОВАЯ СТАТИСТИКА ПО ВИДАМ КОДОВ ПРАВИЛ')
-    print(f'{'=' * 70}')
+    print(sep)
     print(f'Всего файлов просканировано:    {stats["files_scanned"]}')
     print(f'Всего проблем найдено:         {total_issues}')
     print(f'Всего видов кодов правил:      {total_rules}')
-    print(f'{'=' * 70}')
+    print(sep)
     print('Распределение по кодам правил (по убыванию):')
-    print(f'{'-' * 70}')
+    print(dash)
     for rule_code, count in sorted(stats['by_type'].items(), key=lambda x: (-x[1], x[0])):
         print(f'  {rule_code}: {count}')
-    print(f'{'=' * 70}')
+    print(sep)
     
     print(f"\nРезультаты сканирования:")
     print(f"  Файлов: {stats['files_scanned']}")

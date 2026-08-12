@@ -785,17 +785,19 @@ class PLPlusFixer:
             # Итоговая статистика по видам кодов правил
             total_fixes = len(self.fixed_issues)
             total_rules = len(self.stats)
-            log_callback(f"\n{'=' * 70}")
+            sep = '=' * 70
+            dash = '-' * 70
+            log_callback(f"\n{sep}")
             log_callback('ИТОГОВАЯ СТАТИСТИКА ПО ВИДАМ КОДОВ ПРАВИЛ')
-            log_callback(f'{'=' * 70}')
+            log_callback(sep)
             log_callback(f'Всего исправлено проблем:        {total_fixes}')
             log_callback(f'Всего видов кодов правил:       {total_rules}')
-            log_callback(f'{'=' * 70}')
+            log_callback(sep)
             log_callback('Распределение по кодам правил (по убыванию):')
-            log_callback(f'{'-' * 70}')
+            log_callback(dash)
             for rule_code, count in sorted(self.stats.items(), key=lambda x: (-x[1], x[0])):
                 log_callback(f'  {rule_code}: {count}')
-            log_callback(f'{'=' * 70}')
+            log_callback(sep)
         else:
             print(f"\nГотово! Изменено файлов: {files_modified}/{total_files}")
             if files_unchanged > 0:
@@ -804,17 +806,19 @@ class PLPlusFixer:
             # Итоговая статистика по видам кодов правил в консоль
             total_fixes = len(self.fixed_issues)
             total_rules = len(self.stats)
-            print(f"\n{'=' * 70}")
+            sep = '=' * 70
+            dash = '-' * 70
+            print(f"\n{sep}")
             print('ИТОГОВАЯ СТАТИСТИКА ПО ВИДАМ КОДОВ ПРАВИЛ')
-            print(f'{'=' * 70}')
+            print(sep)
             print(f'Всего исправлено проблем:        {total_fixes}')
             print(f'Всего видов кодов правил:       {total_rules}')
-            print(f'{'=' * 70}')
+            print(sep)
             print('Распределение по кодам правил (по убыванию):')
-            print(f'{'-' * 70}')
+            print(dash)
             for rule_code, count in sorted(self.stats.items(), key=lambda x: (-x[1], x[0])):
                 print(f'  {rule_code}: {count}')
-            print(f'{'=' * 70}')
+            print(sep)
         
         return files_modified
     

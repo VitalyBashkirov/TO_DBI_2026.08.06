@@ -890,16 +890,46 @@ class DBIMigrationApp:
                 self.log(f"  [ФАЙЛ] {rel_path}", 'info')
     
     def show_documentation(self):
-        """Показ документации"""
+        """Показ документации - открывает файл в Word"""
         self._log_separator("ДОКУМЕНТАЦИЯ")
         
+        # Путь к основной документации
         docs_path = Path(__file__).parent / 'AI_DOCS'
-        if docs_path.exists():
-            for doc_file in docs_path.glob('*.txt'):
-                self.log(f"  [ДОКУМЕНТ] {doc_file.name}", 'info')
-                self.log(f"     Полный путь: {doc_file}", 'debug')
+        
+        # Основная документация (по умолчанию — старая версия 26.2.005)
+        doc_file_2005 = docs_path / 'АРМ Адаптация под DBI v26.2.005.docx'
+        doc_file_2006 = docs_path / 'АРМ Адаптация под DBI v26.2.006.docx'
+        
+        # Ищем файл: сначала старую версию, потом новую
+        doc_to_open = None
+        if doc_file_2005.exists():
+            doc_to_open = doc_file_2005
+        elif doc_file_2006.exists():
+            doc_to_open = doc_file_2006
+        
+        if doc_to_open:
+            self.log(f"[ДОКУМЕНТ] {doc_to_open.name}", 'info')
+            self.log(f"     Полный путь: {doc_to_open}", 'info')
+            self.log(f"     Каталог хранения: {docs_path}", 'info')
+            self.log("     Для ручного поиска: F:\\TO_DBI\\SRC\\AI_DOCS\\", 'info')
+            
+            # Открываем документ в Word через OLE
+            try:
+                import subprocess
+                import os
+                
+                # Пробуем открыть через ShellExecute (Windows)
+                import ctypes
+                ctypes.windll.shell32.ShellExecuteW(
+                    None, 'open', str(doc_to_open), None, None, 1
+                )
+                self.log(f"     [SUCCESS] Документ открыт в Microsoft Word", 'success')
+            except Exception as e:
+                self.log(f"     [!] Не удалось открыть в Word: {e}", 'warning')
+                self.log(f"     [INFO] Откройте файл вручную: {doc_to_open}", 'info')
         else:
             self.log("  [!] Документация не найдена", 'warning')
+            self.log(f"     Каталог: {docs_path}", 'debug')
     
     def set_status(self, message: str):
         """Установка сообщения в подвале"""

@@ -1,0 +1,439 @@
+-- ============================================================================
+-- ТЕСТОВЫЙ ФАЙЛ: Все правила v50
+-- Дата генерации: 2026-05-05
+-- ============================================================================
+
+-- ============================================================================
+-- Правило: v50.SQL.OUTERJOIN.п.1.1
+-- Описание: Замена (+) на LEFT/RIGHT JOIN
+-- Категория: SQL
+-- Приоритет: high
+-- Теги: outer join, oracle, ansi
+-- 3.RUBRICATOR_FIXES.md: Замена (+) на LEFT/RIGHT JOIN
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Oracle оператор (+) в ANSI не поддерживается. Далее нельзя использовать PLPlus параметризацию типа соединения (true/false) в where. Вместо этого нужно использовать явные left/right join on.
+--   plplus_materials_note: Согласно учебному курсу (Глава 5.8), конструкция '&collection(true)' является упрощённым синтаксисом LOCATE для поиска в коллекции и используется для организации внешних соединений (outer joins).
+--   search_prompt: Найти в PLPlus коде использование устаревших синтаксисов внешних соединений: 1. Оператор Oracle '(+)' в условии WHERE; 2. Конструкцию '&collection(true)' в условии WHERE; 3. Конструкцию '[REF](true)' или '[REF](false)' в условии WHERE.
+--   code_example_bad: select * from t1, t2 where t1.id = t2.id(+)
+--   code_example_bad2: where ac%id = gj.[ACCOUNT](true)
+--   code_example_bad3: where cr.[LIST_PAY] = fo&collection(true)
+--   fix_instruction: Преобразовать устаревший синтаксис в ANSI SQL: 1. a=b(+) -> LEFT JOIN b ON a=b; 2. a(+)=b -> RIGHT JOIN b ON a=b; 3. &collection(true) -> LEFT JOIN (::[TABLE] all : alias) ON условие; 4. [REF](true) -> удалить (true) и преобразовать в LEFT JOIN
+-- ============================================================================
+PUBLIC PROCEDURE v50_SQL_OUTERJOIN_p_1_1 IS
+    v_ref REF [PRICE_LIST];
+    v_result VARCHAR2(4000);
+    P_DATE DATE_TIME;
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v50.SQL.OUTERJOIN.п.1.1 Замена (+) на LEFT/RIGHT JOIN =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- Пример 1: простой outer join (+)
+        -- begin pl/sql
+        select * from t1, t2 where t1.id = t2.id(+);
+        -- end pl/sql
+        
+        -- Пример 2: ссылка с параметром true (из эталона)
+        FOR (
+            SELECT ac(ac%id : id, ac.[MAIN_V_ID] : main_v_id, gj.[WORKING_DATETIME] : WrkDate, st.tm : AnswDate, st.val : RESULT, gj.[FILENAME] : FILENAME)
+            IN ::[AC_FIN]
+            , (SELECT gj(gj.[WORKING_DATETIME] : WORKING_DATETIME, gj.[FILENAME] : FILENAME, gj.[ACCOUNT] : ACCOUNT, gj.[IN_FILE_HISTORY] : IN_FILE_HISTORY) IN ::[GNI_JOUR] WHERE coalesce(gj.[FILENAME],'SBC2') LIKE 'SBC2%' OR coalesce(gj.[FILENAME],'SFC2') LIKE 'SFC2%')
+            , (SELECT DISTINCT st(st%collection : collection_id, analytic(first_value(substr(st.[TO_FILENAME], 3, 1)), 'over (partition by [1] order by [2] desc)', st%collection, st.[IN_FILE_DATETIME]) : val, analytic(first_value(st.[IN_FILE_DATETIME]), 'over (partition by [1] order by [2] desc)', st%collection, st.[IN_FILE_DATETIME]) : tm) IN ::[GNI_JOUR_HISTORY] collections WHERE st.[SOC_FUND] IS NULL AND st.[IN_FILE_DATETIME] < (P_DATE + 1))
+            WHERE ac%id = gj.[ACCOUNT](true) AND gj.[IN_FILE_HISTORY] = st.collection_id(true)
+        ) LOOP EXIT; END LOOP;
+
+        -- Пример 3: коллекция с параметром true
+        FOR (
+            SELECT cr(cr.[LIST_PAY] : LIST_PAY, fo.[DATE] : OP_DATE, fo.[SUMMA] : OP_SUM)
+            IN ::[PR_CRED]
+            , (::[FACT_OPER] all : fo)
+            WHERE cr.[LIST_PAY] = fo&collection(true)
+        ) LOOP EXIT; END LOOP;
+
+        -- [+] ПРАВИЛЬНО
+        -- Исправление для примера 1
+        -- begin pl/sql
+        select * from t1 left join t2 on t1.id = t2.id;
+        -- end pl/sql
+        
+        -- Исправление для примера 2 (из эталона)
+        FOR (
+            SELECT ac(ac%id : id, ac.[MAIN_V_ID] : main_v_id, gj.[WORKING_DATETIME] : WrkDate, st.tm : AnswDate, st.val : RESULT, gj.[FILENAME] : FILENAME)
+            IN ::[AC_FIN]
+            LEFT JOIN (gj : (SELECT gj(gj.[WORKING_DATETIME] : WORKING_DATETIME, gj.[FILENAME] : FILENAME, gj.[ACCOUNT] : ACCOUNT, gj.[IN_FILE_HISTORY] : IN_FILE_HISTORY) IN ::[GNI_JOUR] WHERE coalesce(gj.[FILENAME],'SBC2') LIKE 'SBC2%' OR coalesce(gj.[FILENAME],'SFC2') LIKE 'SFC2%')) ON ac%id = gj.[ACCOUNT]
+            LEFT JOIN (st : (SELECT DISTINCT st(st%collection : collection_id, analytic(first_value(substr(st.[TO_FILENAME], 3, 1)), 'over (partition by [1] order by [2] desc)', st%collection, st.[IN_FILE_DATETIME]) : val, analytic(first_value(st.[IN_FILE_DATETIME]), 'over (partition by [1] order by [2] desc)', st%collection, st.[IN_FILE_DATETIME]) : tm) IN ::[GNI_JOUR_HISTORY] collections WHERE st.[SOC_FUND] IS NULL AND st.[IN_FILE_DATETIME] < (P_DATE + 1))) ON gj.[IN_FILE_HISTORY] = st.collection_id
+        ) LOOP EXIT; END LOOP;
+
+        -- Исправление для примера 3
+        FOR (
+            SELECT cr(cr.[LIST_PAY] : LIST_PAY, fo.[DATE] : OP_DATE, fo.[SUMMA] : OP_SUM)
+            IN ::[PR_CRED]
+            LEFT JOIN (::[FACT_OPER] all : fo) ON cr.[LIST_PAY] = fo&collection
+        ) LOOP EXIT; END LOOP;
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v50.SQL.ROWNUM.п.1.2
+-- Описание: Замена rownum на FETCH FIRST
+-- Категория: SQL
+-- Приоритет: high
+-- Теги: rownum, limit, offset
+-- 3.RUBRICATOR_FIXES.md: Замена rownum на FETCH FIRST
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Псевдоколонка rownum не поддерживается в PostgreSQL. Использовать FETCH FIRST N ROWS ONLY.
+--   plplus_materials_note: В PL+ rownum используется в WHERE для ограничения выборки. В DBI его нет.
+--   search_prompt: Найти использование псевдоколонки rownum в WHERE, ORDER BY или SELECT. Игнорировать комментарии и строковые литералы.
+--   code_example_bad: select * from t where rownum = 1
+--   code_example_bad2: select * from t where rownum <= 10
+--   fix_instruction: Заменить ROWNUM на FETCH FIRST: - rownum = 1 -> fetch first 1 rows only; - rownum <= N -> fetch first N rows only; - rownum между значениями -> использовать offset on
+-- ============================================================================
+PUBLIC PROCEDURE v50_SQL_ROWNUM_p_1_2 IS
+    v_ref REF [PRICE_LIST];
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v50.SQL.ROWNUM.п.1.2 Замена rownum на FETCH FIRST =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- begin pl/sql
+        select * from t where rownum = 1;
+        select * from t where rownum <= 10;
+        -- end pl/sql
+
+        -- [+] ПРАВИЛЬНО
+        -- begin pl/sql
+        select * from t fetch first 1 rows only;
+        select * from t fetch first 10 rows only;
+        -- end pl/sql
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v50.SQL.UDF.п.1.3
+-- Описание: Запрет UDF в WHERE/GROUP BY/ORDER BY
+-- Категория: SQL
+-- Приоритет: high
+-- Теги: udf, function, performance
+-- 3.RUBRICATOR_FIXES.md: Запрет UDF в WHERE/GROUP BY/ORDER BY
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Пользовательские функции нельзя в условиях фильтрации, группировки и сортировки. Только в SELECT-листе верхнего уровня.
+--   plplus_materials_note: UDF в PL+ могут вызываться в SELECT, но не в WHERE/GROUP BY/ORDER BY для DBI.
+--   search_prompt: Найти вызовы пользовательских функций (UDF) в WHERE, GROUP BY, ORDER BY, HAVING. Игнорировать системные функции.
+--   code_example_bad: where my_func(id) > 0
+--   fix_instruction: Переписать запрос: вычислить значение UDF до запроса или использовать в SELECT-листе.
+-- ============================================================================
+PUBLIC PROCEDURE v50_SQL_UDF_p_1_3 IS
+    FUNCTION my_func(p_id NUMBER) RETURN NUMBER IS
+    BEGIN
+        RETURN p_id * 2;
+    END;
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v50.SQL.UDF.п.1.3 Запрет UDF в WHERE/GROUP BY/ORDER BY =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- begin pl/sql
+        select * from t where my_func(id) > 0;
+        -- end pl/sql
+
+        -- [+] ПРАВИЛЬНО
+        -- begin pl/sql
+        select id, my_func(id) as val from t where val > 0;
+        -- end pl/sql
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v50.SQL.DECODE.п.1.6.1
+-- Описание: Замена DECODE на CASE
+-- Категория: SQL
+-- Приоритет: high
+-- Теги: decode, case, conditional
+-- 3.RUBRICATOR_FIXES.md: Замена DECODE на CASE
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Функция DECODE специфична для Oracle. Заменять на ANSI-конструкцию CASE WHEN.
+--   plplus_materials_note: DECODE не поддерживается в PostgreSQL.
+--   search_prompt: Найти вызовы функции DECODE в SQL-запросах. Игнорировать комментарии.
+--   code_example_bad: select decode(status,1,'A',2,'B','?') from t
+--   fix_instruction: Заменить DECODE на CASE WHEN: DECODE(expr, v1, r1, v2, r2, default) -> CASE expr WHEN v1 THEN r1 WHEN v2 THEN r2 ELSE default END
+-- ============================================================================
+PUBLIC PROCEDURE v50_SQL_DECODE_p_1_6_1 IS
+    v_status NUMBER := 1;
+    v_result VARCHAR2(100);
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v50.SQL.DECODE.п.1.6.1 Замена DECODE на CASE =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- begin pl/sql
+        select decode(status,1,'A',2,'B','?') from t;
+        -- end pl/sql
+
+        -- [+] ПРАВИЛЬНО
+        -- begin pl/sql
+        select case status when 1 then 'A' when 2 then 'B' else '?' end from t;
+        -- end pl/sql
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v50.SQL.CONNECTBY.п.1.8
+-- Описание: Замена CONNECT BY на WITH RECURSIVE
+-- Категория: SQL
+-- Приоритет: high
+-- Теги: hierarchical, connect by, cte
+-- 3.RUBRICATOR_FIXES.md: Замена CONNECT BY на WITH RECURSIVE
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Иерархические запросы с CONNECT BY не поддерживаются. Использовать рекурсивные CTE: WITH RECURSIVE.
+--   plplus_materials_note: CONNECT BY — Oracle синтаксис, в PostgreSQL нет.
+--   search_prompt: Найти использование CONNECT BY в запросах. Игнорировать комментарии.
+--   code_example_bad: select * from t connect by prior id = parent_id start with parent_id is null
+--   fix_instruction: Преобразовать CONNECT BY в WITH RECURSIVE: WITH RECURSIVE cte AS ( SELECT * FROM t WHERE start_condition UNION ALL SELECT t2.* FROM t t2 JOIN cte ON t2.parent_id = cte.id ) SELECT * FROM cte
+-- ============================================================================
+PUBLIC PROCEDURE v50_SQL_CONNECTBY_p_1_8 IS
+    v_dep_id NUMBER := 100;
+    v_high_dep REF [DEPART];
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v50.SQL.CONNECTBY.п.1.8 Замена CONNECT BY на WITH RECURSIVE =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- begin pl/sql
+        select * from t connect by prior id = parent_id start with parent_id is null;
+        -- end pl/sql
+
+        -- [+] ПРАВИЛЬНО
+        -- begin pl/sql
+        with recursive cte as (
+            select * from t where parent_id is null
+            union all
+            select t2.* from t t2 join cte on t2.parent_id = cte.id
+        ) select * from cte;
+        -- end pl/sql
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v50.SQL.SYSVIEW.п.1.9
+-- Описание: Замена v$session на VW_DB_SESSION
+-- Категория: SQL
+-- Приоритет: high
+-- Теги: system view, oracle, session
+-- 3.RUBRICATOR_FIXES.md: Замена v$session на VW_DB_SESSION
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Системные представления Oracle недоступны. Использовать VW_DB_SESSION.
+--   plplus_materials_note: V$SESSION и другие системные представления Oracle не работают в DBI.
+--   search_prompt: Найти обращения к системным представлениям Oracle: v$session, gv$session, user_tables, all_objects и др.
+--   code_example_bad: select * from v$session
+--   fix_instruction: Заменить v$session на VW_DB_SESSION. Другие системные представления заменить на альтернативы из документации.
+-- ============================================================================
+PUBLIC PROCEDURE v50_SQL_SYSVIEW_p_1_9 IS
+    v_session_info VW_DB_SESSION%ROWTYPE;
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v50.SQL.SYSVIEW.п.1.9 Замена v$session на VW_DB_SESSION =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- begin pl/sql
+        select * from v$session;
+        -- end pl/sql
+
+        -- [+] ПРАВИЛЬНО
+        -- begin pl/sql
+        select * from VW_DB_SESSION;
+        -- end pl/sql
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v50.SQL.CONTEXT.п.1.23
+-- Описание: Замена sys_context('USERENV','DB_NAME')
+-- Категория: SQL
+-- Приоритет: high
+-- Теги: context, userenv, database
+-- 3.RUBRICATOR_FIXES.md: Замена sys_context('USERENV','DB_NAME')
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Контекст USERENV не поддерживается. Использовать ::[RUNTIME].[ENVIRONMENT].ClassStorage('ТБП').dbName.
+--   plplus_materials_note: SYS_CONTEXT с USERENV — Oracle специфика.
+--   search_prompt: Найти вызовы SYS_CONTEXT с контекстом USERENV.
+--   code_example_bad: sys_context('USERENV','DB_NAME')
+--   code_example_bad2: sys_context('USERENV','SESSIONID')
+--   fix_instruction: Заменить: - DB_NAME -> ::[RUNTIME].[ENVIRONMENT].ClassStorage('ТБП').dbName; - SESSIONID -> rtl.session_id или rtl.USERID; - CURRENT_USER -> rtl.usr$
+-- ============================================================================
+PUBLIC PROCEDURE v50_SQL_CONTEXT_p_1_23 IS
+    v_dbname VARCHAR2(100);
+    v_sessionid VARCHAR2(100);
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v50.SQL.CONTEXT.п.1.23 Замена sys_context(...) =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- begin pl/sql
+        v_dbname := sys_context('USERENV','DB_NAME');
+        v_sessionid := sys_context('USERENV','SESSIONID');
+        -- end pl/sql
+
+        -- [+] ПРАВИЛЬНО
+        -- begin pl/sql
+        v_dbname := ::[RUNTIME].[ENVIRONMENT].ClassStorage('ТБП').dbName;
+        v_sessionid := rtl.session_id;
+        -- end pl/sql
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v50.STOR.DATE.п.2.2
+-- Описание: Замена DATE на DATE_TIME
+-- Категория: STOR
+-- Приоритет: medium
+-- Теги: date, type, timestamp
+-- 3.RUBRICATOR_FIXES.md: Замена DATE на DATE_TIME
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: В PostgreSQL тип DATE не хранит время. Использовать тип DATE_TIME (timestamp(0)).
+--   plplus_materials_note: Тип DATE в PL+ отображается на Oracle DATE. Для DBI нужен DATE_TIME.
+--   search_prompt: Найти объявления переменных, параметров и реквизитов типа DATE. Игнорировать вызовы функций to_date.
+--   code_example_bad: DateTimeEnd date;
+--   fix_instruction: Заменить тип DATE на DATE_TIME. Для присвоений и арифметики использовать INTERVAL.
+-- ============================================================================
+PUBLIC PROCEDURE v50_STOR_DATE_p_2_2 IS
+    DateTimeEnd DATE_TIME;
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v50.STOR.DATE.п.2.2 Замена DATE на DATE_TIME =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- DateTimeEnd date;
+        
+        -- [+] ПРАВИЛЬНО
+        -- begin pl/sql
+        DateTimeEnd := sysdate;
+        -- end pl/sql
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v50.PROC.WHENOTHERS.п.3.5
+-- Описание: Добавление ROLLBACK или RAISE в WHEN OTHERS
+-- Категория: PROC
+-- Приоритет: high
+-- Теги: exception, rollback, raise
+-- 3.RUBRICATOR_FIXES.md: Добавление ROLLBACK или RAISE в WHEN OTHERS
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: В PostgreSQL после ошибки транзакция прерывается. В WHEN OTHERS обязательно делать ROLLBACK или RAISE.
+--   plplus_materials_note: WHEN OTHERS без обработки портит транзакцию в PostgreSQL.
+--   search_prompt: Найти блоки WHEN OTHERS без ROLLBACK или RAISE.
+--   code_example_bad: exception when others then null;
+--   fix_instruction: Добавить ROLLBACK или RAISE в блок WHEN OTHERS.
+-- ============================================================================
+PUBLIC PROCEDURE v50_PROC_WHENOTHERS_p_3_5 IS
+    v_val NUMBER;
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v50.PROC.WHENOTHERS.п.3.5 Добавление ROLLBACK/RAISE =-', 0);
+        
+        -- begin pl/sql
+        BEGIN
+            select 1/0 into v_val from dual;
+        EXCEPTION
+            -- [-] НЕПРАВИЛЬНО
+            -- when others then null;
+            
+            -- [+] ПРАВИЛЬНО
+            when others then
+                rollback;
+                raise;
+        END;
+        -- end pl/sql
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v50.PROC.EXECUTE.п.3.3
+-- Описание: Экранирование имён таблиц в execute immediate
+-- Категория: PROC
+-- Приоритет: high
+-- Теги: dynamic sql, execute, escape
+-- 3.RUBRICATOR_FIXES.md: Экранирование имён таблиц в execute immediate
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: В execute immediate имена таблиц экранировать двойными кавычками: "Z#MY_TABLE".
+--   plplus_materials_note: PostgreSQL требует экранирования имён таблиц в динамическом SQL.
+--   search_prompt: Найти вызовы EXECUTE IMMEDIATE. Проверить экранирование имён таблиц.
+--   code_example_bad: execute immediate 'truncate table Z#T'
+--   fix_instruction: Добавить двойные кавычки вокруг имён таблиц: 'truncate table "Z#T"'
+-- ============================================================================
+PUBLIC PROCEDURE v50_PROC_EXECUTE_p_3_3 IS
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v50.PROC.EXECUTE.п.3.3 Экранирование имён таблиц =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- begin pl/sql
+        execute immediate 'truncate table Z#TEMP';
+        -- end pl/sql
+
+        -- [+] ПРАВИЛЬНО
+        -- begin pl/sql
+        execute immediate 'truncate table "Z#TEMP"';
+        -- end pl/sql
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;

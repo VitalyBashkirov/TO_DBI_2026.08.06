@@ -1,0 +1,596 @@
+-- ============================================================================
+-- СВОДНЫЙ ТЕСТОВЫЙ ФАЙЛ: ВСЕ ПРАВИЛА v3.0.0 (13 правил)
+-- Дата генерации: 2026-08-12 22:26:53
+-- Описание: Тестовые файлы для всех правил PLPlus адаптации
+-- Приоритеты: Приоритет 1, Приоритет 2, Приоритет 3, Приоритет 4
+-- ============================================================================
+-- Список всех правил (HIGH, 13 шт.):
+-- ============================================================================
+--  1.  v50.INT.DBLINK.п.4.2                          - Замена Database Link на REST/SOAP                      
+--  2.  v50.PROC.CRYPTO.п.3.1.2                       - Замена dbms_crypto на INT_EXT_CALL_001                 
+--  3.  v50.PROC.TYPING.п.3.11                        - Ограничения типизации                                  
+--  4.  v50.SQL.CONNECTBY.п.1.8                       - Замена CONNECT BY на WITH RECURSIVE                    
+--  5.  v50.SQL.DECODE.п.1.6.1                        - Замена DECODE на CASE                                  
+--  6.  v50.SQL.DML_JOIN.п.1.17                       - Переписывание DML с JOIN на подзапросы                 
+--  7.  v50.SQL.ORACLE_PKG.п.1.11                     - Запрет Oracle supplied PL/SQL пакетов                  
+--  8.  v50.SQL.OUTERJOIN.п.1.1                       - Замена (+) на LEFT/RIGHT JOIN                          
+--  9.  v50.SQL.PSEUDO.п.1.20                         - Запрет псевдоколонок Oracle                            
+-- 10.  v50.SQL.ROWNUM.п.1.2                          - Замена rownum на FETCH FIRST                           
+-- 11.  v50.SQL.SYSTABLES.п.1.10                      - Запрет SELECT из системных таблиц ТЯ                   
+-- 12.  v50.SQL.UDF.п.1.3                             - Запрет UDF в WHERE/GROUP BY/ORDER BY                   
+-- 13.  v50.SQL.VW_CRIT_RPT.п.1.19                    - Ограничения при SELECT из VW_CRIT, VW_RPT, VW_SQL      
+-- ============================================================================
+
+-- ============================================================================
+--  1: v50.INT.DBLINK.п.4.2 - Замена Database Link на REST/SOAP
+-- ============================================================================
+-- 3.RUBRICATOR_FIXES.md:
+--   Короткое описание: Замена Database Link на REST/SOAP
+--   Подробное описание: Database Link не поддерживается. Использовать веб-сервисы: REST (1B060230 — потребитель, 1B060220 — поставщик) или SOAP (1B060250 — потребитель, 1B060240 — поставщик).
+--   Пример кода (плохой): select * from table@dblink
+--   Пример кода (исправленный): -- использовать REST веб-сервис 1B060230
+--   Теги: v50, INT, DBLINK, п, 4, 2
+-- 4.RUBRICATOR_PROMPTS.json (расширенный):
+--   documentation_text: Database Link не поддерживается. Использовать веб-сервисы: REST (1B060230 — потребитель, 1B060220 — поставщик) или SOAP (1B060250 — потребитель, 1B060240 — поставщик).
+--   plplus_materials_note: Database Link не работает в DBI.
+--   search_prompt: Найти обращения к Database Link (@dblink).
+--   regex_patterns.for_search: (1) Database Link в SQL запросах
+--   code_example_bad: select * from table@dblink
+--   fix_instruction: Заменить Database Link на вызов REST/SOAP веб-сервиса.
+--   test_generation_prompt: Сгенерировать тестовый PLPlus файл для проверки правила 'v50.INT.DBLINK.п.4.2' с проблемными конструкциями.
+--   examples.simple.bad: select * from table@dblink
+--   examples.simple.good: -- использовать REST веб-сервис 1B060230
+--   priority: HIGH
+--   category: INT
+--   subcategory: INT.WEBSERVICES
+--   source_files: v50.docx
+--   source_sections: 2
+-- ============================================================================
+PROCEDURE v50_INT_DBLINK_p_4_2 IS
+	-- Объявления переменных из примеров
+BEGIN
+	-- [-] Неправильный код
+	-- begin pl/sql
+		select * from table@dblink
+	-- end pl/sql
+
+	-- [+] Исправленный код
+	-- begin pl/sql
+		-- использовать REST веб-сервис 1B060230
+	-- end pl/sql
+END;
+
+
+-- ============================================================================
+--  2: v50.PROC.CRYPTO.п.3.1.2 - Замена dbms_crypto на INT_EXT_CALL_001
+-- ============================================================================
+-- 3.RUBRICATOR_FIXES.md:
+--   Короткое описание: Замена dbms_crypto на INT_EXT_CALL_001
+--   Подробное описание: Пакет dbms_crypto недоступен. Использовать ::[PCORE_INTERFACE].[INT_EXT_CALL_001]. Функции encrypt/decrypt требуют дополнительных параметров p_al, p_mod, p_pad.
+--   Пример кода (плохой): dbms_crypto.hash(src, dbms_crypto.hash_md5)
+--   Пример кода (исправленный): ::[PCORE_INTERFACE].[INT_EXT_CALL_001].HSH_B(...)
+--   Теги: v50, PROC, CRYPTO, п, 3, 1, 2
+-- 4.RUBRICATOR_PROMPTS.json (расширенный):
+--   documentation_text: Пакет dbms_crypto недоступен. Использовать ::[PCORE_INTERFACE].[INT_EXT_CALL_001]. Функции encrypt/decrypt требуют дополнительных параметров p_al, p_mod, p_pad.
+--   plplus_materials_note: DBMS_CRYPTO — Oracle пакет, не поддерживается в DBI.
+--   search_prompt: Найти вызовы DBMS_CRYPTO функций.
+--   regex_patterns.for_search: (1) DBMS_CRYPTO вызовы
+--   code_example_bad: dbms_crypto.hash(src, dbms_crypto.hash_md5)
+--   fix_instruction: Заменить DBMS_CRYPTO на ::[PCORE_INTERFACE].[INT_EXT_CALL_001].
+--   test_generation_prompt: Сгенерировать тестовый PLPlus файл для проверки правила 'v50.PROC.CRYPTO.п.3.1.2' с проблемными конструкциями.
+--   examples.simple.bad: dbms_crypto.hash(src, dbms_crypto.hash_md5)
+--   examples.simple.good: ::[PCORE_INTERFACE].[INT_EXT_CALL_001].HSH_B(...)
+--   priority: HIGH
+--   category: PROC
+--   subcategory: PROC.PACKAGES
+--   source_files: v50.docx
+--   source_sections: 2
+-- ============================================================================
+PROCEDURE v50_PROC_CRYPTO_p_3_1_2 IS
+	-- Объявления переменных из примеров
+BEGIN
+	-- [-] Неправильный код
+	-- begin pl/sql
+		dbms_crypto.hash(src, dbms_crypto.hash_md5)
+	-- end pl/sql
+
+	-- [+] Исправленный код
+	-- begin pl/sql
+		::[PCORE_INTERFACE].[INT_EXT_CALL_001].HSH_B(...)
+	-- end pl/sql
+END;
+
+
+-- ============================================================================
+--  3: v50.PROC.TYPING.п.3.11 - Ограничения типизации
+-- ============================================================================
+-- 3.RUBRICATOR_FIXES.md:
+--   Короткое описание: Ограничения типизации
+--   Подробное описание: DBI приложение более чувствительно к приведению типов. %rowtype от таблицы в разных операциях — разные типы. Параметр-массив ссылок не примет массив number. Запрещён ref к скалярным типам.
+--   Пример кода (плохой): par1 := lib.test2(); (разные типы %rowtype)
+--   Теги: v50, PROC, TYPING, п, 3, 11
+-- 4.RUBRICATOR_PROMPTS.json (расширенный):
+--   documentation_text: DBI приложение более чувствительно к приведению типов. %rowtype от таблицы в разных операциях — разные типы. Параметр-массив ссылок не примет массив number. Запрещён ref к скалярным типам.
+--   plplus_materials_note: Ошибки компиляции JAVA при несовместимости типов.
+--   search_prompt: Найти объявления %rowtype, параметров-массивов ссылок, ref к скалярным типам.
+--   regex_patterns.for_search: (1) %rowtype объявление; (2) REF объявление
+--   code_example_bad: par1 := lib.test2(); (разные типы %rowtype)
+--   fix_instruction: Использовать совместимые типы или явное приведение.
+--   test_generation_prompt: Сгенерировать тестовый PLPlus файл для проверки правила 'v50.PROC.TYPING.п.3.11' с проблемными конструкциями.
+--   examples.simple.bad: par1 := lib.test2(); (разные типы %rowtype)
+--   examples.simple.good: (нет примера)
+--   priority: HIGH
+--   category: PROC
+--   subcategory: PROC.OTHER
+--   source_files: v50.docx
+--   source_sections: 11
+-- ============================================================================
+PROCEDURE v50_PROC_TYPING_p_3_11 IS
+	-- Объявления переменных из примеров
+BEGIN
+	-- [-] Неправильный код
+	-- begin pl/sql
+		par1 := lib.test2(); (разные типы %rowtype)
+	-- end pl/sql
+
+	-- [+] Исправленный код
+	-- begin pl/sql
+		-- Исправление: Использовать совместимые типы или явное приведение.
+	-- end pl/sql
+END;
+
+
+-- ============================================================================
+--  4: v50.SQL.CONNECTBY.п.1.8 - Замена CONNECT BY на WITH RECURSIVE
+-- ============================================================================
+-- 3.RUBRICATOR_FIXES.md:
+--   Короткое описание: Замена CONNECT BY на WITH RECURSIVE
+--   Подробное описание: Иерархические запросы с CONNECT BY не поддерживаются. Использовать рекурсивные CTE: WITH RECURSIVE. Нет аналога NOCYCLE. Иерархические запросы по метаданным запрещены.
+--   Пример кода (плохой): select * from t connect by prior id = parent_id start with parent_id is null
+--   Пример кода (исправленный): with recursive cte as (select * from t where parent_id is null union all select t2.* from t t2 join cte on t2.parent_id = cte.id) select * from cte
+--   Теги: v50, SQL, CONNECTBY, п, 1, 8
+-- 4.RUBRICATOR_PROMPTS.json (расширенный):
+--   documentation_text: Иерархические запросы с CONNECT BY не поддерживаются. Использовать рекурсивные CTE: WITH RECURSIVE. Нет аналога NOCYCLE. Иерархические запросы по метаданным запрещены.
+--   plplus_materials_note: CONNECT BY — Oracle синтаксис, в PostgreSQL нет.
+--   search_prompt: Найти использование CONNECT BY в запросах. Игнорировать комментарии.
+--   regex_patterns.for_search: (1) CONNECT BY
+--   code_example_bad: select * from t connect by prior id = parent_id start with parent_id is null
+--   fix_instruction: Преобразовать CONNECT BY в WITH RECURSIVE:
+WITH RECURSIVE cte AS (
+  SELECT * FROM t WHERE start_condition
+  UNION ALL
+  SELECT t2.* FROM t t2 JOIN cte ON t2.parent_id = cte.id
+) SELECT * FROM cte
+--   test_generation_prompt: Сгенерировать тестовый PLPlus файл для проверки правила 'v50.SQL.CONNECTBY.п.1.8' с проблемными конструкциями.
+--   examples.simple.bad: select * from t connect by prior id = parent_id start with parent_id is null
+--   examples.simple.good: with recursive cte as (select * from t where parent_id is null union all select t2.* from t t2 join cte on t2.parent_id = cte.id) select * from cte
+--   priority: HIGH
+--   category: SQL
+--   subcategory: SQL.DML.HIERARCHICAL
+--   source_files: v50.docx
+--   source_sections: 8
+-- ============================================================================
+PROCEDURE v50_SQL_CONNECTBY_p_1_8 IS
+	-- Объявления переменных из примеров
+BEGIN
+	-- [-] Неправильный код
+	-- begin pl/sql
+		select * from t connect by prior id = parent_id start with parent_id is null
+	-- end pl/sql
+
+	-- [+] Исправленный код
+	-- begin pl/sql
+		with recursive cte as (select * from t where parent_id is null union all select t2.* from t t2 join cte on t2.parent_id = cte.id) select * from cte
+	-- end pl/sql
+END;
+
+
+-- ============================================================================
+--  5: v50.SQL.DECODE.п.1.6.1 - Замена DECODE на CASE
+-- ============================================================================
+-- 3.RUBRICATOR_FIXES.md:
+--   Короткое описание: Замена DECODE на CASE
+--   Подробное описание: Функция DECODE специфична для Oracle. Заменять на ANSI-конструкцию CASE WHEN. В ТЯ 7.6.10.10 при APPLICATION.DBI = 1 реализована компиляция decode в case, но при ошибке требуется ручная замена.
+--   Пример кода (плохой): select decode(status,1,'A',2,'B','?') from t
+--   Пример кода (исправленный): select case status when 1 then 'A' when 2 then 'B' else '?' end from t
+--   Теги: v50, SQL, DECODE, п, 1, 6, 1
+-- 4.RUBRICATOR_PROMPTS.json (расширенный):
+--   documentation_text: Функция DECODE специфична для Oracle. Заменять на ANSI-конструкцию CASE WHEN. В ТЯ 7.6.10.10 при APPLICATION.DBI = 1 реализована компиляция decode в case, но при ошибке требуется ручная замена.
+--   plplus_materials_note: DECODE не рекомендуется использовать в новом коде из-за неявного приведения типов.
+--   search_prompt: Найти вызовы функции DECODE в SQL-запросах. Игнорировать комментарии.
+--   regex_patterns.for_search: (1) Вызов DECODE
+--   code_example_bad: select decode(status,1,'A',2,'B','?') from t
+--   fix_instruction: Заменить DECODE на CASE WHEN:
+DECODE(expr, v1, r1, v2, r2, default) -> CASE expr WHEN v1 THEN r1 WHEN v2 THEN r2 ELSE default END
+--   test_generation_prompt: Сгенерировать тестовый PLPlus файл для проверки правила 'v50.SQL.DECODE.п.1.6.1' с проблемными конструкциями.
+--   examples.simple.bad: select decode(status,1,'A',2,'B','?') from t
+--   examples.simple.good: select case status when 1 then 'A' when 2 then 'B' else '?' end from t
+--   priority: HIGH
+--   category: SQL
+--   subcategory: SQL.DML.FUNCTIONS
+--   source_files: v50.docx
+--   source_sections: 1
+-- ============================================================================
+PROCEDURE v50_SQL_DECODE_p_1_6_1 IS
+	-- Объявления переменных из примеров
+BEGIN
+	-- [-] Неправильный код
+	-- begin pl/sql
+		select decode(status,1,'A',2,'B','?') from t
+	-- end pl/sql
+
+	-- [+] Исправленный код
+	-- begin pl/sql
+		select case status when 1 then 'A' when 2 then 'B' else '?' end from t
+	-- end pl/sql
+END;
+
+
+-- ============================================================================
+--  6: v50.SQL.DML_JOIN.п.1.17 - Переписывание DML с JOIN на подзапросы
+-- ============================================================================
+-- 3.RUBRICATOR_FIXES.md:
+--   Короткое описание: Переписывание DML с JOIN на подзапросы
+--   Подробное описание: Нет совместимости синтаксиса UPDATE/DELETE FROM (JOIN) между Oracle и PostgreSQL. Требуется переписать код на подзапросы или явные условия.
+--   Пример кода (плохой): delete from (select * from t1 join t2 on t1.id = t2.id)
+--   Теги: v50, SQL, DML_JOIN, п, 1, 17
+-- 4.RUBRICATOR_PROMPTS.json (расширенный):
+--   documentation_text: Нет совместимости синтаксиса UPDATE/DELETE FROM (JOIN) между Oracle и PostgreSQL. Требуется переписать код на подзапросы или явные условия.
+--   plplus_materials_note: Реализовано в СП 2MCA DBI версии 3.1.5 и IDE версии 2.36.193.
+--   search_prompt: Найти UPDATE или DELETE с JOIN в FROM клаузе.
+--   regex_patterns.for_search: (1) UPDATE/DELETE с JOIN
+--   code_example_bad: delete from (select * from t1 join t2 on t1.id = t2.id)
+--   fix_instruction: Переписать DML с JOIN на подзапрос: DELETE FROM t1 WHERE EXISTS (SELECT 1 FROM t2 WHERE t2.id = t1.id)
+--   test_generation_prompt: Сгенерировать тестовый PLPlus файл для проверки правила 'v50.SQL.DML_JOIN.п.1.17' с проблемными конструкциями.
+--   examples.simple.bad: delete from (select * from t1 join t2 on t1.id = t2.id)
+--   examples.simple.good: (нет примера)
+--   priority: HIGH
+--   category: SQL
+--   subcategory: SQL.DML.JOINS
+--   source_files: v50.docx
+--   source_sections: 17
+-- ============================================================================
+PROCEDURE v50_SQL_DML_JOIN_p_1_17 IS
+	-- Объявления переменных из примеров
+BEGIN
+	-- [-] Неправильный код
+	-- begin pl/sql
+		delete from (select * from t1 join t2 on t1.id = t2.id)
+	-- end pl/sql
+
+	-- [+] Исправленный код
+	-- begin pl/sql
+		-- Исправление: Переписать DML с JOIN на подзапрос: DELETE FROM t1 WHERE EXISTS (SELECT 1 FROM t2 WHERE t2.id = t1.id)
+	-- end pl/sql
+END;
+
+
+-- ============================================================================
+--  7: v50.SQL.ORACLE_PKG.п.1.11 - Запрет Oracle supplied PL/SQL пакетов
+-- ============================================================================
+-- 3.RUBRICATOR_FIXES.md:
+--   Короткое описание: Запрет Oracle supplied PL/SQL пакетов
+--   Подробное описание: Oracle пакетов нет в PostgreSQL, поэтому не должно быть зависимостей. Исключить: UTL_FILE, DBMS_OUTPUT, DBMS_ALERT, DBMS_PIPE, DBMS_LOB, DBMS_RANDOM, UTL_RAW, UTL_COMPRESS, DBMS_XMLGEN.
+--   Пример кода (плохой): utl_file.put_line(fhandle, 'text');
+--   Пример кода 2 (плохой): dbms_output.put_line('message');
+--   Теги: v50, SQL, ORACLE_PKG, п, 1, 11
+-- 4.RUBRICATOR_PROMPTS.json (расширенный):
+--   documentation_text: Oracle пакетов нет в PostgreSQL, поэтому не должно быть зависимостей. Исключить: UTL_FILE, DBMS_OUTPUT, DBMS_ALERT, DBMS_PIPE, DBMS_LOB, DBMS_RANDOM, UTL_RAW, UTL_COMPRESS, DBMS_XMLGEN.
+--   plplus_materials_note: Некоторые функции поддержаны через Java-пакеты: dbms_lob, dbms_random, utl_raw, utl_compress.
+--   search_prompt: Найти вызовы Oracle supplied PL/SQL пакетов в коде.
+--   regex_patterns.for_search: (1) Oracle пакеты
+--   code_example_bad: utl_file.put_line(fhandle, 'text');
+--   code_example_bad2: dbms_output.put_line('message');
+--   fix_instruction: Удалить вызовы Oracle пакетов или обернуть в UDF с условной компиляцией.
+--   test_generation_prompt: Сгенерировать тестовый PLPlus файл для проверки правила 'v50.SQL.ORACLE_PKG.п.1.11' с проблемными конструкциями.
+--   examples.simple.bad: utl_file.put_line(fhandle, 'text');
+--   examples.simple.good: (нет примера)
+--   priority: HIGH
+--   category: SQL
+--   subcategory: SQL.DML.SYS_OBJECTS
+--   source_files: v50.docx
+--   source_sections: 11
+-- ============================================================================
+PROCEDURE v50_SQL_ORACLE_PKG_p_1_11 IS
+	-- Объявления переменных из примеров
+BEGIN
+	-- [-] Неправильный код
+	-- begin pl/sql
+		utl_file.put_line(fhandle, 'text');
+		-- Дополнительный пример:
+		dbms_output.put_line('message');
+	-- end pl/sql
+
+	-- [+] Исправленный код
+	-- begin pl/sql
+		-- Исправление: Удалить вызовы Oracle пакетов или обернуть в UDF с условной компиляцией.
+	-- end pl/sql
+END;
+
+
+-- ============================================================================
+--  8: v50.SQL.OUTERJOIN.п.1.1 - Замена (+) на LEFT/RIGHT JOIN
+-- ============================================================================
+-- 3.RUBRICATOR_FIXES.md:
+--   Короткое описание: Замена (+) на LEFT/RIGHT JOIN
+--   Подробное описание: Oracle оператор (+) в ANSI не поддерживается. Далее нельзя использовать PLPlus параметризацию типа соединения (true/false) в where. Вместо этого нужно использовать явные left/right join on.
+--   Пример кода (плохой): select * from t1, t2 where t1.id = t2.id(+)
+--   Пример кода 2 (плохой): where ac%id = gj.[ACCOUNT](true)
+--   Пример кода 3 (плохой): where cr.[LIST_PAY] = fo&collection(true)
+--   Пример кода (исправленный): select * from t1 left join t2 on t1.id = t2.id
+--   Теги: v50, SQL, OUTERJOIN, п, 1, 1
+-- 4.RUBRICATOR_PROMPTS.json (расширенный):
+--   documentation_text: Oracle оператор (+) в ANSI не поддерживается. Далее нельзя использовать PLPlus параметризацию типа соединения (true/false) в where. Вместо этого нужно использовать явные left/right join on.
+--   plplus_materials_note: Согласно учебному курсу (Глава 5.8), конструкция '&collection(true)' является упрощённым синтаксисом LOCATE для поиска в коллекции и используется для организации внешних соединений (outer joins). Аналогично, конструкция '[REF](true)' или '[REF](false)' применяется к реквизитам-ссылкам для указания типа соединения.
+--   search_prompt: Найти в PLPlus коде использование устаревших синтаксисов внешних соединений:
+1. Оператор Oracle '(+)' в условии WHERE.
+2. Конструкцию '&collection(true)' в условии WHERE.
+3. Конструкцию '[REF](true)' или '[REF](false)' в условии WHERE.
+Игнорировать: строки с 'LEFT/RIGHT JOIN', закомментированные строки (--), строки внутри PL/SQL блоков (/* ... */).
+--   regex_patterns.for_search: (1) Левая часть без (+), правая с (+); (2) Левая часть с (+), правая без (+); (3) Параметризованное внешнее соединение с коллекцией; (4) Внешнее соединение через реквизит-ссылку с параметром true; (5) Строгое соединение через реквизит-ссылку с параметром false; (6) Внешнее соединение через реквизит-ссылку (без квадратных скобок) с параметром true
+--   code_example_bad: select * from t1, t2 where t1.id = t2.id(+)
+--   code_example_bad2: where ac%id = gj.[ACCOUNT](true)
+--   code_example_bad3: where cr.[LIST_PAY] = fo&collection(true)
+--   fix_instruction: Преобразовать устаревший синтаксис в ANSI SQL:
+1. a=b(+) -> LEFT JOIN b ON a=b
+2. a(+)=b -> RIGHT JOIN b ON a=b
+3. &collection(true) -> LEFT JOIN (::[TABLE] all : alias) ON условие
+4. [REF](true) -> удалить (true) и преобразовать в LEFT JOIN
+--   test_generation_prompt: Сгенерировать тестовый PLPlus файл для проверки правила 'v50.SQL.OUTERJOIN.п.1.1' с проблемными конструкциями.
+--   examples.simple.bad: select * from t1, t2 where t1.id = t2.id(+)
+--   examples.simple.good: select * from t1 left join t2 on t1.id = t2.id
+--   examples.simple_case.bad: select * from t1, t2 where t1.id = t2.id(+)
+--   examples.simple_case.good: select * from t1 left join t2 on t1.id = t2.id
+--   examples.parametrized_collection.bad: where cr.[LIST_PAY] = fo&collection(true)
+--   examples.parametrized_collection.good: left join (::[FACT_OPER] all : fo) on cr.[LIST_PAY] = fo&collection
+--   examples.parametrized_ref.bad: where ac%id = gj.[ACCOUNT](true)
+--   examples.parametrized_ref.good: left join [GNI_JOUR] gj on ac%id = gj.[ACCOUNT]
+--   priority: HIGH
+--   category: SQL
+--   subcategory: SQL.DML.JOINS
+--   source_files: v50.docx
+--   source_sections: 1
+-- ============================================================================
+PROCEDURE v50_SQL_OUTERJOIN_p_1_1 IS
+	-- Объявления переменных из примеров
+BEGIN
+	-- [-] Неправильный код
+	-- begin pl/sql
+		select * from t1, t2 where t1.id = t2.id(+)
+		-- Дополнительный пример:
+		where ac%id = gj.[ACCOUNT](true)
+		-- Дополнительный пример:
+		where cr.[LIST_PAY] = fo&collection(true)
+	-- end pl/sql
+
+	-- [+] Исправленный код
+	-- begin pl/sql
+		select * from t1 left join t2 on t1.id = t2.id
+	-- end pl/sql
+END;
+
+
+-- ============================================================================
+--  9: v50.SQL.PSEUDO.п.1.20 - Запрет псевдоколонок Oracle
+-- ============================================================================
+-- 3.RUBRICATOR_FIXES.md:
+--   Короткое описание: Запрет псевдоколонок Oracle
+--   Подробное описание: Обращение к псевдоколонкам недопустимо. Псевдоколонки OBJECT_ID, OBJECT_VALUE, ORA_ROWSCN, ROWID, ROWNUM, XMLDATA не поддерживаются.
+--   Пример кода (плохой): select rowid, rownum from t
+--   Теги: v50, SQL, PSEUDO, п, 1, 20
+-- 4.RUBRICATOR_PROMPTS.json (расширенный):
+--   documentation_text: Обращение к псевдоколонкам недопустимо. Псевдоколонки OBJECT_ID, OBJECT_VALUE, ORA_ROWSCN, ROWID, ROWNUM, XMLDATA не поддерживаются.
+--   plplus_materials_note: В PostgreSQL нет аналогов Oracle псевдоколонок.
+--   search_prompt: Найти обращения к псевдоколонкам Oracle.
+--   regex_patterns.for_search: (1) Псевдоколонки Oracle
+--   code_example_bad: select rowid, rownum from t
+--   fix_instruction: Исключить псевдоколонки или заменить на прикладную логику. ROWNUM обрабатывается отдельным правилом.
+--   test_generation_prompt: Сгенерировать тестовый PLPlus файл для проверки правила 'v50.SQL.PSEUDO.п.1.20' с проблемными конструкциями.
+--   examples.simple.bad: select rowid, rownum from t
+--   examples.simple.good: (нет примера)
+--   priority: HIGH
+--   category: SQL
+--   subcategory: SQL.DML.PSEUDOCOLUMNS
+--   source_files: v50.docx
+--   source_sections: 20
+-- ============================================================================
+PROCEDURE v50_SQL_PSEUDO_p_1_20 IS
+	-- Объявления переменных из примеров
+BEGIN
+	-- [-] Неправильный код
+	-- begin pl/sql
+		select rowid, rownum from t
+	-- end pl/sql
+
+	-- [+] Исправленный код
+	-- begin pl/sql
+		-- Исправление: Исключить псевдоколонки или заменить на прикладную логику. ROWNUM обрабатывается отдельным правилом.
+	-- end pl/sql
+END;
+
+
+-- ============================================================================
+-- 10: v50.SQL.ROWNUM.п.1.2 - Замена rownum на FETCH FIRST
+-- ============================================================================
+-- 3.RUBRICATOR_FIXES.md:
+--   Короткое описание: Замена rownum на FETCH FIRST
+--   Подробное описание: Псевдоколонка rownum не поддерживается в PostgreSQL. Использовать FETCH FIRST N ROWS ONLY. Для сдвига выборки использовать OFFSET ON. Не использовать fetch в подзапросе EXISTS.
+--   Пример кода (плохой): select * from t where rownum = 1
+--   Пример кода 2 (плохой): select * from t where rownum <= 10
+--   Пример кода (исправленный): select * from t fetch first 1 rows only
+--   Теги: v50, SQL, ROWNUM, п, 1, 2
+-- 4.RUBRICATOR_PROMPTS.json (расширенный):
+--   documentation_text: Псевдоколонка rownum не поддерживается в PostgreSQL. Использовать FETCH FIRST N ROWS ONLY. Для сдвига выборки использовать OFFSET ON. Не использовать fetch в подзапросе EXISTS.
+--   plplus_materials_note: В PL+ rownum используется в WHERE для ограничения выборки. В DBI его нет. order by применяется ко всей выборке, потом ограничивается количество строк.
+--   search_prompt: Найти использование псевдоколонки rownum в WHERE, ORDER BY или SELECT. Игнорировать комментарии и строковые литералы.
+--   regex_patterns.for_search: (1) ROWNUM = N; (2) ROWNUM <= N; (3) ROWNUM BETWEEN; (4) ROWNUM < N; (5) Любое использование ROWNUM
+--   code_example_bad: select * from t where rownum = 1
+--   code_example_bad2: select * from t where rownum <= 10
+--   fix_instruction: Заменить ROWNUM на FETCH FIRST:
+- rownum = 1 -> fetch first 1 rows only
+- rownum <= N -> fetch first N rows only
+- rownum between A and B -> offset on (A-1) fetch first (B-A+1) rows only
+--   test_generation_prompt: Сгенерировать тестовый PLPlus файл для проверки правила 'v50.SQL.ROWNUM.п.1.2' с проблемными конструкциями.
+--   examples.simple.bad: select * from t where rownum = 1
+--   examples.simple.good: select * from t fetch first 1 rows only
+--   examples.with_order.bad: select * from t where rownum <= 10 order by id
+--   examples.with_order.good: select * from t order by id fetch first 10 rows only
+--   examples.between.bad: select * from t where rownum between 5 and 10
+--   examples.between.good: select * from t offset on 4 fetch first 6 rows only
+--   priority: HIGH
+--   category: SQL
+--   subcategory: SQL.DML.LIMIT
+--   source_files: v50.docx
+--   source_sections: 2
+-- ============================================================================
+PROCEDURE v50_SQL_ROWNUM_p_1_2 IS
+	-- Объявления переменных из примеров
+BEGIN
+	-- [-] Неправильный код
+	-- begin pl/sql
+		select * from t where rownum = 1
+		-- Дополнительный пример:
+		select * from t where rownum <= 10
+	-- end pl/sql
+
+	-- [+] Исправленный код
+	-- begin pl/sql
+		select * from t fetch first 1 rows only
+	-- end pl/sql
+END;
+
+
+-- ============================================================================
+-- 11: v50.SQL.SYSTABLES.п.1.10 - Запрет SELECT из системных таблиц ТЯ
+-- ============================================================================
+-- 3.RUBRICATOR_FIXES.md:
+--   Короткое описание: Запрет SELECT из системных таблиц ТЯ
+--   Подробное описание: Все таблицы метаданных ТЯ перенесены в другой data source.
+--   Пример кода (плохой): select * from classes
+--   Пример кода 2 (плохой): select * from methods where id = 123
+--   Теги: v50, SQL, SYSTABLES, п, 1, 10
+-- 4.RUBRICATOR_PROMPTS.json (расширенный):
+--   documentation_text: Все таблицы метаданных ТЯ перенесены в другой data source.
+--   plplus_materials_note: Обращаться к метаданным только через метаклассы или системные модификаторы (%statename, %classname).
+--   search_prompt: Найти SELECT запросы к системным таблицам ТЯ из списка выше.
+--   regex_patterns.for_search: (1) Обращение к системным таблицам ТЯ
+--   code_example_bad: select * from classes
+--   code_example_bad2: select * from methods where id = 123
+--   fix_instruction: Заменить прямые запросы к системным таблицам на обращение к метаклассам: ::[METACLASS], ::[CLASS], ::[METHOD] и т.д.
+--   test_generation_prompt: Сгенерировать тестовый PLPlus файл для проверки правила 'v50.SQL.SYSTABLES.п.1.10' с проблемными конструкциями.
+--   examples.simple.bad: select * from classes
+--   examples.simple.good: (нет примера)
+--   priority: HIGH
+--   category: SQL
+--   subcategory: SQL.DML.SYS_OBJECTS
+--   source_files: v50.docx
+--   source_sections: 10
+-- ============================================================================
+PROCEDURE v50_SQL_SYSTABLES_p_1_10 IS
+	-- Объявления переменных из примеров
+BEGIN
+	-- [-] Неправильный код
+	-- begin pl/sql
+		select * from classes
+		-- Дополнительный пример:
+		select * from methods where id = 123
+	-- end pl/sql
+
+	-- [+] Исправленный код
+	-- begin pl/sql
+		-- Исправление: Заменить прямые запросы к системным таблицам на обращение к метаклассам: ::[METACLASS], ::[CLASS], ::[METHOD] и т.д.
+	-- end pl/sql
+END;
+
+
+-- ============================================================================
+-- 12: v50.SQL.UDF.п.1.3 - Запрет UDF в WHERE/GROUP BY/ORDER BY
+-- ============================================================================
+-- 3.RUBRICATOR_FIXES.md:
+--   Короткое описание: Запрет UDF в WHERE/GROUP BY/ORDER BY
+--   Подробное описание: Пользовательские функции нельзя в условиях фильтрации, группировки и сортировки. Только в SELECT-листе верхнего уровня.
+--   Пример кода (плохой): where my_func(id) > 0
+--   Пример кода 2 (плохой): order by my_func(name)
+--   Пример кода (исправленный): select id, my_func(id) as val from t where val > 0
+--   Теги: v50, SQL, UDF, п, 1, 3
+-- 4.RUBRICATOR_PROMPTS.json (расширенный):
+--   documentation_text: Пользовательские функции нельзя в условиях фильтрации, группировки и сортировки. Только в SELECT-листе верхнего уровня.
+--   plplus_materials_note: UDF в PL+ могут вызываться в SELECT, но не в WHERE/GROUP BY/ORDER BY для DBI.
+--   search_prompt: Найти вызовы пользовательских функций (UDF) в WHERE, GROUP BY, ORDER BY, HAVING. Игнорировать системные функции.
+--   regex_patterns.for_search: (1) UDF в WHERE; (2) UDF в GROUP BY; (3) UDF в ORDER BY
+--   code_example_bad: where my_func(id) > 0
+--   code_example_bad2: order by my_func(name)
+--   fix_instruction: Переписать запрос: вычислить значение UDF до запроса или использовать в SELECT-листе.
+--   test_generation_prompt: Сгенерировать тестовый PLPlus файл для проверки правила 'v50.SQL.UDF.п.1.3' с проблемными конструкциями.
+--   examples.simple.bad: where my_func(id) > 0
+--   examples.simple.good: select id, my_func(id) as val from t where val > 0
+--   priority: HIGH
+--   category: SQL
+--   subcategory: SQL.DML.FUNCTIONS
+--   source_files: v50.docx
+--   source_sections: 3
+-- ============================================================================
+PROCEDURE v50_SQL_UDF_p_1_3 IS
+	-- Объявления переменных из примеров
+BEGIN
+	-- [-] Неправильный код
+	-- begin pl/sql
+		where my_func(id) > 0
+		-- Дополнительный пример:
+		order by my_func(name)
+	-- end pl/sql
+
+	-- [+] Исправленный код
+	-- begin pl/sql
+		select id, my_func(id) as val from t where val > 0
+	-- end pl/sql
+END;
+
+
+-- ============================================================================
+-- 13: v50.SQL.VW_CRIT_RPT.п.1.19 - Ограничения при SELECT из VW_CRIT, VW_RPT, VW_SQL
+-- ============================================================================
+-- 3.RUBRICATOR_FIXES.md:
+--   Короткое описание: Ограничения при SELECT из VW_CRIT, VW_RPT, VW_SQL
+--   Подробное описание: VW_SQL не поддерживаются. VW_RPT с ограничениями: не должно содержать вычисляемых колонок. Не рекомендуется выбирать из VW_CRIT.
+--   Пример кода (плохой): select * from VW_SQL
+--   Пример кода 2 (плохой): select * from VW_CRIT where id = 123
+--   Теги: v50, SQL, VW_CRIT_RPT, п, 1, 19
+-- 4.RUBRICATOR_PROMPTS.json (расширенный):
+--   documentation_text: VW_SQL не поддерживаются. VW_RPT с ограничениями: не должно содержать вычисляемых колонок. Не рекомендуется выбирать из VW_CRIT.
+--   plplus_materials_note: Поддержаны обращения к представлениям из процедурного кода через %rowtype без разворачивания в БД.
+--   search_prompt: Найти SELECT запросы к VW_CRIT, VW_RPT, VW_SQL.
+--   regex_patterns.for_search: (1) SELECT из VW_CRIT/VW_RPT/VW_SQL
+--   code_example_bad: select * from VW_SQL
+--   code_example_bad2: select * from VW_CRIT where id = 123
+--   fix_instruction: VW_SQL заменить на VW_RPT или прямые запросы. VW_RPT использовать только если нет вычисляемых колонок.
+--   test_generation_prompt: Сгенерировать тестовый PLPlus файл для проверки правила 'v50.SQL.VW_CRIT_RPT.п.1.19' с проблемными конструкциями.
+--   examples.simple.bad: select * from VW_SQL
+--   examples.simple.good: (нет примера)
+--   priority: HIGH
+--   category: SQL
+--   subcategory: SQL.DML.VIEWS
+--   source_files: v50.docx
+--   source_sections: 19
+-- ============================================================================
+PROCEDURE v50_SQL_VW_CRIT_RPT_p_1_19 IS
+	-- Объявления переменных из примеров
+BEGIN
+	-- [-] Неправильный код
+	-- begin pl/sql
+		select * from VW_SQL
+		-- Дополнительный пример:
+		select * from VW_CRIT where id = 123
+	-- end pl/sql
+
+	-- [+] Исправленный код
+	-- begin pl/sql
+		-- Исправление: VW_SQL заменить на VW_RPT или прямые запросы. VW_RPT использовать только если нет вычисляемых колонок.
+	-- end pl/sql
+END;
+
+
+-- ============================================================================
+-- КОНЕЦ ФАЙЛА: 13 правил v3.0.0
+-- Дата генерации: 2026-08-12 22:26:53
+-- ============================================================================

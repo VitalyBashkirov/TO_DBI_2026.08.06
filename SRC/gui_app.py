@@ -1,9 +1,9 @@
 ﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-АРМ "Адаптация под DBI" v26.2.005
+АРМ "Адаптация под DBI"
 Графический интерфейс для миграции PLPlus кода на DBI
-Версия: 2026 2-й квартал (апрель-июнь), версия 005
+Версия: вычисляется автоматически при запуске
 """
 import sys
 import io
@@ -27,11 +27,17 @@ import zipfile
 # Импорт модуля рубрикатора
 from rubricator_prompts import RubricatorPrompts
 
-# Константы версии
-APP_VERSION = "v26.2.005"
+# Вычисляемые константы версии на основе текущей даты
+_now = datetime.now()
+_year_short = str(_now.year)[-2:]
+_quarter = (_now.month - 1) // 3 + 1
+_quarter_start = datetime(_now.year, (_quarter - 1) * 3 + 1, 1)
+_release = (_now - _quarter_start).days + 1
+
+APP_VERSION = f"v{_year_short}.{_quarter}.{_release:03d}"
 APP_TITLE = f"АРМ 'Адаптация под DBI' {APP_VERSION}"
-APP_QUARTER = "2026 2-й квартал (апрель-июнь)"
-APP_RELEASE = "005"
+APP_QUARTER = ["1-й квартал (янв-мар)", "2-й квартал (апр-июн)", "3-й квартал (июл-сен)", "4-й квартал (окт-дек)"][_quarter - 1]
+APP_RELEASE = f"{_release:03d}"
 
 # Константы для логов
 MAX_LOG_SIZE_MB = 2  # Максимальный размер логов в МБ (по умолчанию)
@@ -43,7 +49,7 @@ class DBIMigrationApp:
     def __init__(self, root):
         self.root = root
         self.root.title(APP_TITLE)
-        self.root.geometry("1060x600")
+        self.root.geometry("1090x650")
         
         # Переменные
         self.source_dir_var = tk.StringVar()
@@ -68,6 +74,9 @@ class DBIMigrationApp:
         
         # Сохранённые правила из предыдущего запуска
         self._saved_rules = []
+        
+        # Сохранённые приоритеты из предыдущего запуска
+        self._saved_priorities = []
         
         # Результаты сканирования (для кнопки "Показать SQL для ручного исправления")
         self.scan_results = None  # Результаты последнего сканирования
@@ -231,9 +240,9 @@ class DBIMigrationApp:
         
         # Настройка колонок: Выбрано | Код файла | Полное имя файла
         self.rules_tree['columns'] = ('selected', 'code', 'name')
-        self.rules_tree.column('selected', width=3, minwidth=3, anchor=tk.CENTER)
-        self.rules_tree.column('code', width=5, minwidth=5, anchor=tk.W)
-        self.rules_tree.column('name', width=552, minwidth=200, anchor=tk.W)
+        self.rules_tree.column('selected', width=60, minwidth=60, anchor=tk.CENTER)
+        self.rules_tree.column('code', width=110, minwidth=110, anchor=tk.W)
+        self.rules_tree.column('name', width=750, minwidth=400, anchor=tk.W)
         
         # Заголовки
         self.rules_tree.heading('selected', text='Выбрано', anchor=tk.CENTER)
@@ -243,7 +252,22 @@ class DBIMigrationApp:
         # Размещаем Treeview и скроллы
         tree_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
         tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
-        self.rules_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.rules_tree.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        
+        # Панель приоритетов справа от рубрикатора
+        priority_frame = ttk.Frame(rules_frame)
+        priority_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
+        
+        self.priority_vars = {}
+        priorities = ['Приоритет 1', 'Приоритет 2', 'Приоритет 3', 'Приоритет 4']
+        for i, prio in enumerate(priorities):
+            var = tk.BooleanVar(value=False)
+            self.priority_vars[prio] = var
+            ttk.Checkbutton(priority_frame, text=prio, variable=var, 
+                          command=self._on_priority_change).grid(row=i, column=0, pady=2, sticky=tk.W)
+        
+        # Изначально фильтр по приоритетам не активен
+        self.priority_filter_active = False
         
         # Заполняем Treeview (позже, после создания кнопок)
         # self._populate_rules_tree() будет вызван после инициализации кнопок
@@ -264,27 +288,39 @@ class DBIMigrationApp:
                     values=["Минимальный", "Подробный"], 
                     state="readonly", width=15).grid(row=0, column=3, sticky=tk.W)
         
+        # Чекбокс для режима вывода при исправлении
+        self.fix_only_found_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(options_frame, text='"Исправить код" — только пометить найденные теги "--NEW YYYY-MM-DD"', 
+                       variable=self.fix_only_found_var).grid(row=1, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
+        
+        # Чекбокс архивирования
+        self.archive_result_var = tk.BooleanVar(value=True)
+        self.archive_result_check = ttk.Checkbutton(options_frame, text="Архивировать результат", 
+                                                    variable=self.archive_result_var)
+        self.archive_result_check.grid(row=1, column=4, sticky=tk.W, padx=(20,0))
+        # Изначально доступен только если включена сохранность структуры
+        self._update_archive_state()
+        
+        # Привязка изменения preserve_structure к доступности archive
+        self.preserve_structure_var.trace_add('write', lambda *args: self._update_archive_state())
+        
         # Панель управления
         control_frame = ttk.Frame(scrollable_frame, padding="5")
         control_frame.pack(fill=tk.X)
         
-        self.btn_scan = ttk.Button(control_frame, text="🔍 Сканировать", command=self.start_scan, width=20)
+        self.btn_scan = ttk.Button(control_frame, text="Сканировать", command=self.start_scan, width=20)
         self.btn_scan.pack(side=tk.LEFT, padx=3)
         
-        self.btn_fix = ttk.Button(control_frame, text="✏️ Исправить код", command=self.start_fix, width=20)
+        self.btn_fix = ttk.Button(control_frame, text="Исправить код", command=self.start_fix, width=20)
         self.btn_fix.pack(side=tk.LEFT, padx=3)
         
-        self.btn_rubricator = ttk.Button(control_frame, text="📖 Открыть рубрикатор", command=self.open_rubricator, width=25)
+        self.btn_rubricator = ttk.Button(control_frame, text="Открыть рубрикатор", command=self.open_rubricator, width=25)
         self.btn_rubricator.pack(side=tk.LEFT, padx=3)
         
-        self.btn_archive = ttk.Button(control_frame, text="📦 Архивировать результат", command=self.start_archive, width=25)
-        self.btn_archive.pack(side=tk.LEFT, padx=3)
-        self.btn_archive.state(['disabled'])
-        
-        self.btn_test_gen = ttk.Button(control_frame, text="🧪 Генерация тестовых .plp", command=self.start_test_generation, width=30)
+        self.btn_test_gen = ttk.Button(control_frame, text="Генерация тестовых .plp", command=self.start_test_generation, width=30)
         self.btn_test_gen.pack(side=tk.LEFT, padx=3)
         
-        self.btn_show_sql = ttk.Button(control_frame, text="📋 Показать SQL для ручного исправления", command=self.show_sql_for_manual_fix, width=35)
+        self.btn_show_sql = ttk.Button(control_frame, text="Показать SQL для ручного исправления", command=self.show_sql_for_manual_fix, width=35)
         self.btn_show_sql.pack(side=tk.LEFT, padx=3)
         self.btn_show_sql.state(['disabled'])
         
@@ -303,16 +339,25 @@ class DBIMigrationApp:
         
         log_scroll_y.config(command=self.log_text.yview)
         
-        # Кнопки журнала — ПОД полем (pack раньше, чтобы были внизу секции)
+# Кнопки журнала — ПОД полем (pack раньше, чтобы были внизу секции)
         journal_buttons = ttk.Frame(journal_frame)
         journal_buttons.pack(side=tk.BOTTOM, fill=tk.X, pady=(3, 0))
         
-        ttk.Button(journal_buttons, text="🗑️ Очистить журнал", command=self.clear_log).pack(side=tk.LEFT, padx=3)
-        ttk.Button(journal_buttons, text="📋 Копировать в буфер", command=self.copy_log).pack(side=tk.LEFT, padx=3)
+        ttk.Button(journal_buttons, text="Очистить журнал", command=self.clear_log).pack(side=tk.LEFT, padx=3)
+        ttk.Button(journal_buttons, text="Копировать в буфер", command=self.copy_log).pack(side=tk.LEFT, padx=3)
         
         # Скроллы и журнал
         log_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Индикатор выполнения — процент в той же строке (под журналом)
+        progress_frame = ttk.Frame(scrollable_frame, padding="5")
+        progress_frame.pack(fill=tk.X, padx=5, pady=3)
+        
+        self.progress = ttk.Progressbar(progress_frame, mode='determinate')
+        self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.progress_label = ttk.Label(progress_frame, text="0%", width=10)
+        self.progress_label.pack(side=tk.LEFT, padx=5)
         
         # Цвета для логов
         self.log_text.tag_configure('info', foreground='black')
@@ -327,15 +372,6 @@ class DBIMigrationApp:
         if self.rubricator_files:
             for code, name in self.rubricator_files.items():
                 self.log(f"Загружен файл рубрикатора: {code} -> {name[:50]}...", 'debug')
-        
-        # Индикатор выполнения — процент в той же строке
-        progress_frame = ttk.Frame(scrollable_frame, padding="5")
-        progress_frame.pack(fill=tk.X)
-        
-        self.progress = ttk.Progressbar(progress_frame, mode='determinate')
-        self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.progress_label = ttk.Label(progress_frame, text="0%", width=10)
-        self.progress_label.pack(side=tk.LEFT, padx=5)
     
         # Путь для дублирования логов
         self.logs_deep_dir = Path(__file__).parent.parent / 'logs_Deep'
@@ -474,6 +510,84 @@ class DBIMigrationApp:
                     self._update_buttons_state()
                     break
     
+    def _on_priority_change(self):
+        """Обработка изменения приоритетов — фильтрация рубрикатора"""
+        # Собираем выбранные приоритеты
+        selected_priorities = [p for p, var in self.priority_vars.items() if var.get()]
+        
+        # Сохраняем выбранные приоритеты
+        self._saved_priorities = selected_priorities
+        
+        # Активируем/деактивируем фильтр
+        self.priority_filter_active = len(selected_priorities) > 0
+        
+        if not self.priority_filter_active:
+            # Если ни один приоритет не выбран — показываем все строки рубрикатора
+            self.log("Фильтр по приоритетам отключён (показаны все файлы рубрикатора)", 'info')
+            # Обновляем список рубрикаторов — показываем все файлы
+            self._refresh_rubricator_tree()
+        else:
+            self.log(f"Фильтр по приоритетам: {', '.join(selected_priorities)}", 'info')
+        
+        # Обновляем видимость строк в Treeview
+        self._filter_rules_tree(selected_priorities)
+        self._update_buttons_state()
+    
+    def _update_archive_state(self):
+        """Обновление доступности чекбокса архивирования"""
+        if self.preserve_structure_var.get():
+            self.archive_result_check.state(['!disabled'])
+        else:
+            self.archive_result_check.state(['disabled'])
+            self.archive_result_var.set(False)
+    
+    def _filter_rules_tree(self, selected_priorities: list):
+        """
+        Скрывает/показывает строки в Treeview в зависимости от приоритетов.
+        
+        Args:
+            selected_priorities: Список выбранных приоритетов
+        """
+        from rubricator_priority_mapping import get_matching_rules
+        
+        if not self.priority_filter_active:
+            # Показываем всё
+            for code, (item_id, var) in self.rule_checkboxes.items():
+                self.rules_tree.item(item_id, values=self.rules_tree.item(item_id)['values'])
+                self.rules_tree.item(item_id, open=True)
+            return
+        
+        # При выборе приоритетов показываем только строку рубрикатора с "Рекомендации по адаптации"
+        # и фильтруем selected_rules для генерации по приоритетам
+        RECOMMENDATIONS_KEYWORD = "Рекомендации по адаптации"
+        
+        visible_count = 0
+        hidden_count = 0
+        
+        for code, (item_id, var) in self.rule_checkboxes.items():
+            name = self.rubricator_files.get(code, '')
+            
+            # Если строка содержит "Рекомендации по адаптации" — всегда показываем
+            if RECOMMENDATIONS_KEYWORD in name:
+                self.rules_tree.item(item_id, values=self.rules_tree.item(item_id)['values'])
+                visible_count += 1
+            else:
+                # Остальные строки скрываем
+                self.rules_tree.item(item_id, values=('', '', ''))
+                hidden_count += 1
+        
+        self.log(f"  Показано строк: {visible_count}, скрыто: {hidden_count}", 'info')
+    
+    def _refresh_rubricator_tree(self):
+        """
+        Обновляет список рубрикаторов в Treeview — показывает все строки.
+        Вызывается при отключении всех приоритетов.
+        """
+        for code, (item_id, var) in self.rule_checkboxes.items():
+            self.rules_tree.item(item_id, values=self.rules_tree.item(item_id)['values'])
+            self.rules_tree.item(item_id, open=True)
+        self.log("  Список рубрикаторов обновлён (показаны все файлы)", 'info')
+    
     def _bind_entry_events(self):
         """Привязка событий для поля ввода - логирование только при потере фокуса"""
         # Привязываем события потери фокуса для полей ввода
@@ -504,20 +618,36 @@ class DBIMigrationApp:
             self._update_buttons_state()
     
     def _auto_fill_result_dir(self, source_dir: Path):
-        """Автоматическое формирование каталога результатов из исходного"""
+        """Автоматическое формирование каталога результатов из исходного
+        PATCH_IN/xxx -> PATCH_OUT
+        PATCH_OUT/xxx -> PATCH_IN
+        """
         source_str = str(source_dir).replace('/', '\\')
-        source_name = source_dir.name
         
         if 'PATCH_IN' in source_str:
-            # PATCH_IN/xxx -> PATCH_OUT/xxx
+            # PATCH_IN/xxx -> PATCH_OUT
             result_base = source_str.replace('PATCH_IN', 'PATCH_OUT', 1)
-            result_path = Path(result_base) / source_name
+            result_path = Path(result_base).parent
         elif 'PATCH_OUT' in source_str:
-            # PATCH_OUT/xxx -> PATCH_IN/xxx
+            # PATCH_OUT/xxx -> PATCH_IN
             result_base = source_str.replace('PATCH_OUT', 'PATCH_IN', 1)
-            result_path = Path(result_base) / source_name
+            result_path = Path(result_base).parent
         else:
             return None
+        
+        result_str = str(result_path).replace('/', '\\')
+        
+        # Проверяем текущее значение каталога результатов
+        current_result = self.result_dir_var.get()
+        if current_result:
+            current_result = current_result.replace('/', '\\')
+        
+        # Обновляем только если каталог не указан или совпадает с текущим
+        if not current_result or current_result == result_str:
+            self.result_dir_var.set(result_str)
+            return result_path
+        
+        return None
     
         # Нормализуем путь - убираем дублирование имени подкаталога
         result_str = str(result_path).replace('/', '\\')
@@ -544,23 +674,9 @@ class DBIMigrationApp:
     
     def _ensure_result_path(self, source_dir: Path, result_dir: Path) -> Path:
         """
-        Обеспечение корректного пути к каталогу результатов.
-        Если исходный PATCH_IN/xxx, а результат PATCH_OUT - добавляем подкаталог xxx.
+        Возвращает result_dir без изменений.
+        (Логика добавления подкаталога перенесена в _auto_fill_result_dir)
         """
-        source_str = str(source_dir)
-        result_str = str(result_dir)
-        
-        # Если исходный содержит PATCH_IN
-        if 'PATCH_IN' in source_str:
-            source_name = source_dir.name
-            # Проверяем, содержит ли результат PATCH_OUT
-            if 'PATCH_OUT' in result_str:
-                # Проверяем, есть ли подкаталог с именем source_name
-                expected_result = result_dir / source_name
-                # Если текущий результат не содержит подкаталог, добавляем его
-                if not result_str.endswith(source_name):
-                    return expected_result
-        
         return result_dir
     
     def _check_full_structure(self, source_dir: Path, result_dir: Path) -> bool:
@@ -648,7 +764,7 @@ class DBIMigrationApp:
         show_sql_enabled = self.scan_results is not None
         self.btn_show_sql.state(['!disabled' if show_sql_enabled else 'disabled'])
     
-        # Кнопка "Архивировать" - активируется при установленном флаге "Сохранить структуру"
+# Кнопка "Архивировать" - активируется при установленном флаге "Сохранить структуру"
         archive_enabled = False
         if (bool(result_dir) and
             self.preserve_structure_var.get()):
@@ -659,7 +775,7 @@ class DBIMigrationApp:
                 if self._check_full_structure(source_path, result_path):
                     archive_enabled = True
         
-        self.btn_archive.state(['!disabled' if archive_enabled else 'disabled'])
+        self._update_archive_state()
     
     def _on_source_focus_out(self, event):
         """Обработка потери фокуса поля исходного каталога"""
@@ -836,6 +952,17 @@ class DBIMigrationApp:
                     max_log_size = settings.get('max_log_size_mb', 2)
                     if max_log_size:
                         MAX_LOG_SIZE_MB = max_log_size
+                    
+                    # Загрузка сохранённых приоритетов
+                    saved_priorities = settings.get('selected_priorities', [])
+                    if saved_priorities:
+                        for prio in saved_priorities:
+                            if prio in self.priority_vars:
+                                self.priority_vars[prio].set(True)
+                        self._saved_priorities = saved_priorities
+                        self.log(f"Восстановлены приоритеты: {', '.join(saved_priorities)}", 'info')
+                    else:
+                        self._saved_priorities = []
                         
                 self.log("Настройки загружены", 'info')
                 
@@ -870,7 +997,8 @@ class DBIMigrationApp:
             'only_modified': self.only_modified_var.get(),
             'preserve_structure': self.preserve_structure_var.get(),
             'selected_rules': selected_rules,
-            'max_log_size_mb': MAX_LOG_SIZE_MB
+            'max_log_size_mb': MAX_LOG_SIZE_MB,
+            'selected_priorities': self._saved_priorities if hasattr(self, '_saved_priorities') else []
         }
         try:
             with open(settings_path, 'w', encoding='utf-8') as f:
@@ -938,14 +1066,28 @@ class DBIMigrationApp:
         
     def show_about(self):
         """Показ информации о программе"""
+        # Обновляем версию только если были изменения (новая дата)
+        _now = datetime.now()
+        _year_short = str(_now.year)[-2:]
+        _quarter = (_now.month - 1) // 3 + 1
+        _quarter_start = datetime(_now.year, (_quarter - 1) * 3 + 1, 1)
+        _release = (_now - _quarter_start).days + 1
+        
+        current_version = f"v{_year_short}.{_quarter}.{_release:03d}"
+        current_quarter = ["1-й квартал (янв-мар)", "2-й квартал (апр-июн)", "3-й квартал (июл-сен)", "4-й квартал (окт-дек)"][_quarter - 1]
+        current_release = f"{_release:03d}"
+        
+        if current_version != APP_VERSION:
+            self.log(f"Версия АРМ обновлена: {current_version}", 'info')
+        
         messagebox.showinfo(
             "О программе",
-            f"АРМ 'Адаптация под DBI' {APP_VERSION}\n\n"
+            f"АРМ 'Адаптация под DBI' {current_version}\n\n"
             "Автоматизированное рабочее место для миграции\n"
             "PLPlus-кода с Oracle на PostgreSQL (2MCA DBI).\n\n"
             "Разработчик: NLP-Core-Team\n"
             f"Дата: {datetime.now().strftime('%Y-%m-%d')}\n\n"
-            f"Версия: {APP_QUARTER}, версия {APP_RELEASE}"
+            f"Версия: {current_quarter}, версия {current_release}"
         )
         self.log("Открыто окно 'О программе'", 'info')
     
@@ -1067,6 +1209,26 @@ class DBIMigrationApp:
             
             # Определение выбранных правил
             selected_rules = [code for code, var in self.selected_rules.items() if var.get()]
+            
+            # Если выбраны приоритеты — используем правила из выбранных приоритетов
+            from rubricator_priority_mapping import PRIORITY_RULES
+            selected_priorities = [p for p, var in self.priority_vars.items() if var.get()]
+            
+            if selected_priorities:
+                # Собираем правила из выбранных приоритетов
+                priority_rules = set()
+                for prio in selected_priorities:
+                    if prio in PRIORITY_RULES:
+                        priority_rules.update(PRIORITY_RULES[prio])
+                priority_rules = sorted(priority_rules)
+                
+                # Фильтруем selected_rules — оставляем только те, что в приоритетах
+                selected_rules = [r for r in selected_rules if r in priority_rules]
+                
+                self.root.after(0, lambda: self.log(f"\n[ПРИОРИТЕТ] Фильтрация по приоритетам: {', '.join(selected_priorities)}", 'highlight'))
+                self.root.after(0, lambda: self.log(f"  Всего правил из приоритетов: {len(priority_rules)}", 'info'))
+                self.root.after(0, lambda: self.log(f"  Используемых правил: {len(selected_rules)}", 'info'))
+            
             self.root.after(0, lambda: self.log(f"\nИСПОЛЬЗУЕМЫЕ ПРАВИЛА ({len(selected_rules)}):", 'info'))
             for rule in selected_rules:
                 self.root.after(0, lambda r=rule: self.log(f"  [+] {r}", 'info'))
@@ -1218,17 +1380,24 @@ class DBIMigrationApp:
             messagebox.showerror("Ошибка", "Укажите исходный каталог!")
             return
         
+        # Автоматическое формирование каталога результатов из исходного
+        # PATCH_IN/xxx -> PATCH_OUT (без подкаталога)
+        # PATCH_OUT/xxx -> PATCH_IN (без подкаталога)
+        source_path = Path(self.source_dir_var.get())
+        auto_result = self._auto_fill_result_dir(source_path)
+        if auto_result:
+            self.result_dir_var.set(str(auto_result))
+            self.log(f"Каталог результатов обновлён: {auto_result}", 'info')
+        
         # Проверяем наличие каталога результатов
         if not self.result_dir_var.get():
             messagebox.showerror("Ошибка", "Укажите каталог результатов!")
             return
         
         result_path = Path(self.result_dir_var.get())
-        source_path = Path(self.source_dir_var.get())
         
         # Автоматическое формирование полного пути к каталогу результатов
         # Если исходный PATCH_IN/xxx, а результат PATCH_OUT - добавляем подкаталог xxx
-        source_name = source_path.name
         result_path = self._ensure_result_path(source_path, result_path)
         
         # Создаем каталог результатов если не существует
@@ -1306,7 +1475,8 @@ class DBIMigrationApp:
                 },
                 'output': {
                     'only_modified': self.only_modified_var.get(),
-                    'preserve_structure': self.preserve_structure_var.get()
+                    'preserve_structure': self.preserve_structure_var.get(),
+                    'fix_only_found': self.fix_only_found_var.get()
                 },
                 'rules': {
                     'max_comment_length': 60,
@@ -1321,6 +1491,26 @@ class DBIMigrationApp:
             
             # Определение выбранных правил
             selected_rules = [code for code, var in self.selected_rules.items() if var.get()]
+            
+            # Если выбраны приоритеты — используем правила из выбранных приоритетов
+            from rubricator_priority_mapping import PRIORITY_RULES
+            selected_priorities = [p for p, var in self.priority_vars.items() if var.get()]
+            
+            if selected_priorities:
+                # Собираем правила из выбранных приоритетов
+                priority_rules = set()
+                for prio in selected_priorities:
+                    if prio in PRIORITY_RULES:
+                        priority_rules.update(PRIORITY_RULES[prio])
+                priority_rules = sorted(priority_rules)
+                
+                # Фильтруем selected_rules — оставляем только те, что в приоритетах
+                selected_rules = [r for r in selected_rules if r in priority_rules]
+                
+                self.root.after(0, lambda: self.log(f"\n[ПРИОРИТЕТ] Фильтрация по приоритетам: {', '.join(selected_priorities)}", 'highlight'))
+                self.root.after(0, lambda: self.log(f"  Всего правил из приоритетов: {len(priority_rules)}", 'info'))
+                self.root.after(0, lambda: self.log(f"  Используемых правил: {len(selected_rules)}", 'info'))
+            
             self.root.after(0, lambda: self.log(f"\nИСПОЛЬЗУЕМЫЕ ПРАВИЛА ({len(selected_rules)}):", 'info'))
             for rule in selected_rules:
                 self.root.after(0, lambda r=rule: self.log(f"  [+] {r}", 'info'))
@@ -1398,8 +1588,9 @@ class DBIMigrationApp:
             
             # Передаём callback для вывода в журнал
             files_modified = fixer.fix_directory(scanner, final_results_dir, 
-                                                 log_callback=scan_log, 
-                                                 log_level=self.log_level_var.get())
+                                                  log_callback=scan_log, 
+                                                  log_level=self.log_level_var.get(),
+                                                  fix_only_found=self.fix_only_found_var.get())
             
             self.root.after(0, lambda: self.progress.config(value=75))
             self.root.after(0, lambda: self.progress_label.config(text="75%"))
@@ -1457,12 +1648,16 @@ class DBIMigrationApp:
             
             # Проверка условий для архивации
             should_archive = (
-                self.preserve_structure_var.get()
+                self.preserve_structure_var.get() and 
+                self.archive_result_var.get()
             )
             
             if should_archive:
-                # Запуск архивации
-                self.root.after(0, lambda: self._run_archive(final_results_dir, source_dir))
+                # Запуск архивации в отдельном потоке
+                thread = threading.Thread(target=self._run_archive, args=(final_results_dir, source_dir), daemon=True)
+                thread.start()
+            else:
+                self.root.after(0, lambda: self.log("Архивация пропущена (отключена)", 'info'))
             
             # Показываем результаты с нормализацией буквы диска
             log_path_str = str(log_path)
@@ -1488,12 +1683,13 @@ class DBIMigrationApp:
             self.root.after(0, lambda: messagebox.showerror("Ошибка", f"Исправление завершилось с ошибкой:\n{error_msg}"))
     
     def _run_archive(self, results_dir: Path, source_dir: Path):
-        """Рабочая функция архивации (вызывается в главном потоке)"""
+        """Рабочая функция архивации (вызывается в отдельном потоке)"""
         try:
             self.root.after(0, lambda: self.log("\n[5/5] Архивация результатов...", 'info'))
             self.root.after(0, lambda: self.progress.config(value=95))
             self.root.after(0, lambda: self.progress_label.config(text="95%"))
             
+            # Архив создаётся в родительском каталоге результатов
             archive_path = results_dir.parent / f"{results_dir.name}.zip"
             
             # Создаём архив
@@ -1505,37 +1701,17 @@ class DBIMigrationApp:
                         zipf.write(file_path, arcname)
                         self.root.after(0, lambda f=file: self.log(f"  Добавлен: {f}", 'debug'))
             
-            # Копируем .pck файл из исходного каталога в архив
-            source_pck = source_dir / f"{source_dir.name}.pck"
+            # Копируем .pck файл: из source_dir.parent/{source_dir.name}.pck в results_dir/{results_dir.name}.pck
+            source_pck = source_dir.parent / f"{source_dir.name}.pck"
             if source_pck.exists():
-                archive_pck_path = results_dir.parent / f"{results_dir.name}.pck"
-                if not archive_pck_path.exists():
-                    shutil.copy2(source_pck, archive_pck_path)
-                    self.root.after(0, lambda: self.log(f"  Копирован .pck файл в архив: {source_pck.name}", 'info'))
+                result_pck_path = results_dir / f"{results_dir.name}.pck"
+                if not result_pck_path.exists():
+                    shutil.copy2(source_pck, result_pck_path)
+                    self.root.after(0, lambda: self.log(f"  Копирован .pck файл в: {result_pck_path}", 'info'))
                 else:
-                    self.root.after(0, lambda: self.log(f"  .pck файл для архива уже существует, пропущен", 'info'))
-                # Добавляем .pck в архив
-                with zipfile.ZipFile(archive_path, 'a') as zipf:
-                    zipf.write(archive_pck_path, f"{results_dir.name}.pck")
-                    self.root.after(0, lambda: self.log(f"  Добавлен .pck в архив", 'info'))
+                    self.root.after(0, lambda: self.log(f"  .pck файл уже существует: {result_pck_path.name}", 'info'))
             else:
                 self.root.after(0, lambda: self.log(f"  .pck файл не найден в источнике: {source_pck}", 'warning'))
-            
-            # ДОПОЛНИТЕЛЬНО: Проверка и копирование .pck файла в родительский каталог результатов
-            # .pck файл должен быть в PATCH_OUT, а не в PATCH_OUT/patch_RV
-            result_pck_dir = results_dir.parent  # PATCH_OUT
-            result_pck = result_pck_dir / f"{source_dir.name}.pck"
-            if source_pck.exists():
-                if not result_pck.exists():
-                    try:
-                        shutil.copy2(source_pck, result_pck)
-                        self.root.after(0, lambda: self.log(f"  Копирован .pck файл в {result_pck_dir}: {result_pck.name}", 'info'))
-                    except Exception as e:
-                        self.root.after(0, lambda err=e: self.log(f"  Ошибка копирования .pck в {result_pck_dir}: {err}", 'error'))
-                else:
-                    self.root.after(0, lambda: self.log(f"  .pck файл в {result_pck_dir} уже существует, пропущен", 'info'))
-            else:
-                self.root.after(0, lambda: self.log(f"  .pck файл не найден в исходном каталоге", 'debug'))
             
             self.root.after(0, lambda: self.progress.config(value=100))
             self.root.after(0, lambda: self.progress_label.config(text="100%"))
@@ -1583,7 +1759,7 @@ class DBIMigrationApp:
         thread.start()
     
     def _run_test_generation(self):
-        """Рабочая функция генерации тестовых файлов"""
+        """Рабочая функция генерации тестовых файлов (один сводный файл)"""
         try:
             # Очистить журнал перед генерацией
             self.root.after(0, lambda: self.clear_log())
@@ -1603,40 +1779,286 @@ class DBIMigrationApp:
             # Используем новый TestGenerator
             try:
                 from analyzer.test_generator import TestGenerator
+                import json
                 
                 self.root.after(0, lambda: self.log("Использование нового генератора тестов...", 'info'))
                 generator = TestGenerator(self.rubricator_dir)
                 
-                # Получаем выбранные правила
-                selected_rules = [code for code, var in self.selected_rules.items() if var.get()]
+                # Маппинг кодов файлов к правилам v3.0.0
+                # selected_rules содержит коды файлов из 1.RUBRICATOR_FILES.md:
+                #   v50 → все правила, начинающиеся с v50.
+                #   тдс20240828, тклоик20240828 → правила, содержащие код в названии
+                selected_file_codes = [code for code, var in self.selected_rules.items() if var.get()]
                 
-                if not selected_rules:
-                    self.root.after(0, lambda: self.log("Нет выбранных правил", 'warning'))
+                if not selected_file_codes:
+                    self.root.after(0, lambda: self.log("Нет выбранных файлов в рубрикаторе", 'warning'))
                     self.root.after(0, lambda: self.set_status("Готово"))
                     return
                 
-                # Генерируем файлы
-                files_created = 0
-                for rule_code in selected_rules:
-                    self.root.after(0, lambda c=rule_code: self.log(f"Генерация для правила: {c}", 'info'))
+                # Собираем все доступные правила v3.0.0
+                all_rules = generator.rubricator_v3.rules
+                
+                # Маппинг: код файла → список кодов правил
+                matched_rules = []
+                for file_code in selected_file_codes:
+                    self.root.after(0, lambda fc=file_code: self.log(f"Поиск правил для файла: {fc}", 'info'))
+                    if file_code == 'README':
+                        self.root.after(0, lambda fc=file_code: self.log(f"  ⚠️ README — документация, правил нет", 'warning'))
+                        continue
                     
-                    try:
-                        file_path = generator.generate_test_file(rule_code, test_dir)
-                        if file_path:
-                            files_created += 1
-                            self.root.after(0, lambda f=file_path.name: self.log(f"  ✅ Создан: {f}", 'success'))
+                    # Ищем правила: для v50 — все начинающиеся с v50., для остальных — содержащих код
+                    matching = [code for code in all_rules if code.startswith(file_code + '.') or file_code in code]
+                    if matching:
+                        matched_rules.extend(matching)
+                        self.root.after(0, lambda fc=file_code, m=len(matching): self.log(f"  Найдено правил: {m}", 'info'))
+                    else:
+                        self.root.after(0, lambda fc=file_code: self.log(f"  ⚠️ Правил не найдено для файла: {fc}", 'warning'))
+                
+                if not matched_rules:
+                    self.root.after(0, lambda: self.log("Нет подходящих правил для генерации", 'warning'))
+                    self.root.after(0, lambda: self.set_status("Готово"))
+                    return
+                
+                # Загружаем JSON для доступа к examples
+                json_path = self.rubricator_dir / '4.RUBRICATOR_PROMPTS.json'
+                json_data = {}
+                if json_path.exists():
+                    with open(json_path, 'r', encoding='utf-8-sig') as f:
+                        json_data = json.load(f)
+                
+                # Получаем выбранные приоритеты для фильтрации правил
+                from rubricator_priority_mapping import PRIORITY_RULES
+                selected_priorities = [p for p, var in self.priority_vars.items() if var.get()]
+                
+                # Если приоритеты выбраны — используем только правила из выбранных приоритетов
+                if selected_priorities:
+                    matched_rules = set()
+                    for prio in selected_priorities:
+                        if prio in PRIORITY_RULES:
+                            matched_rules.update(PRIORITY_RULES[prio])
+                    matched_rules = sorted(matched_rules)
+                    self.root.after(0, lambda: self.log(f"Фильтрация по приоритетам: {', '.join(selected_priorities)}", 'info'))
+                    self.root.after(0, lambda: self.log(f"  Найдено правил по приоритетам: {len(matched_rules)}", 'info'))
+                else:
+                    # Приоритеты не выбраны — используем все правила из выбранных файлов рубрикатора
+                    matched_rules = []
+                    for file_code in selected_file_codes:
+                        self.root.after(0, lambda fc=file_code: self.log(f"Поиск правил для файла: {fc}", 'info'))
+                        if file_code == 'README':
+                            self.root.after(0, lambda fc=file_code: self.log(f"  ⚠️ README — документация, правил нет", 'warning'))
+                            continue
+                        
+                        # Ищем правила: для v50 — все начинающиеся с v50., для остальных — содержащих код
+                        matching = [code for code in all_rules if code.startswith(file_code + '.') or file_code in code]
+                        if matching:
+                            matched_rules.extend(matching)
+                            self.root.after(0, lambda fc=file_code, m=len(matching): self.log(f"  Найдено правил: {m}", 'info'))
                         else:
-                            self.root.after(0, lambda c=rule_code: self.log(f"  ⚠️ Не удалось сгенерировать: {c}", 'warning'))
-                    except Exception as e:
-                        self.root.after(0, lambda c=rule_code, e=str(e): self.log(f"  ❌ Ошибка для {c}: {e}", 'error'))
+                            self.root.after(0, lambda fc=file_code: self.log(f"  ⚠️ Правил не найдено для файла: {fc}", 'warning'))
+                    matched_rules = sorted(set(matched_rules))
+                
+                # Формируем отсортированный список правил
+                sorted_rules = matched_rules
+                total = len(sorted_rules)
+                self.root.after(0, lambda t=total: self.log(f"Сводный файл: {t} правил v3.0.0", 'info'))
+                
+                # Генерируем один сводный файл
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                file_name = f"test_all_{timestamp}.plp"
+                file_path = test_dir / file_name
+                
+                self.root.after(0, lambda: self.log(f"Создание сводного файла: {file_name}", 'info'))
+                
+                lines = []
+                
+                # Заголовок со списком всех правил
+                lines.append('-- ============================================================================')
+                lines.append(f'-- СВОДНЫЙ ТЕСТОВЫЙ ФАЙЛ: ВСЕ ПРАВИЛА v3.0.0 ({total} правил)')
+                lines.append(f'-- Дата генерации: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+                lines.append(f'-- Описание: Тестовые файлы для всех правил PLPlus адаптации')
+                
+                # Добавляем информацию о выбранных приоритетах
+                selected_priorities = [p for p, var in self.priority_vars.items() if var.get()]
+                if selected_priorities:
+                    lines.append(f'-- Приоритеты: {", ".join(selected_priorities)}')
+                
+                lines.append('-- ============================================================================')
+                lines.append('-- Список всех правил (HIGH, ' + str(total) + ' шт.):')
+                lines.append('-- ============================================================================')
+                
+                for i, rule_code in enumerate(sorted_rules, 1):
+                    rule = all_rules[rule_code]
+                    short_desc = rule.short_description[:50] if rule.short_description else '...'
+                    desc_padded = short_desc.ljust(55)
+                    lines.append(f'-- {i:2d}.  {rule_code:45s} - {desc_padded}')
+                
+                lines.append('-- ============================================================================')
+                lines.append('')
+                
+                # Секции для каждого правила
+                for i, rule_code in enumerate(sorted_rules, 1):
+                    rule = all_rules[rule_code]
+                    short_desc = rule.short_description[:60] if rule.short_description else '...'
+                    
+                    lines.append('-- ============================================================================')
+                    lines.append(f'-- {i:2d}: {rule_code} - {short_desc}')
+                    lines.append('-- ============================================================================')
+                    
+                    # Метаданные
+                    lines.append('-- 3.RUBRICATOR_FIXES.md:')
+                    lines.append(f'--   Короткое описание: {rule.short_description}')
+                    lines.append(f'--   Подробное описание: {rule.documentation_text}')
+                    
+                    bad_main = rule.code_example_bad[0] if rule.code_example_bad else ''
+                    extra_bads = rule.code_example_bad[1:] if rule.code_example_bad else []
+                    
+                    if bad_main:
+                        lines.append(f'--   Пример кода (плохой): {bad_main}')
+                    for idx, bad in enumerate(extra_bads, 2):
+                        lines.append(f'--   Пример кода {idx} (плохой): {bad}')
+                    
+                    # Хорошие примеры из JSON
+                    json_rule = json_data.get('rules', {}).get(rule_code, {})
+                    examples = json_rule.get('examples', {})
+                    good = ''
+                    if examples:
+                        good = examples.get('simple', {}).get('good', '')
+                        if not good:
+                            good = examples.get('simple_case', {}).get('good', '')
+                        if not good:
+                            for ex_name, ex_data in examples.items():
+                                if ex_data.get('good'):
+                                    good = ex_data['good']
+                                    break
+                    
+                    if good:
+                        lines.append(f'--   Пример кода (исправленный): {good}')
+                    
+                    parts = rule_code.split('.')
+                    tags = ', '.join(parts) if len(parts) >= 2 else rule.priority
+                    lines.append(f'--   Теги: {tags}')
+                    
+                    # JSON metadata
+                    lines.append('-- 4.RUBRICATOR_PROMPTS.json (расширенный):')
+                    lines.append(f'--   documentation_text: {rule.documentation_text}')
+                    lines.append(f'--   plplus_materials_note: {rule.plplus_materials_note}')
+                    lines.append(f'--   search_prompt: {rule.search_prompt}')
+                    
+                    patterns_str = []
+                    for p in rule.regex_patterns_search:
+                        desc = p.get('description', p.get('pattern', ''))
+                        patterns_str.append(f'({len(patterns_str)+1}) {desc}')
+                    if patterns_str:
+                        lines.append(f'--   regex_patterns.for_search: {"; ".join(patterns_str)}')
+                    
+                    if bad_main:
+                        lines.append(f'--   code_example_bad: {bad_main}')
+                    for idx, bad in enumerate(extra_bads, 2):
+                        lines.append(f'--   code_example_bad{idx}: {bad}')
+                    
+                    if rule.fix_instruction:
+                        lines.append(f'--   fix_instruction: {rule.fix_instruction}')
+                    
+                    lines.append(f'--   test_generation_prompt: Сгенерировать тестовый PLPlus файл для проверки правила \'{rule_code}\' с проблемными конструкциями.')
+                    lines.append(f'--   examples.simple.bad: {bad_main if bad_main else "(нет примера)"}')
+                    lines.append(f'--   examples.simple.good: {good if good else "(нет примера)"}')
+                    
+                    # Дополнительные примеры из JSON
+                    if examples:
+                        for ex_name in ['simple_case', 'parametrized_collection', 'parametrized_ref', 'with_order', 'between']:
+                            if ex_name in examples:
+                                ex = examples[ex_name]
+                                ex_bad = ex.get('bad', ex.get('bad2', ''))
+                                ex_good = ex.get('good', '')
+                                lines.append(f'--   examples.{ex_name}.bad: {ex_bad}')
+                                lines.append(f'--   examples.{ex_name}.good: {ex_good}')
+                    
+                    lines.append(f'--   priority: {rule.priority}')
+                    lines.append(f'--   category: {rule.category}')
+                    lines.append(f'--   subcategory: {rule.subcategory}')
+                    lines.append(f'--   source_files: v50.docx')
+                    lines.append(f'--   source_sections: {rule_code.split(".")[-1] if len(rule_code.split(".")) > 2 else "N/A"}')
+                    lines.append('-- ============================================================================')
+                    
+# Блок кода PROCEDURE
+                    proc_name = rule_code.replace('.', '_').replace('(', '').replace(')', '').replace(',', '')
+                    # Транслитерация кириллицы в латиницу для имени процедуры
+                    _CYR_TO_LAT = {
+                        'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e',
+                        'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
+                        'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+                        'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch',
+                        'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
+                        'А': 'A', 'Б': 'B', 'В': 'V', 'Г': 'G', 'Д': 'D', 'Е': 'E', 'Ё': 'E',
+                        'Ж': 'Zh', 'З': 'Z', 'И': 'I', 'Й': 'Y', 'К': 'K', 'Л': 'L', 'М': 'M',
+                        'Н': 'N', 'О': 'O', 'П': 'P', 'Р': 'R', 'С': 'S', 'Т': 'T', 'У': 'U',
+                        'Ф': 'F', 'Х': 'H', 'Ц': 'Ts', 'Ч': 'Ch', 'Ш': 'Sh', 'Щ': 'Sch',
+                        'Ъ': '', 'Ы': 'Y', 'Ь': '', 'Э': 'E', 'Ю': 'Yu', 'Я': 'Ya',
+                    }
+                    proc_name = ''.join(_CYR_TO_LAT.get(ch, ch) for ch in proc_name)
+                    lines.append(f'PROCEDURE {proc_name} IS')
+                    
+                    if bad_main:
+                        lines.append('	-- Объявления переменных из примеров')
+                    
+                    lines.append('BEGIN')
+                    
+                    # [-] Неправильный код
+                    lines.append('	-- [-] Неправильный код')
+                    if bad_main:
+                        lines.append('	-- begin pl/sql')
+                        for line in bad_main.strip().split('\n'):
+                            lines.append(f'		{line.strip()}')
+                        if extra_bads:
+                            for extra in extra_bads:
+                                lines.append(f'		-- Дополнительный пример:')
+                                for line in extra.strip().split('\n'):
+                                    lines.append(f'		{line.strip()}')
+                        lines.append('	-- end pl/sql')
+                    else:
+                        lines.append('		-- (нет примера плохого кода)')
+                    
+                    lines.append('')
+                    
+                    # [+] Исправленный код
+                    lines.append('	-- [+] Исправленный код')
+                    if good:
+                        lines.append('	-- begin pl/sql')
+                        for line in good.strip().split('\n'):
+                            lines.append(f'		{line.strip()}')
+                        lines.append('	-- end pl/sql')
+                    elif rule.fix_instruction:
+                        lines.append('	-- begin pl/sql')
+                        lines.append(f'		-- Исправление: {rule.fix_instruction}')
+                        lines.append('	-- end pl/sql')
+                    else:
+                        lines.append('		-- (нет примера исправленного кода)')
+                    
+                    lines.append('END;')
+                    lines.append('')
+                    lines.append('')
+                
+                # Футер
+                lines.append('-- ============================================================================')
+                lines.append(f'-- КОНЕЦ ФАЙЛА: {total} правил v3.0.0')
+                lines.append(f'-- Дата генерации: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+                lines.append('-- ============================================================================')
+                
+                # Записываем файл
+                content = '\n'.join(lines)
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                
+                self.root.after(0, lambda fp=file_path: self.log(f"  ✅ Создан: {fp.name}", 'success'))
+                self.root.after(0, lambda t=total: self.log(f"\nСоздано сводных файлов: 1 ({t} правил)", 'info'))
                 
                 self.root.after(0, lambda: self._log_separator("ГЕНЕРАЦИЯ ЗАВЕРШЕНА"))
-                self.root.after(0, lambda: self.log(f"\nСоздано тестовых файлов: {files_created}", 'info'))
                 self.root.after(0, lambda: self.set_status("Готово"))
                 
                 self.root.after(0, 
                     lambda: messagebox.showinfo("Генерация завершена", 
-                              f"Создано тестовых файлов: {files_created}\n\n"
+                              f"Создан сводный файл: {file_path.name}\n\n"
+                              f"Правил: {total}\n\n"
                               f"Каталог: {test_dir}"))
                 
             except ImportError as e:
@@ -1992,9 +2414,6 @@ class DBIMigrationApp:
             if file_path.exists():
                 self.log(f"# {file_path}", 'info')
                 self.log("# Рубрикатор: перечень файлов (с учетом текущего выбора)", 'info')
-                self.log("+--+--+--------------+------------------------------------------------------------------------", 'info')
-                self.log("|N|+/-|Код файла     |Имя файла", 'info')
-                self.log("+--+--+--------------+------------------------------------------------------------------------", 'info')
                 try:
                     from utils.encoding_utils import read_file_with_encoding
                     content, used_encoding = read_file_with_encoding(file_path)
@@ -2041,7 +2460,6 @@ class DBIMigrationApp:
                 
                 self.log("+--+--+--------------+------------------------------------------------------------------------", 'info')
                 
-                self.log("", 'info')
             
             # Вывод 2.RUBRICATOR_CATEGORIES.md
             file_path = self.rubricator_dir / '2.RUBRICATOR_CATEGORIES.md'
@@ -2079,9 +2497,8 @@ class DBIMigrationApp:
                             # Проверяем, есть ли хотя бы один выбранный код
                             if any(code in selected_codes for code in file_codes):
                                 self.log(line, 'info')
-                    else:
-                        self.log(line, 'info')
-                self.log("", 'info')
+                        else:
+                            self.log(line, 'info')
                     
             # Вывод 3.RUBRICATOR_FIXES.md
             file_path = self.rubricator_dir / '3.RUBRICATOR_FIXES.md'
@@ -2136,8 +2553,6 @@ class DBIMigrationApp:
                             if include_line:
                                 self.log(line, 'info')
                     
-                    self.log("", 'info')
-            
             self.log("ВЫБРАННЫЕ ПРАВИЛА:", 'info')
             selected_count = 0
             for code, var in self.selected_rules.items():
@@ -2146,6 +2561,15 @@ class DBIMigrationApp:
                     self.log(f"  [+] {code}: ВКЛ", 'info')
             
             self.log(f"\nВсего выбрано правил: {selected_count}", 'info')
+            
+            # Информация о выбранных приоритетах
+            selected_priorities = [p for p, var in self.priority_vars.items() if var.get()]
+            if selected_priorities:
+                self.log("ВЫБРАННЫЕ ПРИОРИТЕТЫ:", 'highlight')
+                for prio in selected_priorities:
+                    self.log(f"  ★ {prio}", 'highlight')
+            else:
+                self.log("Приоритеты не выбраны (используются все правила из выбранных файлов)", 'info')
             
             # Устанавливаем флаг загрузки
             self.rubricator_loaded = True

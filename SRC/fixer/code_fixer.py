@@ -34,6 +34,7 @@ class PLPlusFixer:
         self.skipped_in_comment = 0  # Счётчик пропущенных из-за комментариев
         self.skipped_in_string = 0  # Счётчик пропущенных из-за строк
         self.skipped_details = []  # Детали пропущенных исправлений для подробного лога
+        self.fix_only_found = config.get('output', {}).get('fix_only_found', False)  # Флаг режима вывода
         
         # Загрузка рубрикатора для получения кратких описаний
         if use_rubricator:
@@ -232,7 +233,7 @@ class PLPlusFixer:
                 matches.append((match.start(), match.end(), match.group()))
         return matches
     
-    def apply_fix(self, line: str, issue: Issue, log_level: str = 'Минимальный') -> Tuple[str, bool]:
+    def apply_fix(self, line: str, issue: Issue, log_level: str = 'Минимальный', fix_only_found: bool = False) -> Tuple[str, bool]:
         """Применение исправления к строке с учётом комментариев и строк"""
         original = line.strip()
         
@@ -264,16 +265,20 @@ class PLPlusFixer:
                 else:
                     marker_line = f"--(*){issue.issue_type} - {short_desc}"
                 
-                modified = f"{marker_line}\n--OLD {timestamp}\n{old_line_commented}\n{sql_fixed}\n"
+                if fix_only_found:
+                    # Формат: --NEW дата время новый_код\nстарый_код (без комментирования)
+                    modified = f"{marker_line}\n--NEW {timestamp} {sql_fixed}\n{leading_whitespace}{original}\n"
+                else:
+                    modified = f"{marker_line}\n--OLD {timestamp}\n{old_line_commented}\n{sql_fixed}\n"
                 return modified, True
         except Exception as e:
             logger.warning(f"[FIXER] Ошибка SQL парсера: {e}")
             # Продолжаем с fallback
         
         # 2. Если парсер не справился — используем старый метод
-        return self._apply_fix_legacy(line, issue, log_level)
+        return self._apply_fix_legacy(line, issue, log_level, fix_only_found)
     
-    def _apply_fix_legacy(self, line: str, issue: Issue, log_level: str) -> Tuple[str, bool]:
+    def _apply_fix_legacy(self, line: str, issue: Issue, log_level: str, fix_only_found: bool = False) -> Tuple[str, bool]:
         """Применение исправления через старые правила (fallback)"""
         original = line.strip()
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -333,11 +338,19 @@ class PLPlusFixer:
                     # Проанализированный код с полным описанием (одной строкой)
                     prompt_line = self._get_prompt_line(issue, original)
                     marker_line = f"--(*){issue_type_code} - {prompt_line}"
-                    modified = f"{marker_line}\n--OLD {timestamp}\n{old_line_commented}\n{new_line_stripped}\n"
+                    if fix_only_found:
+                        # Формат: --NEW дата время новый_код\nстарый_код (без комментирования)
+                        modified = f"{marker_line}\n--NEW {timestamp} {new_line_stripped}\n{leading_whitespace}{original}\n"
+                    else:
+                        modified = f"{marker_line}\n--OLD {timestamp}\n{old_line_commented}\n{new_line_stripped}\n"
                 else:
                     # Минимальный уровень - только краткое описание с меткой (*)
                     marker_line = f"--(*){issue_type_code} - {issue_description}"
-                    modified = f"{marker_line}\n--OLD {timestamp}\n{old_line_commented}\n{new_line_stripped}\n"
+                    if fix_only_found:
+                        # Формат: --NEW дата время новый_код\nстарый_код (без комментирования)
+                        modified = f"{marker_line}\n--NEW {timestamp} {new_line_stripped}\n{leading_whitespace}{original}\n"
+                    else:
+                        modified = f"{marker_line}\n--OLD {timestamp}\n{old_line_commented}\n{new_line_stripped}\n"
                 return modified, True
         
         return original, False
@@ -408,7 +421,7 @@ class PLPlusFixer:
                 original = line.strip()
                 
                 # Применяем исправление с учётом комментариев и строк
-                fixed_line, was_modified = self.apply_fix(line, issue, self.config.get('logging', {}).get('level', 'Минимальный'))
+                fixed_line, was_modified = self.apply_fix(line, issue, self.config.get('logging', {}).get('level', 'Минимальный'), self.fix_only_found)
                 
                 if was_modified:
                     modified_count += 1
@@ -531,11 +544,12 @@ class PLPlusFixer:
         
         return files_copied
     
-    def fix_directory(self, scanner: PLPlusScanner, results_dir: Path, log_callback=None, log_level: str = 'Минимальный'):
+    def fix_directory(self, scanner: PLPlusScanner, results_dir: Path, log_callback=None, log_level: str = 'Минимальный', fix_only_found: bool = False):
         """
         Исправление всех файлов в директории.
         log_callback - функция для вывода сообщений в журнал (опционально).
         log_level - уровень логирования ('Минимальный' или 'Подробный').
+        fix_only_found - если True, выводить только найденные строки в специальном формате.
         """
         # Получаем паттерн файлов
         file_pattern = self.config.get('scan', {}).get('file_pattern', '**/*.plp')
@@ -748,9 +762,7 @@ class PLPlusFixer:
                     print(f"      Копия оригинала: {backup_path.name}")
             else:
                 files_unchanged += 1
-                # Удаляем только results_path (исправленный файл), так как изменений не было
-                # backup_path (копия оригинала) остаётся
-                results_path.unlink(missing_ok=True)
+                # Файл результата остаётся как копия оригинала (даже если нет изменений)
                 
                 # Формируем сообщение о причине пропуска
                 skip_reason = ""
@@ -760,9 +772,9 @@ class PLPlusFixer:
                     skip_reason += f" (в строках: {self.skipped_in_string})"
                 
                 if log_callback:
-                    log_callback(f"  [i] Нет исправлений{skip_reason} (копия сохранена: {backup_path.name})")
+                    log_callback(f"  [i] Нет исправлений{skip_reason} (файл сохранён: {results_path.name})")
                 else:
-                    print(f"  [i] Нет исправлений{skip_reason} (копия сохранена: {backup_path.name})")
+                    print(f"  [i] Нет исправлений{skip_reason} (файл сохранён: {results_path.name})")
                 
                 # При уровне "Подробный" выводим детали пропущенных исправлений
                 if log_level == 'Подробный' and self.skipped_details:

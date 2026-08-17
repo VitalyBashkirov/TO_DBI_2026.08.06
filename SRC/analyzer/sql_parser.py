@@ -207,6 +207,26 @@ def apply_fix(line: str, rule_code: str) -> Optional[str]:
                         named_mapping['var_name'] = groups[0]
                         named_mapping['param_name'] = groups[0]
                     
+                    # Область замены: 'match' - заменять только совпадение(я) в строке,
+                    # 'full' (по умолчанию) - заменять всю строку результатом transform
+                    replace_scope = pattern_def.get('replace_scope', 'full')
+                    
+                    if replace_scope == 'match':
+                        # Заменяем только совпадения в строке, сохраняя остальной код
+                        def _repl(m):
+                            # Пересчитываем mapping для текущего совпадения
+                            current_mapping = dict(named_mapping)
+                            g = m.groups()
+                            if len(g) >= 1 and 'date' in pattern_name.lower():
+                                current_mapping['var_name'] = g[0]
+                                current_mapping['param_name'] = g[0]
+                            return apply_transform(m, transform, current_mapping)
+                        result = re.sub(regex, _repl, line_stripped, flags=re.IGNORECASE)
+                        logger.debug(f"  Стало: {result}")
+                        if result != line_stripped:
+                            return result
+                        continue
+                    
                     # Применяем transform
                     result = apply_transform(match, transform, named_mapping)
                     
@@ -221,6 +241,10 @@ def apply_fix(line: str, rule_code: str) -> Optional[str]:
                             result = f"{line_stripped}  {instruction}"
                             logger.debug(f"  Гибридный паттерн: возвращена инструкция (остались плейсхолдеры)")
                             return result
+                        else:
+                            # Нет fallback - пропускаем этот паттерн (не возвращаем кривой результат)
+                            logger.debug(f"  Паттерн {pattern_name}: остались плейсхолдеры без fallback, пропуск")
+                            continue
                     
                     logger.debug(f"  Стало: {result}")
                     

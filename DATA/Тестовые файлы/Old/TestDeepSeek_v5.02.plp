@@ -1,0 +1,541 @@
+-- ============================================================================
+-- Правило: v5.STYLE.BAD_PREFIX.п.4.3
+-- Описание: Не корректный префикс
+-- Категория: STYLE
+-- Приоритет: high
+-- Теги: prefix, naming, style
+-- 3.RUBRICATOR_FIXES.md: Не корректный префикс
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Имена переменных и параметров должны соответствовать стандартам именования.
+--   plplus_materials_note: В PL+ используются префиксы: p_ - параметры, v_ - переменные, cn_ - константы.
+--   search_prompt: Найти объявления с нестандартными префиксами.
+--   code_example_bad: idx VARCHAR2(100);
+--   code_example_bad2: t_ref TAB_TYPE;
+--   fix_instruction: Переименовать с правильным префиксом: v_idx, gt_ref_tab_type.
+-- ============================================================================
+PUBLIC PROCEDURE v5_STYLE_BAD_PREFIX_p_4_3 IS
+    idx VARCHAR2(100);
+    t_ref TAB_TYPE;
+    p_var NUMBER;
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v5.STYLE.BAD_PREFIX.п.4.3 Не корректный префикс =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- idx VARCHAR2(100); -- должно быть v_idx
+        -- t_ref TAB_TYPE;    -- должно быть gt_ref_tab_type
+        
+        -- [+] ПРАВИЛЬНО
+        v_idx VARCHAR2(100);
+        gt_ref_tab_type TAB_TYPE;
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v5.STYLE.PREFIX_TYPE.п.4.4
+-- Описание: Наименование переменной не содержит префикс типа
+-- Категория: STYLE
+-- Приоритет: high
+-- Теги: prefix, type, naming
+-- 3.RUBRICATOR_FIXES.md: Наименование переменной не содержит префикс типа
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Переменные должны содержать префикс типа: s_ - строка, n_ - число, d_ - дата, r_ - ссылка.
+--   plplus_materials_note: Префиксы типа помогают понимать тип переменной при чтении кода.
+--   search_prompt: Найти переменные без префикса типа.
+--   code_example_bad: name VARCHAR2(100);
+--   code_example_bad2: date_val DATE_TIME;
+--   fix_instruction: Добавить префикс типа: sName, dDateVal.
+-- ============================================================================
+PUBLIC PROCEDURE v5_STYLE_PREFIX_TYPE_p_4_4 IS
+    name VARCHAR2(100);
+    date_val DATE_TIME;
+    rClLastChange REF [CLIENT];
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v5.STYLE.PREFIX_TYPE.п.4.4 Наименование переменной не содержит префикс типа =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- name VARCHAR2(100);      -- должно быть sName
+        -- date_val DATE_TIME;     -- должно быть dDateVal
+        
+        -- [+] ПРАВИЛЬНО
+        sName VARCHAR2(100);
+        dDateVal DATE_TIME;
+        rClLastChange REF [CLIENT];
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v5.STYLE.RESERVED_PREFIX.п.4.5
+-- Описание: Использован зарезервированный префикс
+-- Категория: STYLE
+-- Приоритет: high
+-- Теги: reserved, prefix, naming
+-- 3.RUBRICATOR_FIXES.md: Использован зарезервированный префикс
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Некоторые префиксы зарезервированы для системных объектов.
+--   plplus_materials_note: Префиксы gv_, gt_, p_ могут быть зарезервированы.
+--   search_prompt: Найти объявления с зарезервированными префиксами.
+--   code_example_bad: gv_global_var NUMBER;
+--   code_example_bad2: p_param VARCHAR2(100);
+--   fix_instruction: Переименовать без зарезервированного префикса.
+-- ============================================================================
+PUBLIC PROCEDURE v5_STYLE_RESERVED_PREFIX_p_4_5 IS
+    gv_global_var NUMBER;
+    p_param VARCHAR2(100);
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v5.STYLE.RESERVED_PREFIX.п.4.5 Использован зарезервированный префикс =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- gv_global_var NUMBER;      -- зарезервированный префикс gv_
+        -- p_param VARCHAR2(100);     -- зарезервированный префикс p_ для параметров метода
+        
+        -- [+] ПРАВИЛЬНО
+        v_global_var NUMBER;
+        v_param VARCHAR2(100);
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v5.STYLE.CODE_IN_COMMENT.п.4.6
+-- Описание: Удалите закомментированный код
+-- Категория: STYLE
+-- Приоритет: medium
+-- Теги: comment, code, cleanup
+-- 3.RUBRICATOR_FIXES.md: Удалите закомментированный код
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Закомментированный код засоряет код и должен быть удален.
+--   plplus_materials_note: Используйте систему контроля версий для хранения истории изменений.
+--   search_prompt: Найти закомментированные строки кода.
+--   code_example_bad: -- DELETE FROM table WHERE id = 1;
+--   fix_instruction: Удалить закомментированный код.
+-- ============================================================================
+PUBLIC PROCEDURE v5_STYLE_CODE_IN_COMMENT_p_4_6 IS
+    v_id NUMBER := 1;
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v5.STYLE.CODE_IN_COMMENT.п.4.6 Удалите закомментированный код =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- v_id := 2;
+        -- DELETE FROM table WHERE id = v_id;
+        
+        -- [+] ПРАВИЛЬНО
+        v_id := 2;
+        -- обновление выполнено
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v5.STYLE.EXIST_ALL_OR_COLLECTIONS.п.4.7
+-- Описание: Обращение к ТБП без опций all и collection
+-- Категория: STYLE
+-- Приоритет: medium
+-- Теги: tbp, all, collection
+-- 3.RUBRICATOR_FIXES.md: Обращение к ТБП без опций all и collection
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: При обращении к ТБП необходимо указывать all или collection.
+--   plplus_materials_note: Опции all и collection определяют режим выборки из ТБП.
+--   search_prompt: Найти обращения к ТБП без all и collection.
+--   code_example_bad: SELECT * FROM ::[SOME_TBP];
+--   fix_instruction: Добавить условие на collection is null.
+-- ============================================================================
+PUBLIC PROCEDURE v5_STYLE_EXIST_ALL_p_4_7 IS
+    v_id NUMBER;
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v5.STYLE.EXIST_ALL_OR_COLLECTIONS.п.4.7 Обращение к ТБП без опций all и collection =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- SELECT id INTO v_id FROM ::[CLIENT] WHERE id = 1;
+        
+        -- [+] ПРАВИЛЬНО
+        SELECT id INTO v_id FROM ::[CLIENT] WHERE collection IS NULL AND id = 1;
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v5.STYLE.NOT_MENTIONED.п.4.8
+-- Описание: Переменная/Параметр/Алиас более нигде не упоминается
+-- Категория: STYLE
+-- Приоритет: low
+-- Теги: unused, variable, cleanup
+-- 3.RUBRICATOR_FIXES.md: Переменная/Параметр/Алиас более нигде не упоминается
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Неиспользуемые переменные и параметры следует удалять.
+--   plplus_materials_note: Неиспользуемый код усложняет поддержку.
+--   search_prompt: Найти объявления переменных, которые не используются.
+--   code_example_bad: v_unused NUMBER;
+--   fix_instruction: Удалить неиспользуемую переменную.
+-- ============================================================================
+PUBLIC PROCEDURE v5_STYLE_NOT_MENTIONED_p_4_8 IS
+    v_used NUMBER := 1;
+    v_unused NUMBER := 2;
+    v_result NUMBER;
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v5.STYLE.NOT_MENTIONED.п.4.8 Переменная/Параметр/Алиас более нигде не упоминается =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- v_unused NUMBER := 2; -- не используется
+        
+        -- [+] ПРАВИЛЬНО
+        v_result := v_used * 2;
+        debug_pipe('Result: ' || v_result, 0);
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v5.STYLE.VALIDATE_DEFAULT_TWICE.п.4.9
+-- Описание: Повторное использование блока с DEFAULT валидацией
+-- Категория: STYLE
+-- Приоритет: low
+-- Теги: validate, default, duplicate
+-- 3.RUBRICATOR_FIXES.md: Повторное использование блока с DEFAULT валидацией
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Несколько блоков DEFAULT в VALIDATE можно объединить.
+--   plplus_materials_note: Объединение DEFAULT блоков улучшает читаемость.
+--   search_prompt: Найти повторяющиеся блоки DEFAULT в VALIDATE.
+--   code_example_bad: VALIDATE DEFAULT ...; VALIDATE DEFAULT ...;
+--   fix_instruction: Объединить блоки в один.
+-- ============================================================================
+PUBLIC PROCEDURE v5_STYLE_VALIDATE_DEFAULT_p_4_9 IS
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v5.STYLE.VALIDATE_DEFAULT_TWICE.п.4.9 Повторное использование блока с DEFAULT валидацией =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- VALIDATE
+        --     DEFAULT 1;
+        -- VALIDATE
+        --     DEFAULT 2;
+        
+        -- [+] ПРАВИЛЬНО
+        -- VALIDATE
+        --     DEFAULT 1;
+        --     DEFAULT 2;
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v5.STYLE.GLOBAL_VAR.п.4.10
+-- Описание: Не рекомендуется использовать глобальные переменные
+-- Категория: STYLE
+-- Приоритет: low
+-- Теги: global, variable, design
+-- 3.RUBRICATOR_FIXES.md: Не рекомендуется использовать глобальные переменные
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Глобальные переменные усложняют управление кодом.
+--   plplus_materials_note: Используйте локальные переменные или параметры.
+--   search_prompt: Найти объявления глобальных переменных.
+--   code_example_bad: gv_global_var NUMBER;
+--   fix_instruction: Заменить на локальную переменную.
+-- ============================================================================
+PUBLIC PROCEDURE v5_STYLE_GLOBAL_VAR_p_4_10 IS
+    gv_global_var NUMBER;
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v5.STYLE.GLOBAL_VAR.п.4.10 Не рекомендуется использовать глобальные переменные =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- gv_global_var NUMBER; -- глобальная переменная
+        
+        -- [+] ПРАВИЛЬНО
+        v_local_var NUMBER;
+        v_local_var := 1;
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v5.STYLE.SAVEPOINT_ROLLBACK.п.4.11
+-- Описание: Savepoint/rollback необходимо заменить на &sp/&rb макросы
+-- Категория: STYLE
+-- Приоритет: high
+-- Теги: savepoint, rollback, macro
+-- 3.RUBRICATOR_FIXES.md: Savepoint/rollback необходимо заменить на &sp/&rb макросы
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: В DBI используются макросы &sp и &rb вместо SAVEPOINT и ROLLBACK.
+--   plplus_materials_note: Макросы &sp/&rb обеспечивают совместимость с PostgreSQL.
+--   search_prompt: Найти использование SAVEPOINT и ROLLBACK TO.
+--   code_example_bad: SAVEPOINT sp1; ROLLBACK TO sp1;
+--   fix_instruction: Заменить на &sp; и &rb;.
+-- ============================================================================
+PUBLIC PROCEDURE v5_STYLE_SAVEPOINT_ROLLBACK_p_4_11 IS
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v5.STYLE.SAVEPOINT_ROLLBACK.п.4.11 Savepoint/rollback необходимо заменить на &sp/&rb макросы =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- SAVEPOINT sp1;
+        -- ROLLBACK TO sp1;
+        
+        -- [+] ПРАВИЛЬНО
+        -- &sp;
+        -- &rb;
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v5.SQL.ANALYTIC_AND_FETCH.п.1.4
+-- Описание: Вызов порождает необходимость повторного чтения результирующего набора
+-- Категория: SQL
+-- Приоритет: high
+-- Теги: analytic, fetch, performance
+-- 3.RUBRICATOR_FIXES.md: analytic и fetch
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Использование analytic в некоторых случаях требует повторного чтения.
+--   plplus_materials_note: Оптимизируйте запросы для избежания повторных чтений.
+--   search_prompt: Найти использование analytic в SELECT.
+--   code_example_bad: SELECT analytic(...) FROM table;
+--   fix_instruction: Оптимизировать запрос или использовать другой подход.
+-- ============================================================================
+PUBLIC PROCEDURE v5_SQL_ANALYTIC_FETCH_p_1_4 IS
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v5.SQL.ANALYTIC_AND_FETCH.п.1.4 Вызов порождает необходимость повторного чтения =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- SELECT analytic(first_value(name), 'over (partition by id)', col) FROM table;
+        
+        -- [+] ПРАВИЛЬНО
+        -- SELECT first_value(name) over (partition by id) FROM table;
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v5.STYLE.WRONG_CLASS_SYNTAX.п.4.12
+-- Описание: Обращение к классу должно быть в формате ::[CLASS_NAME]
+-- Категория: STYLE
+-- Приоритет: high
+-- Теги: class, syntax, namespace
+-- 3.RUBRICATOR_FIXES.md: Обращение к классу должно быть в формате ::[CLASS_NAME]
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Все обращения к классам должны использовать синтаксис ::[CLASS_NAME].
+--   plplus_materials_note: Это стандартный синтаксис PL+ для работы с классами.
+--   search_prompt: Найти обращения к классам без ::[].
+--   code_example_bad: REF [SOME_CLASS];
+--   code_example_bad2: [SOME_CLASS]%class;
+--   fix_instruction: Добавить :: перед именем класса.
+-- ============================================================================
+PUBLIC PROCEDURE v5_STYLE_WRONG_CLASS_p_4_12 IS
+    v_ref REF [CLIENT];
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v5.STYLE.WRONG_CLASS_SYNTAX.п.4.12 Обращение к классу должно быть в формате ::[CLASS_NAME] =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- v_ref := REF [CLIENT];
+        -- IF v_ref%class = [CLIENT]%class THEN ...
+        
+        -- [+] ПРАВИЛЬНО
+        v_ref := REF ::[CLIENT];
+        IF v_ref%class = ::[CLIENT]%class THEN ...
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v5.STYLE.WRONG_ATTR_SYNTAX.п.4.13
+-- Описание: Обращение к реквизиту должно быть в формате [ATTRIBUTE_NAME]
+-- Категория: STYLE
+-- Приоритет: high
+-- Теги: attribute, syntax
+-- 3.RUBRICATOR_FIXES.md: Обращение к реквизиту должно быть в формате [ATTRIBUTE_NAME]
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Все обращения к реквизитам должны использовать синтаксис [ATTRIBUTE_NAME].
+--   plplus_materials_note: Это стандартный синтаксис PL+ для работы с реквизитами.
+--   search_prompt: Найти обращения к реквизитам без [].
+--   code_example_bad: v_ref.attribute;
+--   fix_instruction: Добавить [] вокруг имени реквизита.
+-- ============================================================================
+PUBLIC PROCEDURE v5_STYLE_WRONG_ATTR_p_4_13 IS
+    v_ref REF [CLIENT];
+    v_name VARCHAR2(100);
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v5.STYLE.WRONG_ATTR_SYNTAX.п.4.13 Обращение к реквизиту должно быть в формате [ATTRIBUTE_NAME] =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- v_name := v_ref.name;
+        
+        -- [+] ПРАВИЛЬНО
+        v_name := v_ref.[NAME];
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v5.STYLE.WRONG_METHOD_SYNTAX.п.4.14
+-- Описание: Обращение к методу должно быть в формате ::[CLASS_NAME].[METHOD_NAME]
+-- Категория: STYLE
+-- Приоритет: high
+-- Теги: method, syntax
+-- 3.RUBRICATOR_FIXES.md: Обращение к методу должно быть в формате ::[CLASS_NAME].[METHOD_NAME]
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Все обращения к методам должны использовать синтаксис ::[CLASS_NAME].[METHOD_NAME].
+--   plplus_materials_note: Это стандартный синтаксис PL+ для вызова методов.
+--   search_prompt: Найти обращения к методам без ::[].[].
+--   code_example_bad: method_name(params);
+--   code_example_bad2: [CLASS].method_name(params);
+--   fix_instruction: Использовать формат ::[CLASS_NAME].[METHOD_NAME](params).
+-- ============================================================================
+PUBLIC PROCEDURE v5_STYLE_WRONG_METHOD_p_4_14 IS
+    v_result VARCHAR2(100);
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v5.STYLE.WRONG_METHOD_SYNTAX.п.4.14 Обращение к методу должно быть в формате ::[CLASS_NAME].[METHOD_NAME] =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- v_result := get_user_name(1);
+        -- v_result := [CLIENT].get_name(1);
+        
+        -- [+] ПРАВИЛЬНО
+        v_result := ::[CLIENT].[GET_NAME](1);
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v5.STYLE.STRING_AS_CLASS.п.4.15
+-- Описание: Не разрешено использование строки вместо ::[CLASS]%class
+-- Категория: STYLE
+-- Приоритет: high
+-- Теги: class, string, type
+-- 3.RUBRICATOR_FIXES.md: Не разрешено использование строки вместо ::[CLASS]%class
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Для сравнения классов используйте ::[CLASS]%class.
+--   plplus_materials_note: Строковые литералы не являются типами классов.
+--   search_prompt: Найти строковые литералы, используемые как имена классов.
+--   code_example_bad: IF v_class = 'CLIENT' THEN ...
+--   fix_instruction: Использовать ::[CLIENT]%class.
+-- ============================================================================
+PUBLIC PROCEDURE v5_STYLE_STRING_AS_CLASS_p_4_15 IS
+    v_class_name VARCHAR2(100);
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v5.STYLE.STRING_AS_CLASS.п.4.15 Не разрешено использование строки вместо ::[CLASS]%class =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- IF v_class_name = 'CLIENT' THEN ...
+        
+        -- [+] ПРАВИЛЬНО
+        IF v_class_name = ::[CLIENT]%class THEN ...
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;
+
+-- ============================================================================
+-- Правило: v5.STYLE.DEREFERENCE_OUT_PARAM.п.4.16
+-- Описание: Запрещено передавать в out параметры реквизиты ссылочных переменных
+-- Категория: STYLE
+-- Приоритет: high
+-- Теги: out, parameter, ref
+-- 3.RUBRICATOR_FIXES.md: Запрещено передавать в out параметры реквизиты ссылочных переменных
+-- 4.RUBRICATOR_PROMPTS.json:
+--   documentation_text: Передача реквизитов ссылок в OUT параметры может привести к модификации БД.
+--   plplus_materials_note: Используйте промежуточные переменные.
+--   search_prompt: Найти вызовы с OUT параметрами, где передаются реквизиты ссылок.
+--   code_example_bad: get_value(v_ref.attr, p_out);
+--   fix_instruction: Использовать промежуточную переменную.
+-- ============================================================================
+PUBLIC PROCEDURE v5_STYLE_DEREFERENCE_OUT_p_4_16 IS
+    v_ref REF [CLIENT];
+    v_value NUMBER;
+BEGIN
+    BEGIN
+        savepoint sp1;
+        debug_pipe('-= v5.STYLE.DEREFERENCE_OUT_PARAM.п.4.16 Запрещено передавать в out параметры реквизиты ссылочных переменных =-', 0);
+        
+        -- [-] НЕПРАВИЛЬНО
+        -- get_value(v_ref.[ID], v_value);
+        
+        -- [+] ПРАВИЛЬНО
+        v_value := v_ref.[ID];
+        
+        RAISE; -- прерываем, чтобы случайно не внести изменения на схему
+    EXCEPTION WHEN OTHERS THEN
+        debug_pipe(substr(utils.error_stack, 1, 4000), 0);
+        ROLLBACK TO sp1;
+    END;
+END;

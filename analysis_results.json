@@ -1,0 +1,3055 @@
+{
+  "total_files": 599,
+  "total_issues": 381,
+  "high_issues_count": 381,
+  "issues": [
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\AC_FIN\\PSH_LIB_2021.plp",
+      "line": 220,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\AC_FIN\\PSH_L_LOAN_INSP.plp",
+      "line": 137,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\AC_FIN\\Z1494265900.plp",
+      "line": 141,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\CLIENT\\PSH_IMP_K.plp",
+      "line": 302,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\CL_PRIV\\PSH_DATE_DEATH.plp",
+      "line": 64,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\CL_PRIV\\PSH_EDIT#AUTO_CP.plp",
+      "line": 1761,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 154,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 182,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 880,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 915,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 955,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1024,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1074,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1119,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then -- Выполнение операции не должно прерываться при возникновении любой ошибки, сообщение об ошибке необходимо записать в лог-файл",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1201,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1234,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1273,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1301,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1360,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1512,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1585,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1628,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "--- \twhen others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1669,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1852,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1965,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 2026,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 2144,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\DEPN\\PSH_PRN_WORD_UNI.plp",
+      "line": 92,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\END_OD_OPERATION\\PSH_NAST_EDIT_G5.plp",
+      "line": 62,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\END_OD_OPERATION\\PSH_NAST_EDIT_G5.plp",
+      "line": 77,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then nastroyka:=null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\FOLDER_PAY\\PSH_TO_FORM.plp",
+      "line": 83,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\MD_FOR_PROV_CP_3.plp",
+      "line": 66,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\MD_FOR_PROV_CP_3.plp",
+      "line": 88,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "--exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\MD_FOR_PROV_CP_3.plp",
+      "line": 111,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\MD_FOR_PROV_CP_3.plp",
+      "line": 172,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then debug_pipe('.DbpBusinessOp -- Ош.:'||LF$||sqlerrm,dp1);",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\MD_FOR_PROV_CP_3.plp",
+      "line": 266,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 80,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 88,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 99,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 1613,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "WHEN OTHERS THEN",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 1632,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "WHEN OTHERS THEN",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 1661,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "WHEN OTHERS THEN",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 1745,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3023,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3261,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3299,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3318,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3343,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3356,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3368,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3406,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3449,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3498,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3550,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_GETSUM_CP_2.plp",
+      "line": 54,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_GETSUM_CP_2.plp",
+      "line": 76,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "--exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_GETSUM_CP_2.plp",
+      "line": 99,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\HOOK_BANK\\RKO_GETSUM_CP_2.plp",
+      "line": 134,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\IP_CARDS\\PSH_WRD_V3.plp",
+      "line": 194,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\IP_CARDS\\PSH_WRD_V3.plp",
+      "line": 207,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\IP_CARDS\\PSH_WRD_V3.plp",
+      "line": 232,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\MAIN_DOCUM\\PSH_MAG.plp",
+      "line": 122,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception When OTHERS Then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\MAIN_DOCUM\\PSH_MAG.plp",
+      "line": 208,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception When OTHERS Then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PR_CRED\\PSH_CALC_PAR.plp",
+      "line": 76,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1478,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1496,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1590,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1608,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1703,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1712,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1744,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "begin bcd.[PURPOSE_CODE] := substr(get_query('CODE_PURPOSE'), 1, bcd.[PURPOSE_CODE]%size); exception when OTHERS then null; end;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1844,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1885,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1895,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1929,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1954,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2184,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2338,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2348,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2460,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2593,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2740,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2842,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2852,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1960,
+      "rule": "v50.PROC.NATIVEID.п.3.26",
+      "description": "NativeID для метаданных (NUMBER переменная для %id)",
+      "code": "A_DocID\t\t:= doc%id;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2179,
+      "rule": "v50.PROC.NATIVEID.п.3.26",
+      "description": "NativeID для метаданных (NUMBER переменная для %id)",
+      "code": "A_DocID\t\t:= doc%id;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2611,
+      "rule": "v50.PROC.NATIVEID.п.3.26",
+      "description": "NativeID для метаданных (NUMBER переменная для %id)",
+      "code": "A_DocID\t\t:= doc%id;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\TMC_DOCUM\\WORK_DOCUM_SPIS.plp",
+      "line": 268,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\ENTITY\\TMC_DOCUM\\WORK_DOCUM_SPIS.plp",
+      "line": 542,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 85,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 247,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 752,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then log_err('Ошибка при добавлении файла в архив:'||rFile_name,false);",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 806,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 830,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 854,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 879,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 1018,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\BASE_VAL_OP\\PSH_EXP_CONTR.plp",
+      "line": 187,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\DOC_TAX_IN\\PSH_FILE_CONTEN.plp",
+      "line": 54,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\IFRS_FTOOL_GRP\\PSH_IMP_BUDV.plp",
+      "line": 152,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\IFRS_FTOOL_GRP\\PSH_IMP_BUDV.plp",
+      "line": 695,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\MARKET_PLACE\\PSH_IMP_TRDS_FRX.plp",
+      "line": 722,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB.plp",
+      "line": 86,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB.plp",
+      "line": 135,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB.plp",
+      "line": 1041,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB_FUN.plp",
+      "line": 172,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB_FUN.plp",
+      "line": 442,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then -- важно перехватить любые ошибки разбора xml",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB_FUN.plp",
+      "line": 449,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then  -- важно перехватить любые ошибки преобразования строки в дату",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB_FUN.plp",
+      "line": 1186,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB_FUN.plp",
+      "line": 1203,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LOAD_DOCS.plp",
+      "line": 77,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LOAD_DOCS.plp",
+      "line": 165,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LOAD_DOCS.plp",
+      "line": 441,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then -- необходимо отловить все исключения при ошибках XML",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LOAD_DOCS.plp",
+      "line": 562,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then\t-- не прерываем обработку документов",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_INIT_RECS.plp",
+      "line": 76,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_INIT_RECS.plp",
+      "line": 106,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_INIT_RECS.plp",
+      "line": 355,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_L.plp",
+      "line": 934,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_L.plp",
+      "line": 1080,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_L.plp",
+      "line": 1090,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_L.plp",
+      "line": 1176,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_L.plp",
+      "line": 1188,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_L.plp",
+      "line": 1199,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\REPS_DATA\\PSH_LIB_DEFINE.plp",
+      "line": 359,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_WORK\\src\\TYPE\\STRUCTURE\\TAX_CL_PR_AC_INF\\PSH_L.plp",
+      "line": 84,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\AC_FIN\\PSH_AVG_MONTH_01.plp",
+      "line": 200,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\AC_FIN\\PSH_LIB_2021.plp",
+      "line": 220,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\AC_FIN\\PSH_L_LOAN_INSP.plp",
+      "line": 137,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\AC_FIN\\Z1494265900.plp",
+      "line": 141,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_CHK_CLIENT_L.plp",
+      "line": 288,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_CHK_CLIENT_L.plp",
+      "line": 520,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then\t-- исключение на все возможные ошибки при выполнени операции IS_CL_SUSPECT",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_CHK_CLIENT_L.plp",
+      "line": 552,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then\t-- исключение на все возможные ошибки при выполнени операции IS_CL_SUSPECT",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_CHK_CLIENT_L.plp",
+      "line": 597,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then\t-- исключение на все возможные ошибки при выполнени операции IS_CL_SUSPECT",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_CHK_CLIENT_L.plp",
+      "line": 619,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then\t-- исключение на все возможные ошибки при выполнени операции IS_ADDR_SUSPECT",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_CHK_CLIENT_L.plp",
+      "line": 1079,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_IMP_K.plp",
+      "line": 302,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_KLIENT_WORD.plp",
+      "line": 218,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_KLIENT_WORD.plp",
+      "line": 230,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_KLIENT_WORD.plp",
+      "line": 244,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_KLIENT_WORDP.plp",
+      "line": 211,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_KLIENT_WORDP.plp",
+      "line": 223,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_KLIENT_WORDP.plp",
+      "line": 237,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_LIB_P.plp",
+      "line": 1713,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_LIB_P.plp",
+      "line": 3027,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_LIB_P.plp",
+      "line": 3048,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CLIENT\\PSH_LIB_P.plp",
+      "line": 3110,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_ADD_PROP_S.plp",
+      "line": 101,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_DATE_DEATH.plp",
+      "line": 64,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_DBLINKCLIENT.plp",
+      "line": 720,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_DBLINKCLIENT.plp",
+      "line": 789,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_DBLINKCLIENT.plp",
+      "line": 810,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_DBLINKCLIENT.plp",
+      "line": 823,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_DBLINKCLIENT.plp",
+      "line": 1171,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_DBLINKCLIENT.plp",
+      "line": 1373,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_DBLINKCLIENT.plp",
+      "line": 1647,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_DBLINKCLIENT.plp",
+      "line": 1755,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_DBLINKCLIENT.plp",
+      "line": 2040,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_DBLINKCLIENT.plp",
+      "line": 2988,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_DBLINKCLIENT.plp",
+      "line": 3041,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_DBLINKCLIENT.plp",
+      "line": 3083,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_EDIT#AUTO_CP.plp",
+      "line": 1761,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\CL_PRIV\\PSH_WRD_FIZCLANK.plp",
+      "line": 918,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 154,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 182,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 880,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 915,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 955,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1024,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1074,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1119,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then -- Выполнение операции не должно прерываться при возникновении любой ошибки, сообщение об ошибке необходимо записать в лог-файл",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1201,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1234,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1273,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1301,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1360,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1512,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1585,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1628,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "--- \twhen others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1669,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1852,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 1965,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 2026,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_DEP_PRIV_GO.plp",
+      "line": 2144,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_LIB.plp",
+      "line": 62,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_LIB.plp",
+      "line": 868,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_LIB.plp",
+      "line": 920,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_PRNT_WRD_XML.plp",
+      "line": 681,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_PRNT_WRD_XML.plp",
+      "line": 1047,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_PRNT_WRD_XML.plp",
+      "line": 1158,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then -- для совместимости предыдущей печати оставлена обработка others",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_PRNT_WRD_XML.plp",
+      "line": 1512,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DEPN\\PSH_PRN_WORD_UNI.plp",
+      "line": 92,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DOCUM_RC\\PROC#VD_3.plp",
+      "line": 319,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DOCUM_RC\\PROC#VD_3.plp",
+      "line": 1646,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DOCUM_RC\\PROC#VD_3.plp",
+      "line": 1689,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DOCUM_RC\\PSH_EDIT_SBER_D.plp",
+      "line": 258,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DOCUM_RC\\PSH_EDIT_SBER_D.plp",
+      "line": 1069,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\DOCUM_RC\\PSH_EDIT_SBER_D.plp",
+      "line": 1212,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\FOLDER_PAY\\PSH_TO_FORM.plp",
+      "line": 83,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\MD_FOR_PROV_CP_1.plp",
+      "line": 1759,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\MD_FOR_PROV_CP_3.plp",
+      "line": 66,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\MD_FOR_PROV_CP_3.plp",
+      "line": 88,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "--exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\MD_FOR_PROV_CP_3.plp",
+      "line": 111,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\MD_FOR_PROV_CP_3.plp",
+      "line": 172,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then debug_pipe('.DbpBusinessOp -- Ош.:'||LF$||sqlerrm,dp1);",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\MD_FOR_PROV_CP_3.plp",
+      "line": 266,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 83,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then debug_pipe('.DbpBusinessOp -- Ош.:'||LF$||sqlerrm,dp1);",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 135,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 185,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 193,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 204,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 2041,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "WHEN OTHERS THEN",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 2060,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "WHEN OTHERS THEN",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 2089,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "WHEN OTHERS THEN",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 2173,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 3453,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 3695,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 3733,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 3752,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 3777,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 3790,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 3802,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 3840,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 3883,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 3935,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_1.plp",
+      "line": 3987,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 80,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 88,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 99,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 1613,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "WHEN OTHERS THEN",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 1632,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "WHEN OTHERS THEN",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 1661,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "WHEN OTHERS THEN",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 1745,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3023,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3261,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3299,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3318,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3343,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3356,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3368,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3406,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3449,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3498,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_CALC_PAR_333.plp",
+      "line": 3550,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_GETSUM_CP_2.plp",
+      "line": 54,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_GETSUM_CP_2.plp",
+      "line": 76,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "--exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_GETSUM_CP_2.plp",
+      "line": 99,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\HOOK_BANK\\RKO_GETSUM_CP_2.plp",
+      "line": 134,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\IP_CARDS\\PSH_WRD_V3.plp",
+      "line": 194,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\IP_CARDS\\PSH_WRD_V3.plp",
+      "line": 207,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\IP_CARDS\\PSH_WRD_V3.plp",
+      "line": 232,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\KRED_PERS\\PSH_KR_PORT_XLS.plp",
+      "line": 74,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\MAIN_DOCUM\\PSH_DO_TO_NOSTRO.plp",
+      "line": 189,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\MAIN_DOCUM\\PSH_IMP_DOC_XLS.plp",
+      "line": 224,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\MAIN_DOCUM\\PSH_MAG.plp",
+      "line": 122,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception When OTHERS Then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\MAIN_DOCUM\\PSH_MAG.plp",
+      "line": 208,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception When OTHERS Then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\MAIN_DOCUM\\PSH_TO_NEOB.plp",
+      "line": 60,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PR_CRED\\PSH_CALC_PAR.plp",
+      "line": 76,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PR_CRED\\PSH_CRED_REP.plp",
+      "line": 90,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PR_CRED\\PSH_CRED_REP.plp",
+      "line": 93,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PR_CRED\\PSH_CRED_REP.plp",
+      "line": 157,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PR_CRED\\PSH_CRED_REP.plp",
+      "line": 331,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1484,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1502,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1596,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1614,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1709,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1718,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1750,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "begin bcd.[PURPOSE_CODE] := substr(get_query('CODE_PURPOSE'), 1, bcd.[PURPOSE_CODE]%size); exception when OTHERS then null; end;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1850,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1891,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1901,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1935,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1960,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2190,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2344,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2354,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2466,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2599,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2746,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2848,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2858,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 1966,
+      "rule": "v50.PROC.NATIVEID.п.3.26",
+      "description": "NativeID для метаданных (NUMBER переменная для %id)",
+      "code": "A_DocID\t\t:= doc%id;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2185,
+      "rule": "v50.PROC.NATIVEID.п.3.26",
+      "description": "NativeID для метаданных (NUMBER переменная для %id)",
+      "code": "A_DocID\t\t:= doc%id;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_IBANK2.plp",
+      "line": 2617,
+      "rule": "v50.PROC.NATIVEID.п.3.26",
+      "description": "NativeID для метаданных (NUMBER переменная для %id)",
+      "code": "A_DocID\t\t:= doc%id;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_L.plp",
+      "line": 661,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_L2.plp",
+      "line": 1118,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_L2.plp",
+      "line": 1129,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_L2.plp",
+      "line": 1228,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_L2.plp",
+      "line": 1236,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_LIB.plp",
+      "line": 44,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_LIB.plp",
+      "line": 59,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_LIB_DEP_XML.plp",
+      "line": 98,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then return 0;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_LIB_DEP_XML.plp",
+      "line": 166,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then return null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_LIB_DEP_XML.plp",
+      "line": 306,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then return null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_LIB_DEP_XML.plp",
+      "line": 360,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception   when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_LIB_DEP_XML.plp",
+      "line": 480,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_LIB_DEP_XML.plp",
+      "line": 511,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception   when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_LIB_DEP_XML.plp",
+      "line": 638,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_LIB_DEP_XML.plp",
+      "line": 750,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_LIB_DEP_XML.plp",
+      "line": 763,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_LIB_DEP_XML.plp",
+      "line": 837,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\PSH_IBANK2\\PSH_LIB_DEP_XML.plp",
+      "line": 861,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\TMC_DOCUM\\WORK_DOCUM_SPIS.plp",
+      "line": 268,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\ENTITY\\TMC_DOCUM\\WORK_DOCUM_SPIS.plp",
+      "line": 542,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\KERNEL\\RUNTIME\\PSH_DELFIOFILES.plp",
+      "line": 36,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 85,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 247,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 752,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then log_err('Ошибка при добавлении файла в архив:'||rFile_name,false);",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 806,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 830,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 854,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 879,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\ASV_REESTR_FILES\\PSH_EXPORT.plp",
+      "line": 1018,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\BASE_VAL_OP\\PSH_EXP_CONTR.plp",
+      "line": 187,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\CIT_INTERFACE\\PSH_CL_PRIV_INT.plp",
+      "line": 260,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\CIT_INTERFACE\\PSH_CL_PRIV_INT.plp",
+      "line": 393,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\CIT_INTERFACE\\PSH_CL_PRIV_INT2.plp",
+      "line": 261,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\CIT_INTERFACE\\PSH_CL_PRIV_INT2.plp",
+      "line": 390,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\CIT_INTERFACE\\PSH_CL_PRIV_INT4.plp",
+      "line": 209,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\CIT_INTERFACE\\PSH_CL_PRIV_INT4.plp",
+      "line": 348,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\CIT_INTERFACE\\PSH_ETO_A_CL_INT.plp",
+      "line": 68,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\CIT_INTERFACE\\PSH_ETO_CARD_INT.plp",
+      "line": 142,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\CIT_INTERFACE\\PSH_ETO_CARD_INT.plp",
+      "line": 223,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\CIT_INTERFACE\\PSH_ETO_C_CT_INT.plp",
+      "line": 117,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\CIT_INTERFACE\\PSH_ETO_C_DT_INT.plp",
+      "line": 100,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\DOC_TAX_IN\\PSH_FILE_CONTEN.plp",
+      "line": 54,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\DOC_TAX_IN\\PSH_PREPROCESS.plp",
+      "line": 134,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\GIS_ZHKH_COND\\PSH_IMPORT_INN.plp",
+      "line": 120,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\IFRS_FTOOL_GRP\\PSH_IMP_BUDV.plp",
+      "line": 152,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\IFRS_FTOOL_GRP\\PSH_IMP_BUDV.plp",
+      "line": 695,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\MARKET_PLACE\\PSH_IMP_TRDS_FRX.plp",
+      "line": 726,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\MARKET_PLACE\\PSH_IMP_TRDS_F_X.plp",
+      "line": 77,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\MARKET_PLACE\\PSH_IMP_TRDS_F_X.plp",
+      "line": 109,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\MARKET_PLACE\\PSH_IMP_TRDS_F_X.plp",
+      "line": 162,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\MARKET_PLACE\\PSH_IMP_TRDS_F_X.plp",
+      "line": 1538,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB.plp",
+      "line": 86,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB.plp",
+      "line": 135,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB.plp",
+      "line": 1041,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB_FUN.plp",
+      "line": 172,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB_FUN.plp",
+      "line": 442,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then -- важно перехватить любые ошибки разбора xml",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB_FUN.plp",
+      "line": 449,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then  -- важно перехватить любые ошибки преобразования строки в дату",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB_FUN.plp",
+      "line": 1186,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LIB_FUN.plp",
+      "line": 1203,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LOAD_DOCS.plp",
+      "line": 77,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LOAD_DOCS.plp",
+      "line": 165,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LOAD_DOCS.plp",
+      "line": 441,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then -- необходимо отловить все исключения при ошибках XML",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_CUST_DOCS\\PSH_LOAD_DOCS.plp",
+      "line": 562,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then\t-- не прерываем обработку документов",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_EVENT\\PSH_LIB.plp",
+      "line": 51,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then null;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_LIB\\PSH_GFLIB.plp",
+      "line": 635,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_LOCAL_JOB\\PSH_LIB.plp",
+      "line": 86,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when OTHERS then return;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_LOCAL_JOB\\PSH_LIB.plp",
+      "line": 358,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when OTHERS then return;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_LOCAL_JOB\\PSH_LIB.plp",
+      "line": 811,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then  exit;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_LOCAL_JOB\\PSH_LIB.plp",
+      "line": 821,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then  exit;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_LOCAL_JOB\\PSH_LIB.plp",
+      "line": 847,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then write_log('JOB_SENDMAIL','Ошибка '||j.[NAME]||' '||u.[CLIENT_REF].[NAME]); end;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_LOCAL_JOB\\PSH_LIB_V2.plp",
+      "line": 117,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_LOCAL_JOB\\PSH_LIB_V2.plp",
+      "line": 396,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_LOCAL_JOB\\PSH_LIB_V2.plp",
+      "line": 685,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then  exit;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_LOCAL_JOB\\PSH_LIB_V2.plp",
+      "line": 695,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then  exit;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_LOCAL_JOB\\PSH_LIB_V2.plp",
+      "line": 719,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then write_log('JOB_SENDMAIL','Ошибка '||j.[NAME]||' '||u.[CLIENT_REF].[NAME]); end;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_INIT_RECS.plp",
+      "line": 78,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_INIT_RECS.plp",
+      "line": 108,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when OTHERS then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_INIT_RECS.plp",
+      "line": 357,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_L.plp",
+      "line": 942,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_L.plp",
+      "line": 1088,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_L.plp",
+      "line": 1098,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_L.plp",
+      "line": 1184,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_L.plp",
+      "line": 1196,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_ON_OFF_SOFT\\PSH_L.plp",
+      "line": 1207,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_RFM_CTRL\\PSH_RFM_DAILY.plp",
+      "line": 165,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_RFM_CTRL\\PSH_RFM_GLOBAL.plp",
+      "line": 157,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_RFM_CTRL\\PSH_RFM_JOB.plp",
+      "line": 152,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\PSH_RFM_CTRL\\PSH_RFM_ONCE.plp",
+      "line": 165,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_ALL\\src\\TYPE\\STRUCTURE\\REPS_DATA\\PSH_LIB_DEFINE.plp",
+      "line": 359,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "exception when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_TEST_DS\\TestDeepSeek_full.plp",
+      "line": 1322,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "--   examples.rollback.good: exception when others then rollback; raise;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_TEST_DS\\TestDeepSeek_full.plp",
+      "line": 1337,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_TEST_DS\\TestDeepSeek_full.plp",
+      "line": 1397,
+      "rule": "v50.PROC.WHENOTHERS.п.3.5",
+      "description": "WHEN OTHERS без ROLLBACK/RAISE",
+      "code": "when others then",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_TEST_DS\\TestDeepSeek_full.plp",
+      "line": 1780,
+      "rule": "v50.PROC.NATIVEID.п.3.26",
+      "description": "NativeID для метаданных (NUMBER переменная для %id)",
+      "code": "--   Пример кода для корректировки: v_id number; v_id := rMeth%id;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_TEST_DS\\TestDeepSeek_full.plp",
+      "line": 1781,
+      "rule": "v50.PROC.NATIVEID.п.3.26",
+      "description": "NativeID для метаданных (NUMBER переменная для %id)",
+      "code": "--   Пример исправленного кода: v_id varchar2(100); v_id := rMeth%id;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_TEST_DS\\TestDeepSeek_full.plp",
+      "line": 1788,
+      "rule": "v50.PROC.NATIVEID.п.3.26",
+      "description": "NativeID для метаданных (NUMBER переменная для %id)",
+      "code": "--   code_example_bad: v_id number; v_id := rMeth%id;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_TEST_DS\\TestDeepSeek_full.plp",
+      "line": 1829,
+      "rule": "v50.PROC.NATIVEID.п.3.26",
+      "description": "NativeID для метаданных (NUMBER переменная для %id)",
+      "code": "--   code_example_bad: v_id varchar2(10); v_id := r%id;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_TEST_DS\\TestDeepSeek_full.plp",
+      "line": 1805,
+      "rule": "v50.PROC.NATIVEID.п.3.26",
+      "description": "NativeID для метаданных (NUMBER переменная для %id)",
+      "code": "v_bad_id := rMeth%id;",
+      "category": "PROC"
+    },
+    {
+      "file": "F:\\TO_DBI\\PATCH_IN\\patch_TEST_DS\\TestDeepSeek_full.plp",
+      "line": 1846,
+      "rule": "v50.PROC.NATIVEID.п.3.26",
+      "description": "NativeID для метаданных (NUMBER переменная для %id)",
+      "code": "v_bad_id := client%id;",
+      "category": "PROC"
+    }
+  ]
+}

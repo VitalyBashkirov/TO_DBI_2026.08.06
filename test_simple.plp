@@ -1,0 +1,4 @@
+--(*)PlpCheck.STYLE.BAD_PREFIX.п.4.3 - Некорректный префикс
+--OLD 2026-08-19 13:13:25
+-- dp1  integer:=0;
+v_iDp1 integer:=0;

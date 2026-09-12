@@ -14,7 +14,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from analyzer.scanner import PLPlusScanner, Issue
 from fixer.markdown_rubricator_loader_v3 import MarkdownRubricatorLoaderV3
 from analyzer.sql_parser import apply_fix as sql_apply_fix
-from fixer.variable_parser import DeterministicFixer, VariableParser
 import logging
 
 logger = logging.getLogger(__name__)
@@ -39,9 +38,9 @@ TYPE_PREFIX_MAP = {
     'date_time': 'd',
     'timestamp': 'd',
     'boolean': 'b',
-    'ref': 'r',
-    'rowtype': 'r',
-    'record': 'rec',
+    'ref': 'lr',
+    'rowtype': 'lr',
+    'record': 'lrec',
     'table': 'tb',
     'clob': 'v',
     'blob': 'v',
@@ -1231,33 +1230,234 @@ class PLPlusFixer:
         Исправление одного файла.
         Возвращает кортеж (изменён_ли_файл, количество_исправлений).
         """
-        # 1. Детерминированные правки (переименование, удаление неиспользуемых)
-        det_fixer = DeterministicFixer()
-        result = det_fixer.fix_file(str(file_path))
+        if not issues:
+            return False, 0
         
-        # 2. Если есть изменения — обновляем статистику
-        if result.get('modified', False):
-            for change in result.get('changes', []):
-                if 'old_name' in change:
-                    self.stats['PlpCheck.STYLE.PREFIX_TYPE.п.4.4'] = self.stats.get('PlpCheck.STYLE.PREFIX_TYPE.п.4.4', 0) + change.get('count', 0)
-                elif 'deleted' in change:
-                    self.stats['PlpCheck.STYLE.NOT_MENTIONED.п.4.8'] = self.stats.get('PlpCheck.STYLE.NOT_MENTIONED.п.4.8', 0) + change.get('count', 0)
+        # Сброс состояния блочного комментария в начале нового файла
+        self.in_block_comment = False
+        self.skipped_in_comment = 0
+        self.skipped_in_string = 0
+        self.skipped_details = []
+        
+        # Чтение файла с автоматическим определением кодировки
+        try:
+            from utils.encoding_utils import read_file_with_encoding
+            content, used_encoding = read_file_with_encoding(file_path)
+            lines = content.splitlines(keepends=True)
+        except Exception as e:
+            # Fallback: пробуем UTF-8
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+        
+        # Группировка проблем по строкам
+        issues_by_line = {}
+        for issue in issues:
+            line_num = issue.line_number
+            if line_num not in issues_by_line:
+                issues_by_line[line_num] = []
+            issues_by_line[line_num].append(issue)
+        
+        new_lines = []
+        modified_count = 0
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # ========== ПРЕДОБРАБОТКА: Обработка функций ==========
+        # Ищем функции и обрабатываем их целиком
+        function_start_lines = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if re.match(r'\s*function\s+\w+\s*\(', stripped, re.IGNORECASE):
+                function_start_lines.append(i)
+        
+        # Собираем mapping параметров для замены в теле
+        param_mapping = {}  # mapping: old_name -> new_name for each function
+        
+        # ========== ОСНОВНОЙ ЦИКЛ ==========
+        for line_num, line in enumerate(lines, 1):
+            # Пропускаем строки заголовков функций - они обрабатываются отдельно
+            if line_num - 1 in function_start_lines:
+                new_lines.append(line)
+                self._update_block_comment_state(line)
+                continue
             
-            # Добавляем в changelog
+            if line_num in issues_by_line:
+                # Есть проблемы в этой строке - обрабатываем ВСЕ проблемы
+                line_to_process = line
+                line_modified = False
+                
+                for issue in issues_by_line[line_num]:
+                    if issue.issue_type not in self.FIXES:
+                        continue
+                    
+                    # Сохраняем оригинальную строку для использования в обоих блоках
+                    original = line_to_process.strip()
+                    
+                    # Применяем исправление с учётом комментариев и строк
+                    fixed_line, was_modified = self.apply_fix(line_to_process, issue, self.config.get('logging', {}).get('level', 'Минимальный'), self.fix_only_found)
+                    
+                    if was_modified:
+                        line_modified = True
+                        line_to_process = fixed_line
+                        modified_count += 1
+                        # Сохраняем детали исправления для отчёта
+                        self.fixed_issues.append({
+                            'file': str(file_path),
+                            'line_num': line_num,
+                            'issue_type': issue.issue_type,
+                            'original_code': original,
+                            'fixed_code': line_to_process.rstrip(),
+                            'timestamp': timestamp
+                        })
+                
+                new_lines.append(line_to_process)
+                self._update_block_comment_state(line_to_process)
+                continue
+            else:
+                # Нет проблем, оставляем как есть, но обновляем состояние блочного комментария
+                new_lines.append(line)
+                self._update_block_comment_state(line)
+        
+        # Проверяем, были ли реальные изменения
+        if modified_count == 0 and not function_start_lines:
+            return False, 0
+        
+        # ========== ПОСТ-ОБРАБОТКА: Функции ==========
+        # Применяем обработку функций ТОЛЬКО если они ещё не были обработаны
+        functions_modified = 0
+        processed_funcs = set()  # Отслеживаем обработанные функции
+        index_offset = 0  # Смещение индексов из-за добавления строк
+        
+        for func_start_orig in function_start_lines:
+            # Защита от бесконечного цикла
+            if functions_modified > len(function_start_lines) * 2:  # Ограничение
+                break
+            
+            func_start = func_start_orig + index_offset
+            
+            if func_start in processed_funcs:
+                continue
+            
+            # Проверяем, была ли эта строка уже обработана (есть v_vResult или p_bV1)
+            if func_start < len(new_lines):
+                if 'v_vResult' in new_lines[func_start] or 'p_bV1' in new_lines[func_start]:
+                    processed_funcs.add(func_start)
+                    continue  # Уже обработано
+            
+            # Сохраняем старые имена параметров ДО обработки
+            # Парсим заголовок функции до преобразования
+            header_before = ''.join(new_lines[func_start:func_start+10])  # Берём первые 10 строк
+            param_match_before = re.search(r'\((.+?)\)\s+return\s+(\w+(?:\(\d+\))?)', header_before, re.IGNORECASE)
+            old_param_names = []
+            if param_match_before:
+                params_str_before = param_match_before.group(1)
+                params_before = [p.strip() for p in params_str_before.split(',')]
+                for param in params_before:
+                    parts = param.split()
+                    if len(parts) >= 2:
+                        old_param_names.append(parts[0])
+            
+            # Запоминаем длину ДО обработки
+            len_before = len(new_lines)
+            
+            # Обрабатываем заголовок функции (из new_lines)
+            new_lines, next_idx = _process_function_declaration(new_lines, func_start)
+            functions_modified += 1
+            processed_funcs.add(func_start)
+            
+            # Обновляем смещение для следующих функций
+            index_offset += len(new_lines) - len_before
+            
+            # Собираем mapping параметров для замены в теле
+            header_lines = new_lines[func_start:next_idx]
+            header_text = ''.join(header_lines)
+            # Pattern: (params) return type[(size)]
+            param_match = re.search(r'\((.+?)\)\s+return\s+(\w+(?:\(\d+\))?)', header_text, re.IGNORECASE)
+            if param_match and len(old_param_names) > 0:
+                params_str = param_match.group(1)
+                params = [p.strip() for p in params_str.split(',')]
+                for idx, param in enumerate(params):
+                    parts = param.split()
+                    if len(parts) >= 2 and idx < len(old_param_names):
+                        old_name = old_param_names[idx]
+                        new_name = parts[0]  # Уже преобразовано
+                        param_mapping[old_name] = new_name
+        
+        # Заменяем старые имена параметров на новые в телах функций
+        for i, line in enumerate(new_lines):
+            for old_name, new_name in param_mapping.items():
+                # Заменяем whole word
+                line = re.sub(rf'\b{re.escape(old_name)}\b', new_name, line)
+            new_lines[i] = line
+        
+        modified_count += functions_modified
+        
+        # ============================================================
+        # ДЕТЕРМИНИРОВАННЫЙ СЛОЙ: Переименование переменных и обновление ссылок
+        # ============================================================
+        # Применяем детерминированные правила:
+        # 1. Строим карту переименований по объявлениям
+        # 2. Обновляем все ссылки на переименованные переменные
+        # 3. Удаляем неиспользуемые переменные (NOT_MENTIONED.п.4.8)
+        # 4. Валидируем результат
+        
+        rename_map = self._build_rename_map(new_lines)
+        deterministic_changes = 0
+        
+        if rename_map:
+            # Логируем переименования
+            old_names = list(rename_map.keys())
+            
+            # Обновляем ссылки на переименованные переменные
+            new_lines = self._update_references(new_lines, rename_map)
+            deterministic_changes += len(rename_map)
+            
+            # Удаляем неиспользуемые переменные
+            before_len = len(new_lines)
+            new_lines = self._remove_unused_variables(new_lines, rename_map)
+            deterministic_changes += before_len - len(new_lines)
+            
+            # Валидация: проверяем, что старые имена не остались
+            warnings = self._validate_fix(new_lines, old_names)
+            if warnings:
+                self._log_warnings(warnings, file_path)
+        
+        # Детерминированное исправление обращений к методам (WRONG_METHOD.п.4.14)
+        new_lines = self._fix_wrong_methods(new_lines)
+        
+        # Детерминированное исправление синтаксиса класса (WRONG_CLASS.п.4.12)
+        for i, line in enumerate(new_lines):
+            if re.match(r'^\s*class\s+(\w+)\s*;', line):
+                class_name = re.match(r'^\s*class\s+(\w+)\s*;', line).group(1)
+                new_lines[i] = line.replace(f'class {class_name};', f'class ::[{class_name}];')
+                deterministic_changes += 1
+        
+        modified_count += deterministic_changes
+        
+        # Записываем изменения только если были модификации (в UTF-8)
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.writelines(new_lines)
+        
+        # Статистика
+        fixed_types = set(issue.issue_type for issue in issues if any(
+            self._find_code_positions(lines[issue.line_number-1] if issue.line_number <= len(lines) else '', 
+                                       self.FIXES.get(issue.issue_type, [])[0][0] if self.FIXES.get(issue.issue_type) else '',
+                                       0 if self.FIXES.get(issue.issue_type) and len(self.FIXES[issue.issue_type]) > 0 else 0)
+        ))
+        
+        for issue_type in fixed_types:
+            if issue_type in self.FIXES:
+                self.stats[issue_type] = self.stats.get(issue_type, 0) + 1
+        
+        if modified_count > 0:
             self.changes_log.append({
                 'file': str(file_path),
                 'iteration': self.iteration,
                 'timestamp': datetime.now().isoformat(),
-                'issues_fixed': len(result.get('changes', [])),
-                'types': ['PlpCheck.STYLE.PREFIX_TYPE.п.4.4', 'PlpCheck.STYLE.NOT_MENTIONED.п.4.8']
+                'issues_fixed': modified_count,
+                'types': list(fixed_types) if fixed_types else [issues[0].issue_type]
             })
-            
-            return True, len(result.get('changes', []))
         
-        # 3. Пока KODA не подключен — просто возвращаем результат
-        # Позже здесь будет вызов KODA для сложных случаев
-        
-        return False, 0
+        return True, modified_count
     
     def copy_directory_structure(self, source_dir: Path, results_dir: Path, log_callback=None):
         """Копирование структуры каталогов и файлов (кроме .plp)"""
@@ -1844,6 +2044,16 @@ def generate_changelog(issues: List, changes: List[dict], filename: str = '') ->
     
     return changelog
 
+def fix_file(self, file_path: str, issues: List) -> Dict:
+    """Основной метод исправления файла"""
+    # 1. Детерминированные правки (переименование, удаление неиспользуемых)
+    det_fixer = DeterministicFixer()
+    result = det_fixer.fix_file(file_path)
+    
+    # 2. Пока KODA не подключен — просто возвращаем результат
+    # Позже здесь будет вызов KODA для сложных случаев
+    
+    return result
 
 if __name__ == '__main__':
     main()

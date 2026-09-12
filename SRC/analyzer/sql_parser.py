@@ -29,7 +29,7 @@ def load_config() -> Dict[str, Any]:
     if _CONFIG_CACHE is not None:
         return _CONFIG_CACHE
     
-    config_path = Path(__file__).parent.parent.parent / 'DATA' / 'Рубрикатор' / '5.RUBRICATOR_PARSER_SQL.json'
+    config_path = Path(__file__).parent.parent.parent / 'DATA' / 'Рубрикатор v5' / '5.RUBRICATOR_PARSER_SQL v5.json'
     
     if not config_path.exists():
         logger.warning(f"[PARSER] Конфигурация не найдена: {config_path}")

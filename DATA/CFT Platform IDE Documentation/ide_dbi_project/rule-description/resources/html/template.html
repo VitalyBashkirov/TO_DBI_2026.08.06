@@ -1,0 +1,71 @@
+<html>
+	<head>
+		<meta charset="UTF-8">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<link rel="stylesheet" href="%s">  <!-- github-markdown.css -->
+		<link rel="stylesheet" href="%s">  <!-- prism.css -->
+		<link rel="stylesheet" href="%s">  <!-- prism-ghcolors.css -->
+		<link rel="stylesheet" href="%s">  <!-- plpcheck-styles.css -->
+		<style>%s</style> 
+	</head>
+	<body class="markdown-body language-plsql">
+		
+		<!-- header -->
+		<div class="top-bar">
+			<div class="top-bar-brand">
+				<h1>PLPCheck</h1>
+				<span class="app-version">%s</span>
+			</div>
+			<div class="top-bar-main">
+				<div class="search-box">
+					<div class="search-icon"></div>
+					<input type="text" id="searchInput" class="search-input" placeholder="Поиск">
+				</div>
+				<div class="controls">
+					<button class="btn" onclick="toggleAll(true)">Раскрыть все</button>
+					<button class="btn" onclick="toggleAll(false)">Скрыть все</button>
+				</div>
+				<div class="stats" id="statsLabel">Загрузка...</div>
+			</div>
+		</div>
+		
+		<div class="page-wrapper">
+			<aside class="sidebar">
+				<nav class="sidebar-nav" id="sidebarNav">
+					<div id="filter-tags-container">
+						<h3>
+							<span>Теги</span>
+							<button class="btn btn-reset-filters" data-target="tags">Сбросить</button>
+						</h3>
+						<div class="filter-group" id="filter-group-tags">
+							<span style="color: var(--color-fg-muted); font-size: 14px;">Загрузка...</span>
+						</div>
+					</div>
+					<div id="filter-restictions-container">
+						<h3>
+							<span>Ограничения</span>
+							<button class="btn btn-reset-filters" data-target="restrictions">Сбросить</button>
+						</h3>
+						<div class="filter-group" id="filter-group-restrictions">
+							<!-- Будут вставлены JS -->
+						</div>
+					</div>
+				</nav>
+			</aside>
+			
+			<main class="main-content">
+				<div class="container">
+					<!-- content -->
+					%s 
+				</div>
+			</main>
+		</div>
+		
+		<!-- prism.js -->
+		<script src="%s"></script>  
+		
+		<!-- plpcheck-script.js -->
+		<script src="%s"></script> 
+	</body>
+</html>

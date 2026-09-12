@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Модуль работы с рубрикатором 4.RUBRICATOR_PROMPTS.json
-Расширенные инструкции для поиска и исправления проблемных конструкций PL/Plus
+Модуль работы с рубрикатором 4.RUBRICATOR_PROMPT v5.json
+Только единый объединенный файл (v53, тдс20240828, тклоик20240828, PlpCheck)
 """
 
 import json
@@ -12,7 +12,7 @@ import re
 
 
 class RubricatorPrompts:
-    """Класс для работы с файлом 4.RUBRICATOR_PROMPTS.json"""
+    """Класс для работы с единым объединенным файлом 4.RUBRICATOR_PROMPT v5.json"""
     
     def __init__(self, rubricator_dir: Path):
         """
@@ -22,13 +22,13 @@ class RubricatorPrompts:
             rubricator_dir: Путь к каталогу рубрикатора
         """
         self.rubricator_dir = rubricator_dir
-        self.prompts_file = rubricator_dir / '4.RUBRICATOR_PROMPTS.json'
+        self.prompts_file = rubricator_dir / '4.RUBRICATOR_PROMPT v5.json'
         self.data: Dict[str, Any] = {}
         self.loaded = False
     
     def load(self) -> bool:
         """
-        Загрузка данных из файла 4.RUBRICATOR_PROMPTS.json
+        Загрузка данных из единого файла 4.RUBRICATOR_PROMPT v5.json
         
         Returns:
             True если загрузка успешна, False иначе
@@ -42,7 +42,8 @@ class RubricatorPrompts:
                 self.data = json.load(f)
             
             self.loaded = True
-            print(f"[INFO] Рубрикатор 4.RUBRICATOR_PROMPTS.json загружен (версия {self.data.get('version', 'N/A')})")
+            rules_count = len(self.data.get('rules', {}))
+            print(f"[INFO] Рубрикатор 4.RUBRICATOR_PROMPT v5.json загружен (версия {self.data.get('version', 'N/A')}, правил: {rules_count})")
             return True
             
         except Exception as e:
@@ -55,7 +56,7 @@ class RubricatorPrompts:
         Получение правила по коду
         
         Args:
-            code: Код правила (например, 'v50.SQL.OUTERJOIN.п.1.1')
+            code: Код правила (например, 'тдс20240828.TRANS_ABORTED.стр.29')
         
         Returns:
             Словарь с правилом или None если не найдено
@@ -80,7 +81,6 @@ class RubricatorPrompts:
         if not rule:
             return False
         
-        # Проверяем наличие поля disabled
         return not rule.get('disabled', False)
     
     def get_search_prompt(self, code: str) -> Optional[str]:
@@ -129,7 +129,15 @@ class RubricatorPrompts:
         if not rule:
             return None
         
-        return rule.get('test_generation_prompt')
+        # Если нет прямого поля, генерируем на основе описания
+        prompt = rule.get('test_generation_prompt')
+        if prompt:
+            return prompt
+        
+        if rule.get('documentation_text'):
+            return f"Сгенерировать тестовый PLPlus файл для проверки правила '{code}' с проблемными конструкциями. Описание: {rule['documentation_text'][:200]}"
+        
+        return None
     
     def get_regex_patterns(self, code: str) -> Optional[Dict[str, List[Dict[str, str]]]]:
         """
@@ -161,7 +169,21 @@ class RubricatorPrompts:
         if not rule:
             return None
         
-        return rule.get('examples')
+        # Если есть стандартные examples, используем их
+        examples = rule.get('examples')
+        if examples:
+            return examples
+        
+        # Если нет, создаем структуру из code_example_bad/good
+        if rule.get('code_example_bad') or rule.get('code_example_good'):
+            return {
+                'simple': {
+                    'bad': rule.get('code_example_bad', ''),
+                    'good': rule.get('code_example_good', '')
+                }
+            }
+        
+        return None
     
     def get_fix_instruction(self, code: str) -> Optional[str]:
         """
@@ -447,7 +469,7 @@ class RubricatorPrompts:
 if __name__ == '__main__':
     from pathlib import Path
     
-    rubricator_dir = Path(__file__).parent.parent / 'DATA' / 'Рубрикатор'
+    rubricator_dir = Path(__file__).parent.parent / 'DATA' / 'Рубрикатор v5'
     prompts = RubricatorPrompts(rubricator_dir)
     
     if prompts.load():
@@ -456,7 +478,7 @@ if __name__ == '__main__':
             print(f"  {rule['code']}: {rule['description']}")
         
         # Проверка конкретного правила
-        code = 'v50.SQL.OUTERJOIN.п.1.1'
+        code = 'тдс20240828.TRANS_ABORTED.стр.29'
         rule = prompts.get_rule(code)
         if rule:
             print(f"\nПравило {code}:")

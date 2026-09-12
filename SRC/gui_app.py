@@ -60,13 +60,19 @@ class DBIMigrationApp:
         self.preserve_structure_var = tk.BooleanVar(value=True)
         self.scan_recursive_var = tk.BooleanVar(value=True)
         
-        # Состояние рубрикатора
+# Состояние рубрикатора
         self.rubricator_loaded = False
-        self.rubricator_dir = Path(__file__).parent.parent / 'DATA' / 'Рубрикатор'
-        self.rubricator_files = {}  # Код файла: Полное имя из 1.RUBRICATOR_FILES.md
+        self.rubricator_dir = Path(__file__).parent.parent / 'DATA' / 'Рубрикатор v5'
+        self.rubricator_files = {}  # Код файла: Полное имя из 1.RUBRICATOR_FILES v5.md
         
-        # Новый рубрикатор 4.RUBRICATOR_PROMPTS.json
+        # Новый рубрикатор 4.RUBRICATOR_PROMPT v5.json
         self.rubricator_prompts: Optional[RubricatorPrompts] = None
+        
+        # Флаг PlpCheck - включение/выключение правил стиля кода
+        self.plpcheck_enabled_var = tk.BooleanVar(value=False)
+        
+        # Флаг чистого вывода (без маркеров изменений)
+        self.clean_output_var = tk.BooleanVar(value=False)
         
         # Выбранные правила
         self.selected_rules = {}
@@ -75,8 +81,8 @@ class DBIMigrationApp:
         # Сохранённые правила из предыдущего запуска
         self._saved_rules = []
         
-        # Сохранённые приоритеты из предыдущего запуска
-        self._saved_priorities = []
+        # DS 018: выбранные приоритеты HIGH/MEDIUM/LOW (заполняется из чекбоксов бокса 3)
+        self._selected_priorities = []
         
         # Результаты сканирования (для кнопки "Показать SQL для ручного исправления")
         self.scan_results = None  # Результаты последнего сканирования
@@ -112,19 +118,96 @@ class DBIMigrationApp:
         # Заполняем рубрикатор и применяем сохранённые правила
         self._populate_rules_tree()
         
-        # Применить сохранённые правила, если они есть
-        if self._saved_rules:
-            self.log(f"Восстановлены сохранённые правила: {', '.join(self._saved_rules)}", 'info')
-            # Устанавливаем чекбоксы для сохранённых правил
-            for code in self._saved_rules:
-                if code in self.rule_checkboxes:
-                    item_id, var = self.rule_checkboxes[code]
-                    var.set(True)
-                    self.rules_tree.set(item_id, 'selected', '✓')
-            self._saved_rules = []  # Сброс после применения
+        # Состояние чекбоксов уже установлено из 1.RUBRICATOR_FILES v5.md (признак +/−)
+        # Никаких дополнительных правил из settings.json не загружаем
+        
+        # DS 029: вывод информации о загруженных рубрикаторах в Журнал выполнения
+        self._log_rubricator_status()
         
         # Привязка событий для поля ввода
         self._bind_entry_events()
+    
+    def _log_rubricator_status(self):
+        """Вывод информации о загруженных рубрикаторах в Журнал выполнения (DS 029)"""
+        self.log("=" * 60, 'info')
+        self.log("ЗАГРУЖЕНЫ РУБРИКАТОРЫ:", 'highlight')
+        self.log("=" * 60, 'info')
+        
+        total_rules = 0
+        for code, var in self.selected_rules.items():
+            status = "включён" if var.get() else "отключён"
+            name = self.rubricator_files.get(code, code)
+            self.log(f"  [{'+' if var.get() else '-'}] {code} ({status})", 'info')
+            # Подсчёт правил для каждого файла
+            if self.rubricator_prompts and self.rubricator_prompts.loaded:
+                rules = [r for r in self.rubricator_prompts.get_all_rules() if r['code'].lower().startswith(code.lower())]
+                if rules:
+                    total_rules += len(rules)
+                    self.log(f"      Правил: {len(rules)}", 'debug')
+        
+        self.log("=" * 60, 'info')
+        if self.rubricator_prompts and self.rubricator_prompts.loaded:
+            self.log(f"Всего правил: {total_rules}", 'info')
+        self.log("=" * 60, 'info')
+        
+        # DS 030: информация о фильтрах по приоритету
+        selected_priorities = []
+        if getattr(self, 'priority_high_var', None) and self.priority_high_var.get():
+            selected_priorities.append('HIGH')
+        if getattr(self, 'priority_medium_var', None) and self.priority_medium_var.get():
+            selected_priorities.append('MEDIUM')
+        if getattr(self, 'priority_low_var', None) and self.priority_low_var.get():
+            selected_priorities.append('LOW')
+        
+        if selected_priorities:
+            self.log("=" * 60, 'info')
+            self.log("ФИЛЬТРЫ ПО ПРИОРИТЕТУ:", 'highlight')
+            self.log("=" * 60, 'info')
+            for prio in selected_priorities:
+                self.log(f"  ★ {prio}", 'highlight')
+            
+            # Показываем количество правил по каждому приоритету
+            try:
+                from rubricator_priority_mapping import PRIORITY_RULES
+                # DS 030: в PRIORITY_RULES ключи - 'Приоритет 1/2/3', а не 'HIGH/MEDIUM/LOW'
+                prio_key_map = {'HIGH': 'Приоритет 1', 'MEDIUM': 'Приоритет 2', 'LOW': 'Приоритет 3'}
+                for prio in selected_priorities:
+                    prio_key = prio_key_map.get(prio, prio)
+                    if prio_key in PRIORITY_RULES:
+                        count = len(PRIORITY_RULES[prio_key])
+                        self.log(f"     Правил в {prio}: {count}", 'info')
+            except ImportError:
+                pass
+            
+            self.log("=" * 60, 'info')
+        else:
+            self.log("=" * 60, 'info')
+            self.log("ФИЛЬТРЫ ПО ПРИОРИТЕТУ: не выбраны (используются все правила)", 'info')
+            self.log("=" * 60, 'info')
+    
+    def display_log_line(self, line: str):
+        """Вывод строки PlpCheck-отчёта с цветовой подсветкой (DS 030).
+        
+        Формат: КЛАСС.МЕТОД.СЕКЦИЯ:СТРОКА ТИП: ОПИСАНИЕ | ПЛАН: {план}
+        Подсветка: локация (синий), номер строки (зелёный), тип (оранжевый),
+        описание (чёрный), ПЛАН (красный жирный).
+        """
+        import re
+        match = re.match(
+            r'^([\w.]+):(\d+)\s+([\w.]+):\s(.*?)\s\|\sПЛАН:\s(.*)$', line
+        )
+        if not match:
+            self.log(line, 'info')
+            return
+        
+        location, line_number, issue_type, description, plan = match.groups()
+        self.log_with_tags([
+            (f"{location}:", 'class_method'),
+            (f"{line_number} ", 'line_number'),
+            (f"{issue_type}: ", 'issue_type'),
+            (f"{description} | ", 'description'),
+            (f"ПЛАН: {plan}", 'plan'),
+        ])
     
     def _create_menu(self):
         """Создание главного меню"""
@@ -200,20 +283,33 @@ class DBIMigrationApp:
         
         # Строка 0: Исходный каталог
         ttk.Label(paths_frame, text="Исходный каталог:").grid(row=0, column=0, sticky=tk.W, padx=(0,1))
-        self.source_entry = ttk.Entry(paths_frame, textvariable=self.source_dir_var, width=50)
+        self.source_entry = ttk.Entry(paths_frame, textvariable=self.source_dir_var, width=50, style='Valid.TEntry')
         self.source_entry.grid(row=0, column=1, padx=0, sticky=tk.EW)
         ttk.Button(paths_frame, text="...", command=self.browse_source, width=3).grid(row=0, column=2, padx=(0,2))
         
         # Строка 0: Каталог результатов
         ttk.Label(paths_frame, text="Каталог результатов:").grid(row=0, column=3, sticky=tk.W, padx=(2,1))
-        self.result_entry = ttk.Entry(paths_frame, textvariable=self.result_dir_var, width=50)
+        self.result_entry = ttk.Entry(paths_frame, textvariable=self.result_dir_var, width=50, style='Valid.TEntry')
         self.result_entry.grid(row=0, column=4, padx=0, sticky=tk.EW)
         ttk.Button(paths_frame, text="...", command=self.browse_result, width=3).grid(row=0, column=5, padx=(0,0))
+        
+        # Стили цветовой индикации полей ИК/РК (DS 008)
+        entry_style = ttk.Style()
+        entry_style.configure('Valid.TEntry', fieldbackground='#d4edda')    # зелёный — доступен
+        entry_style.configure('Warning.TEntry', fieldbackground='#fff3cd')  # жёлтый — будет создан
+        entry_style.configure('Invalid.TEntry', fieldbackground='#f8d7da')  # красный — ошибка
         
         # Строка 1: Шаблон + Сканировать подкаталоги
         ttk.Label(paths_frame, text="Шаблон:").grid(row=1, column=0, sticky=tk.W, padx=(0,1), pady=2)
         ttk.Entry(paths_frame, textvariable=self.file_pattern_var, width=50).grid(row=1, column=1, padx=0, sticky=tk.W)
         ttk.Checkbutton(paths_frame, text="Рекурсивно", variable=self.scan_recursive_var).grid(row=1, column=2, padx=(2,0), sticky=tk.W)
+        
+        # Строка 2: Метки статуса каталогов (DS 009)
+        self.source_status_label = ttk.Label(paths_frame, text="", font=("Segoe UI", 9))
+        self.source_status_label.grid(row=2, column=1, sticky=tk.W)
+        
+        self.result_status_label = ttk.Label(paths_frame, text="", font=("Segoe UI", 9))
+        self.result_status_label.grid(row=2, column=4, sticky=tk.W)
         
         paths_frame.grid_columnconfigure(1, weight=1)
         paths_frame.grid_columnconfigure(4, weight=1)
@@ -233,7 +329,7 @@ class DBIMigrationApp:
                                        yscrollcommand=tree_scroll_y.set, 
                                        xscrollcommand=tree_scroll_x.set,
                                        show='headings',
-                                       height=3)
+                                       height=4)
         
         tree_scroll_y.config(command=self.rules_tree.yview)
         tree_scroll_x.config(command=self.rules_tree.xview)
@@ -254,20 +350,7 @@ class DBIMigrationApp:
         tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
         self.rules_tree.pack(side=tk.LEFT, fill=tk.Y, padx=5)
         
-        # Панель приоритетов справа от рубрикатора
-        priority_frame = ttk.Frame(rules_frame)
-        priority_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
-        
-        self.priority_vars = {}
-        priorities = ['Приоритет 1', 'Приоритет 2', 'Приоритет 3', 'Приоритет 4']
-        for i, prio in enumerate(priorities):
-            var = tk.BooleanVar(value=False)
-            self.priority_vars[prio] = var
-            ttk.Checkbutton(priority_frame, text=prio, variable=var, 
-                          command=self._on_priority_change).grid(row=i, column=0, pady=2, sticky=tk.W)
-        
-        # Изначально фильтр по приоритетам не активен
-        self.priority_filter_active = False
+        # DS 018: панель приоритетов удалена из бокса 2 (перенесена в бокс 3 как HIGH/MEDIUM/LOW)
         
         # Заполняем Treeview (позже, после создания кнопок)
         # self._populate_rules_tree() будет вызван после инициализации кнопок
@@ -288,10 +371,45 @@ class DBIMigrationApp:
                     values=["Минимальный", "Подробный"], 
                     state="readonly", width=15).grid(row=0, column=3, sticky=tk.W)
         
-        # Чекбокс для режима вывода при исправлении
+# Чекбокс для режима вывода при исправлении
         self.fix_only_found_var = tk.BooleanVar(value=False)
+        # Стиль для зелёного текста чекбокса
+        style = ttk.Style()
+        style.configure('Green.TCheckbutton', foreground='green')
         ttk.Checkbutton(options_frame, text='"Исправить код" — только пометить найденные теги "--NEW YYYY-MM-DD"', 
-                       variable=self.fix_only_found_var).grid(row=1, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
+                        variable=self.fix_only_found_var, style='Green.TCheckbutton').grid(row=1, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
+        
+# Чекбокс PlpCheck — включение/выключение правил стиля кода
+        ttk.Checkbutton(options_frame, text="Добавлять PlpCheck-правила (стиль кода)", 
+                        variable=self.plpcheck_enabled_var).grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
+        # Синхронизация флага PlpCheck с чекбоксом в дереве правил
+        self.plpcheck_enabled_var.trace_add('write', lambda *args: self._sync_plpcheck_checkbox())
+        
+        # DS 018: чекбоксы приоритетов HIGH/MEDIUM/LOW (фильтр правил)
+        priority_frame = ttk.Frame(options_frame)
+        priority_frame.grid(row=4, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
+        
+        ttk.Label(priority_frame, text="Фильтр по приоритету:", font=('Segoe UI', 9, 'bold')).pack(side=tk.LEFT, padx=(0,10))
+        
+        self.priority_high_var = tk.BooleanVar(value=False)
+        self.priority_medium_var = tk.BooleanVar(value=False)
+        self.priority_low_var = tk.BooleanVar(value=False)
+        
+        ttk.Checkbutton(priority_frame, text="HIGH", variable=self.priority_high_var,
+                        command=self._on_priority_filter_change).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(priority_frame, text="MEDIUM", variable=self.priority_medium_var,
+                        command=self._on_priority_filter_change).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(priority_frame, text="LOW", variable=self.priority_low_var,
+                        command=self._on_priority_filter_change).pack(side=tk.LEFT, padx=5)
+        
+        # Метка для отображения выбранных приоритетов
+        self.priority_status_label = ttk.Label(priority_frame, text="Все приоритеты", font=('Segoe UI', 9, 'italic'), foreground='gray')
+        self.priority_status_label.pack(side=tk.LEFT, padx=(10,0))
+        
+        # Чекбокс чистого вывода (без маркеров изменений)
+        ttk.Checkbutton(options_frame, 
+                       text="Верни только исправленный код без пояснений и маркеров изменений.\nВсе пояснения, изменения, удаления журналируй", 
+                       variable=self.clean_output_var).grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
         
         # Чекбокс архивирования
         self.archive_result_var = tk.BooleanVar(value=True)
@@ -311,7 +429,11 @@ class DBIMigrationApp:
         self.btn_scan = ttk.Button(control_frame, text="Сканировать", command=self.start_scan, width=20)
         self.btn_scan.pack(side=tk.LEFT, padx=3)
         
-        self.btn_fix = ttk.Button(control_frame, text="Исправить код", command=self.start_fix, width=20)
+        # Стиль для кнопки "Исправить код" — жирный шрифт
+        style = ttk.Style()
+        style.configure('Fix.TButton', font=('Segoe UI', 9, 'bold'))
+        
+        self.btn_fix = ttk.Button(control_frame, text="Исправить код", command=self.start_fix, width=20, style='Fix.TButton')
         self.btn_fix.pack(side=tk.LEFT, padx=3)
         
         self.btn_rubricator = ttk.Button(control_frame, text="Открыть рубрикатор", command=self.open_rubricator, width=25)
@@ -324,22 +446,37 @@ class DBIMigrationApp:
         self.btn_show_sql.pack(side=tk.LEFT, padx=3)
         self.btn_show_sql.state(['disabled'])
         
-        # Журнал выполнения
-        journal_frame = ttk.LabelFrame(scrollable_frame, text="Журнал выполнения", padding="5")
-        journal_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=3)
+        self.btn_send_koda = ttk.Button(control_frame, text="Отправить в Koda", command=self.send_to_koda, width=20)
+        self.btn_send_koda.pack(side=tk.LEFT, padx=3)
+        self.btn_send_koda.state(['disabled'])
         
-        # Журнал с прокруткой (ширина как у грида рубрикатора)
+        self.btn_receive_koda = ttk.Button(control_frame, text="Получить ответ", command=self.receive_from_koda, width=20)
+        self.btn_receive_koda.pack(side=tk.LEFT, padx=3)
+        self.btn_receive_koda.state(['disabled'])
+        
+        # DS 010: кнопка просмотра истории изменений РК
+        self.btn_result_history = ttk.Button(control_frame, text="История РК", command=self.show_result_dir_history, width=15)
+        self.btn_result_history.pack(side=tk.LEFT, padx=3)
+        
+        # Журнал выполнения — уменьшенный размер
+        journal_frame = ttk.LabelFrame(scrollable_frame, text="Журнал выполнения", padding="5")
+        journal_frame.pack(fill=tk.BOTH, expand=False, padx=5, pady=3)
+        
+        # Журнал с прокруткой (вертикальная + горизонтальная)
         log_scroll_y = ttk.Scrollbar(journal_frame, orient=tk.VERTICAL)
+        log_scroll_x = ttk.Scrollbar(journal_frame, orient=tk.HORIZONTAL)
         
         self.log_text = scrolledtext.ScrolledText(journal_frame, 
                                                   wrap=tk.NONE,
                                                   font=('Consolas', 9),
                                                   yscrollcommand=log_scroll_y.set,
-                                                  height=11, width=58)
+                                                  xscrollcommand=log_scroll_x.set,
+                                                  height=8, width=58)
         
         log_scroll_y.config(command=self.log_text.yview)
+        log_scroll_x.config(command=self.log_text.xview)
         
-# Кнопки журнала — ПОД полем (pack раньше, чтобы были внизу секции)
+        # Кнопки журнала — ПОД полем (pack раньше, чтобы были внизу секции)
         journal_buttons = ttk.Frame(journal_frame)
         journal_buttons.pack(side=tk.BOTTOM, fill=tk.X, pady=(3, 0))
         
@@ -348,6 +485,7 @@ class DBIMigrationApp:
         
         # Скроллы и журнал
         log_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        log_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         # Индикатор выполнения — процент в той же строке (под журналом)
@@ -367,6 +505,30 @@ class DBIMigrationApp:
         self.log_text.tag_configure('debug', foreground='gray')
         self.log_text.tag_configure('highlight', foreground='green', font=('Consolas', 9, 'bold'))
         self.log_text.tag_configure('pending', foreground='orange', font=('Consolas', 9, 'bold'))
+        # DS 030: теги цветовой подсветки строк PlpCheck-отчёта
+        self.log_text.tag_configure('class_method', foreground='#0066cc')
+        self.log_text.tag_configure('line_number', foreground='#008000', font=('Consolas', 9, 'bold'))
+        self.log_text.tag_configure('issue_type', foreground='#cc6600')
+        self.log_text.tag_configure('description', foreground='#000000')
+        self.log_text.tag_configure('plan', foreground='#cc0000', font=('Consolas', 9, 'bold'))
+        
+        # Вкладка журнала изменений
+        self.changelog_frame = ttk.LabelFrame(scrollable_frame, text="Журнал изменений", padding="5")
+        self.changelog_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=3)
+        
+        self.changelog_text = scrolledtext.ScrolledText(self.changelog_frame,
+                                                        wrap=tk.WORD,
+                                                        font=('Consolas', 9),
+                                                        height=10,
+                                                        state='disabled')
+        self.changelog_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Кнопки журнала изменений
+        changelog_buttons = ttk.Frame(self.changelog_frame)
+        changelog_buttons.pack(fill=tk.X, pady=(5, 0))
+        
+        ttk.Button(changelog_buttons, text="Очистить журнал", command=self.clear_changelog).pack(side=tk.LEFT, padx=3)
+        ttk.Button(changelog_buttons, text="Сохранить журнал в файл", command=self.save_changelog_to_file).pack(side=tk.LEFT, padx=3)
         
         # Логируем загруженные файлы рубрикатора (после создания log_text)
         if self.rubricator_files:
@@ -432,7 +594,7 @@ class DBIMigrationApp:
     def _load_rubricator_files(self):
         """Загрузка информации о файлах рубрикатора"""
         try:
-            file_path = self.rubricator_dir / '1.RUBRICATOR_FILES.md'
+            file_path = self.rubricator_dir / '1.RUBRICATOR_FILES v5.md'
             if file_path.exists():
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
@@ -447,8 +609,13 @@ class DBIMigrationApp:
                             if len(parts) >= 5:
                                 code = parts[3].strip()
                                 name = parts[4].strip()
+                                sign = parts[2].strip()  # '+' или '-'
                                 if code and not code.lower() in ['n', '№', 'код файла', '']:
                                     self.rubricator_files[code] = name
+                                    # Сохраняем признак обработки (+/-)
+                                    if not hasattr(self, '_rubricator_file_signs'):
+                                        self._rubricator_file_signs = {}
+                                    self._rubricator_file_signs[code] = (sign == '+')
         except Exception as e:
             print(f"Ошибка загрузки рубрикатора: {e}")
     
@@ -458,18 +625,24 @@ class DBIMigrationApp:
         for item in self.rules_tree.get_children():
             self.rules_tree.delete(item)
         
-        # Загружаем коды файлов из 1.RUBRICATOR_FILES.md
+        # Загружаем коды файлов из 1.RUBRICATOR_FILES v5.md
         for code, name in self.rubricator_files.items():
-            # По умолчанию включаем правило
-            var = tk.BooleanVar(value=True)
+            # По умолчанию включаем правило, если признак '+' (или признак неизвестен)
+            signs = getattr(self, '_rubricator_file_signs', {})
+            enabled = signs.get(code, True)
+            var = tk.BooleanVar(value=enabled)
             self.selected_rules[code] = var
             
-            # Вставляем в дерево (без иконки)
+            # Вставляем в дерево
             item_id = self.rules_tree.insert('', tk.END, 
-                                            values=('✓', code, name))
+                                            values=('✓' if enabled else '✗', code, name))
             self.rule_checkboxes[code] = (item_id, var)
+            
+            # Синхронизация флага PlpCheck с признаком из рубрикатора
+            if code == 'PlpCheck':
+                self.plpcheck_enabled_var.set(enabled)
         
-        # Загрузка нового рубрикатора 4.RUBRICATOR_PROMPTS.json
+        # Загрузка нового рубрикатора 4.RUBRICATOR_PROMPT v5.json
         self._load_rubricator_prompts()
         
         # Обработчик клика для переключения чекбокса
@@ -477,11 +650,11 @@ class DBIMigrationApp:
         self._update_buttons_state()
     
     def _load_rubricator_prompts(self):
-        """Загрузка расширенного рубрикатора 4.RUBRICATOR_PROMPTS.json"""
+        """Загрузка расширенного рубрикатора 4.RUBRICATOR_PROMPT v5.json"""
         try:
             self.rubricator_prompts = RubricatorPrompts(self.rubricator_dir)
             if self.rubricator_prompts.load():
-                self.log(f"Загружен расширенный рубрикатор: 4.RUBRICATOR_PROMPTS.json", 'debug')
+                self.log(f"Загружен расширенный рубрикатор: 4.RUBRICATOR_PROMPT v5.json", 'debug')
                 # Вывод доступных правил
                 rules = self.rubricator_prompts.get_all_rules()
                 for rule in rules:
@@ -496,7 +669,7 @@ class DBIMigrationApp:
         item = self.rules_tree.identify_row(event.y)
         column = self.rules_tree.identify_column(event.x)
         
-        # Колонка "Выбрано" (индекс 1)
+# Колонка "Выбрано" (индекс 1)
         if column == '#1':
             for code, (item_id, var) in self.rule_checkboxes.items():
                 if item_id == item:
@@ -506,32 +679,51 @@ class DBIMigrationApp:
                     # Сброс индикатора
                     self._reset_progress()
                     self.log(f"Правило {code}: {'включено' if var.get() else 'выключено'}", 'debug')
+                    # Синхронизация флага PlpCheck при клике на чекбокс в дереве
+                    if code == 'PlpCheck':
+                        self.plpcheck_enabled_var.set(var.get())
                     # Обновляем доступность кнопок
                     self._update_buttons_state()
                     break
     
-    def _on_priority_change(self):
-        """Обработка изменения приоритетов — фильтрация рубрикатора"""
-        # Собираем выбранные приоритеты
-        selected_priorities = [p for p, var in self.priority_vars.items() if var.get()]
+    def _sync_plpcheck_checkbox(self):
+        """Синхронизация флага PlpCheck с чекбоксом в дереве правил"""
+        if 'PlpCheck' in self.rule_checkboxes:
+            item_id, var = self.rule_checkboxes['PlpCheck']
+            new_state = self.plpcheck_enabled_var.get()
+            if var.get() != new_state:
+                var.set(new_state)
+                self.rules_tree.set(item_id, 'selected', '✓' if new_state else '✗')
+                self.rules_changed = True
+                self._reset_progress()
+    
+    def _on_priority_filter_change(self):
+        """Обработка изменения чекбоксов HIGH/MEDIUM/LOW (DS 018)"""
+        selected = []
+        if self.priority_high_var.get():
+            selected.append('HIGH')
+        if self.priority_medium_var.get():
+            selected.append('MEDIUM')
+        if self.priority_low_var.get():
+            selected.append('LOW')
         
-        # Сохраняем выбранные приоритеты
-        self._saved_priorities = selected_priorities
-        
-        # Активируем/деактивируем фильтр
-        self.priority_filter_active = len(selected_priorities) > 0
-        
-        if not self.priority_filter_active:
-            # Если ни один приоритет не выбран — показываем все строки рубрикатора
-            self.log("Фильтр по приоритетам отключён (показаны все файлы рубрикатора)", 'info')
-            # Обновляем список рубрикаторов — показываем все файлы
-            self._refresh_rubricator_tree()
+        # Обновляем статус
+        if selected:
+            self.priority_status_label.config(text=f"Активны: {', '.join(selected)}", foreground='green')
         else:
-            self.log(f"Фильтр по приоритетам: {', '.join(selected_priorities)}", 'info')
+            self.priority_status_label.config(text="Все приоритеты", foreground='gray')
         
-        # Обновляем видимость строк в Treeview
-        self._filter_rules_tree(selected_priorities)
+        # Сохраняем для использования в сканировании
+        self._selected_priorities = selected
+        
+        # Логируем
+        self.log(f"Фильтр по приоритетам: {', '.join(selected) if selected else 'все'}", 'info')
+        
         self._update_buttons_state()
+    
+    def get_selected_priorities(self):
+        """Возвращает выбранные приоритеты HIGH/MEDIUM/LOW (DS 018)"""
+        return list(self._selected_priorities)
     
     def _update_archive_state(self):
         """Обновление доступности чекбокса архивирования"""
@@ -540,43 +732,6 @@ class DBIMigrationApp:
         else:
             self.archive_result_check.state(['disabled'])
             self.archive_result_var.set(False)
-    
-    def _filter_rules_tree(self, selected_priorities: list):
-        """
-        Скрывает/показывает строки в Treeview в зависимости от приоритетов.
-        
-        Args:
-            selected_priorities: Список выбранных приоритетов
-        """
-        from rubricator_priority_mapping import get_matching_rules
-        
-        if not self.priority_filter_active:
-            # Показываем всё
-            for code, (item_id, var) in self.rule_checkboxes.items():
-                self.rules_tree.item(item_id, values=self.rules_tree.item(item_id)['values'])
-                self.rules_tree.item(item_id, open=True)
-            return
-        
-        # При выборе приоритетов показываем только строку рубрикатора с "Рекомендации по адаптации"
-        # и фильтруем selected_rules для генерации по приоритетам
-        RECOMMENDATIONS_KEYWORD = "Рекомендации по адаптации"
-        
-        visible_count = 0
-        hidden_count = 0
-        
-        for code, (item_id, var) in self.rule_checkboxes.items():
-            name = self.rubricator_files.get(code, '')
-            
-            # Если строка содержит "Рекомендации по адаптации" — всегда показываем
-            if RECOMMENDATIONS_KEYWORD in name:
-                self.rules_tree.item(item_id, values=self.rules_tree.item(item_id)['values'])
-                visible_count += 1
-            else:
-                # Остальные строки скрываем
-                self.rules_tree.item(item_id, values=('', '', ''))
-                hidden_count += 1
-        
-        self.log(f"  Показано строк: {visible_count}, скрыто: {hidden_count}", 'info')
     
     def _refresh_rubricator_tree(self):
         """
@@ -595,8 +750,15 @@ class DBIMigrationApp:
             self.source_entry.bind('<FocusOut>', self._on_source_focus_out)
             # Также привязываем событие изменения для автоматического обновления результата
             self.source_dir_var.trace_add('write', lambda *args: self._on_source_dir_changed())
+            # DS 008/009: обновление цветовой индикации и меток статуса при изменении ИК
+            self.source_dir_var.trace_add('write', lambda *args: self._update_dir_indicators())
         if self.result_entry:
             self.result_entry.bind('<FocusOut>', self._on_result_focus_out)
+            # DS 008/009: обновление цветовой индикации и меток статуса при изменении РК
+            self.result_dir_var.trace_add('write', lambda *args: self._update_dir_indicators())
+        
+        # DS 008/009: первичное обновление индикации каталогов
+        self._update_dir_indicators()
     
         # Привязка события изменения чекбоксов и комбобоксов
         self.only_modified_var.trace_add('write', lambda *args: (self._reset_progress(), self._update_buttons_state()))
@@ -609,68 +771,129 @@ class DBIMigrationApp:
         self.root.after(100, self._update_buttons_state)
     
     def _on_source_dir_changed(self):
-        """Обработка изменения исходного каталога - автоматическое обновление результата"""
-        source_dir = self.source_dir_var.get()
-        if source_dir:
-            source_path = Path(source_dir)
-            self._auto_fill_result_dir(source_path)
-            # Обновить состояние кнопок
-            self._update_buttons_state()
+        """Обработка изменения исходного каталога - автоматическое обновление результата (DS 013: с детальным логированием)"""
+        # === ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ ВЫЧИСЛЕНИЯ РК ===
+        self.log("=" * 60)
+        self.log("🔍 ВЫЧИСЛЕНИЕ РК")
+        self.log("=" * 60)
+        
+        # 1. Получаем значение ИК
+        source_dir = self.source_dir_var.get().strip()
+        self.log(f"📁 ИК (исходный): '{source_dir}'")
+        self.log(f"📏 Длина ИК: {len(source_dir)}")
+        
+        if not source_dir:
+            self.log("⚠️ ИК пуст, РК не изменяется")
+            self.log("=" * 60)
+            self.log("🔍 КОНЕЦ ВЫЧИСЛЕНИЯ РК")
+            self.log("=" * 60)
+            return
+        
+        # 2. Проверяем наличие PATCH_IN
+        has_patch_in = 'PATCH_IN' in source_dir
+        self.log(f"🔎 Найдено 'PATCH_IN': {has_patch_in}")
+        
+        if has_patch_in:
+            # 3. Находим позицию PATCH_IN
+            patch_index = source_dir.find('PATCH_IN')
+            self.log(f"📍 Позиция 'PATCH_IN': {patch_index}")
+            
+            # 4. Показываем части пути
+            before = source_dir[:patch_index]
+            after = source_dir[patch_index + len('PATCH_IN'):]
+            self.log(f"📂 До 'PATCH_IN': '{before}'")
+            self.log(f"📂 После 'PATCH_IN': '{after}'")
+            
+            # 5. Выполняем замену (DS 011/012: полная замена всех вхождений)
+            result_dir = source_dir.replace('PATCH_IN', 'PATCH_OUT')
+            self.log(f"🔄 Результат replace(): '{result_dir}'")
+            
+            # 6. Альтернативный способ (для проверки)
+            alt_result = before + 'PATCH_OUT' + after
+            self.log(f"🔄 Альтернативный результат: '{alt_result}'")
+        else:
+            result_dir = None
+            self.log("ℹ️ В ИК отсутствует 'PATCH_IN'. РК не изменён.")
+        
+        # 7. Автоподстановка через _auto_fill_result_dir (сохраняет trailing slash)
+        result_path = self._auto_fill_result_dir(source_dir) if result_dir else None
+        
+        # 8. Фиксируем итоговое значение РК
+        actual_result = self.result_dir_var.get()
+        self.log(f"🔍 Фактическое значение РК: '{actual_result}'")
+        
+        if result_path is not None:
+            # DS 010: логирование автоматического обновления РК в историю
+            self.log_result_dir_change(source_dir, str(result_path), action="auto_update")
+            self.log(f"🔄 Автоматически обновлён РК: {result_path}")
+            # 9. Сравниваем ожидание и реальность
+            if result_dir and result_dir.rstrip(chr(92)) == actual_result.rstrip(chr(92)):
+                self.log("✅ РК установлен корректно")
+            else:
+                self.log(f"❌ РАСХОЖДЕНИЕ! Ожидалось: '{result_dir}', Получено: '{actual_result}'")
+            # 10. Вывод вычисленного РК в Журнал
+            self.log(f"📝 ВЫЧИСЛЕННЫЙ РК: {result_path}")
+        
+        # Обновить состояние кнопок
+        self._update_buttons_state()
+        
+        self.log("=" * 60)
+        self.log("🔍 КОНЕЦ ВЫЧИСЛЕНИЯ РК")
+        self.log("=" * 60)
+    
+    def update_result_dir_from_source(self, source_dir):
+        """Резервный метод обновления РК (DS 012).
+        Возвращает РК с заменой PATCH_IN -> PATCH_OUT (сохраняется весь хвост пути).
+        """
+        if source_dir and 'PATCH_IN' in source_dir:
+            return source_dir.replace('PATCH_IN', 'PATCH_OUT')
+        return source_dir
     
     def _auto_fill_result_dir(self, source_dir: Path):
-        """Автоматическое формирование каталога результатов из исходного
-        PATCH_IN/xxx -> PATCH_OUT
-        PATCH_OUT/xxx -> PATCH_IN
+        """Автоматическое формирование каталога результатов из исходного (DS 011).
+        PATCH_IN + подкаталоги -> PATCH_OUT + те же подкаталоги (структура сохраняется)
+        PATCH_OUT + подкаталоги -> PATCH_IN + те же подкаталоги
         """
-        source_str = str(source_dir).replace('/', '\\')
+        BS = chr(92)  # обратный слэш
+        source_str = str(source_dir).replace('/', BS)
         
-        if 'PATCH_IN' in source_str:
-            # PATCH_IN/xxx -> PATCH_OUT
-            result_base = source_str.replace('PATCH_IN', 'PATCH_OUT', 1)
-            result_path = Path(result_base).parent
-        elif 'PATCH_OUT' in source_str:
-            # PATCH_OUT/xxx -> PATCH_IN
-            result_base = source_str.replace('PATCH_OUT', 'PATCH_IN', 1)
-            result_path = Path(result_base).parent
+        # Сохраняем завершающий слэш (если был), работаем с путём без него
+        trailing = BS if source_str.endswith(BS) else ''
+        core = source_str.rstrip(BS).rstrip('/')
+        
+        if 'PATCH_IN' in core:
+            # PATCH_IN\xxx -> PATCH_OUT\xxx (заменяем все вхождения PATCH_IN)
+            result_str = core.replace('PATCH_IN', 'PATCH_OUT') + trailing
+        elif 'PATCH_OUT' in core:
+            # PATCH_OUT\xxx -> PATCH_IN\xxx (заменяем все вхождения PATCH_OUT)
+            result_str = core.replace('PATCH_OUT', 'PATCH_IN') + trailing
         else:
             return None
         
-        result_str = str(result_path).replace('/', '\\')
+        result_path = Path(result_str.rstrip(BS))
         
-        # Проверяем текущее значение каталога результатов
-        current_result = self.result_dir_var.get()
-        if current_result:
-            current_result = current_result.replace('/', '\\')
+        # ============================================================
+        # ПРИНУДИТЕЛЬНОЕ ОБНОВЛЕНИЕ РК (DS 017: условие блокировки убрано)
+        # РК обновляется всегда при изменении ИК, без проверки текущего значения
+        # ============================================================
+        self.result_dir_var.set(result_str)
         
-        # Обновляем только если каталог не указан или совпадает с текущим
-        if not current_result or current_result == result_str:
-            self.result_dir_var.set(result_str)
-            return result_path
+        # DS 014: проверка, что значение не было перезаписано другим кодом
+        actual = self.result_dir_var.get()
+        if actual != result_str:
+            self.log(f"❌ ЗНАЧЕНИЕ БЫЛО ПЕРЕЗАПИСАНО! Ожидалось: '{result_str}', Получено: '{actual}'")
+            self.log("📌 Ищите другой код, который меняет result_dir_var")
+            # Принудительная установка через Entry (запасной механизм)
+            if self.result_entry is not None:
+                try:
+                    self.result_entry.delete(0, tk.END)
+                    self.result_entry.insert(0, result_str)
+                    self.result_dir_var.set(result_str)
+                    self.log(f"🔧 РК установлен принудительно через Entry: '{self.result_dir_var.get()}'")
+                except Exception as e:
+                    self.log(f"Ошибка принудительной установки РК: {e}", 'error')
         
-        return None
-    
-        # Нормализуем путь - убираем дублирование имени подкаталога
-        result_str = str(result_path).replace('/', '\\')
-        # Проверяем, не дублируется ли имя подкаталога в конце
-        if result_str.endswith(f'\\{source_name}\\{source_name}'):
-            result_str = result_str[:-len(source_name)-1]  # Убираем дубликат
-            result_path = Path(result_str)
-        
-        # Проверяем текущее значение каталога результатов
-        current_result = self.result_dir_var.get()
-        if current_result:
-            current_result = current_result.replace('/', '\\')
-        
-        # Обновляем только если каталог не указан или совпадает с базой без подкаталога
-        if not current_result:
-            self.result_dir_var.set(result_str)
-            return result_path
-        elif Path(current_result).parent == Path(result_base):
-            # Текущий каталог - это базовая папка PATCH_OUT или PATCH_IN без подкаталога
-            self.result_dir_var.set(result_str)
-            return result_path
-        
-        return None
+        return result_path
     
     def _ensure_result_path(self, source_dir: Path, result_dir: Path) -> Path:
         """
@@ -763,6 +986,10 @@ class DBIMigrationApp:
         # Кнопка "Показать SQL для ручного исправления" - активна после сканирования
         show_sql_enabled = self.scan_results is not None
         self.btn_show_sql.state(['!disabled' if show_sql_enabled else 'disabled'])
+
+        # Кнопки Koda - активны после сканирования
+        self.btn_send_koda.state(['!disabled' if show_sql_enabled else 'disabled'])
+        self.btn_receive_koda.state(['!disabled' if show_sql_enabled else 'disabled'])
     
 # Кнопка "Архивировать" - активируется при установленном флаге "Сохранить структуру"
         archive_enabled = False
@@ -793,19 +1020,194 @@ class DBIMigrationApp:
         else:
             self.log("Каталог результатов очищен", 'info')
     
+    def validate_directories(self):
+        """Проверка существования и доступности ИК и РК"""
+        source_dir = self.source_dir_var.get().strip()
+        result_dir = self.result_dir_var.get().strip()
+        
+        errors = []
+        warnings = []
+        
+        # Проверка ИК
+        if not source_dir:
+            errors.append("Исходный каталог не указан")
+        elif not os.path.exists(source_dir):
+            errors.append(f"Исходный каталог не существует: {source_dir}")
+        elif not os.access(source_dir, os.R_OK):
+            errors.append(f"Нет доступа на чтение к ИК: {source_dir}")
+        
+        # Проверка РК
+        if result_dir:
+            if not os.path.exists(result_dir):
+                warnings.append(f"РК не существует, будет создан: {result_dir}")
+            elif not os.access(result_dir, os.W_OK):
+                errors.append(f"Нет доступа на запись в РК: {result_dir}")
+        else:
+            warnings.append("РК не указан, будет использован ИК")
+        
+        return {
+            "valid": len(errors) == 0,
+            "errors": errors,
+            "warnings": warnings
+        }
+    
+    def update_field_colors(self):
+        """Обновление цвета полей ввода на основе валидации
+        
+        Поля - ttk.Entry, поэтому цвет задаётся через ttk.Style (fieldbackground).
+        """
+        try:
+            validation = self.validate_directories()
+            errors = validation["errors"]
+            
+            # ИК
+            source_dir = self.source_dir_var.get().strip()
+            if source_dir and os.path.exists(source_dir) and os.access(source_dir, os.R_OK):
+                self.source_entry.configure(style='Valid.TEntry')      # зелёный
+            elif any('Исходный' in e for e in errors):
+                self.source_entry.configure(style='Invalid.TEntry')    # красный
+            else:
+                self.source_entry.configure(style='Warning.TEntry')    # жёлтый
+            
+            # РК
+            result_dir = self.result_dir_var.get().strip()
+            if result_dir and os.path.exists(result_dir):
+                if os.access(result_dir, os.W_OK):
+                    self.result_entry.configure(style='Valid.TEntry')    # зелёный
+                else:
+                    self.result_entry.configure(style='Invalid.TEntry')  # красный (нет доступа)
+            elif result_dir:
+                self.result_entry.configure(style='Warning.TEntry')      # жёлтый (будет создан)
+            else:
+                self.result_entry.configure(style='Invalid.TEntry')      # красный (не указан)
+        except Exception:
+            pass  # Индикация не должна ломать работу АРМа
+    
+    def update_status_indicators(self):
+        """Обновление индикаторов статуса каталогов (DS 009)"""
+        def get_status_text(path, is_source=True):
+            if not path:
+                return "⚠️ не указан", "#b8860b"  # жёлтый (тёмный для читаемости на светлом фоне)
+            
+            if is_source:
+                if not os.path.exists(path):
+                    return "❌ не существует", "#dc3545"  # красный
+                elif not os.access(path, os.R_OK):
+                    return "🔒 нет доступа", "#dc3545"  # красный
+                else:
+                    return "✅ доступен", "#28a745"  # зелёный
+            else:
+                if not os.path.exists(path):
+                    return "📁 будет создан", "#b8860b"  # жёлтый
+                elif not os.access(path, os.W_OK):
+                    return "🔒 нет доступа", "#dc3545"  # красный
+                else:
+                    return "✅ доступен", "#28a745"  # зелёный
+        
+        try:
+            # Обновление ИК
+            source_dir = self.source_dir_var.get().strip()
+            text, color = get_status_text(source_dir, True)
+            self.source_status_label.config(text=text, foreground=color)
+            
+            # Обновление РК
+            result_dir = self.result_dir_var.get().strip()
+            if not result_dir:
+                result_dir = source_dir  # если РК не указан, используем ИК
+            text, color = get_status_text(result_dir, False)
+            self.result_status_label.config(text=text, foreground=color)
+        except Exception:
+            pass  # Индикация не должна ломать работу АРМа
+    
+    def log_result_dir_change(self, source_dir, result_dir, action="auto_update"):
+        """Логирование изменения РК в result_dir_history.json (DS 010)"""
+        history_file = Path(__file__).parent.parent / 'EXCHANGE' / 'result_dir_history.json'
+        
+        try:
+            # Загрузка существующей истории
+            history = {"history": []}
+            if history_file.exists():
+                with open(history_file, 'r', encoding='utf-8') as f:
+                    history = json.load(f)
+            
+            # Добавление записи
+            history["history"].append({
+                "timestamp": datetime.now().isoformat(timespec='seconds'),
+                "source_dir": source_dir,
+                "result_dir": result_dir,
+                "action": action,
+                "user": os.getenv("USERNAME", "unknown")
+            })
+            
+            # Ограничение истории (последние 100 записей)
+            if len(history["history"]) > 100:
+                history["history"] = history["history"][-100:]
+            
+            # Сохранение
+            history_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(history_file, 'w', encoding='utf-8') as f:
+                json.dump(history, f, ensure_ascii=False, indent=2)
+            
+            self.log(f"📝 Изменение РК зафиксировано: {result_dir}")
+        except Exception as e:
+            self.log(f"Ошибка записи истории РК: {e}", 'error')
+    
+    def show_result_dir_history(self):
+        """Показать историю изменений РК (DS 010)"""
+        history_file = Path(__file__).parent.parent / 'EXCHANGE' / 'result_dir_history.json'
+        
+        if not history_file.exists():
+            self.log("📭 История РК пуста")
+            return
+        
+        try:
+            with open(history_file, 'r', encoding='utf-8') as f:
+                history = json.load(f)
+        except Exception as e:
+            self.log(f"Ошибка чтения истории РК: {e}", 'error')
+            return
+        
+        if not history.get("history"):
+            self.log("📭 История РК пуста")
+            return
+        
+        self.log("=" * 60)
+        self.log("📋 ИСТОРИЯ ИЗМЕНЕНИЙ РК")
+        self.log("=" * 60)
+        
+        for i, entry in enumerate(history["history"][-10:], 1):
+            self.log(f"{i}. [{entry['timestamp']}]")
+            self.log(f"   ИК: {entry['source_dir']}")
+            self.log(f"   РК: {entry['result_dir']}")
+            self.log(f"   Действие: {entry['action']}")
+            self.log(f"   Пользователь: {entry['user']}")
+    
+    def _update_dir_indicators(self):
+        """Единая точка обновления визуальной индикации каталогов (цвет полей + метки статуса)"""
+        self.update_field_colors()
+        if hasattr(self, 'update_status_indicators'):
+            self.update_status_indicators()
+    
     def _load_rules(self) -> dict:
         """Загрузка списка правил из рубрикатора"""
         rules = {}
         try:
-            rubricator_path = self.rubricator_dir / '3.RUBRICATOR_FIXES.md'
+            rubricator_path = self.rubricator_dir / '3.RUBRICATOR_FIXES v5.md'
             if rubricator_path.exists():
                 with open(rubricator_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                     for line in content.split('\n'):
-                        if '|' in line and not line.startswith('|---'):
+                        if '|' in line and not line.startswith('|---') and not line.startswith('|N'):
                             parts = [p.strip() for p in line.split('|')]
-                            if len(parts) >= 2:
-                                code = parts[1] if len(parts) > 1 else ''
+                            # Формат v5: |N |++|Код |Пункт |Priority |Теги |Описание
+                            # parts: ['', '1', '++', 'v50.SQL.OUTERJOIN.п.1.1', 'п.1.1', 'HIGH', 'tags', 'desc']
+                            if len(parts) >= 8:
+                                code = parts[3]
+                                desc = parts[7]
+                                if code and (code.startswith('v') or code.startswith('PlpCheck') or code.startswith('тдс') or code.startswith('тклоик')):
+                                    rules[code] = desc
+                            elif len(parts) >= 2:
+                                code = parts[1]
                                 desc = parts[4] if len(parts) > 4 else ''
                                 if code and code.startswith('v'):
                                     rules[code] = desc
@@ -816,10 +1218,55 @@ class DBIMigrationApp:
             rules = {
                 'v50': 'Рекомендации по адаптации кода на PLPlus для DBI',
                 'тдс20240828': 'Правила для проекта ТДС',
-                'тклоик20240828': 'Правила для проекта ТЦ ЛОИК'
+                'тклоик20240828': 'Правила для проекта ТЦ ЛОИК',
+                'PlpCheck': 'Правила PlpCheck (стиль кода)'
             }
         
         return rules
+    
+    def _get_rules_for_selected_files(self, selected_files=None):
+        """Получить список правил для выбранных файлов рубрикатора (DS 019/DS 020).
+        
+        Маппинг код файла -> префиксы правил:
+        - v53/v50 -> v53.* или v50.*
+        - PlpCheck -> plpcheck.*
+        - тдс20240828 -> тдс20240828.*
+        - тклоик20240828 -> тклоик20240828.*
+        
+        Args:
+            selected_files: список кодов файлов. Если None - берётся из selected_rules.
+        """
+        if selected_files is None:
+            selected_files = [code for code, var in self.selected_rules.items() if var.get()]
+        
+        if not self.rubricator_prompts or not self.rubricator_prompts.loaded:
+            return selected_files  # fallback: возвращаем коды файлов
+        
+        all_rules = self.rubricator_prompts.get_all_rules()
+        matched_rules = []
+        
+        # Префикс(ы) правил для каждого кода файла рубрикатора (DS 019)
+        file_prefixes = {
+            'v53': ('v53.', 'v50.'),   # актуальный код файла рубрикатора
+            'v50': ('v53.', 'v50.'),   # старый код (совместимость)
+            'PlpCheck': ('plpcheck.',),
+            'тдс20240828': ('тдс20240828.',),
+            'тклоик20240828': ('тклоик20240828.',),
+        }
+        
+        for file_code in selected_files:
+            prefixes = file_prefixes.get(file_code)
+            if prefixes:
+                for rule in all_rules:
+                    if rule['code'].startswith(prefixes):
+                        matched_rules.append(rule['code'])
+            else:
+                # fallback: ищем правила, содержащие код файла
+                for rule in all_rules:
+                    if file_code in rule['code']:
+                        matched_rules.append(rule['code'])
+        
+        return sorted(set(matched_rules))
     
     def browse_source(self):
         """Выбор исходного каталога"""
@@ -833,7 +1280,7 @@ class DBIMigrationApp:
             # Логирование только при потере фокуса, здесь - мгновенно
             self.log(f"Исходный каталог: {directory}", 'info')
             # Автоматическое формирование каталога результатов
-            self._auto_fill_result_dir(Path(directory))
+            self._auto_fill_result_dir(directory)
             # Обновляем доступность кнопок
             self._update_buttons_state()
     
@@ -843,11 +1290,15 @@ class DBIMigrationApp:
         if directory:
             # Нормализуем путь к Windows-формату
             directory = directory.replace('/', '\\')
+            old_result = self.result_dir_var.get()
             self.result_dir_var.set(directory)
             # Сброс индикатора
             self._reset_progress()
             # Логирование только при потере фокуса, здесь - мгновенно
             self.log(f"Каталог результатов: {directory}", 'info')
+            # DS 010: логирование ручного изменения РК
+            if directory != old_result:
+                self.log_result_dir_change(self.source_dir_var.get(), directory, action="manual")
             # Обновляем доступность кнопок
             self._update_buttons_state()
     
@@ -939,13 +1390,10 @@ class DBIMigrationApp:
                     self.scan_recursive_var.set(settings.get('recursive', True))
                     self.only_modified_var.set(settings.get('only_modified', True))
                     self.preserve_structure_var.set(settings.get('preserve_structure', True))
+                    self.clean_output_var.set(settings.get('clean_output', False))
                     
-                    # Загрузка сохранённых правил рубрикатора
-                    saved_rules = settings.get('selected_rules', [])
-                    if saved_rules:
-                        self._saved_rules = saved_rules
-                    else:
-                        self._saved_rules = []
+                    # Состояние чекбоксов рубрикатора загружается из 1.RUBRICATOR_FILES v5.md — отдельно
+                    self._saved_rules = []
                         
                     # Загрузка настройки максимального размера логов
                     global MAX_LOG_SIZE_MB
@@ -953,16 +1401,16 @@ class DBIMigrationApp:
                     if max_log_size:
                         MAX_LOG_SIZE_MB = max_log_size
                     
-                    # Загрузка сохранённых приоритетов
+                    # Загрузка сохранённых приоритетов (DS 018: HIGH/MEDIUM/LOW)
                     saved_priorities = settings.get('selected_priorities', [])
-                    if saved_priorities:
-                        for prio in saved_priorities:
-                            if prio in self.priority_vars:
-                                self.priority_vars[prio].set(True)
-                        self._saved_priorities = saved_priorities
-                        self.log(f"Восстановлены приоритеты: {', '.join(saved_priorities)}", 'info')
-                    else:
-                        self._saved_priorities = []
+                    self._selected_priorities = [p for p in saved_priorities if p in ('HIGH', 'MEDIUM', 'LOW')]
+                    if hasattr(self, 'priority_high_var'):
+                        self.priority_high_var.set('HIGH' in self._selected_priorities)
+                        self.priority_medium_var.set('MEDIUM' in self._selected_priorities)
+                        self.priority_low_var.set('LOW' in self._selected_priorities)
+                        self._on_priority_filter_change()
+                    if self._selected_priorities:
+                        self.log(f"Восстановлены приоритеты: {', '.join(self._selected_priorities)}", 'info')
                         
                 self.log("Настройки загружены", 'info')
                 
@@ -985,9 +1433,7 @@ class DBIMigrationApp:
         """Сохранение настроек в файл"""
         settings_path = Path(__file__).parent / 'settings.json'
         
-        # Сохраняем выбранные правила рубрикатора
-        selected_rules = [code for code, var in self.selected_rules.items() if var.get()]
-        
+        # Сохраняем только базовые настройки (без selected_rules — они в 1.RUBRICATOR_FILES v5.md)
         settings = {
             'source_dir': self.source_dir_var.get(),
             'result_dir': self.result_dir_var.get(),
@@ -996,9 +1442,9 @@ class DBIMigrationApp:
             'recursive': self.scan_recursive_var.get(),
             'only_modified': self.only_modified_var.get(),
             'preserve_structure': self.preserve_structure_var.get(),
-            'selected_rules': selected_rules,
+            'clean_output': self.clean_output_var.get(),
             'max_log_size_mb': MAX_LOG_SIZE_MB,
-            'selected_priorities': self._saved_priorities if hasattr(self, '_saved_priorities') else []
+            'selected_priorities': list(getattr(self, '_selected_priorities', []))
         }
         try:
             with open(settings_path, 'w', encoding='utf-8') as f:
@@ -1006,6 +1452,67 @@ class DBIMigrationApp:
             self.log("Настройки сохранены", 'success')
         except Exception as e:
             self.log(f"Ошибка сохранения настроек: {e}", 'error')
+        
+        # Сохраняем состояние чекбоксов рубрикатора в 1.RUBRICATOR_FILES v5.md
+        self._save_rubricator_state()
+    
+    def _save_rubricator_state(self):
+        """Сохранение состояния чекбоксов рубрикатора в 1.RUBRICATOR_FILES v5.md
+        
+        Читает файл, обновляет признак +/− для каждой строки по состоянию чекбокса,
+        перезаписывает файл.
+        """
+        try:
+            file_path = self.rubricator_dir / '1.RUBRICATOR_FILES v5.md'
+            if not file_path.exists():
+                return
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            # Собираем коды из чекбоксов
+            checkbox_codes = set(self.rule_checkboxes.keys())
+            
+            # Обновляем строки таблицы
+            new_lines = []
+            for line in lines:
+                stripped = line.strip()
+                # Пропускаем заголовки
+                if stripped.startswith('#') or stripped.startswith('|---') or not stripped:
+                    new_lines.append(line)
+                    continue
+                
+                # Пропускаем строку заголовка таблицы
+                if 'Код файла' in stripped:
+                    new_lines.append(line)
+                    continue
+                
+                # Проверяем, табличная ли строка
+                if stripped.startswith('|') and '|' in stripped[1:]:
+                    parts = [p.strip() for p in stripped.split('|')]
+                    # Формат: ['', 'N', '+/−', 'Код файла', 'Полное имя файла']
+                    # parts[0]='', parts[1]='1', parts[2]='+', parts[3]='v50', parts[4]='...'
+                    if len(parts) >= 5:
+                        code = parts[3].strip()
+                        if code in checkbox_codes:
+                            # Определяем новый признак
+                            var = self.rule_checkboxes[code][1]
+                            new_sign = '+' if var.get() else '−'
+                            # Восстанавливаем строку: |N|знак|код|имя
+                            new_line = f"|{parts[1]}|{new_sign}|{code}|{parts[4]}"
+                            for extra in parts[5:]:
+                                new_line += f"|{extra}"
+                            new_lines.append(new_line + '\n')
+                            continue
+                
+                new_lines.append(line)
+            
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.writelines(new_lines)
+            
+            self.log("Состояние рубрикатора сохранено в 1.RUBRICATOR_FILES v5.md", 'success')
+        except Exception as e:
+            self.log(f"Ошибка сохранения состояния рубрикатора: {e}", 'error')
     
     def show_project_structure(self):
         """Показ структуры проекта"""
@@ -1102,8 +1609,8 @@ class DBIMigrationApp:
             return
         
         try:
-            # Вывод 1.RUBRICATOR_FILES.md
-            file_path = self.rubricator_dir / '1.RUBRICATOR_FILES.md'
+            # Вывод 1.RUBRICATOR_FILES v5.md
+            file_path = self.rubricator_dir / '1.RUBRICATOR_FILES v5.md'
             if file_path.exists():
                 self.log(f"# {file_path}", 'info')
                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -1124,8 +1631,8 @@ class DBIMigrationApp:
                         self.log(line, 'info')
                 self.log("", 'info')
                     
-            # Вывод 3.RUBRICATOR_FIXES.md
-            file_path = self.rubricator_dir / '3.RUBRICATOR_FIXES.md'
+            # Вывод 3.RUBRICATOR_FIXES v5.md
+            file_path = self.rubricator_dir / '3.RUBRICATOR_FIXES v5.md'
             if file_path.exists():
                 self.log(f"# {file_path}", 'info')
                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -1145,9 +1652,21 @@ class DBIMigrationApp:
     
     def start_scan(self):
         """Запуск сканирования в отдельном потоке"""
+        # Валидация ИК и РК перед запуском (DS 008)
+        validation = self.validate_directories()
+        
+        if not validation["valid"]:
+            for error in validation["errors"]:
+                self.log(f"❌ {error}", 'error')
+            messagebox.showerror("Ошибка валидации каталогов", "\n".join(validation["errors"]))
+            return
+        
         if not self.source_dir_var.get():
             messagebox.showerror("Ошибка", "Укажите исходный каталог!")
             return
+        
+        for warning in validation["warnings"]:
+            self.log(f"⚠️ {warning}", 'warning')
         
         # Проверка: выбран ли хотя бы один файл в рубрикаторе
         any_rule_selected = any(var.get() for var in self.selected_rules.values())
@@ -1185,10 +1704,10 @@ class DBIMigrationApp:
             
             # Логирование использования нового рубрикатора
             if self.rubricator_prompts and self.rubricator_prompts.loaded:
-                self.root.after(0, lambda: self.log("\n[ИСПОЛЬЗУЕТСЯ] Расширенный рубрикатор 4.RUBRICATOR_PROMPTS.json", 'highlight'))
+                self.root.after(0, lambda: self.log("\n[ИСПОЛЬЗУЕТСЯ] Расширенный рубрикатор 4.RUBRICATOR_PROMPT v5.json", 'highlight'))
                 self.root.after(0, lambda: self.log(f"  Версия: {self.rubricator_prompts.data.get('version', 'N/A')}", 'debug'))
             else:
-                self.root.after(0, lambda: self.log("\n[ИСПОЛЬЗУЕТСЯ] Старый рубрикатор 3.RUBRICATOR_FIXES.md", 'warning'))
+                self.root.after(0, lambda: self.log("\n[ИСПОЛЬЗУЕТСЯ] Старый рубрикатор 3.RUBRICATOR_FIXES v5.md", 'warning'))
             
             # Подготовка конфигурации
             config = {
@@ -1207,35 +1726,77 @@ class DBIMigrationApp:
                 }
             }
             
-            # Определение выбранных правил
-            selected_rules = [code for code, var in self.selected_rules.items() if var.get()]
+            # Определение выбранных правил (DS 019/DS 020: только правила из выбранных файлов рубрикатора)
+            selected_files = [code for code, var in self.selected_rules.items() if var.get()]
             
-            # Если выбраны приоритеты — используем правила из выбранных приоритетов
+            # DS 020: фильтр PlpCheck применяется к ФАЙЛАМ до сбора правил
+            if not self.plpcheck_enabled_var.get():
+                selected_files = [r for r in selected_files if r != 'PlpCheck']
+                self.root.after(0, lambda: self.log("\n[PlpCheck] Флаг выключен — правила стиля кода не применяются", 'info'))
+            else:
+                self.root.after(0, lambda: self.log("\n[PlpCheck] Флаг включён — применяются правила стиля кода", 'info'))
+            
+            selected_rules = self._get_rules_for_selected_files(selected_files)
+            
+            # DS 023: отладочный вывод в лог АРМ
+            self.log(f"[DEBUG] selected_files: {selected_files}", 'info')
+            self.log(f"[DEBUG] selected_rules (передано в сканер): {selected_rules[:20]}{' ...' if len(selected_rules) > 20 else ''} (всего {len(selected_rules)})", 'info')
+            
+            self.root.after(0, lambda: self.log("\nВЫБРАННЫЕ ФАЙЛЫ РУБРИКАТОРА:", 'highlight'))
+            for f in selected_files:
+                self.root.after(0, lambda ff=f: self.log(f"  [+] {ff}", 'highlight'))
+            
+            # Если выбраны приоритеты — используем правила из выбранных приоритетов (DS 018: HIGH/MEDIUM/LOW)
+            # DS 024: защита от пустого результата — если после фильтра не осталось ни одного правила,
+            # selected_rules НЕ обнуляется (иначе сканер загрузит ВСЕ правила)
             from rubricator_priority_mapping import PRIORITY_RULES
-            selected_priorities = [p for p, var in self.priority_vars.items() if var.get()]
+            priority_mapping = {'HIGH': 'Приоритет 1', 'MEDIUM': 'Приоритет 2', 'LOW': 'Приоритет 3'}
+            selected_priorities = [priority_mapping.get(p, p) for p in getattr(self, '_selected_priorities', [])]
             
             if selected_priorities:
-                # Собираем правила из выбранных приоритетов
+                # Собираем правила из выбранных приоритетов (DS 024)
                 priority_rules = set()
                 for prio in selected_priorities:
                     if prio in PRIORITY_RULES:
                         priority_rules.update(PRIORITY_RULES[prio])
-                priority_rules = sorted(priority_rules)
                 
-                # Фильтруем selected_rules — оставляем только те, что в приоритетах
-                selected_rules = [r for r in selected_rules if r in priority_rules]
-                
-                self.root.after(0, lambda: self.log(f"\n[ПРИОРИТЕТ] Фильтрация по приоритетам: {', '.join(selected_priorities)}", 'highlight'))
-                self.root.after(0, lambda: self.log(f"  Всего правил из приоритетов: {len(priority_rules)}", 'info'))
-                self.root.after(0, lambda: self.log(f"  Используемых правил: {len(selected_rules)}", 'info'))
+                if priority_rules:
+                    # DS 024: регистронезависимое сопоставление кодов
+                    # PRIORITY_RULES использует 'PlpCheck.DBI.*.п.1', рубрикатор - 'plpcheck.ACCESS_STATIC'
+                    pr_lower = {r.lower(): r for r in priority_rules}
+                    filtered_rules = []
+                    for r in selected_rules:
+                        r_lower = r.lower()
+                        # 1) точное совпадение (регистронезависимо)
+                        if r_lower in pr_lower:
+                            filtered_rules.append(r)
+                            continue
+                        # 2) частичное совпадение: код приоритета начинается с кода правила
+                        #    (PlpCheck.DBI.OUTER_JOIN.п.1 vs plpcheck.DBI.OUTER_JOIN)
+                        if any(pr.lower().startswith(r_lower) or r_lower.startswith(pr.lower()) for pr in priority_rules):
+                            filtered_rules.append(r)
+                    
+                    if filtered_rules:
+                        selected_rules = filtered_rules
+                        self.root.after(0, lambda: self.log(f"\n[ПРИОРИТЕТ] Фильтрация по приоритетам: {', '.join(getattr(self, '_selected_priorities', []))}", 'highlight'))
+                        self.root.after(0, lambda: self.log(f"  Всего правил из приоритетов: {len(priority_rules)}", 'info'))
+                        self.root.after(0, lambda: self.log(f"  Используемых правил: {len(selected_rules)}", 'info'))
+                    else:
+                        # DS 024: НЕ обнуляем selected_rules — используем все правила выбранных файлов
+                        self.root.after(0, lambda: self.log(f"\n⚠ Для выбранных файлов нет правил с приоритетами {', '.join(getattr(self, '_selected_priorities', []))}. Используются все правила выбранных файлов ({len(selected_rules)}).", 'warning'))
+                else:
+                    # DS 024: в PRIORITY_RULES нет правил — не трогаем selected_rules
+                    self.root.after(0, lambda: self.log("\n⚠ Нет правил в PRIORITY_RULES. Используются все правила выбранных файлов.", 'warning'))
             
             self.root.after(0, lambda: self.log(f"\nИСПОЛЬЗУЕМЫЕ ПРАВИЛА ({len(selected_rules)}):", 'info'))
-            for rule in selected_rules:
+            for rule in selected_rules[:30]:
                 self.root.after(0, lambda r=rule: self.log(f"  [+] {r}", 'info'))
+            if len(selected_rules) > 30:
+                self.root.after(0, lambda: self.log(f"  ... и ещё {len(selected_rules) - 30} правил", 'info'))
             
             # Логирование использования промптов из нового рубрикатора
             if self.rubricator_prompts and self.rubricator_prompts.loaded:
-                self.root.after(0, lambda: self.log("\nПРОМПТЫ ИЗ 4.RUBRICATOR_PROMPTS.json:", 'highlight'))
+                self.root.after(0, lambda: self.log("\nПРОМПТЫ ИЗ 4.RUBRICATOR_PROMPT v5.json:", 'highlight'))
                 for rule in selected_rules:
                     new_rule = self.rubricator_prompts.get_rule(rule)
                     if new_rule:
@@ -1259,7 +1820,7 @@ class DBIMigrationApp:
             
             # Создание сканера
             from analyzer.scanner import PLPlusScanner
-            scanner = PLPlusScanner(config, selected_rules)
+            scanner = PLPlusScanner(config, selected_rules, self.rubricator_prompts)
             
             # Логирование вызова Парсера SQL
             self.root.after(0, lambda: self.log("\n[ПАРСЕР SQL] Начало сканирования и анализа...", 'highlight'))
@@ -1292,6 +1853,10 @@ class DBIMigrationApp:
             source_name = Path(self.source_dir_var.get()).name
             output_path = Path(config['paths']['logs_dir']) / f'scan_report_{source_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.md'
             scanner.generate_report(output_path)
+            
+            # DS 025: дополнительно HTML-отчёт в формате дистрибутивного PlpCheck
+            html_report_path = Path(config['paths']['logs_dir']) / f'plpcheck_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.html'
+            scanner.generate_report(html_report_path)
             
             self.root.after(0, lambda: self.log(f"\n[2/3] Результаты сканирования:", 'info'))
             self.root.after(0, lambda: self.log(f"  Найдено *.plp файлов: {scan_results.get('files_scanned', 0)}", 'info'))
@@ -1473,7 +2038,7 @@ class DBIMigrationApp:
                     'file_pattern': self.file_pattern_var.get() if self.file_pattern_var.get() else '**/*.plp',
                     'exclude_patterns': ['.v????', '.bak', '.tmp']
                 },
-                'output': {
+'output': {
                     'only_modified': self.only_modified_var.get(),
                     'preserve_structure': self.preserve_structure_var.get(),
                     'fix_only_found': self.fix_only_found_var.get()
@@ -1489,31 +2054,73 @@ class DBIMigrationApp:
                 }
             }
             
-            # Определение выбранных правил
-            selected_rules = [code for code, var in self.selected_rules.items() if var.get()]
+# Определение выбранных правил (DS 019/DS 020: только правила из выбранных файлов рубрикатора)
+            selected_files = [code for code, var in self.selected_rules.items() if var.get()]
             
-            # Если выбраны приоритеты — используем правила из выбранных приоритетов
+            # DS 020: фильтр PlpCheck применяется к ФАЙЛАМ до сбора правил
+            if not self.plpcheck_enabled_var.get():
+                selected_files = [r for r in selected_files if r != 'PlpCheck']
+                self.root.after(0, lambda: self.log("\n[PlpCheck] Флаг выключен — правила стиля кода не применяются", 'info'))
+            else:
+                self.root.after(0, lambda: self.log("\n[PlpCheck] Флаг включён — применяются правила стиля кода", 'info'))
+            
+            selected_rules = self._get_rules_for_selected_files(selected_files)
+            
+            # DS 023: отладочный вывод в лог АРМ
+            self.log(f"[DEBUG] selected_files: {selected_files}", 'info')
+            self.log(f"[DEBUG] selected_rules (передано в сканер): {selected_rules[:20]}{' ...' if len(selected_rules) > 20 else ''} (всего {len(selected_rules)})", 'info')
+            
+            self.root.after(0, lambda: self.log("\nВЫБРАННЫЕ ФАЙЛЫ РУБРИКАТОРА:", 'highlight'))
+            for f in selected_files:
+                self.root.after(0, lambda ff=f: self.log(f"  [+] {ff}", 'highlight'))
+            
+            # Если выбраны приоритеты — используем правила из выбранных приоритетов (DS 018: HIGH/MEDIUM/LOW)
+            # DS 024: защита от пустого результата — если после фильтра не осталось ни одного правила,
+            # selected_rules НЕ обнуляется (иначе сканер загрузит ВСЕ правила)
             from rubricator_priority_mapping import PRIORITY_RULES
-            selected_priorities = [p for p, var in self.priority_vars.items() if var.get()]
+            priority_mapping = {'HIGH': 'Приоритет 1', 'MEDIUM': 'Приоритет 2', 'LOW': 'Приоритет 3'}
+            selected_priorities = [priority_mapping.get(p, p) for p in getattr(self, '_selected_priorities', [])]
             
             if selected_priorities:
-                # Собираем правила из выбранных приоритетов
+                # Собираем правила из выбранных приоритетов (DS 024)
                 priority_rules = set()
                 for prio in selected_priorities:
                     if prio in PRIORITY_RULES:
                         priority_rules.update(PRIORITY_RULES[prio])
-                priority_rules = sorted(priority_rules)
                 
-                # Фильтруем selected_rules — оставляем только те, что в приоритетах
-                selected_rules = [r for r in selected_rules if r in priority_rules]
-                
-                self.root.after(0, lambda: self.log(f"\n[ПРИОРИТЕТ] Фильтрация по приоритетам: {', '.join(selected_priorities)}", 'highlight'))
-                self.root.after(0, lambda: self.log(f"  Всего правил из приоритетов: {len(priority_rules)}", 'info'))
-                self.root.after(0, lambda: self.log(f"  Используемых правил: {len(selected_rules)}", 'info'))
+                if priority_rules:
+                    # DS 024: регистронезависимое сопоставление кодов
+                    # PRIORITY_RULES использует 'PlpCheck.DBI.*.п.1', рубрикатор - 'plpcheck.ACCESS_STATIC'
+                    pr_lower = {r.lower(): r for r in priority_rules}
+                    filtered_rules = []
+                    for r in selected_rules:
+                        r_lower = r.lower()
+                        # 1) точное совпадение (регистронезависимо)
+                        if r_lower in pr_lower:
+                            filtered_rules.append(r)
+                            continue
+                        # 2) частичное совпадение: код приоритета начинается с кода правила
+                        #    (PlpCheck.DBI.OUTER_JOIN.п.1 vs plpcheck.DBI.OUTER_JOIN)
+                        if any(pr.lower().startswith(r_lower) or r_lower.startswith(pr.lower()) for pr in priority_rules):
+                            filtered_rules.append(r)
+                    
+                    if filtered_rules:
+                        selected_rules = filtered_rules
+                        self.root.after(0, lambda: self.log(f"\n[ПРИОРИТЕТ] Фильтрация по приоритетам: {', '.join(getattr(self, '_selected_priorities', []))}", 'highlight'))
+                        self.root.after(0, lambda: self.log(f"  Всего правил из приоритетов: {len(priority_rules)}", 'info'))
+                        self.root.after(0, lambda: self.log(f"  Используемых правил: {len(selected_rules)}", 'info'))
+                    else:
+                        # DS 024: НЕ обнуляем selected_rules — используем все правила выбранных файлов
+                        self.root.after(0, lambda: self.log(f"\n⚠ Для выбранных файлов нет правил с приоритетами {', '.join(getattr(self, '_selected_priorities', []))}. Используются все правила выбранных файлов ({len(selected_rules)}).", 'warning'))
+                else:
+                    # DS 024: в PRIORITY_RULES нет правил — не трогаем selected_rules
+                    self.root.after(0, lambda: self.log("\n⚠ Нет правил в PRIORITY_RULES. Используются все правила выбранных файлов.", 'warning'))
             
             self.root.after(0, lambda: self.log(f"\nИСПОЛЬЗУЕМЫЕ ПРАВИЛА ({len(selected_rules)}):", 'info'))
-            for rule in selected_rules:
+            for rule in selected_rules[:30]:
                 self.root.after(0, lambda r=rule: self.log(f"  [+] {r}", 'info'))
+            if len(selected_rules) > 30:
+                self.root.after(0, lambda: self.log(f"  ... и ещё {len(selected_rules) - 30} правил", 'info'))
             
             # Загрузка рубрикатора если ещё не загружен
             if not self.rubricator_loaded:
@@ -1531,7 +2138,7 @@ class DBIMigrationApp:
             
             # Создание сканера
             from analyzer.scanner import PLPlusScanner
-            scanner = PLPlusScanner(config, selected_rules)
+            scanner = PLPlusScanner(config, selected_rules, self.rubricator_prompts)
             
             # Callback для вывода в журнал
             def scan_log(message, level='info'):
@@ -1567,7 +2174,7 @@ class DBIMigrationApp:
             from fixer.code_fixer import PLPlusFixer
             iteration = datetime.now().strftime("%Y%m%d_%H%M%S")
             source_name = source_dir.name
-            fixer = PLPlusFixer(config, iteration)
+            fixer = PLPlusFixer(config, iteration, clean_output=self.clean_output_var.get())
             
             self.root.after(0, lambda: self.progress.config(value=50))
             self.root.after(0, lambda: self.progress_label.config(text="50%"))
@@ -1784,8 +2391,8 @@ class DBIMigrationApp:
                 self.root.after(0, lambda: self.log("Использование нового генератора тестов...", 'info'))
                 generator = TestGenerator(self.rubricator_dir)
                 
-                # Маппинг кодов файлов к правилам v3.0.0
-                # selected_rules содержит коды файлов из 1.RUBRICATOR_FILES.md:
+                # Маппинг кодов файлов к правилам v5.0.0
+                # selected_rules содержит коды файлов из 1.RUBRICATOR_FILES v5.md:
                 #   v50 → все правила, начинающиеся с v50.
                 #   тдс20240828, тклоик20240828 → правила, содержащие код в названии
                 selected_file_codes = [code for code, var in self.selected_rules.items() if var.get()]
@@ -1795,7 +2402,7 @@ class DBIMigrationApp:
                     self.root.after(0, lambda: self.set_status("Готово"))
                     return
                 
-                # Собираем все доступные правила v3.0.0
+                # Собираем все доступные правила v5.0.0
                 all_rules = generator.rubricator_v3.rules
                 
                 # Маппинг: код файла → список кодов правил
@@ -1820,15 +2427,16 @@ class DBIMigrationApp:
                     return
                 
                 # Загружаем JSON для доступа к examples
-                json_path = self.rubricator_dir / '4.RUBRICATOR_PROMPTS.json'
+                json_path = self.rubricator_dir / '4.RUBRICATOR_PROMPT v5.json'
                 json_data = {}
                 if json_path.exists():
                     with open(json_path, 'r', encoding='utf-8-sig') as f:
                         json_data = json.load(f)
                 
-                # Получаем выбранные приоритеты для фильтрации правил
+                # Получаем выбранные приоритеты для фильтрации правил (DS 018: HIGH/MEDIUM/LOW)
                 from rubricator_priority_mapping import PRIORITY_RULES
-                selected_priorities = [p for p, var in self.priority_vars.items() if var.get()]
+                priority_mapping = {'HIGH': 'Приоритет 1', 'MEDIUM': 'Приоритет 2', 'LOW': 'Приоритет 3'}
+                selected_priorities = [priority_mapping.get(p, p) for p in getattr(self, '_selected_priorities', [])]
                 
                 # Если приоритеты выбраны — используем только правила из выбранных приоритетов
                 if selected_priorities:
@@ -1860,7 +2468,7 @@ class DBIMigrationApp:
                 # Формируем отсортированный список правил
                 sorted_rules = matched_rules
                 total = len(sorted_rules)
-                self.root.after(0, lambda t=total: self.log(f"Сводный файл: {t} правил v3.0.0", 'info'))
+                self.root.after(0, lambda t=total: self.log(f"Сводный файл: {t} правил v5.0.0", 'info'))
                 
                 # Генерируем один сводный файл
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -1873,12 +2481,12 @@ class DBIMigrationApp:
                 
                 # Заголовок со списком всех правил
                 lines.append('-- ============================================================================')
-                lines.append(f'-- СВОДНЫЙ ТЕСТОВЫЙ ФАЙЛ: ВСЕ ПРАВИЛА v3.0.0 ({total} правил)')
+                lines.append(f'-- СВОДНЫЙ ТЕСТОВЫЙ ФАЙЛ: ВСЕ ПРАВИЛА v5.0.0 ({total} правил)')
                 lines.append(f'-- Дата генерации: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
                 lines.append(f'-- Описание: Тестовые файлы для всех правил PLPlus адаптации')
                 
-                # Добавляем информацию о выбранных приоритетах
-                selected_priorities = [p for p, var in self.priority_vars.items() if var.get()]
+                # Добавляем информацию о выбранных приоритетах (DS 018: HIGH/MEDIUM/LOW)
+                selected_priorities = list(getattr(self, '_selected_priorities', []))
                 if selected_priorities:
                     lines.append(f'-- Приоритеты: {", ".join(selected_priorities)}')
                 
@@ -1905,7 +2513,7 @@ class DBIMigrationApp:
                     lines.append('-- ============================================================================')
                     
                     # Метаданные
-                    lines.append('-- 3.RUBRICATOR_FIXES.md:')
+                    lines.append('-- 3.RUBRICATOR_FIXES v5.md:')
                     lines.append(f'--   Короткое описание: {rule.short_description}')
                     lines.append(f'--   Подробное описание: {rule.documentation_text}')
                     
@@ -1939,7 +2547,7 @@ class DBIMigrationApp:
                     lines.append(f'--   Теги: {tags}')
                     
                     # JSON metadata
-                    lines.append('-- 4.RUBRICATOR_PROMPTS.json (расширенный):')
+                    lines.append('-- 4.RUBRICATOR_PROMPT v5.json (расширенный):')
                     lines.append(f'--   documentation_text: {rule.documentation_text}')
                     lines.append(f'--   plplus_materials_note: {rule.plplus_materials_note}')
                     lines.append(f'--   search_prompt: {rule.search_prompt}')
@@ -2040,7 +2648,7 @@ class DBIMigrationApp:
                 
                 # Футер
                 lines.append('-- ============================================================================')
-                lines.append(f'-- КОНЕЦ ФАЙЛА: {total} правил v3.0.0')
+                lines.append(f'-- КОНЕЦ ФАЙЛА: {total} правил v5.0.0')
                 lines.append(f'-- Дата генерации: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
                 lines.append('-- ============================================================================')
                 
@@ -2071,9 +2679,9 @@ class DBIMigrationApp:
             self.root.after(0, lambda: self.set_status("Готово"))
     
     def _run_test_generation_legacy(self, test_dir: Path):
-        """Генерация тестовых файлов по старому алгоритму (из 3.RUBRICATOR_FIXES.md)"""
+        """Генерация тестовых файлов по старому алгоритму (из 3.RUBRICATOR_FIXES v5.md)"""
         try:
-            # Загружаем данные из 3.RUBRICATOR_FIXES.md
+            # Загружаем данные из 3.RUBRICATOR_FIXES v5.md
             fixes_data = self._load_fixes_from_rubricator()
             
             # Группируем по кодам файлов
@@ -2113,10 +2721,10 @@ class DBIMigrationApp:
             self.root.after(0, lambda: self.log(f"[!] Ошибка генерации (legacy): {error_msg}", 'error'))
     
     def _load_fixes_from_rubricator(self) -> List[dict]:
-        """Загрузка данных об исправлениях из 3.RUBRICATOR_FIXES.md"""
+        """Загрузка данных об исправлениях из 3.RUBRICATOR_FIXES v5.md"""
         fixes = []
         try:
-            file_path = self.rubricator_dir / '3.RUBRICATOR_FIXES.md'
+            file_path = self.rubricator_dir / '3.RUBRICATOR_FIXES v5.md'
             if not file_path.exists():
                 return fixes
             
@@ -2409,8 +3017,8 @@ class DBIMigrationApp:
             # Всегда учитываем текущий выбор правил
             selected_codes = {code for code, var in self.selected_rules.items() if var.get()}
             
-            # Вывод 1.RUBRICATOR_FILES.md с актуальными значениями "+/-"
-            file_path = self.rubricator_dir / '1.RUBRICATOR_FILES.md'
+            # Вывод 1.RUBRICATOR_FILES v5.md с актуальными значениями "+/-"
+            file_path = self.rubricator_dir / '1.RUBRICATOR_FILES v5.md'
             if file_path.exists():
                 self.log(f"# {file_path}", 'info')
                 self.log("# Рубрикатор: перечень файлов (с учетом текущего выбора)", 'info')
@@ -2500,8 +3108,8 @@ class DBIMigrationApp:
                         else:
                             self.log(line, 'info')
                     
-            # Вывод 3.RUBRICATOR_FIXES.md
-            file_path = self.rubricator_dir / '3.RUBRICATOR_FIXES.md'
+            # Вывод 3.RUBRICATOR_FIXES v5.md
+            file_path = self.rubricator_dir / '3.RUBRICATOR_FIXES v5.md'
             if file_path.exists():
                 self.log(f"# {file_path}", 'info')
                 self.log("# Рубрикатор: перечень исправлений (с учетом выбранных правил)", 'info')
@@ -2562,8 +3170,8 @@ class DBIMigrationApp:
             
             self.log(f"\nВсего выбрано правил: {selected_count}", 'info')
             
-            # Информация о выбранных приоритетах
-            selected_priorities = [p for p, var in self.priority_vars.items() if var.get()]
+            # Информация о выбранных приоритетах (DS 018: HIGH/MEDIUM/LOW)
+            selected_priorities = list(getattr(self, '_selected_priorities', []))
             if selected_priorities:
                 self.log("ВЫБРАННЫЕ ПРИОРИТЕТЫ:", 'highlight')
                 for prio in selected_priorities:
@@ -2584,6 +3192,174 @@ class DBIMigrationApp:
         self.save_settings()
         self.log("Настройки сохранены. Приложение закрывается...", 'info')
         self.root.destroy()
+    
+    def clear_changelog(self):
+        """Очистка журнала изменений"""
+        self.changelog_text.configure(state='normal')
+        self.changelog_text.delete('1.0', tk.END)
+        self.changelog_text.configure(state='disabled')
+    
+    def show_changelog(self, changelog_text):
+        """Отображение журнала в поле"""
+        self.changelog_text.configure(state='normal')
+        self.changelog_text.delete('1.0', tk.END)
+        self.changelog_text.insert('1.0', changelog_text)
+        self.changelog_text.configure(state='disabled')
+        self.log("Журнал изменений обновлен", 'info')
+    
+    def save_changelog_to_file(self):
+        """Сохранение журнала в файл"""
+        changelog_content = self.changelog_text.get('1.0', tk.END)
+        if not changelog_content.strip():
+            messagebox.showwarning("Предупреждение", "Журнал пуст")
+            return
+        
+        filename = f"CHANGELOG_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".md",
+            filetypes=[("Markdown files", "*.md"), ("All files", "*.*")],
+            initialfile=filename
+        )
+        if filepath:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(changelog_content)
+            messagebox.showinfo("Успех", f"Журнал сохранен в:\n{filepath}")
+            self.log(f"Журнал сохранен: {filepath}", 'success')
+    
+    def process_koda_response(self, response: str, clean_mode: bool = False):
+        """
+        Обработка ответа от KODA
+        
+        Args:
+            response: ответ от KODA
+            clean_mode: если True, возвращает только чистый код без маркеров
+        """
+        from fixer.code_fixer import parse_koda_response
+        
+        result = parse_koda_response(response, clean_mode)
+        
+        # Вставляем код в редактор (если есть)
+        if hasattr(self, 'code_editor'):
+            self.code_editor.delete('1.0', tk.END)
+            self.code_editor.insert('1.0', result['code'])
+        
+        # Показываем журнал
+        if result['changelog'] and clean_mode:
+            self.show_changelog(result['changelog'])
+            # Сохраняем журнал в файл
+            self._save_changelog_to_disk(result['changelog'])
+        elif not clean_mode:
+            self.clear_changelog()
+        
+        self.log("Ответ от KODA обработан", 'info')
+    
+    def send_to_koda(self):
+        """Отправка результатов сканирования в Koda через файл"""
+        if not self.scan_results:
+            messagebox.showwarning("Предупреждение", "Сначала выполните сканирование!")
+            return
+        
+        try:
+            exchange_dir = Path(__file__).parent.parent / 'EXCHANGE' / 'INBOX'
+            exchange_dir.mkdir(parents=True, exist_ok=True)
+            
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            task_file = exchange_dir / f"koda_task_{timestamp}.md"
+            
+            issues = self.scan_results.get('issues', [])
+            stats = self.scan_results.get('stats', {})
+            
+            lines = []
+            lines.append("# Задание для Koda: Исправление PLPlus кода")
+            lines.append("")
+            lines.append(f"## Статистика")
+            lines.append(f"- Найдено файлов: {stats.get('files_scanned', 0)}")
+            lines.append(f"- Найдено проблем: {stats.get('total_issues', 0)}")
+            lines.append("")
+            lines.append(f"## Проблемы ({len(issues)} шт.)")
+            lines.append("")
+            
+            for i, issue in enumerate(issues, 1):
+                lines.append(f"### {i}. {issue.issue_type}")
+                lines.append(f"- Строка: {issue.line_number}")
+                lines.append(f"- Описание: {issue.description}")
+                lines.append(f"- Файл: {issue.file_path}")
+                lines.append(f"- Было: {issue.original_code or 'N/A'}")
+                if issue.rubricator_example_fixed:
+                    lines.append(f"- Пример исправления: {issue.rubricator_example_fixed}")
+                lines.append("")
+            
+            content = '\n'.join(lines)
+            with open(task_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            self.log(f"Задание отправлено в Koda: {task_file.name}", 'success')
+            self.log(f"Файл: {task_file}", 'info')
+            messagebox.showinfo("Успех", f"Задание отправлено в Koda!\n\nФайл: {task_file.name}")
+            
+            # Активируем кнопку получения ответа
+            self.btn_receive_koda.state(['!disabled'])
+            
+        except Exception as e:
+            self.log(f"Ошибка отправки в Koda: {e}", 'error')
+            messagebox.showerror("Ошибка", f"Не удалось отправить задание:\n{e}")
+    
+    def receive_from_koda(self):
+        """Получение ответа от Koda из OUTBOX"""
+        try:
+            exchange_dir = Path(__file__).parent.parent / 'EXCHANGE' / 'OUTBOX'
+            if not exchange_dir.exists():
+                messagebox.showwarning("Предупреждение", "Папка OUTBOX не найдена")
+                return
+            
+            files = sorted(exchange_dir.glob('*.md')) + sorted(exchange_dir.glob('*.json'))
+            if not files:
+                messagebox.showinfo("Информация", "Нет ответов в OUTBOX")
+                return
+            
+            # Берём последний файл
+            last_file = files[-1]
+            
+            with open(last_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Вставляем в журнал изменений
+            self.changelog_text.configure(state='normal')
+            self.changelog_text.delete('1.0', tk.END)
+            self.changelog_text.insert('1.0', content)
+            self.changelog_text.configure(state='disabled')
+            
+            self.log(f"Ответ получен из: {last_file.name}", 'success')
+            self.log(f"Размещено в Журнале изменений", 'info')
+            
+            # Перемещаем файл в PROCESSED
+            processed_dir = Path(__file__).parent.parent / 'EXCHANGE' / 'PROCESSED'
+            processed_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(last_file), str(processed_dir / last_file.name))
+            
+            self.log(f"Файл перемещен в PROCESSED: {last_file.name}", 'info')
+            messagebox.showinfo("Успех", f"Ответ получен из:\n{last_file.name}\n\nРазмещён в Журнале изменений")
+            
+        except Exception as e:
+            self.log(f"Ошибка получения ответа: {e}", 'error')
+            messagebox.showerror("Ошибка", f"Не удалось получить ответ:\n{e}")
+    
+    def _save_changelog_to_disk(self, changelog_text: str, source_file: str = ''):
+        """Сохранение журнала на диск"""
+        import os
+        
+        filename = os.path.basename(source_file) if source_file else 'unknown'
+        name_without_ext = os.path.splitext(filename)[0]
+        date_str = datetime.now().strftime('%Y%m%d')
+        changelog_filename = f"CHANGELOG_{name_without_ext}_{date_str}.md"
+        
+        # Путь для сохранения - рядом с результатами
+        results_dir = self.result_dir_var.get()
+        if results_dir:
+            changelog_path = os.path.join(results_dir, changelog_filename)
+            with open(changelog_path, 'w', encoding='utf-8') as f:
+                f.write(changelog_text)
+            self.log(f"Журнал сохранен: {changelog_path}", 'success')
 
 
 def main():

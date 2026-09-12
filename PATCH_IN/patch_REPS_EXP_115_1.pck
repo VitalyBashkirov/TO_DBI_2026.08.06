@@ -1,0 +1,5 @@
+VER2
+REM Список элементов
+REM CFT-Platform-IDE: 2.36.417
+
+METH HOOK_BANK REPS_EXP_115_1

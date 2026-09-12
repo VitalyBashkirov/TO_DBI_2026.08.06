@@ -1,0 +1,13 @@
+library TEST is
+    dp integer;
+    name varchar2(100);
+    client ref [CLIENT];
+    
+    procedure test(p_param ref [PARAM]) is
+    begin
+        dp := 10;
+        name := 'test';
+        client := ::[CLIENT]([ID] = 1);
+        p_param := client;
+    end;
+end;

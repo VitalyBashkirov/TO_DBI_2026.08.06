@@ -1,0 +1,1919 @@
+{
+  "version": "5.3.0",
+  "source": "v53",
+  "source_file": "Рекомендации по адаптации кода на PLPlus для работы с DBI приложением v53.docx",
+  "based_on": "v53.docx (Рекомендации по адаптации кода на PLPlus для работы с DBI приложением v53.docx)",
+  "last_updated": "2026-08-21",
+  "total_rules": 98,
+  "ai_analysis_enabled": true,
+  "rules": {
+    "v53.SQL.OUTERJOIN.п.1.1": {
+      "code": "v53.SQL.OUTERJOIN.п.1.1",
+      "source": "v53",
+      "short_description": "Замена (+) на LEFT/RIGHT JOIN",
+      "documentation_text": "Oracle оператор (+) в ANSI не поддерживается. Нельзя использовать PLPlus параметризацию типа соединения (true/false) в where. Вместо этого нужно использовать явные left/right join on.",
+      "regex_patterns": {
+        "for_search": [
+          {"pattern": "(\\w+)\\.(\\w+)\\s*=\\s*(\\w+)\\.(\\w+)\\(\\+\\)", "description": "Oracle (+) справа"},
+          {"pattern": "(\\w+)\\.(\\w+)\\(\\+\\)\\s*=\\s*(\\w+)\\.(\\w+)", "description": "Oracle (+) слева"},
+          {"pattern": "(\\w+)\\.\\[(\\w+)\\]\\s*=\\s*(\\w+)&collection\\(true\\)", "description": "PLPlus коллекция с параметром true"}
+        ],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "t1.id = t2.id(+)",
+      "code_example_good": "left join t2 on t1.id = t2.id",
+      "fix_instruction": "Заменить (+) на LEFT/RIGHT JOIN с явным условием соединения.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.JOINS",
+      "tags": ["outer join", "oracle", "ansi"]
+    },
+
+    "v53.SQL.ROWNUM.п.1.2": {
+      "code": "v53.SQL.ROWNUM.п.1.2",
+      "source": "v53",
+      "short_description": "Замена rownum на FETCH FIRST",
+      "documentation_text": "Ранее для ограничения выборки использовалась псевдоколонка 'rownum'. В PostgreSQL таких псевдоколонок нет. Вместо этого нужно использовать конструкцию fetch X.",
+      "regex_patterns": {
+        "for_search": [
+          {"pattern": "\\bROWNUM\\s*=\\s*(\\d+)", "description": "ROWNUM = N"},
+          {"pattern": "\\bROWNUM\\s*<=\\s*(\\d+)", "description": "ROWNUM <= N"},
+          {"pattern": "\\bWHERE\\b.*?\\bROWNUM\\b", "description": "ROWNUM в WHERE"}
+        ],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "where rownum = 1",
+      "code_example_good": "fetch first 1 rows only",
+      "fix_instruction": "Заменить rownum на FETCH FIRST X ROWS ONLY.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.LIMIT",
+      "tags": ["rownum", "limit", "offset"]
+    },
+
+    "v53.SQL.UDF.п.1.3": {
+      "code": "v53.SQL.UDF.п.1.3",
+      "source": "v53",
+      "short_description": "Запрет UDF в WHERE/GROUP BY/ORDER BY",
+      "documentation_text": "Не поддерживается трансляция бизнес-кода в серверный код, поэтому нельзя использовать функции PLPlus бизнес-кода в SQL за исключением использования функциональных реквизитов и функций как выражений выборки в основном запросе.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "(WHERE|GROUP BY|ORDER BY|HAVING).*[A-Z_]+\\([^)]*\\)", "description": "UDF в WHERE/GROUP BY/ORDER BY"}],
+        "for_ignore": [
+          {"pattern": "(NVL|DECODE|CASE|COALESCE|TO_CHAR|TO_DATE|TO_NUMBER|SUBSTR|INSTR|LENGTH|TRIM|UPPER|LOWER|COUNT|SUM|AVG|MIN|MAX|SYSDATE)\\(", "description": "Встроенные функции"},
+          {"pattern": "^\\s*--.*", "description": "Комментарии"}
+        ]
+      },
+      "code_example_bad": "for (select acc(acc.[MAIN_V_ID] : acc_num, f.a('И'||acc, p_date_end) : saldo) in ::[AC_FIN] where acc.[MAIN_USV] = p_usv) loop",
+      "code_example_good": "for (select acc(acc : acc, acc.[MAIN_V_ID] : acc_num) in ::[AC_FIN] where acc.[MAIN_USV] = p_usv) loop str := acc.acc_num ||'='||f.a('И'||acc.acc, p_date_end); end loop;",
+      "fix_instruction": "Вынести UDF из WHERE/GROUP BY/ORDER BY в процедурный код.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.FUNCTIONS",
+      "tags": ["udf", "function", "performance"]
+    },
+
+    "v53.SQL.CAST.п.1.5": {
+      "code": "v53.SQL.CAST.п.1.5",
+      "source": "v53",
+      "short_description": "Явное приведение типов",
+      "documentation_text": "У Oracle и PostgreSQL разные правила неявного приведения типов данных и функции явного преобразования типов. Поэтому необходимо писать код, в котором используются совместимые типы данных или их явные преобразования.",
+      "regex_patterns": {
+        "for_search": [
+          {"pattern": "[a-zA-Z_][a-zA-Z0-9_]*\\s*\\+\\s*[0-9]+", "description": "Сложение строки с числом"},
+          {"pattern": "[a-zA-Z_][a-zA-Z0-9_]*\\s+LIKE\\s+['\"]", "description": "LIKE с числовым полем"}
+        ],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "c_code + 1",
+      "code_example_good": "to_number(c_code) + 1",
+      "fix_instruction": "Добавить явное приведение типов с использованием to_number, to_char, cast и т.д.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.OTHER",
+      "tags": ["cast", "type", "conversion"]
+    },
+
+    "v53.SQL.DECODE.п.1.6.1": {
+      "code": "v53.SQL.DECODE.п.1.6.1",
+      "source": "v53",
+      "short_description": "Замена DECODE на CASE",
+      "documentation_text": "В ТЯ 7.6.10.10 при APPLICATION.DBI = 1 реализована компиляция decode в case. В случае ошибки компиляции case-конструкции java пакет не создается. В этом случае необходимо вручную переписать decode на case.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "DECODE\\s*\\([^)]+\\)", "description": "DECODE функция"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "decode(status,1,'A',2,'B','?')",
+      "code_example_good": "case status when 1 then 'A' when 2 then 'B' else '?' end",
+      "fix_instruction": "Заменить DECODE на CASE WHEN с явным указанием всех условий.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.FUNCTIONS",
+      "tags": ["decode", "case", "conditional"]
+    },
+
+    "v53.SQL.CONNECTBY.п.1.8": {
+      "code": "v53.SQL.CONNECTBY.п.1.8",
+      "source": "v53",
+      "short_description": "Замена CONNECT BY на WITH RECURSIVE",
+      "documentation_text": "Для реализации иерархических выборок использовался синтаксис 'connect by'. Начиная с ТЯ 7.6.9.2 для той же цели нужно использовать CTE (WITH RECURSIVE), т.к. данная конструкция описана в ANSI SQL и поддержана в PLPLUS.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "CONNECT\\s+BY\\s+PRIOR\\s+\\w+\\s*=\\s*\\w+", "description": "CONNECT BY"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "select d(d%id : ID, d.[HIGH] : HIGH) in ::[DEPART] connect by d%id = prior d.[HIGH] start d%id = dep",
+      "code_example_good": "with recursive t(id, high) as (select x(x%id : id, x.[HIGH] : high) in ::[DEPART] where x%id = dep union all select x(x%id : id, x.[HIGH] : high) in ::[DEPART] join (t : t2) on t2.high = x) select t1(t1.id) in t where t1.high is null fetch 1 into high_dep;",
+      "fix_instruction": "Заменить CONNECT BY на WITH RECURSIVE с явным указанием стартовой и итерационной части.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.HIERARCHICAL",
+      "tags": ["hierarchical", "connect by", "cte"]
+    },
+
+    "v53.SQL.SYSVIEW.п.1.9": {
+      "code": "v53.SQL.SYSVIEW.п.1.9",
+      "source": "v53",
+      "short_description": "Замена v$session на VW_DB_SESSION",
+      "documentation_text": "Точного соответствия системным представлениям Oracle в PostgreSQL нет, поэтому к ним обращаться не рекомендуется. Для минимизации изменений в прикладном коде реализовано представление VW_DB_SESSION.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "(V\\$|GV\\$|USER_|ALL_|DBA_)[A-Z0-9_]+", "description": "Системное представление Oracle"}],
+        "for_ignore": [
+          {"pattern": "VW_DB_SESSION", "description": "Разрешенное представление"},
+          {"pattern": "^\\s*--.*", "description": "Комментарии"}
+        ]
+      },
+      "code_example_bad": "select t(t.SID : SID) in gv$session%rowtype",
+      "code_example_good": "select t(t.SID : SID) in VW_DB_SESSION%rowtype",
+      "fix_instruction": "Заменить системное представление Oracle на VW_DB_SESSION.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.SYS_OBJECTS",
+      "tags": ["system view", "oracle", "session"]
+    },
+
+    "v53.SQL.SYSTABLES.п.1.10": {
+      "code": "v53.SQL.SYSTABLES.п.1.10",
+      "source": "v53",
+      "short_description": "Запрет SELECT из системных таблиц ТЯ",
+      "documentation_text": "Все таблицы метаданных ТЯ перенесены в другой data source. Обращаться к метаданным только через соответствующие метаклассы.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "(FROM|INTO|JOIN)\\s+(CLASSES|CLASS_ATTRIBUTES|METHODS|CRITERIA|RTL_ENTRIES|SOURCES|DEPENDENCIES|ERRORS|CURSORS|HOST2PLP|DEPLOYMENT_SUPPLY|HOST_SOURCES|HOST_ERRORS)\\b", "description": "Обращение к системной таблице"}],
+        "for_ignore": [
+          {"pattern": "::\\[METACLASS\\]|::\\[STATES\\]", "description": "Обращение через метакласс"},
+          {"pattern": "^\\s*--.*", "description": "Комментарии"}
+        ]
+      },
+      "code_example_bad": "select s(s.[NAME]) in states%rowtype where s.[id] = ref_doc%state into st;",
+      "code_example_good": "select s(s.[NAME]) in ::[STATES] all where s%id = ref_doc%state into st;",
+      "fix_instruction": "Заменить обращение к системной таблице на обращение через соответствующий метакласс.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.SYS_OBJECTS",
+      "tags": ["metadata", "system tables"]
+    },
+
+    "v53.SQL.ORACLE_PKG.п.1.11": {
+      "code": "v53.SQL.ORACLE_PKG.п.1.11",
+      "source": "v53",
+      "short_description": "Запрет Oracle supplied PL/SQL пакетов",
+      "documentation_text": "Oracle пакетов нет, поэтому не должно быть зависимостей. Если они выявлены в прикладном коде их нужно исключить либо стараться выносить за пределы курсора.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "(UTL_FILE|DBMS_OUTPUT|DBMS_ALERT|DBMS_PIPE|DBMS_LOB|DBMS_RANDOM|UTL_RAW|UTL_COMPRESS|DBMS_XMLGEN|DBMS_CRYPTO|UTL_SMTP|UTL_URL|UTL_HTTP|UTL_TCP|DBMS_SQL)\\.", "description": "Oracle пакет"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "dbms_lob.writeappend(...)",
+      "code_example_good": "::[RUNTIME].[CONCAT_LIB].append(...)",
+      "fix_instruction": "Заменить Oracle пакет на альтернативу из RUNTIME.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.SYS_OBJECTS",
+      "tags": ["oracle", "plsql", "packages"]
+    },
+
+    "v53.SQL.TABLE_SELECT.п.1.13": {
+      "code": "v53.SQL.TABLE_SELECT.п.1.13",
+      "source": "v53",
+      "short_description": "Замена SELECT FROM TABLE()",
+      "documentation_text": "Синтаксис выборки из коллекций не формализован в ANSI SQL и имеет разную реализацию в Oracle и PostgreSQL. Поддержана выборка из скалярных ассоциативных массивов и из массивов объектных типов.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "SELECT.*FROM\\s+TABLE\\s*\\(", "description": "SELECT FROM TABLE()"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "for (select tb(tb.a : SID) in tA) loop",
+      "code_example_good": "for (select tb(tb.column_value : SID) in tA1) loop",
+      "fix_instruction": "Использовать varray от скалярных типов или переписать на процедурный цикл.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.OTHER",
+      "tags": ["collection", "array", "table"]
+    },
+
+    "v53.SQL.FUNC_REQ.п.1.14": {
+      "code": "v53.SQL.FUNC_REQ.п.1.14",
+      "source": "v53",
+      "short_description": "Ограничения функциональных реквизитов",
+      "documentation_text": "Реализована поддержка возможности обращения к полю «Значение» функционального реквизита в select list запроса верхнего уровня. Во всех остальных местах недопустимо использование функциональных реквизитов без секции «SQL значение».",
+      "regex_patterns": {
+        "for_search": [{"pattern": "\\w+\\.\\[\\w+\\]\\.\\[\\w+\\]", "description": "Функциональный реквизит"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "select a(a.[FUNC_ATTR].[VALUE]) in ::[TBP]",
+      "code_example_good": "select a(a.[FUNC_ATTR]) in ::[TBP]",
+      "fix_instruction": "Использовать функциональные реквизиты только в select list запроса верхнего уровня.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "SQL",
+      "subcategory": "SQL.DML.FUNCTIONS",
+      "tags": ["functional", "attributes"]
+    },
+
+    "v53.SQL.XMLTYPE.п.1.15": {
+      "code": "v53.SQL.XMLTYPE.п.1.15",
+      "source": "v53",
+      "short_description": "Запрет XMLType в SQL-запросах",
+      "documentation_text": "В PostgreSQL отсутствует Oracle XMLType, поэтому все существующие варианты использования XMLType в SQL запросах требуется исключить.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "XMLType\\(|XMLTYPE\\(", "description": "XMLType в SQL"}],
+        "for_ignore": [
+          {"pattern": "::\\[RUNTIME\\]\\.\\[XML_DB\\]", "description": "Библиотека XML_DB"},
+          {"pattern": "^\\s*--.*", "description": "Комментарии"}
+        ]
+      },
+      "code_example_bad": "XMLType(a1.[DATA]).extract('/Answer/LegalImpossibility')",
+      "code_example_good": "::[RUNTIME].[XML_DB].extract(...)",
+      "fix_instruction": "Заменить XMLType в SQL на использование ::[RUNTIME].[XML_DB] в процедурном коде.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "SQL",
+      "subcategory": "SQL.DML.FUNCTIONS",
+      "tags": ["xml", "xmltype"]
+    },
+
+    "v53.SQL.XMLQUERY.п.1.16": {
+      "code": "v53.SQL.XMLQUERY.п.1.16",
+      "source": "v53",
+      "short_description": "Замена XMLQuery на execute immediate",
+      "documentation_text": "На текущий момент в PLPlus нет поддержки Oracle XMLQuery. Все существующие варианты использования возможны только через execute immediate.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "XMLQuery\\s*\\(", "description": "XMLQuery"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "XMLQuery('...')",
+      "code_example_good": "execute immediate '...'",
+      "fix_instruction": "Заменить XMLQuery на execute immediate.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "SQL",
+      "subcategory": "SQL.DML.FUNCTIONS",
+      "tags": ["xmlquery"]
+    },
+
+    "v53.SQL.DML_JOIN.п.1.17": {
+      "code": "v53.SQL.DML_JOIN.п.1.17",
+      "source": "v53",
+      "short_description": "Переписывание DML с JOIN на подзапросы",
+      "documentation_text": "Нет совместимости по синтаксису между Oracle и PostgreSQL. На текущий момент PLPLUS трансляция update/delete from (join) в PostgreSQL не работает. Требуется переписать код.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "(UPDATE|DELETE)\\s+\\w+\\s+IN\\s+.*?WHERE.*?\\w+\\.\\[\\w+\\]\\s*=\\s*\\w+", "description": "DML с JOIN"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "delete x in p_doc.[USER_TYPE] where x.[CODE] = 'GZKH_ADD_CONTROL'",
+      "code_example_good": "delete x in p_doc.[USER_TYPE] where x = ::[USER_TYPE]([CODE] = 'GZKH_ADD_CONTROL')",
+      "fix_instruction": "Переписать DML без JOIN, используя подзапросы.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.JOINS",
+      "tags": ["dml", "join", "update", "delete"]
+    },
+
+    "v53.SQL.HINTS.п.1.18": {
+      "code": "v53.SQL.HINTS.п.1.18",
+      "source": "v53",
+      "short_description": "Удаление подсказок оптимизатора",
+      "documentation_text": "В PostgreSQL нет возможности управлять логикой работы Planner/Optimizer, поэтому не рекомендуется использование подсказок (hints) для универсальной функциональности.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "/\\*\\+.*?\\*/", "description": "Подсказка оптимизатора"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "select /*+ INDEX(t idx) */ * from t",
+      "code_example_good": "select * from t",
+      "fix_instruction": "Удалить подсказку оптимизатора.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.OTHER",
+      "tags": ["hints", "optimizer"]
+    },
+
+    "v53.SQL.VW_CRIT_RPT.п.1.19": {
+      "code": "v53.SQL.VW_CRIT_RPT.п.1.19",
+      "source": "v53",
+      "short_description": "Ограничения при SELECT из VW_CRIT, VW_RPT, VW_SQL",
+      "documentation_text": "Представления VW_SQL в DBI не поддерживаются. Для обращений из внешних систем поддержана возможность создания представлений VW_RPT в БД с аннотацией @target(sql). Не рекомендуется в прикладном коде выполнять выборку из представлений для просмотра VW_CRIT.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "(VW_CRIT|VW_RPT|VW_SQL)", "description": "VW_CRIT/VW_RPT/VW_SQL"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "select * from VW_SQL_...",
+      "code_example_good": "select * from ::[TBP] all",
+      "fix_instruction": "Заменить VW_SQL на селект в операции или VW_RPT с @target(sql).",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.VIEWS",
+      "tags": ["views", "vw_crit", "vw_rpt"]
+    },
+
+    "v53.SQL.PSEUDO.п.1.20": {
+      "code": "v53.SQL.PSEUDO.п.1.20",
+      "source": "v53",
+      "short_description": "Запрет псевдоколонок Oracle",
+      "documentation_text": "Обращение к псевдоколонкам Oracle OBJECTID, OBJECT_VALUE, ORA_ROWSCN, ROWID, ROWNUM, XMLDATA недопустимо, так как в PostgreSQL их нет.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "\\b(ROWID|ORA_ROWSCN|OBJECT_ID|OBJECT_VALUE|XMLDATA)\\b", "description": "Псевдоколонка Oracle"}],
+        "for_ignore": [
+          {"pattern": "\\bROWNUM\\b", "description": "ROWNUM обрабатывается отдельно"},
+          {"pattern": "^\\s*--.*", "description": "Комментарии"}
+        ]
+      },
+      "code_example_bad": "select d(d%rowid) in ::[F_120_DETAIL]",
+      "code_example_good": "select d(d%id) in ::[F_120_DETAIL]",
+      "fix_instruction": "Заменить псевдоколонку Oracle на прикладной код.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.PSEUDOCOLUMNS",
+      "tags": ["pseudocolumn", "oracle"]
+    },
+
+    "v53.SQL.SIMPLE_VIEW.п.1.21": {
+      "code": "v53.SQL.SIMPLE_VIEW.п.1.21",
+      "source": "v53",
+      "short_description": "Запрет простых представлений",
+      "documentation_text": "Простые представления отсутствуют в dbi проекте. Их нужно сконвертировать/переписать в PlPlus представления с учетом ANSI синтаксиса.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "CREATE\\s+VIEW\\s+[A-Z_]+\\s+AS\\s+SELECT", "description": "Простое представление"}],
+        "for_ignore": [{"pattern": "view\\s+[A-Z_]+\\s*\\{", "description": "PlPlus представление"}]
+      },
+      "code_example_bad": "CREATE VIEW VW_TEST AS SELECT * FROM T",
+      "code_example_good": "view VW_TEST { type main is select ... }",
+      "fix_instruction": "Переписать простое представление в PlPlus представление.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "SQL",
+      "subcategory": "SQL.DML.VIEWS",
+      "tags": ["view", "simple"]
+    },
+
+    "v53.SQL.LOCK_WAIT.п.1.22": {
+      "code": "v53.SQL.LOCK_WAIT.п.1.22",
+      "source": "v53",
+      "short_description": "Блокировка строк с ожиданием",
+      "documentation_text": "Конструкция блокировки с ожиданием в запросах lock WAIT [int] поддержана в Технологическом ядре, начиная с версии 7.6.13.0.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "SELECT.*FOR\\s+UPDATE.*WAIT\\s+\\d+", "description": "SELECT FOR UPDATE WAIT"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "select * from t for update wait 5",
+      "code_example_good": "select * from t for update",
+      "fix_instruction": "Использовать NOWAIT или убрать WAIT.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "SQL",
+      "subcategory": "SQL.DML.OTHER",
+      "tags": ["lock", "wait"]
+    },
+
+    "v53.SQL.CONTEXT.п.1.23": {
+      "code": "v53.SQL.CONTEXT.п.1.23",
+      "source": "v53",
+      "short_description": "Замена sys_context('USERENV','DB_NAME')",
+      "documentation_text": "Запрещено использовать контекст USERENV, т.к. это контекст исключительно Oracle. Для получения имени БД использовать ::[RUNTIME].[ENVIRONMENT].ClassStorage('ТБП').dbName.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "sys_context\\s*\\(\\s*['\"]USERENV['\"]", "description": "sys_context USERENV"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "sys_context('USERENV', 'DB_NAME')",
+      "code_example_good": "::[RUNTIME].[ENVIRONMENT].ClassStorage('ТБП').dbName",
+      "fix_instruction": "Заменить sys_context('USERENV') на альтернативу из RUNTIME.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.SYS_OBJECTS",
+      "tags": ["context", "userenv", "database"]
+    },
+
+    "v53.SQL.DDL.п.1.24": {
+      "code": "v53.SQL.DDL.п.1.24",
+      "source": "v53",
+      "short_description": "Указание схемы в DDL",
+      "documentation_text": "В PostgreSQL при создании объекта БД без указания схемы, объект будет создан на схеме, указанной первой в search_path. Поэтому при выполнении DDL из прикладного кода, обязательно указывайте имя схемы.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "CREATE\\s+(TABLE|INDEX|VIEW|SEQUENCE|FUNCTION)\\s+[A-Z#]+|GRANT.*ON\\s+[A-Z#]+", "description": "DDL без схемы"}],
+        "for_ignore": [
+          {"pattern": "CREATE\\s+(TABLE|INDEX|VIEW|SEQUENCE|FUNCTION)\\s+[a-z]+\\.|GRANT.*ON\\s+[a-z]+\\.", "description": "С указанием схемы"},
+          {"pattern": "^\\s*--.*", "description": "Комментарии"}
+        ]
+      },
+      "code_example_bad": "CREATE TABLE plants ( plant_id NUMBER PRIMARY KEY, common_name VARCHAR2(15) );",
+      "code_example_good": "CREATE TABLE app.plants ( plant_id NUMBER PRIMARY KEY, common_name VARCHAR2(15) );",
+      "fix_instruction": "Добавить схему в DDL команды.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.OTHER",
+      "tags": ["ddl", "schema"]
+    },
+
+    "v53.SQL.EXCEPTIONLOOP.п.1.25": {
+      "code": "v53.SQL.EXCEPTIONLOOP.п.1.25",
+      "source": "v53",
+      "short_description": "Запрет конструкции exceptionloop",
+      "documentation_text": "Exceptionloop применяется в bulk конструкциях. В PostgreSQL, в отличии от Oracle, при возникновении исключения в SQL портится вся транзакция, таким образом дальнейшее выполнение DML невозможно.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "\\bEXCEPTIONLOOP\\b", "description": "EXCEPTIONLOOP"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "delete for i in 1..2 exceptionloop c in ::[ACCOUNT] where c = ac_ref(i);",
+      "code_example_good": "delete for i in 1..2 loop c in ::[ACCOUNT] where c = ac_ref(i); end loop;",
+      "fix_instruction": "Заменить EXCEPTIONLOOP на LOOP.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.OTHER",
+      "tags": ["exception", "bulk", "loop"]
+    },
+
+    "v53.SQL.BIND_GROUP.п.1.26": {
+      "code": "v53.SQL.BIND_GROUP.п.1.26",
+      "source": "v53",
+      "short_description": "Запрет bind переменных в GROUP BY, DISTINCT, ORDER BY",
+      "documentation_text": "Запросы с bind переменными в выражениях group by, distinct..order by на PostgreSQL не работают, поэтому их необходимо переписать так, чтоб не было bind переменных.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "(GROUP BY|DISTINCT|ORDER BY).*:[a-z_]+", "description": "Bind переменная в GROUP BY/DISTINCT/ORDER BY"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "select distinct x(x : c_id) in ::[TST_IMP_FMS] all order by case when x.[SER] = v_ser then '1' else '0' end",
+      "code_example_good": "select distinct x(x : c_id) in ::[TST_IMP_FMS] all order by case when x.[SER] = '1' then '1' else '0' end",
+      "fix_instruction": "Заменить bind переменные на константы в GROUP BY, DISTINCT, ORDER BY.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.OTHER",
+      "tags": ["bind", "group by", "distinct"]
+    },
+
+    "v53.SQL.REF_SELECT.п.1.27": {
+      "code": "v53.SQL.REF_SELECT.п.1.27",
+      "source": "v53",
+      "short_description": "Запрет выборки из ссылок",
+      "documentation_text": "Выборка из ссылок не поддержана и не будет поддержана в DBI. Следует переписать запрос.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "SELECT.*IN\\s+\\w+\\s+WHERE.*REF\\s+\\[", "description": "Выборка из ссылки"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "for (select a (a : id ) in v_cl_priv_ref) loop",
+      "code_example_good": "for (select a (a : id ) in ::[CL_PRIV] all) loop",
+      "fix_instruction": "Переписать запрос без выборки из ссылки.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.OTHER",
+      "tags": ["ref", "cursor", "select"]
+    },
+
+    "v53.SQL.BULK.п.1.28": {
+      "code": "v53.SQL.BULK.п.1.28",
+      "source": "v53",
+      "short_description": "Включение batch для bulk операций",
+      "documentation_text": "Начиная c 2MCA DBI версии 3.10.24 оптимизирована конструкция массовой вставки. Начиная с 2MCA DBI версии 3.11.0 оптимизирована конструкция массового обновления. Начиная с 2MCA DBI 3.11.106 оптимизирована конструкция массового удаления.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "\\bFORALL\\b|\\bBULK COLLECT\\b", "description": "BULK операции"}],
+        "for_ignore": [
+          {"pattern": "pragma hint\\('jdbc_batch\\(true\\)'\\)", "description": "Уже есть хинт"},
+          {"pattern": "^\\s*--.*", "description": "Комментарии"}
+        ]
+      },
+      "code_example_bad": "forall i in 1..100 insert into t values (v_arr(i));",
+      "code_example_good": "pragma hint('jdbc_batch(true)'); forall i in 1..100 insert into t values (v_arr(i));",
+      "fix_instruction": "Добавить pragma hint('jdbc_batch(true)') перед bulk операцией.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.OTHER",
+      "tags": ["bulk", "batch", "performance"]
+    },
+
+    "v53.SQL.EMPTY_CURSOR.п.1.29": {
+      "code": "v53.SQL.EMPTY_CURSOR.п.1.29",
+      "source": "v53",
+      "short_description": "Пустая строка в курсоре",
+      "documentation_text": "Когда в курсоре колонка объявлена как пустая строка ('') и в соответствующее поле структуры, объявленной как курсор%rowtype помещаем пустую строку, то получаем в этом поле строку из 32767 пробелов, а не пустую.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "select\\s+y\\(\\s*''\\s*:", "description": "Пустая строка в курсоре"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "type err_type is select y('' : MY_FIELD) in ::[CLIENT];",
+      "code_example_good": "lcvStringEmpty varchar2(32767) := null; type correct_type is select y (lcvStringEmpty : MY_FIELD) in ::[CLIENT];",
+      "fix_instruction": "Использовать переменную с null вместо пустой строки в курсоре.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "SQL",
+      "subcategory": "SQL.DML.OTHER",
+      "tags": ["empty string", "cursor"]
+    },
+
+    "v53.SQL.CREATE_VIEW.п.1.30": {
+      "code": "v53.SQL.CREATE_VIEW.п.1.30",
+      "source": "v53",
+      "short_description": "Создание представлений для данных неплатформенных таблиц",
+      "documentation_text": "Платформа позволяет создавать представления, которые будут отображать данные из неплатформенных таблиц. Для этого следует создать промежуточное представление для отчёта с именем вида {ShortName}:{TableName}%ROWTYPE.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "report\\s+view\\s+[A-Z_]+\\s*\\{", "description": "Report view"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "view VW_RPT_PG_STAT_ACTIVITY { type main is select ... }",
+      "code_example_good": "@name('VW_RPT_PG_STAT_ACTIVITY:PG_STAT_ACTIVITY%ROWTYPE') report view VW_RPT_PG_STAT_ACTIVITY { ... }",
+      "fix_instruction": "Создать report view с именем {ShortName}:{TableName}%ROWTYPE для данных неплатформенных таблиц.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "SQL",
+      "subcategory": "SQL.DML.VIEWS",
+      "tags": ["view", "nonplatform", "table"]
+    },
+
+    "v53.STOR.NESTED.п.2.1": {
+      "code": "v53.STOR.NESTED.п.2.1",
+      "source": "v53",
+      "short_description": "Запрет nested table",
+      "documentation_text": "Поля типа nested table не поддерживаются.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "nested\\s+table", "description": "Nested table"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "nested table ...",
+      "code_example_good": "varray ...",
+      "fix_instruction": "Заменить nested table на varray.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STOR",
+      "subcategory": "STOR.TYPES",
+      "tags": ["nested table"]
+    },
+
+    "v53.STOR.DATE.п.2.2": {
+      "code": "v53.STOR.DATE.п.2.2",
+      "source": "v53",
+      "short_description": "Замена DATE на DATE_TIME",
+      "documentation_text": "Тип DATE в PostgreSQL не хранит время. В связи с этим, принято решение по миграции данных из Oracle типа DATE в PostgreSQL в тип TIMESTAMP(0). Также в ТЯ реализована возможность использования типа interval.",
+      "regex_patterns": {
+        "for_search": [
+          {"pattern": "\\b(\\w+)\\s+date\\b", "description": "Объявление типа DATE"},
+          {"pattern": "(\\w+)\\s+in\\s+date\\b", "description": "Параметр типа DATE"}
+        ],
+        "for_ignore": [
+          {"pattern": "^\\s*--.*", "description": "Комментарии"},
+          {"pattern": "to_date\\(", "description": "Функция to_date"}
+        ]
+      },
+      "code_example_bad": "DateTimeEnd date;",
+      "code_example_good": "DateTimeEnd date_time;",
+      "fix_instruction": "Заменить тип DATE на DATE_TIME. При вычитании дат использовать to_number(to_char(date1-date2)).",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STOR",
+      "subcategory": "STOR.TYPES",
+      "tags": ["date", "type", "timestamp"]
+    },
+
+    "v53.STOR.ROWID.п.2.3": {
+      "code": "v53.STOR.ROWID.п.2.3",
+      "source": "v53",
+      "short_description": "Запрет идентификации по rowid",
+      "documentation_text": "Идентификация по rowid не поддерживается. Нужно переходить на стандартную идентификацию по PK через SEQ_ID либо символьные идентификаторы.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "identified\\s+by\\s+rowid", "description": "Идентификация по rowid"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "class TMP_BY_ROWID identified by rowid { ... }",
+      "code_example_good": "class TMP_BY_ID { ... }",
+      "fix_instruction": "Перейти на стандартную идентификацию по PK через SEQ_ID.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STOR",
+      "subcategory": "STOR.OTHER",
+      "tags": ["rowid"]
+    },
+
+    "v53.STOR.PARTITION.п.2.4": {
+      "code": "v53.STOR.PARTITION.п.2.4",
+      "source": "v53",
+      "short_description": "Секционирование не поддерживается",
+      "documentation_text": "На текущий момент секционирование PARTITIONING не поддерживается.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "partition\\s+by", "description": "Секционирование"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "partition by range ...",
+      "code_example_good": "-- без секционирования",
+      "fix_instruction": "Убрать секционирование.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STOR",
+      "subcategory": "STOR.TABLES",
+      "tags": ["partitioning"]
+    },
+
+    "v53.STOR.PARTITION_PROF.п.2.5": {
+      "code": "v53.STOR.PARTITION_PROF.п.2.5",
+      "source": "v53",
+      "short_description": "Секционирование по профилю не поддерживается",
+      "documentation_text": "На текущий момент секционирование по профилю не поддерживается.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "partitioning\\s+profile", "description": "Секционирование по профилю"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "partitioning profile ...",
+      "code_example_good": "-- без секционирования",
+      "fix_instruction": "Убрать секционирование по профилю.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STOR",
+      "subcategory": "STOR.TABLES",
+      "tags": ["partitioning", "profile"]
+    },
+
+    "v53.STOR.GLOBAL_IDX.п.2.6.1": {
+      "code": "v53.STOR.GLOBAL_IDX.п.2.6.1",
+      "source": "v53",
+      "short_description": "Глобальные индексы не поддерживаются",
+      "documentation_text": "В PostgreSQL нет поддержки глобальных индексов.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "global\\s+index", "description": "Глобальный индекс"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "global index ...",
+      "code_example_good": "local index ...",
+      "fix_instruction": "Заменить глобальный индекс на локальный.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STOR",
+      "subcategory": "STOR.INDEXES",
+      "tags": ["global index"]
+    },
+
+    "v53.STOR.UNIQUE_IDX.п.2.6.2": {
+      "code": "v53.STOR.UNIQUE_IDX.п.2.6.2",
+      "source": "v53",
+      "short_description": "NULL в составных уникальных индексах",
+      "documentation_text": "В PostgreSQL null значения входят в состав индекса. Это порождает отличие в поведении уникальных СОСТАВНЫХ индексов. Когда все ключевые поля составного уникального индекса = NULL, то при повторной вставке записи получим исключение в PostgreSQL. В Oracle исключения не будет.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "CREATE\\s+UNIQUE\\s+INDEX.*ON.*\\([^)]+\\)", "description": "Уникальный индекс"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "CREATE UNIQUE INDEX IDX_KTST ON app.\"KTST\" USING btree (c_vek, c_num);",
+      "code_example_good": "CREATE UNIQUE INDEX IDX_KTST ON app.\"KTST\" USING btree (c_vek, c_num) NULLS NOT DISTINCT;",
+      "fix_instruction": "Добавить NULLS NOT DISTINCT для составных уникальных индексов или избавиться от дублей с NULL.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STOR",
+      "subcategory": "STOR.INDEXES",
+      "tags": ["unique index", "null"]
+    },
+
+    "v53.STOR.INDEX.п.2.6.3": {
+      "code": "v53.STOR.INDEX.п.2.6.3",
+      "source": "v53",
+      "short_description": "Учёт ограничения 2704 байт для BTREE",
+      "documentation_text": "В PostgreSQL размер строки BTREE индекса не может превышать 2704 байт. Ограничение справедливо как для составного индекса, так и для индекса на одно поле. В зоне риска находятся все индексы с размером суммы текстовых полей более 676 символов.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "CREATE\\s+INDEX.*ON.*\\(.*VARCHAR2.*\\)", "description": "Индекс на текстовом поле"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "unique index IDX_Z#B_REP_RESULT_UNI { UNIQUE_ID; -- STRING_4000 }",
+      "code_example_good": "unique index IDX_Z#B_REP_RESULT_UNI { UNIQUE_TEST_ID; -- STRING_200 }",
+      "fix_instruction": "Уменьшить размер поля, использовать GIST/GIN индекс или исключить неиспользуемые поля.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STOR",
+      "subcategory": "STOR.INDEXES",
+      "tags": ["index", "btree", "size", "limit"]
+    },
+
+    "v53.STOR.OLE.п.2.7": {
+      "code": "v53.STOR.OLE.п.2.7",
+      "source": "v53",
+      "short_description": "OLE объекты не поддерживаются",
+      "documentation_text": "Не поддерживаются типы данных, основывающиеся на deprecated datatype LONG ROW.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "OLE|LONG\\s+RAW", "description": "OLE/LONG RAW"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "OLE объект",
+      "code_example_good": "BLOB",
+      "fix_instruction": "Заменить OLE/LONG RAW на BLOB.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STOR",
+      "subcategory": "STOR.TYPES",
+      "tags": ["ole", "long raw"]
+    },
+
+    "v53.STOR.TEMP.п.2.8": {
+      "code": "v53.STOR.TEMP.п.2.8",
+      "source": "v53",
+      "short_description": "Замена временных таблиц на VARRAY",
+      "documentation_text": "Работа с временными таблицами в Oracle и PostgreSQL различается. Использование временных таблиц в OLTP системе на базе PostgreSQL оценивается как ошибка дизайна, приводящая к pg_catalog bloat. Альтернативой может служить varray.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "GLOBAL\\s+TEMPORARY\\s+TABLE|TEMP\\s+TABLE", "description": "Временная таблица"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "create global temporary table ...",
+      "code_example_good": "type t_tbl is varray(0) of ...",
+      "fix_instruction": "Заменить временную таблицу на varray или использовать ::[RUNTIME].[STORAGE_MGR].init_temp_table() в крайнем случае.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STOR",
+      "subcategory": "STOR.TABLES",
+      "tags": ["temp table", "varray"]
+    },
+
+    "v53.STOR.COLUMNS_LIMIT.п.2.9": {
+      "code": "v53.STOR.COLUMNS_LIMIT.п.2.9",
+      "source": "v53",
+      "short_description": "Количество колонок > 1664",
+      "documentation_text": "БД ограничивает количество колонок в запросе 1664. При превышении получим ошибку. Решение следует искать на прикладном уровне: сделать родительский ТБП абстрактным, сделать дочерние ТБП самостоятельными, убрать обращение к родительскому ТБП, уменьшить количество колонок в таблице.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "select.*::\\[.*\\].*where.*\\[.*\\]\\s*=\\s*::\\[.*\\]", "description": "Запрос с разыменованием"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "select a(a%rowtype) in ::[MAIN_DOCUM] where ...",
+      "code_example_good": "Сделать родительский ТБП абстрактным или убрать обращение к родительскому ТБП",
+      "fix_instruction": "Сделать родительский ТБП абстрактным или убрать обращение к родительскому ТБП.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STOR",
+      "subcategory": "STOR.TABLES",
+      "tags": ["columns", "limit"]
+    },
+
+    "v53.STOR.SPEC_CHARS.п.2.10": {
+      "code": "v53.STOR.SPEC_CHARS.п.2.10",
+      "source": "v53",
+      "short_description": "Запрет спецсимволов в коротких именах",
+      "documentation_text": "Запрещено использование спецсимволов в именах реквизитов и ТБП.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "[^A-Z0-9_#]|^[0-9]", "description": "Спецсимволы в именах"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "class TEST-TBP { @name('attr!') ATTR [STRING]; }",
+      "code_example_good": "class TEST_TBP { @name('attr') ATTR [STRING]; }",
+      "fix_instruction": "Использовать только буквы, цифры, подчеркивание и # в коротких именах.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STOR",
+      "subcategory": "STOR.OTHER",
+      "tags": ["special characters"]
+    },
+
+    "v53.PROC.UTILS.п.3.1.1": {
+      "code": "v53.PROC.UTILS.п.3.1.1",
+      "source": "v53",
+      "short_description": "Замена утилитных функций ТЯ",
+      "documentation_text": "Список запрещенных функций: utils.session_id → rtl.USERID, method_mgr.clear_object_refcing → ::[RUNTIME].[SYSLIB].clear_object_refcing, stdio.zip → ::[RUNTIME].[ZIP_LIB].",
+      "regex_patterns": {
+        "for_search": [{"pattern": "utils\\.session_id|method_mgr\\.clear_object_refcing|stdio\\.zip", "description": "Запрещенные функции"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "utils.session_id",
+      "code_example_good": "rtl.USERID",
+      "fix_instruction": "Заменить запрещенные утилитные функции на альтернативы.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.PACKAGES",
+      "tags": ["utils", "functions"]
+    },
+
+    "v53.PROC.CRYPTO.п.3.1.2": {
+      "code": "v53.PROC.CRYPTO.п.3.1.2",
+      "source": "v53",
+      "short_description": "Замена dbms_crypto на INT_EXT_CALL_001",
+      "documentation_text": "Вместо операции ::[RUNTIME].[LIB_EXT_CALL] следует использовать интерфейс ::[PCORE_INTERFACE].[INT_EXT_CALL_001].",
+      "regex_patterns": {
+        "for_search": [{"pattern": "::\\[RUNTIME\\]\\.\\[LIB_EXT_CALL\\]|dbms_crypto", "description": "LIB_EXT_CALL/dbms_crypto"}],
+        "for_ignore": [{"pattern": "::\\[PCORE_INTERFACE\\]\\.\\[INT_EXT_CALL_001\\]", "description": "Уже заменено"}]
+      },
+      "code_example_bad": "hash := ::[RUNTIME].[LIB_EXT_CALL].HSH_B(...)",
+      "code_example_good": "hash := ::[PCORE_INTERFACE].[INT_EXT_CALL_001].HSH_B(...)",
+      "fix_instruction": "Заменить ::[RUNTIME].[LIB_EXT_CALL] на ::[PCORE_INTERFACE].[INT_EXT_CALL_001].",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.PACKAGES",
+      "tags": ["crypto", "security", "hash"]
+    },
+
+    "v53.PROC.SMTP.п.3.1.3": {
+      "code": "v53.PROC.SMTP.п.3.1.3",
+      "source": "v53",
+      "short_description": "Замена utl_smtp на INT_EMAIL_001",
+      "documentation_text": "Вместо операции ::[RUNTIME].[SMTP_MAIL] следует использовать интерфейс ::[PCORE_INTERFACE].[INT_EMAIL_001].",
+      "regex_patterns": {
+        "for_search": [{"pattern": "::\\[RUNTIME\\]\\.\\[SMTP_MAIL\\]|utl_smtp", "description": "SMTP_MAIL/utl_smtp"}],
+        "for_ignore": [{"pattern": "::\\[PCORE_INTERFACE\\]\\.\\[INT_EMAIL_001\\]", "description": "Уже заменено"}]
+      },
+      "code_example_bad": "::[RUNTIME].[SMTP_MAIL].SendMail(...)",
+      "code_example_good": "::[PCORE_INTERFACE].[INT_EMAIL_001].SendMail(...)",
+      "fix_instruction": "Заменить ::[RUNTIME].[SMTP_MAIL] на ::[PCORE_INTERFACE].[INT_EMAIL_001].",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.PACKAGES",
+      "tags": ["smtp", "email", "mail"]
+    },
+
+    "v53.PROC.JSON.п.3.1.4": {
+      "code": "v53.PROC.JSON.п.3.1.4",
+      "source": "v53",
+      "short_description": "Использование RUNTIME.LIB_JSON для JSON",
+      "documentation_text": "Для работы с документами формата JSON в архитектуре DBI реализована поддержка только библиотеки ::[RUNTIME].[LIB_JSON]. Все остальные варианты: объектные типы Oracle и PLJSON не поддерживаются.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "JSON_OBJECT_T|JSON_ELEMENT_T|JSON_ARRAY_T|JSON_SCALAR_T|JSON_KEY_LIST|JSON_VALUE|JSON_TABLE|JSON_LIST|PLJSON", "description": "Oracle JSON или PLJSON"}],
+        "for_ignore": [{"pattern": "::\\[RUNTIME\\]\\.\\[LIB_JSON\\]", "description": "Разрешенная библиотека"}]
+      },
+      "code_example_bad": "l_JSON_ELEMENT_T JSON_ELEMENT_T;",
+      "code_example_good": "v_json ::[RUNTIME].[LIB_JSON].T_JSON_ELEMENT;",
+      "fix_instruction": "Заменить Oracle JSON/PLJSON на ::[RUNTIME].[LIB_JSON].",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.PACKAGES",
+      "tags": ["json", "api", "library"]
+    },
+
+    "v53.PROC.UTL_URL.п.3.1.5": {
+      "code": "v53.PROC.UTL_URL.п.3.1.5",
+      "source": "v53",
+      "short_description": "Замена utl_url на HTTP_MGR",
+      "documentation_text": "Вместо пакета utl_url следует использовать функции библиотеки ::[RUNTIME].[HTTP_MGR]: url_escape и url_unescape.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "utl_url\\.(escape|unescape)", "description": "utl_url"}],
+        "for_ignore": [{"pattern": "::\\[RUNTIME\\]\\.\\[HTTP_MGR\\]\\.url_(escape|unescape)", "description": "Уже заменено"}]
+      },
+      "code_example_bad": "utl_url.escape(...)",
+      "code_example_good": "::[RUNTIME].[HTTP_MGR].url_escape(...)",
+      "fix_instruction": "Заменить utl_url на ::[RUNTIME].[HTTP_MGR].",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.PACKAGES",
+      "tags": ["utl_url", "escape"]
+    },
+
+    "v53.PROC.HTTP.п.3.1.6": {
+      "code": "v53.PROC.HTTP.п.3.1.6",
+      "source": "v53",
+      "short_description": "Замена utl_http на HTTP_MGR",
+      "documentation_text": "Вместо пакета utl_http следует использовать функции библиотеки ::[RUNTIME].[HTTP_MGR].",
+      "regex_patterns": {
+        "for_search": [{"pattern": "utl_http\\.", "description": "utl_http"}],
+        "for_ignore": [{"pattern": "::\\[RUNTIME\\]\\.\\[HTTP_MGR\\]", "description": "Уже заменено"}]
+      },
+      "code_example_bad": "utl_http.request(...)",
+      "code_example_good": "::[RUNTIME].[HTTP_MGR].request(...)",
+      "fix_instruction": "Заменить utl_http на ::[RUNTIME].[HTTP_MGR].",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.PACKAGES",
+      "tags": ["http", "web", "request"]
+    },
+
+    "v53.PROC.UTL_TCP.п.3.1.7": {
+      "code": "v53.PROC.UTL_TCP.п.3.1.7",
+      "source": "v53",
+      "short_description": "Замена utl_tcp на TCP_MGR",
+      "documentation_text": "Вместо пакета utl_tcp следует использовать функции библиотеки ::[RUNTIME].[TCP_MGR].",
+      "regex_patterns": {
+        "for_search": [{"pattern": "utl_tcp\\.", "description": "utl_tcp"}],
+        "for_ignore": [{"pattern": "::\\[RUNTIME\\]\\.\\[TCP_MGR\\]", "description": "Уже заменено"}]
+      },
+      "code_example_bad": "utl_tcp.open_connection(...)",
+      "code_example_good": "::[RUNTIME].[TCP_MGR].open_connection(...)",
+      "fix_instruction": "Заменить utl_tcp на ::[RUNTIME].[TCP_MGR].",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.PACKAGES",
+      "tags": ["utl_tcp", "socket"]
+    },
+
+    "v53.PROC.HASH_VALUE.п.3.1.8": {
+      "code": "v53.PROC.HASH_VALUE.п.3.1.8",
+      "source": "v53",
+      "short_description": "Особенности utils.hash_value/hash_value2",
+      "documentation_text": "В режиме DBI функция ::[RUNTIME].[UTILS].hash_value2 имеет собственную java реализацию. Возвращаемый результат отличается от результата в режиме ТЯ1.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "utils\\.hash_value(2)?", "description": "hash_value"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "utils.hash_value(...)",
+      "code_example_good": "utils.hash_value2(...)",
+      "fix_instruction": "Использовать hash_value2 для DBI или учитывать различия в результатах.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.PACKAGES",
+      "tags": ["hash", "utils"]
+    },
+
+    "v53.PROC.EMPTY_STRING.п.3.2": {
+      "code": "v53.PROC.EMPTY_STRING.п.3.2",
+      "source": "v53",
+      "short_description": "Пустая строка и NULL",
+      "documentation_text": "В PostgreSQL пустая строка '' is not null. Это отличается от поведения в Oracle. Это надо учитывать при написании кода запросов к БД.",
+      "regex_patterns": {
+        "for_search": [
+          {"pattern": "=\\s*''|''\\s*=", "description": "Сравнение с пустой строкой"},
+          {"pattern": ":=\\s*''", "description": "Присваивание пустой строки"}
+        ],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "if s = '' then",
+      "code_example_good": "if s is null then",
+      "fix_instruction": "Заменить сравнение с пустой строкой на IS NULL.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["empty string", "null"]
+    },
+
+    "v53.PROC.EXECUTE.п.3.3": {
+      "code": "v53.PROC.EXECUTE.п.3.3",
+      "source": "v53",
+      "short_description": "Экранирование имён таблиц в execute immediate",
+      "documentation_text": "Рекомендуется избегать прямого вызова в базу и использовать для этого соответствующие пакеты runtime.calc, runtime.plp и пр. В случае необходимости использования execute immediate требуется писать запрос таким образом, чтобы он мог одинаково проигрываться в разных средах.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "EXECUTE\\s+IMMEDIATE\\s+'[^']*\\bZ#[A-Z_]+\\b[^']*'", "description": "EXECUTE IMMEDIATE с именем таблицы"}],
+        "for_ignore": [
+          {"pattern": "EXECUTE\\s+IMMEDIATE\\s+'[^']*\"Z#[A-Z_]+\"[^']*'", "description": "Уже экранировано"},
+          {"pattern": "^\\s*--.*", "description": "Комментарии"}
+        ]
+      },
+      "code_example_bad": "execute immediate 'truncate table Z#DBI_TEST';",
+      "code_example_good": "execute immediate 'truncate table \"Z#DBI_TEST\"';",
+      "fix_instruction": "Добавить двойные кавычки вокруг имен таблиц в execute immediate.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.SQL",
+      "tags": ["dynamic sql", "execute", "escape"]
+    },
+
+    "v53.PROC.DYNAMIC_SQL.п.3.3": {
+      "code": "v53.PROC.DYNAMIC_SQL.п.3.3",
+      "source": "v53",
+      "short_description": "Замена DBMS_SQL на RUNTIME.CALC",
+      "documentation_text": "Запрещается использование синтаксиса динамических запросов с использованием пакетов DBMS_SQL, RTL.execute_sql, RTL.exec_sql_out, UTILS.open_cursor. Вместо них рекомендуется использовать ::[RUNTIME].[CALC], ::[RUNTIME].[PLP].",
+      "regex_patterns": {
+        "for_search": [{"pattern": "dbms_sql\\.(open_cursor|parse|execute|close_cursor)|rtl\\.execute_sql|rtl\\.exec_sql_out|utils\\.open_cursor", "description": "DBMS_SQL или аналоги"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "v_cursor := dbms_sql.open_cursor();",
+      "code_example_good": "v_cursor := ::[RUNTIME].[CALC].plp_c();",
+      "fix_instruction": "Заменить DBMS_SQL на ::[RUNTIME].[CALC] или ::[RUNTIME].[PLP].",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.SQL",
+      "tags": ["dynamic sql", "dbms_sql"]
+    },
+
+    "v53.PROC.MACROS.п.3.4": {
+      "code": "v53.PROC.MACROS.п.3.4",
+      "source": "v53",
+      "short_description": "Запрет макросов execute и process",
+      "documentation_text": "Макросы execute и process типа без Oracle точно не будут работать, нужно исключить их использование.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "pragma\\s+macro\\([^,]+,[^,]+,\\s*(execute|process)\\)", "description": "Макрос execute/process"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "pragma macro(RSM,'Z$ANYTOOLS_RS_A_MACRO.make_selects([1])',execute);",
+      "code_example_good": "-- макрос удалён",
+      "fix_instruction": "Удалить макросы с опциями execute и process.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.MACROS",
+      "tags": ["macro", "substitution"]
+    },
+
+    "v53.PROC.WHENOTHERS.п.3.5": {
+      "code": "v53.PROC.WHENOTHERS.п.3.5",
+      "source": "v53",
+      "short_description": "Добавление ROLLBACK или RAISE в WHEN OTHERS",
+      "documentation_text": "PostgreSQL в отличие от Oracle «портит» транзакцию при возникновении исключений большинства групп. Конструкция when others перехватывает исключения всех групп. Без правильной обработки исключений что-либо получить/положить в базу не удастся.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "WHEN\\s+OTHERS\\s+THEN(?!.*?(ROLLBACK|RAISE))", "description": "WHEN OTHERS без ROLLBACK/RAISE"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "exception when others then null;",
+      "code_example_good": "exception when others then rollback; raise;",
+      "fix_instruction": "Добавить ROLLBACK и RAISE в блок WHEN OTHERS или использовать &sp/&rb макросы.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.EXCEPTIONS",
+      "tags": ["exception", "rollback", "raise"]
+    },
+
+    "v53.PROC.XML.п.3.6": {
+      "code": "v53.PROC.XML.п.3.6",
+      "source": "v53",
+      "short_description": "Использование RUNTIME.XML_DB для XML",
+      "documentation_text": "Для работы с xml следует использовать только библиотеки прикладного ядра RUNTIME.XML_DB, RUNTIME.XML_DOM, RUNTIME.XT, RUNTIME.XQ и объектный тип XMLTYPE. Запрещается использование dbms_xmldom, dbms_xmlparser, xrc_xmldom, xrc_xmlparser.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "dbms_xmldom|dbms_xmlparser|xrc_xmldom|xrc_xmlparser", "description": "Запрещенные XML пакеты"}],
+        "for_ignore": [{"pattern": "::\\[RUNTIME\\]\\.\\[XML_DB\\]|::\\[RUNTIME\\]\\.\\[XML_DOM\\]|::\\[RUNTIME\\]\\.\\[XT\\]|::\\[RUNTIME\\]\\.\\[XQ\\]", "description": "Разрешенные библиотеки"}]
+      },
+      "code_example_bad": "dbms_xmldom.parse(...)",
+      "code_example_good": "::[RUNTIME].[XML_DB].parse(...)",
+      "fix_instruction": "Заменить запрещенные XML пакеты на ::[RUNTIME].[XML_DB] и др.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.XML_JSON",
+      "tags": ["xml", "parser", "dom"]
+    },
+
+    "v53.PROC.SQLCODE.п.3.7": {
+      "code": "v53.PROC.SQLCODE.п.3.7",
+      "source": "v53",
+      "short_description": "Ограничения SQLCODE/SQLSTATE",
+      "documentation_text": "Анализ кода исключений SQLCODE вне пользовательского диапазона (-20000 to -20999) не будет работать в PostgreSQL. Такой код должен быть исключен.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "sqlcode\\s*[><=!]|sqlstate\\s*[><=!]", "description": "SQLCODE/SQLSTATE"}],
+        "for_ignore": [{"pattern": "sqlcode\\s*=\\s*-[0-9]{5}|sqlcode\\s*=\\s*[0-9]+", "description": "Сравнение с кодом"}]
+      },
+      "code_example_bad": "if sqlcode = 1436 then",
+      "code_example_good": "if sqlcode = -20000 then",
+      "fix_instruction": "Использовать только пользовательские коды исключений (-20000..-20999).",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.EXCEPTIONS",
+      "tags": ["sqlcode", "sqlstate"]
+    },
+
+    "v53.PROC.TRIGGER.п.3.8": {
+      "code": "v53.PROC.TRIGGER.п.3.8",
+      "source": "v53",
+      "short_description": "Замена триггеров БД на операции-триггеры",
+      "documentation_text": "Триггеры базы данных относятся к серверному коду и возможны к использованию только для Платформы 1 и Платформы 2МСА. Для архитектуры DBI есть возможность использовать операции типа Триггер, но они не совместимы с Платформой 1.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "CREATE\\s+TRIGGER\\b", "description": "CREATE TRIGGER"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "CREATE OR REPLACE TRIGGER USR_TVR_TRIG BEFORE INSERT ON Z#UD_CODE_NAME",
+      "code_example_good": "@before(insert, delete, update) trigger TVR_TRIG is ...",
+      "fix_instruction": "Заменить триггер БД на операцию типа Триггер с аннотацией @before/@after.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["trigger", "database", "plsql"]
+    },
+
+    "v53.PROC.PIPELINED.п.3.9": {
+      "code": "v53.PROC.PIPELINED.п.3.9",
+      "source": "v53",
+      "short_description": "Pipelined functions",
+      "documentation_text": "Пункт не актуален. Ограничений по использованию Pipelined functions нет.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "pipelined", "description": "Pipelined"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "pipelined function ...",
+      "code_example_good": "function ...",
+      "fix_instruction": "Ограничений нет, пункт не актуален.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["pipelined", "function"]
+    },
+
+    "v53.PROC.REPORT.п.3.10": {
+      "code": "v53.PROC.REPORT.п.3.10",
+      "source": "v53",
+      "short_description": "Операции типа Отчет не поддерживаются",
+      "documentation_text": "Не поддерживаются в архитектуре DBI. Следует переписать на OOXML.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "\\<Report\\>|\\<MethodPresentation.*Report", "description": "Операция типа Отчет"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "<MethodPresentation><Properties><Report>report.rdf</Report>",
+      "code_example_good": "OOXML отчет",
+      "fix_instruction": "Переписать отчет на технологию OOXML.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["report", "oracle reports"]
+    },
+
+    "v53.PROC.TYPING.п.3.11": {
+      "code": "v53.PROC.TYPING.п.3.11",
+      "source": "v53",
+      "short_description": "Ограничения типизации",
+      "documentation_text": "DBI приложение более чувствительно к приведению типов. При определении переменных как %rowtype от таблицы или представления в разных операциях, это будут разные типы. Запрещается применение модификатора ref к скалярным типам.",
+      "regex_patterns": {
+        "for_search": [
+          {"pattern": "\\w+%rowtype", "description": "%rowtype"},
+          {"pattern": "ref\\s+\\[SUMMA\\]|ref\\s+\\[REFERENCE\\]", "description": "ref к скалярному типу"}
+        ],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "public function test2 return dual%rowtype is v_test dual%rowtype;",
+      "code_example_good": "public function test2 return ::[DUAL]%rowtype is v_test ::[DUAL]%rowtype;",
+      "fix_instruction": "Использовать общие глобальные типы от ТБП.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["typing", "rowtype"]
+    },
+
+    "v53.PROC.REGEXP.п.3.12": {
+      "code": "v53.PROC.REGEXP.п.3.12",
+      "source": "v53",
+      "short_description": "Различия в регулярных выражениях",
+      "documentation_text": "Необходимо учитывать различия при работе с регулярными выражениями в Java, Oracle и PostgreSQL. Функции поставляются в расширении к СУБД PostgreSQL dbi_funcs.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "regexp_(replace|substr|instr|count|like)", "description": "Регулярные выражения"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "regexp_replace('abc def','()*def',1,1,0,'',1)",
+      "code_example_good": "regexp_replace('abc def','()*def',1,1,0,'',1)",
+      "fix_instruction": "Тестировать регулярные выражения в каждой среде выполнения.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["regexp", "regular"]
+    },
+
+    "v53.PROC.LOB.п.3.13": {
+      "code": "v53.PROC.LOB.п.3.13",
+      "source": "v53",
+      "short_description": "Ограничения LOB объектов",
+      "documentation_text": "Максимальный размер LOB для TEXT/BYTEA типов в Postgres -- 1Gb. Для типа BYTEA форматом выходных данных оставлен HEX. Нельзя будет обычным запросом получить данные поля при размере более 500мб.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "CLOB|BLOB|NCLOB", "description": "LOB объекты"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "v_clob CLOB;",
+      "code_example_good": "v_clob CLOB; -- учитывать ограничения PostgreSQL",
+      "fix_instruction": "Учитывать ограничения LOB объектов в PostgreSQL.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["lob", "clob", "blob"]
+    },
+
+    "v53.PROC.UNREACHABLE.п.3.14.1": {
+      "code": "v53.PROC.UNREACHABLE.п.3.14.1",
+      "source": "v53",
+      "short_description": "Unreachable code",
+      "documentation_text": "Данная ошибка возникает, когда компилятор считает, что данный код никогда не может быть выполнен. Чаще всего это бывает связано либо с попытками обойти некий вызываемый блок, либо транслятор может ошибаться.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "return.*pragma\\s+IF_DEF|exception.*pragma\\s+IF_DEF", "description": "Unreachable code"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "return p_clob; pragma IF_DEF (EXCEPT); exception when others then pragma error('test'); pragma END_IF;",
+      "code_example_good": "return p_clob;",
+      "fix_instruction": "Убрать недостижимый код.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["unreachable", "code"]
+    },
+
+    "v53.PROC.METHOD_SIZE.п.3.14.2": {
+      "code": "v53.PROC.METHOD_SIZE.п.3.14.2",
+      "source": "v53",
+      "short_description": "Превышение 65535 bytes limit",
+      "documentation_text": "Согласно спецификации JAVA есть ограничения на размер методов. Требуется сократить размер прикладного кода.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "method.*\\{.*\\}", "description": "Метод"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "большой метод > 65535 байт",
+      "code_example_good": "разбить на несколько методов",
+      "fix_instruction": "Сократить размер метода, разбив на несколько.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["method", "size", "limit"]
+    },
+
+    "v53.PROC.CODEGEN.п.3.15": {
+      "code": "v53.PROC.CODEGEN.п.3.15",
+      "source": "v53",
+      "short_description": "Запрет кодогенерации операций и представлений",
+      "documentation_text": "В архитектуре DBI запрещено из PLPlus кода операций создавать новые операции и представления, менять существующие, удалять операции, вызывать перекомпиляцию. Нужно избавляться или переписывать на динамическое исполнение кода.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "(CREATE|ALTER|DROP)\\s+(OPERATION|VIEW)", "description": "Кодогенерация операций/представлений"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "create operation ...",
+      "code_example_good": "::[RUNTIME].[PLP].plp_c(...)",
+      "fix_instruction": "Заменить кодогенерацию на динамическое исполнение через ::[RUNTIME].[PLP].",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["codegen", "operations"]
+    },
+
+    "v53.PROC.CHARSET.п.3.16": {
+      "code": "v53.PROC.CHARSET.п.3.16",
+      "source": "v53",
+      "short_description": "Использование RUNTIME.CHARSET для кодировок",
+      "documentation_text": "Для унификации работы с кодировками символов создана библиотека ::[RUNTIME].[CHARSET]. Запрещено использование функций: nchr, asciistr, compose, decompose, dump, unistr, lengthc, length2, length4, substrc, substr2, substr4, NLS_INITCAP, NLS_LOWER, NLS_UPPER, NLS_CHARSET_*, NLSSORT.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "(nchr|asciistr|compose|decompose|dump|unistr|lengthc|length2|length4|substrc|substr2|substr4|NLS_INITCAP|NLS_LOWER|NLS_UPPER|NLS_CHARSET_|NLSSORT)\\(", "description": "Запрещенные функции"}],
+        "for_ignore": [{"pattern": "::\\[RUNTIME\\]\\.\\[CHARSET\\]", "description": "Разрешенная библиотека"}]
+      },
+      "code_example_bad": "v_str := convert(v_text, 'UTF8', 'CL8ISO8859P5');",
+      "code_example_good": "v_str := ::[RUNTIME].[CHARSET].clob_to_clob(v_text, 'UTF8', 'CL8ISO8859P5');",
+      "fix_instruction": "Заменить запрещенные функции на ::[RUNTIME].[CHARSET].*",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.CHARSET",
+      "tags": ["charset", "encoding"]
+    },
+
+    "v53.PROC.TRANS_ABORTED.п.3.18.1": {
+      "code": "v53.PROC.TRANS_ABORTED.п.3.18.1",
+      "source": "v53",
+      "short_description": "Прерванные транзакции",
+      "documentation_text": "При возникновении большинства ошибок в PostgreSQL транзакция считается прерванной. Для продолжения работы в БД есть два варианта: зафиксировать транзакцию или откатить транзакцию на точку отката.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "exception\\s+when\\s+others\\s+then(?!.*?(rollback|raise))", "description": "WHEN OTHERS без rollback/raise"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "exception when others then null;",
+      "code_example_good": "exception when others then &rb(point1); raise;",
+      "fix_instruction": "Добавить rollback или raise в блок WHEN OTHERS.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.TRANSACTIONS",
+      "tags": ["transaction", "aborted"]
+    },
+
+    "v53.PROC.SAVEPOINT_LIMIT.п.3.18.2": {
+      "code": "v53.PROC.SAVEPOINT_LIMIT.п.3.18.2",
+      "source": "v53",
+      "short_description": "Ограничение на количество подтранзакций",
+      "documentation_text": "В БД PostgreSQL есть ограничение на количество создаваемых подтранзакций внутри одной транзакции. Каждая точка отката порождает одну подтранзакцию. Настоятельно не рекомендуется допускать превышение 64 подтранзакций.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "savepoint\\s+\\w+", "description": "SAVEPOINT"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "for i in 1..v_tbl.count loop savepoint SAVE ... exception when others then rollback to SAVE; end loop;",
+      "code_example_good": "for i in 1..v_tbl.count loop savepoint SAVE ... if mod(i,10) = 0 then commit; end if; exception when others then rollback to SAVE; end loop;",
+      "fix_instruction": "Группировать savepoint с периодическим commit, не превышая 64 подтранзакции.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.TRANSACTIONS",
+      "tags": ["savepoint", "subtransaction"]
+    },
+
+    "v53.PROC.TRANSACT_CONTROL.п.3.18.3": {
+      "code": "v53.PROC.TRANSACT_CONTROL.п.3.18.3",
+      "source": "v53",
+      "short_description": "Признак Операция контролирует транзакцию",
+      "documentation_text": "Не рекомендуется к использованию свойство операции 'Операция контролирует транзакцию'. При запуске такой операции, транзакция удерживается на все время ее работы. Таким образом удерживается горизонт транзакций, что негативно сказывается на работе всей системы.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "<ControlTransaction>true</ControlTransaction>", "description": "Признак ControlTransaction"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "<ControlTransaction>true</ControlTransaction>",
+      "code_example_good": "<ControlTransaction>false</ControlTransaction>",
+      "fix_instruction": "Отключить признак 'Операция контролирует транзакцию'.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.TRANSACTIONS",
+      "tags": ["transaction", "control"]
+    },
+
+    "v53.PROC.SAVEPOINT_LENGTH.п.3.18.4": {
+      "code": "v53.PROC.SAVEPOINT_LENGTH.п.3.18.4",
+      "source": "v53",
+      "short_description": "Размерность имен savepoint, rollback",
+      "documentation_text": "В PostgreSQL ограничение длины имени точки сохранения 63 символа. Если используются макросы &sp и &rb, то на имя остается 28 символов.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "&sp\\(['\"][^'\"]{29,}['\"]\\)|&rb\\(['\"][^'\"]{29,}['\"]\\)", "description": "Длинное имя savepoint"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "&sp('very_long_name_more_than_28_characters')",
+      "code_example_good": "&sp('short_name')",
+      "fix_instruction": "Уменьшить длину имени savepoint до 28 символов при использовании макросов.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.TRANSACTIONS",
+      "tags": ["savepoint", "name", "length"]
+    },
+
+    "v53.PROC.JOBS.п.3.19": {
+      "code": "v53.PROC.JOBS.п.3.19",
+      "source": "v53",
+      "short_description": "Задания по расписанию",
+      "documentation_text": "Все задания по расписанию должны запускаться в очереди 2MCA. Начиная с версии СП 2MCA DBI 3.9.13 для указания интервала запуска поддерживается только выражения, допустимые в PLPlus.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "SUBMIT_JOB|jobs", "description": "Задания по расписанию"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "-- задания в БД",
+      "code_example_good": "SUBMIT_JOB_2MCA",
+      "fix_instruction": "Использовать очередь 2MCA для заданий по расписанию.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["jobs", "schedule"]
+    },
+
+    "v53.PROC.SET_THIS.п.3.20": {
+      "code": "v53.PROC.SET_THIS.п.3.20",
+      "source": "v53",
+      "short_description": "Конструкция set_this",
+      "documentation_text": "Есть разница в поведении, обусловленная принципиальной разницей в архитектуре (в ТЯ1 есть только кэш экземпляра this, в 2MCA - полноценный разделяемый кэш). Рекомендуем избавляться от данной конструкции.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "set_this\\s*\\(", "description": "set_this"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "set_this(...)",
+      "code_example_good": "-- избавиться от set_this",
+      "fix_instruction": "Избавиться от конструкции set_this.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["set_this", "this"]
+    },
+
+    "v53.PROC.COND_COMPILE.п.3.21": {
+      "code": "v53.PROC.COND_COMPILE.п.3.21",
+      "source": "v53",
+      "short_description": "Запрет условной компиляции",
+      "documentation_text": "Все разновидности условной компиляции запрещены и не имеют смысла в DBI, т.к. программный код поставляется уже в скомпилированном виде.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "--#IF|--#ELSE|--#ENDIF|IF_DEF\\s*\\(|pragma\\s+define\\b", "description": "Условная компиляция"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "--#IF DEFINED(DEBUG)\n    debug('test');\n--#ENDIF",
+      "code_example_good": "debug('test');",
+      "fix_instruction": "Удалить условную компиляцию или заменить на статичный код.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.MACROS",
+      "tags": ["conditional compilation"]
+    },
+
+    "v53.PROC.PARENT_REF.п.3.22": {
+      "code": "v53.PROC.PARENT_REF.п.3.22",
+      "source": "v53",
+      "short_description": "Обращение к реквизитам родительского класса по ссылке",
+      "documentation_text": "Запрещено обращаться к реквизитам родительского класса по ссылке, если она не принадлежит классу ссылки.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "ref\\s+\\[[A-Z_]+\\]\\s*:=\\s*\\w+%id.*\\w+\\.\\[\\w+\\]", "description": "Разыменование родительского класса"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "v_cl_priv ref [CL_PRIV]:=123; v_cl_org ref [CL_ORG]; begin v_cl_org%id := v_cl_priv%id; debug_pipe(v_cl_org.[NAME],0); end;",
+      "code_example_good": "v_cl_priv ref [CL_PRIV]:=123; debug_pipe(v_cl_priv.[NAME],0);",
+      "fix_instruction": "Обращаться к реквизитам только через правильный класс ссылки.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["parent", "reference"]
+    },
+
+    "v53.PROC.CONCAT_LIB.п.3.23": {
+      "code": "v53.PROC.CONCAT_LIB.п.3.23",
+      "source": "v53",
+      "short_description": "Использование CONCAT_LIB для конкатенации",
+      "documentation_text": "Если в коде многократно выполняется dbms_lob.write, dbms_lob.writeappend, dbms_lob.append для CLOB/BLOB, либо многократно выполняется конкатенация ||,concat для varchar2, рекомендуется использовать ::[RUNTIME].[CONCAT_LIB].",
+      "regex_patterns": {
+        "for_search": [{"pattern": "dbms_lob\\.(write|writeappend|append)|\\|\\||concat\\(", "description": "Конкатенация"}],
+        "for_ignore": [{"pattern": "::\\[RUNTIME\\]\\.\\[CONCAT_LIB\\]", "description": "Уже используется CONCAT_LIB"}]
+      },
+      "code_example_bad": "begin loop dbms_lob.writeappend(...); end loop; end;",
+      "code_example_good": "begin loop dbms_lob.writeappend(...); exit; end loop; end;",
+      "fix_instruction": "Использовать ::[RUNTIME].[CONCAT_LIB] для многократной конкатенации.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "PROC",
+      "subcategory": "PROC.PERFORMANCE",
+      "tags": ["concat", "clob", "blob"]
+    },
+
+    "v53.PROC.GENERIC_REF.п.3.24": {
+      "code": "v53.PROC.GENERIC_REF.п.3.24",
+      "source": "v53",
+      "short_description": "Обобщенные ссылки в представлении",
+      "documentation_text": "В PostgreSQL нет аналога представления OBJECTS. При создании колонки с автоматическим переходом в 'Обобщенную ссылку'(REFERENCE) переход не будет работать. Необходимо вычислить CLASS_ID самостоятельно и конкатенировать с ID через двоеточие.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "select.*\\[REFERENCE\\].*in.*::\\[.*\\]", "description": "Переход в OBJECT"}],
+        "for_ignore": [{"pattern": "cast_to\\(::\\[REFERENCE\\],.*:.*\\)", "description": "Явное приведение"}]
+      },
+      "code_example_bad": "select x(x.[OBJ_REF] : C_OBJ_REF) in ::[TBP] all;",
+      "code_example_good": "select x(cast_to(::[REFERENCE], x.[OBJ_CLASS]||':'||x.[OBJ_REF]) : C_OBJ_REF) in ::[TBP] all;",
+      "fix_instruction": "Вычислить CLASS_ID самостоятельно и сконкатенировать с ID через двоеточие.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["generic", "reference", "objects"]
+    },
+
+    "v53.PROC.COMPILE_TARGET.п.3.25": {
+      "code": "v53.PROC.COMPILE_TARGET.п.3.25",
+      "source": "v53",
+      "short_description": "Различная реализация для Oracle/PostgreSQL",
+      "documentation_text": "В некоторых случаях может потребоваться выполнить различную обработку запроса для БД Oracle и PostgreSQL. Для этого следует использовать системную переменную условной компиляции COMPILE$TARGET, которая может принимать значения 'DBI.ORA' и 'DBI.PGS'.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "COMPILE\\$TARGET", "description": "COMPILE$TARGET"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "select a(a.[R_REF].[R1] : C_R_REF#R1) in ::[MAIN_55446];",
+      "code_example_good": "--#if &COMPILE$TARGET = 'DBI.PGS' (select b(b.[R1]) in ::[TARGET_55446] all where b = a.[R_REF]) : ref1, --#else a.[R_REF].[R1] : C_R_REF#R1, --#endif",
+      "fix_instruction": "Использовать COMPILE$TARGET для разделения логики для Oracle и PostgreSQL.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["compile", "target", "oracle", "pg"]
+    },
+
+    "v53.PROC.NATIVEID.п.3.26": {
+      "code": "v53.PROC.NATIVEID.п.3.26",
+      "source": "v53",
+      "short_description": "NativeID для метаданных",
+      "documentation_text": "На уровне Платформы ведется работа по переводу синтетических идентификаторов операций и представлений на NativeID. Вместо числового идентификатора в колонке ID таблиц methods и criteria будут храниться идентификаторы типа КОРОТКОЕ_ИМЯ_КЛАССА.КОРОТКОЕ_ИМЯ_ОПЕРАЦИИ.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "ref\\s+\\[METHOD\\]|ref\\s+\\[CRITERIA\\]", "description": "Ссылка на метод/представление"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "v_id number; rMeth ref [METHOD]; begin v_id := rMeth%id;",
+      "code_example_good": "v_id varchar2(100); rMeth ref [METHOD]; begin v_id := rMeth%id;",
+      "fix_instruction": "Использовать VARCHAR2 для хранения идентификаторов операций и представлений.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["nativeid", "identifiers"]
+    },
+
+    "v53.PROC.ID_SIZE.п.3.27": {
+      "code": "v53.PROC.ID_SIZE.п.3.27",
+      "source": "v53",
+      "short_description": "Размер идентификатора бизнес-данных",
+      "documentation_text": "В PostgreSQL максимальная размерность sequence, которая генерирует идентификаторы строк таблиц Z# - bigint. Размерность строковой или числовой переменной для хранения ID должна быть не менее 20 символов.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "(\\w+)\\s+(NUMBER|VARCHAR2|STRING)\\s*\\(([0-9]|1[0-9])\\)\\s*;", "description": "ID в типе меньше 20"}],
+        "for_ignore": [{"pattern": "(\\w+)\\s+(NUMBER|VARCHAR2|STRING)\\s*\\([2-9][0-9]+\\)\\s*;", "description": "ID в типе >= 20"}]
+      },
+      "code_example_bad": "v_id number(10);",
+      "code_example_good": "v_id number(20);",
+      "fix_instruction": "Увеличить размерность типа для хранения ID до 20 символов.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["id", "bigint", "size"]
+    },
+
+    "v53.PROC.DYNAMIC_PL.п.3.28": {
+      "code": "v53.PROC.DYNAMIC_PL.п.3.28",
+      "source": "v53",
+      "short_description": "Динамический PL+",
+      "documentation_text": "Т.к. в DBI нет макросов условной компиляции, нельзя перекомпилировать статичный код операции, то на замену приходит динамический PL+. Для работы с динамическим PL+ есть две библиотеки: ::[RUNTIME].[PLP] и ::[RUNTIME].[PLP2].",
+      "regex_patterns": {
+        "for_search": [{"pattern": "::\\[RUNTIME\\]\\.\\[PLP\\]\\.|::\\[RUNTIME\\]\\.\\[PLP2\\]\\.", "description": "Динамический PL+"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "-- условная компиляция или кодогенерация",
+      "code_example_good": "::[RUNTIME].[PLP].plp_c(strPlp);",
+      "fix_instruction": "Заменить условную компиляцию/кодогенерацию на динамический PL+ через ::[RUNTIME].[PLP] или ::[RUNTIME].[PLP2].",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["dynamic", "pl", "plp", "plp2"]
+    },
+
+    "v53.PROC.SORT_BY_ID.п.3.29": {
+      "code": "v53.PROC.SORT_BY_ID.п.3.29",
+      "source": "v53",
+      "short_description": "Сортировка по ID не рекомендуется",
+      "documentation_text": "В общем случае в DBI не гарантируется, что запись с меньшим ID будет вставлена в таблицу раньше, чем запись с большим ID. Поэтому не рекомендуется использовать сортировку по ID для понимания временного порядка записей.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "ORDER\\s+BY.*\\%id", "description": "Сортировка по ID"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "order by a%id",
+      "code_example_good": "order by a.[DATE]",
+      "fix_instruction": "Использовать другой критерий сортировки, например, по дате.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["sort", "id", "order by"]
+    },
+
+    "v53.INT.UTL_HTTP.п.4.1": {
+      "code": "v53.INT.UTL_HTTP.п.4.1",
+      "source": "v53",
+      "short_description": "Замена utl_http на HTTP_MGR",
+      "documentation_text": "Вместо пакета utl_http следует использовать функции библиотеки ::[RUNTIME].[HTTP_MGR].",
+      "regex_patterns": {
+        "for_search": [{"pattern": "utl_http\\.", "description": "utl_http"}],
+        "for_ignore": [{"pattern": "::\\[RUNTIME\\]\\.\\[HTTP_MGR\\]", "description": "Уже заменено"}]
+      },
+      "code_example_bad": "utl_http.request(...)",
+      "code_example_good": "::[RUNTIME].[HTTP_MGR].request(...)",
+      "fix_instruction": "Заменить utl_http на ::[RUNTIME].[HTTP_MGR].",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "INT",
+      "subcategory": "INT.WEBSERVICES",
+      "tags": ["utl_http", "web"]
+    },
+
+    "v53.INT.DBLINK.п.4.2": {
+      "code": "v53.INT.DBLINK.п.4.2",
+      "source": "v53",
+      "short_description": "Замена Database Link на REST/SOAP",
+      "documentation_text": "Требуется исключить использование Database Link. В качестве альтернативы: веб-сервисы REST/SOAP, сообщения через очереди (Интегратор, KAFKA_ADAPTER, AQ_LIB), SQL-запросы к внешней СУБД через JDBC_ADAPTER.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "@[a-z_]+|dblink", "description": "Database Link"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "select * from table@dblink",
+      "code_example_good": "-- использовать REST/SOAP",
+      "fix_instruction": "Заменить Database Link на REST/SOAP или другие альтернативы.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "INT",
+      "subcategory": "INT.WEBSERVICES",
+      "tags": ["dblink", "rest", "soap"]
+    },
+
+    "v53.INT.CLIENT.п.4.3": {
+      "code": "v53.INT.CLIENT.п.4.3",
+      "source": "v53",
+      "short_description": "Подключение внешнего клиентского приложения",
+      "documentation_text": "Объекты базы данных, к которым обращаются внешние приложения, могут быть недоступны или иметь другую структуру. Нужно избавляться от прямых подключений к СУБД.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "jdbc:|odbc:", "description": "Внешнее подключение"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "jdbc:oracle:thin:@...",
+      "code_example_good": "-- использовать REST/SOAP",
+      "fix_instruction": "Заменить прямое подключение на REST/SOAP.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "INT",
+      "subcategory": "INT.WEBSERVICES",
+      "tags": ["client", "connection"]
+    },
+
+    "v53.INT.QUEUE.п.4.4": {
+      "code": "v53.INT.QUEUE.п.4.4",
+      "source": "v53",
+      "short_description": "Использование RUNTIME.AQ_LIB для очередей",
+      "documentation_text": "Для управления очередями используется библиотека RUNTIME.AQ_LIB, которая прозрачно для приложений использует брокер сообщений, настроенный на общесистемном уровне.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "DBMS_AQ|AQ\\$_", "description": "Очереди"}],
+        "for_ignore": [{"pattern": "::\\[RUNTIME\\]\\.\\[AQ_LIB\\]", "description": "Разрешенная библиотека"}]
+      },
+      "code_example_bad": "DBMS_AQ.enqueue(...)",
+      "code_example_good": "::[RUNTIME].[AQ_LIB].enqueue(...)",
+      "fix_instruction": "Использовать ::[RUNTIME].[AQ_LIB] для работы с очередями.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "INT",
+      "subcategory": "INT.QUEUES",
+      "tags": ["queue", "aq", "mq"]
+    },
+
+    "v53.INT.SYNC.п.4.4.1": {
+      "code": "v53.INT.SYNC.п.4.4.1",
+      "source": "v53",
+      "short_description": "Синхронное взаимодействие Интегратора",
+      "documentation_text": "В Интеграторе станет невозможным синхронное взаимодействие. Вместо него следует использовать асинхронное взаимодействие.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "sync|синхрон", "description": "Синхронное взаимодействие"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "синхронный вызов",
+      "code_example_good": "асинхронный вызов",
+      "fix_instruction": "Заменить синхронное взаимодействие на асинхронное.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "INT",
+      "subcategory": "INT.QUEUES",
+      "tags": ["sync", "integration"]
+    },
+
+    "v53.CACHE.TERMS.п.6.1": {
+      "code": "v53.CACHE.TERMS.п.6.1",
+      "source": "v53",
+      "short_description": "Термины кэширования",
+      "documentation_text": "ORM - Object-relational mapping. ORM объект - экземпляр java класса. Hibernate - фреймворк, реализующий ORM. Кэш 1 уровня - кэш сессии hibernate. Кэш 2 уровня - межсессионный кэш hibernate.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "cache", "description": "Кэш"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "--",
+      "code_example_good": "--",
+      "fix_instruction": "Использовать термины в соответствии с документацией.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "CACHE",
+      "subcategory": "CACHE.LEVELS",
+      "tags": ["cache", "terms"]
+    },
+
+    "v53.CACHE.HIBERNATE.п.6.2": {
+      "code": "v53.CACHE.HIBERNATE.п.6.2",
+      "source": "v53",
+      "short_description": "Роль hibernate в платформе",
+      "documentation_text": "Платформа 2MCA/2MCA DBI использует hibernate, как одно из средств доступа и взаимодействия с объектами БД. Другим средством взаимодействия является выполнение прямых SQL запросов.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "hibernate", "description": "Hibernate"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "--",
+      "code_example_good": "--",
+      "fix_instruction": "Понимать роль hibernate в платформе.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "CACHE",
+      "subcategory": "CACHE.LEVELS",
+      "tags": ["hibernate", "orm"]
+    },
+
+    "v53.CACHE.ALGORITHM.п.6.3": {
+      "code": "v53.CACHE.ALGORITHM.п.6.3",
+      "source": "v53",
+      "short_description": "Алгоритм кэширования",
+      "documentation_text": "При обращении к полям ORM объекта проверяется наличие в кэше 1 уровня. Если объект не найден, проверяется кэш 2 уровня. Если объект отсутствует, выполняется точечный запрос к БД.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "cache_mgr\\.", "description": "Управление кэшем"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "--",
+      "code_example_good": "--",
+      "fix_instruction": "Понимать алгоритм кэширования hibernate.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "CACHE",
+      "subcategory": "CACHE.LEVELS",
+      "tags": ["cache", "algorithm"]
+    },
+
+    "v53.CACHE.FUNCTIONS.п.6.4": {
+      "code": "v53.CACHE.FUNCTIONS.п.6.4",
+      "source": "v53",
+      "short_description": "Функции управления кэшем",
+      "documentation_text": "cache_mgr.cache_clear() - удаление всех экземпляров из кэша. cache_mgr.cache_refresh(ref ТБП) - обновление указанного экземпляра. cache_mgr.cache_refresh_class(короткое имя ТБП) - обновление экземпляров указанного ТБП. cache_mgr.cache_flush() - сброс экземпляров всех ТБП в БД.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "cache_mgr\\.cache_(clear|refresh|flush)", "description": "Функции управления кэшем"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "--",
+      "code_example_good": "cache_mgr.cache_refresh(r_md);",
+      "fix_instruction": "Использовать функции управления кэшем при необходимости.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "CACHE",
+      "subcategory": "CACHE.LEVELS",
+      "tags": ["cache", "functions"]
+    },
+
+    "v53.CACHE.FLUSH.п.6.5": {
+      "code": "v53.CACHE.FLUSH.п.6.5",
+      "source": "v53",
+      "short_description": "Сброс кэша",
+      "documentation_text": "Сброс кэша осуществляется при: завершении выполнения операции, commit/savepoint/rollback, выполнении запросов в БД в обход hibernate, перед выполнением операции триггера, вызове cache_mgr.cache_flush.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "cache_mgr\\.cache_flush", "description": "Сброс кэша"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "--",
+      "code_example_good": "cache_mgr.cache_flush();",
+      "fix_instruction": "Понимать когда происходит сброс кэша.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "CACHE",
+      "subcategory": "CACHE.LEVELS",
+      "tags": ["cache", "flush"]
+    },
+
+    "v53.CACHE.FIELDS.п.6.6": {
+      "code": "v53.CACHE.FIELDS.п.6.6",
+      "source": "v53",
+      "short_description": "Кэшируемые поля ORM объекта",
+      "documentation_text": "В кэше находятся все поля ORM объекта. При первом разыменовании ссылки выполняется точечный запрос к БД и помещается в кэш весь ORM объект. Второе и третье разыменование не вызывает обращение БД.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "\\w+\\.\\[\\w+\\]", "description": "Разыменование"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "--",
+      "code_example_good": "r_md.[CODE];",
+      "fix_instruction": "Использовать кэш hibernate для уменьшения количества запросов.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "CACHE",
+      "subcategory": "CACHE.LEVELS",
+      "tags": ["cache", "fields"]
+    },
+
+    "v53.CACHE.LEVEL1.п.6.7": {
+      "code": "v53.CACHE.LEVEL1.п.6.7",
+      "source": "v53",
+      "short_description": "Кэш первого уровня",
+      "documentation_text": "При работе с hibernate кэш первого уровня используется всегда. В кэш первого уровня помещаются все объекты в пределах одной сессии hibernate. Количество объектов - 200 экземпляров. Политика вытеснения - LRU.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "сессия hibernate", "description": "Кэш 1 уровня"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "--",
+      "code_example_good": "--",
+      "fix_instruction": "Понимать работу кэша первого уровня.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "CACHE",
+      "subcategory": "CACHE.LEVELS",
+      "tags": ["cache", "level1"]
+    },
+
+    "v53.CACHE.LEVEL2.п.6.8": {
+      "code": "v53.CACHE.LEVEL2.п.6.8",
+      "source": "v53",
+      "short_description": "Кэш второго уровня",
+      "documentation_text": "Кэш 2 уровня настраивается в разрезе ТБП путем добавления в файл настроек ORM -- config_orm.xml. Стратегии: READ_ONLY, NONSTRICT_READ_WRITE, READ_WRITE. Максимальное количество элементов - 1 000 000. Время жизни - 5 минут.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "config_orm\\.xml", "description": "Настройка кэша 2 уровня"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "--",
+      "code_example_good": "Добавить ТБП в config_orm.xml",
+      "fix_instruction": "Настроить кэш 2 уровня в config_orm.xml.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "CACHE",
+      "subcategory": "CACHE.LEVELS",
+      "tags": ["cache", "level2"]
+    },
+
+    "v53.CACHE.SESSIONS.п.6.9": {
+      "code": "v53.CACHE.SESSIONS.п.6.9",
+      "source": "v53",
+      "short_description": "Сессии",
+      "documentation_text": "1 http запрос от клиента - это 1 сессия hibernate. После окончания работы с сессией hibernate, она удаляется со всем своим кэшем 1 уровня.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "сессия", "description": "Сессия"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "--",
+      "code_example_good": "--",
+      "fix_instruction": "Понимать жизненный цикл сессии hibernate.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "CACHE",
+      "subcategory": "CACHE.LEVELS",
+      "tags": ["cache", "sessions"]
+    },
+
+    "v53.CACHE.REF.п.6.10": {
+      "code": "v53.CACHE.REF.п.6.10",
+      "source": "v53",
+      "short_description": "Получение полей сразу в курсоре",
+      "documentation_text": "Разыменование ссылки в курсоре вызывает обращение к кэшу hibernate. Для оптимизации следует получать данные сразу в курсоре.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "for.*select.*\\w+\\.\\[\\w+\\]\\.\\[\\w+\\]", "description": "Разыменование в курсоре"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "for (select a (a.[TRANS_MD] : TRANS_MD) in ::[RKO_809P]) loop vc_code := a.[TRANS_MD].[CODE]; end loop;",
+      "code_example_good": "for (select a (a.[TRANS_MD].[CODE] : CODE) in ::[RKO_809P]) loop vc_code := a.[CODE]; end loop;",
+      "fix_instruction": "Получать данные сразу в курсоре вместо разыменования в цикле.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "CACHE",
+      "subcategory": "CACHE.OPTIMIZATION",
+      "tags": ["cache", "ref", "dereference"]
+    },
+
+    "v53.CACHE.READ.п.6.10": {
+      "code": "v53.CACHE.READ.п.6.10",
+      "source": "v53",
+      "short_description": "Обращение к кэшу при чтении",
+      "documentation_text": "Разыменование ссылки является обращением к полям ORM объекта. При этом всегда происходит обращение к кэшу hibernate и, возможно, выполняется точечный запрос к БД.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "\\w+\\.\\[\\w+\\]", "description": "Разыменование"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "--",
+      "code_example_good": "r_md.[CODE];",
+      "fix_instruction": "Понимать обращение к кэшу при чтении.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "CACHE",
+      "subcategory": "CACHE.OPTIMIZATION",
+      "tags": ["cache", "read", "optimization"]
+    },
+
+    "v53.CACHE.WRITE.п.6.11": {
+      "code": "v53.CACHE.WRITE.п.6.11",
+      "source": "v53",
+      "short_description": "Обращение к кэшу при изменении",
+      "documentation_text": "Присвоение значений полям переменной типа 'ссылка' является обращением к полям ORM объекта и ручным обновлением кэша. Точечный update по id также обновляет ORM объект в кэше.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "\\w+\\.\\[\\w+\\]\\s*:=|update\\s+\\w+\\s+in\\s+::\\[.*\\]\\s+where\\s+\\w+\\s*=\\s*\\w+", "description": "Изменение"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "--",
+      "code_example_good": "r_md.[CODE] := vc_code;",
+      "fix_instruction": "Понимать обращение к кэшу при изменении.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "CACHE",
+      "subcategory": "CACHE.OPTIMIZATION",
+      "tags": ["cache", "write", "update"]
+    },
+
+    "v53.CACHE.INSERT.п.6.12": {
+      "code": "v53.CACHE.INSERT.п.6.12",
+      "source": "v53",
+      "short_description": "Обращение к кэшу при вставке",
+      "documentation_text": "Быстрым способом вставки является использование модификатора insert. По мере накопления изменений в кэше, hibernate будет пачками сбрасывать новые данные в БД.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "%insert", "description": "Вставка"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "--",
+      "code_example_good": "::[TST_IMP_FMS]%insert(tst_obj);",
+      "fix_instruction": "Использовать %insert для вставки новых данных.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "CACHE",
+      "subcategory": "CACHE.OPTIMIZATION",
+      "tags": ["cache", "insert"]
+    },
+
+    "v53.CACHE.CONFIG.п.6.13": {
+      "code": "v53.CACHE.CONFIG.п.6.13",
+      "source": "v53",
+      "short_description": "Настройка кэша 2 уровня в config_orm.xml",
+      "documentation_text": "Кэш 2 уровня настраивается в разрезе ТБП путем добавления в файл настроек ORM -- config_orm.xml. Рекомендуется помещать ТБП в кэш 2 уровня если частота использования больше раза в секунду и данные не меняются.",
+      "regex_patterns": {
+        "for_search": [{"pattern": "config_orm\\.xml", "description": "Настройка кэша"}],
+        "for_ignore": [{"pattern": "^\\s*--.*", "description": "Комментарии"}]
+      },
+      "code_example_bad": "--",
+      "code_example_good": "Добавить ТБП в config_orm.xml",
+      "fix_instruction": "Настроить кэш 2 уровня в config_orm.xml для часто используемых ТБП.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "CACHE",
+      "subcategory": "CACHE.LEVELS",
+      "tags": ["cache", "hibernate", "performance"]
+    }
+  }
+}

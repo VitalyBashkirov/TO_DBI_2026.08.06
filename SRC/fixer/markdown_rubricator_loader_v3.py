@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Загрузчик рубрикатора v3.0.0
-Использует JSON файлы: 4.RUBRICATOR_PROMPTS.json, 5.RUBRICATOR_PARSER_SQL.json
+Загрузчик рубрикатора v5.0.0
+Использует JSON файлы: 4.RUBRICATOR_PROMPT v5.json, 5.RUBRICATOR_PARSER_SQL v5.json
 """
 import json
 import re
@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class RubricatorRule:
-    """Правило рубрикатора v3.0.0"""
+    """Правило рубрикатора v5.0.0"""
     code: str
     short_description: str
     documentation_text: str
@@ -30,11 +30,11 @@ class RubricatorRule:
 
 
 class MarkdownRubricatorLoaderV3:
-    """Загрузчик рубрикатора v3.0.0"""
+    """Загрузчик рубрикатора v5.0.0"""
     
     def __init__(self, rubricator_dir: str = None):
         if rubricator_dir is None:
-            rubricator_dir = Path(__file__).parent.parent.parent / 'DATA' / 'Рубрикатор'
+            rubricator_dir = Path(__file__).parent.parent.parent / 'DATA' / 'Рубрикатор v5'
         else:
             rubricator_dir = Path(rubricator_dir)
         
@@ -45,8 +45,8 @@ class MarkdownRubricatorLoaderV3:
         self._load_prompts_json()
     
     def _load_prompts_json(self):
-        """Загрузка 4.RUBRICATOR_PROMPTS.json"""
-        file_path = self.rubricator_dir / '4.RUBRICATOR_PROMPTS.json'
+        """Загрузка 4.RUBRICATOR_PROMPT v5.json"""
+        file_path = self.rubricator_dir / '4.RUBRICATOR_PROMPT v5.json'
         
         if not file_path.exists():
             print(f"[!] Файл не найден: {file_path}")
@@ -109,17 +109,17 @@ class MarkdownRubricatorLoaderV3:
                     subcategory=rule_dict.get('subcategory', 'OTHER')
                 )
             
-            print(f"[OK] Загружено правил v3.0.0: {len(self.rules)}")
+            print(f"[OK] Загружено правил v5.0.0: {len(self.rules)}")
         
         except Exception as e:
-            print(f"[!] Ошибка загрузки 4.RUBRICATOR_PROMPTS.json: {e}")
+            print(f"[!] Ошибка загрузки 4.RUBRICATOR_PROMPT v5.json: {e}")
     
     def get_rule_by_code(self, code: str) -> Optional[RubricatorRule]:
         """Получить правило по коду"""
         return self.rules.get(code)
     
     def get_enabled_rules(self) -> List[RubricatorRule]:
-        """Получить все активные правила (все в v3.0.0 активны)"""
+        """Получить все активные правила (все в v5.0.0 активны)"""
         return list(self.rules.values())
     
     def get_rules_by_category(self, category: str) -> List[RubricatorRule]:
@@ -288,7 +288,7 @@ def main():
     """Тестирование загрузчика"""
     loader = MarkdownRubricatorLoaderV3()
     
-    print("\n=== Загрузчик рубрикатора v3.0.0 ===\n")
+    print("\n=== Загрузчик рубрикатора v5.0.0 ===\n")
     
     def print_log(msg):
         print(msg)

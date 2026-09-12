@@ -1,0 +1,4454 @@
+{
+  "version": "5.3.0",
+  "based_on": "Рекомендации по адаптации кода на PLPlus для работы с DBI приложением v53.docx, Требования для совместимости кода с DBI.txt, Требования к локальным объектам и к коду - Дополнительные регламенты разработчика - Confluence.txt, PlpCheck rule-description-11310065634873899272.html",
+  "last_updated": "2026-08-20",
+  "total_rules": 198,
+  "ai_analysis_enabled": true,
+  "rules": {
+
+    "v53.SQL.OUTERJOIN.п.1.1": {
+      "code": "v53.SQL.OUTERJOIN.п.1.1",
+      "source": "v53",
+      "short_description": "Замена (+) на LEFT/RIGHT JOIN",
+      "documentation_text": "Oracle оператор (+) в ANSI не поддерживается. Нельзя использовать PLPlus параметризацию типа соединения (true/false) в where. Вместо этого нужно использовать явные left/right join on.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(\\w+)\\.(\\w+)\\s*=\\s*(\\w+)\\.(\\w+)\\(\\+\\)",
+            "description": "Oracle (+) справа"
+          },
+          {
+            "pattern": "(\\w+)\\.(\\w+)\\(\\+\\)\\s*=\\s*(\\w+)\\.(\\w+)",
+            "description": "Oracle (+) слева"
+          },
+          {
+            "pattern": "(\\w+)\\.\\[(\\w+)\\]\\s*=\\s*(\\w+)&collection\\(true\\)",
+            "description": "PLPlus коллекция с параметром true"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "t1.id = t2.id(+)",
+      "code_example_good": "left join t2 on t1.id = t2.id",
+      "fix_instruction": "Заменить (+) на LEFT/RIGHT JOIN с явным условием соединения.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.JOINS",
+      "tags": ["outer join", "oracle", "ansi"]
+    },
+    "v53.SQL.ROWNUM.п.1.2": {
+      "code": "v53.SQL.ROWNUM.п.1.2",
+      "source": "v53",
+      "short_description": "Замена rownum на FETCH FIRST",
+      "documentation_text": "Ранее для ограничения выборки использовалась псевдоколонка 'rownum'. В PostgreSQL таких псевдоколонок нет. Вместо этого нужно использовать конструкцию fetch X. Дополнительно требуется оценка влияния изменения кода на планы запросов Oracle.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bROWNUM\\s*=\\s*(\\d+)",
+            "description": "ROWNUM = N"
+          },
+          {
+            "pattern": "\\bROWNUM\\s*<=\\s*(\\d+)",
+            "description": "ROWNUM <= N"
+          },
+          {
+            "pattern": "\\bWHERE\\b.*?\\bROWNUM\\b",
+            "description": "ROWNUM в WHERE"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "where rownum = 1",
+      "code_example_good": "fetch first 1 rows only",
+      "fix_instruction": "Заменить rownum на FETCH FIRST X ROWS ONLY. Для сдвига выборки использовать offset on X.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.LIMIT",
+      "tags": ["rownum", "limit", "offset"]
+    },
+    "v53.SQL.UDF.п.1.3": {
+      "code": "v53.SQL.UDF.п.1.3",
+      "source": "v53",
+      "short_description": "Запрет UDF в WHERE/GROUP BY/ORDER BY",
+      "documentation_text": "Не поддерживается трансляция бизнес-кода в серверный код, поэтому нельзя использовать функции PLPlus бизнес-кода в SQL за исключением использования функциональных реквизитов и функций как выражений выборки в основном запросе.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(WHERE|GROUP BY|ORDER BY|HAVING).*[A-Z_]+\\([^)]*\\)",
+            "description": "UDF в WHERE/GROUP BY/ORDER BY"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "(NVL|DECODE|CASE|COALESCE|TO_CHAR|TO_DATE|TO_NUMBER|SUBSTR|INSTR|LENGTH|TRIM|UPPER|LOWER|COUNT|SUM|AVG|MIN|MAX|SYSDATE)\\(",
+            "description": "Встроенные функции"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "for (select acc(acc.[MAIN_V_ID] : acc_num, f.a('И'||acc, p_date_end) : saldo) in ::[AC_FIN] where acc.[MAIN_USV] = p_usv) loop",
+      "code_example_good": "for (select acc(acc : acc, acc.[MAIN_V_ID] : acc_num) in ::[AC_FIN] where acc.[MAIN_USV] = p_usv) loop str := acc.acc_num ||'='||f.a('И'||acc.acc, p_date_end); end loop;",
+      "fix_instruction": "Вынести UDF из WHERE/GROUP BY/ORDER BY в процедурный код.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.FUNCTIONS",
+      "tags": ["udf", "function", "performance"]
+    },
+    "v53.SQL.CAST.п.1.5": {
+      "code": "v53.SQL.CAST.п.1.5",
+      "source": "v53",
+      "short_description": "Явное приведение типов",
+      "documentation_text": "У Oracle и PostgreSQL разные правила неявного приведения типов данных и функции явного преобразования типов. Поэтому необходимо писать код, в котором используются совместимые типы данных или их явные преобразования.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "[a-zA-Z_][a-zA-Z0-9_]*\\s*\\+\\s*[0-9]+",
+            "description": "Сложение строки с числом"
+          },
+          {
+            "pattern": "[a-zA-Z_][a-zA-Z0-9_]*\\s+LIKE\\s+['\"]",
+            "description": "LIKE с числовым полем"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "c_code + 1",
+      "code_example_good": "to_number(c_code) + 1",
+      "fix_instruction": "Добавить явное приведение типов с использованием to_number, to_char, cast и т.д.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.OTHER",
+      "tags": ["cast", "type", "conversion"]
+    },
+    "v53.SQL.DECODE.п.1.6.1": {
+      "code": "v53.SQL.DECODE.п.1.6.1",
+      "source": "v53",
+      "short_description": "Замена DECODE на CASE",
+      "documentation_text": "В ТЯ 7.6.10.10 при APPLICATION.DBI = 1 реализована компиляция decode в case. В случае ошибки компиляции case-конструкции java пакет не создается. В этом случае необходимо вручную переписать decode на case. Также нельзя в новом коде использовать функцию decode из-за неявного приведения типов.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "DECODE\\s*\\([^)]+\\)",
+            "description": "DECODE функция"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "decode(status,1,'A',2,'B','?')",
+      "code_example_good": "case status when 1 then 'A' when 2 then 'B' else '?' end",
+      "fix_instruction": "Заменить DECODE на CASE WHEN с явным указанием всех условий.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.FUNCTIONS",
+      "tags": ["decode", "case", "conditional"]
+    },
+    "v53.SQL.CONNECTBY.п.1.8": {
+      "code": "v53.SQL.CONNECTBY.п.1.8",
+      "source": "v53",
+      "short_description": "Замена CONNECT BY на WITH RECURSIVE",
+      "documentation_text": "Для реализации иерархических выборок использовался синтаксис 'connect by'. Начиная с ТЯ 7.6.9.2 для той же цели нужно использовать CTE (WITH RECURSIVE), т.к. данная конструкция описана в ANSI SQL и поддержана в PLPLUS. Иерархические запросы по метаданным под запретом.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "CONNECT\\s+BY\\s+PRIOR\\s+\\w+\\s*=\\s*\\w+",
+            "description": "CONNECT BY"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select d(d%id : ID, d.[HIGH] : HIGH) in ::[DEPART] connect by d%id = prior d.[HIGH] start d%id = dep",
+      "code_example_good": "with recursive t(id, high) as (select x(x%id : id, x.[HIGH] : high) in ::[DEPART] where x%id = dep union all select x(x%id : id, x.[HIGH] : high) in ::[DEPART] join (t : t2) on t2.high = x) select t1(t1.id) in t where t1.high is null fetch 1 into high_dep;",
+      "fix_instruction": "Заменить CONNECT BY на WITH RECURSIVE с явным указанием стартовой и итерационной части.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.HIERARCHICAL",
+      "tags": ["hierarchical", "connect by", "cte"]
+    },
+    "v53.SQL.SYSVIEW.п.1.9": {
+      "code": "v53.SQL.SYSVIEW.п.1.9",
+      "source": "v53",
+      "short_description": "Замена v$session на VW_DB_SESSION",
+      "documentation_text": "Точного соответствия системным представлениям Oracle в PostgreSQL нет, поэтому к ним обращаться не рекомендуется за исключением перечисленных. Для минимизации изменений в прикладном коде реализовано представление VW_DB_SESSION.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(V\\$|GV\\$|USER_|ALL_|DBA_)[A-Z0-9_]+",
+            "description": "Системное представление Oracle"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "(VW_DB_SESSION|all_constraints|all_ind_columns|all_indexes|all_tab_columns|all_tables|dba_constraints|dba_ind_columns|dba_indexes|dba_tab_columns|dba_tables|dual|user_constraints|user_ind_columns|user_indexes|user_tab_columns|user_tables)",
+            "description": "Разрешенные представления"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select t(t.SID : SID) in gv$session%rowtype",
+      "code_example_good": "select t(t.SID : SID) in VW_DB_SESSION%rowtype",
+      "fix_instruction": "Заменить системное представление Oracle на VW_DB_SESSION.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.SYS_OBJECTS",
+      "tags": ["system view", "oracle", "session"]
+    },
+    "v53.SQL.SYSTABLES.п.1.10": {
+      "code": "v53.SQL.SYSTABLES.п.1.10",
+      "source": "v53",
+      "short_description": "Запрет SELECT из системных таблиц ТЯ",
+      "documentation_text": "Все таблицы метаданных ТЯ перенесены в другой data source. Обращаться к метаданным только через соответствующие метаклассы. Допускается обращение к метаданным через системные модификаторы (%statename, %classname, ...) но с ограничениями аналогичными вычисляемым реквизитам.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(FROM|INTO|JOIN)\\s+(CLASSES|CLASS_ATTRIBUTES|METHODS|CRITERIA|RTL_ENTRIES|SOURCES|DEPENDENCIES|ERRORS|CURSORS|HOST2PLP|DEPLOYMENT_SUPPLY|HOST_SOURCES|HOST_ERRORS)\\b",
+            "description": "Обращение к системной таблице"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          },
+          {
+            "pattern": "::\\[METACLASS\\]|::\\[STATES\\]",
+            "description": "Обращение через метакласс"
+          }
+        ]
+      },
+      "code_example_bad": "select s(s.[NAME]) in states%rowtype where s.[id] = ref_doc%state into st;",
+      "code_example_good": "select s(s.[NAME]) in ::[STATES] all where s%id = ref_doc%state into st;",
+      "fix_instruction": "Заменить обращение к системной таблице на обращение через соответствующий метакласс.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.SYS_OBJECTS",
+      "tags": ["metadata", "system tables"]
+    },
+    "v53.SQL.ORACLE_PKG.п.1.11": {
+      "code": "v53.SQL.ORACLE_PKG.п.1.11",
+      "source": "v53",
+      "short_description": "Запрет Oracle supplied PL/SQL пакетов",
+      "documentation_text": "Oracle пакетов нет, поэтому не должно быть зависимостей. Если они выявлены в прикладном коде их нужно исключить либо стараться выносить за пределы курсора.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(UTL_FILE|DBMS_OUTPUT|DBMS_ALERT|DBMS_PIPE|DBMS_LOB|DBMS_RANDOM|UTL_RAW|UTL_COMPRESS|DBMS_XMLGEN|DBMS_CRYPTO|UTL_SMTP|UTL_URL|UTL_HTTP|UTL_TCP|DBMS_SQL)\\.",
+            "description": "Oracle пакет"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "dbms_lob.writeappend(...)",
+      "code_example_good": "::[RUNTIME].[CONCAT_LIB].append(...)",
+      "fix_instruction": "Заменить Oracle пакет на альтернативу из RUNTIME.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.SYS_OBJECTS",
+      "tags": ["oracle", "plsql", "packages"]
+    },
+    "v53.SQL.TABLE_SELECT.п.1.13": {
+      "code": "v53.SQL.TABLE_SELECT.п.1.13",
+      "source": "v53",
+      "short_description": "Замена SELECT FROM TABLE()",
+      "documentation_text": "Синтаксис выборки из коллекций не формализован в ANSI SQL и имеет разную реализацию в Oracle и PostgreSQL. Поддержана выборка из скалярных ассоциативных массивов и из массивов объектных типов.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "SELECT.*FROM\\s+TABLE\\s*\\(",
+            "description": "SELECT FROM TABLE()"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "for (select tb(tb.a : SID) in tA) loop",
+      "code_example_good": "for (select tb(tb.column_value : SID) in tA1) loop",
+      "fix_instruction": "Использовать varray от скалярных типов или переписать на процедурный цикл.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.OTHER",
+      "tags": ["collection", "array", "table"]
+    },
+    "v53.SQL.BULK.п.1.28": {
+      "code": "v53.SQL.BULK.п.1.28",
+      "source": "v53",
+      "short_description": "Включение batch для bulk операций",
+      "documentation_text": "Начиная c 2MCA DBI версии 3.10.24 оптимизирована конструкция массовой вставки insert into ... for ... loop. Начиная с 2MCA DBI версии 3.11.0 оптимизирована конструкция массового обновления. Начиная с версии 2MCA DBI 3.11.106 оптимизирована конструкция массового удаления.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bFORALL\\b|\\bBULK COLLECT\\b",
+            "description": "BULK операции"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "pragma hint\\('jdbc_batch\\(true\\)'\\)",
+            "description": "Уже есть хинт"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "forall i in 1..100 insert into t values (v_arr(i));",
+      "code_example_good": "pragma hint('jdbc_batch(true)'); forall i in 1..100 insert into t values (v_arr(i));",
+      "fix_instruction": "Добавить pragma hint('jdbc_batch(true)') перед bulk операцией.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.OTHER",
+      "tags": ["bulk", "batch", "performance"]
+    },
+    "v53.STOR.DATE.п.2.2": {
+      "code": "v53.STOR.DATE.п.2.2",
+      "source": "v53",
+      "short_description": "Замена DATE на DATE_TIME",
+      "documentation_text": "Тип DATE в PostgreSQL не хранит время. В связи с этим, принято решение по миграции данных из Oracle типа DATE в PostgreSQL в тип TIMESTAMP(0). Также в ТЯ реализована возможность использования типа interval.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\b(\\w+)\\s+date\\b",
+            "description": "Объявление типа DATE"
+          },
+          {
+            "pattern": "(\\w+)\\s+in\\s+date\\b",
+            "description": "Параметр типа DATE"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          },
+          {
+            "pattern": "to_date\\(",
+            "description": "Функция to_date"
+          }
+        ]
+      },
+      "code_example_bad": "DateTimeEnd date;",
+      "code_example_good": "DateTimeEnd date_time;",
+      "fix_instruction": "Заменить тип DATE на DATE_TIME. При вычитании дат использовать to_number(to_char(date1-date2)).",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STOR",
+      "subcategory": "STOR.TYPES",
+      "tags": ["date", "type", "timestamp"]
+    },
+    "v53.STOR.TEMP.п.2.8": {
+      "code": "v53.STOR.TEMP.п.2.8",
+      "source": "v53",
+      "short_description": "Замена временных таблиц на VARRAY",
+      "documentation_text": "Работа с временными таблицами в Oracle и PostgreSQL различается. Использование временных таблиц в OLTP системе на базе PostgreSQL оценивается как ошибка дизайна, приводящая к pg_catalog bloat. Альтернативой может служить varray.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "GLOBAL\\s+TEMPORARY\\s+TABLE|TEMP\\s+TABLE",
+            "description": "Временная таблица"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "create global temporary table ...",
+      "code_example_good": "type t_tbl is varray(0) of ...",
+      "fix_instruction": "Заменить временную таблицу на varray или использовать ::[RUNTIME].[STORAGE_MGR].init_temp_table() в крайнем случае.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STOR",
+      "subcategory": "STOR.TABLES",
+      "tags": ["temp table", "varray"]
+    },
+    "v53.STOR.UNIQUE_IDX.п.2.6.2": {
+      "code": "v53.STOR.UNIQUE_IDX.п.2.6.2",
+      "source": "v53",
+      "short_description": "NULL в составных уникальных индексах",
+      "documentation_text": "В PostgreSQL null значения входят в состав индекса. Это порождает отличие в поведении уникальных СОСТАВНЫХ индексов. Когда все ключевые поля составного уникального индекса = NULL, то при повторной вставке записи получим исключение в PostgreSQL. В Oracle исключения не будет.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "CREATE\\s+UNIQUE\\s+INDEX.*ON.*\\([^)]+\\)",
+            "description": "Уникальный индекс"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "CREATE UNIQUE INDEX IDX_KTST ON app.\"KTST\" USING btree (c_vek, c_num);",
+      "code_example_good": "CREATE UNIQUE INDEX IDX_KTST ON app.\"KTST\" USING btree (c_vek, c_num) NULLS NOT DISTINCT;",
+      "fix_instruction": "Добавить NULLS NOT DISTINCT для составных уникальных индексов или избавиться от дублей с NULL.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STOR",
+      "subcategory": "STOR.INDEXES",
+      "tags": ["unique index", "null"]
+    },
+    "v53.STOR.INDEX.п.2.6.3": {
+      "code": "v53.STOR.INDEX.п.2.6.3",
+      "source": "v53",
+      "short_description": "Учёт ограничения 2704 байт для BTREE",
+      "documentation_text": "В PostgreSQL размер строки BTREE индекса не может превышать 2704 байт. Ограничение справедливо как для составного индекса, так и для индекса на одно поле. В зоне риска находятся все индексы с размером суммы текстовых полей более 676 символов.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "CREATE\\s+INDEX.*ON.*\\(.*VARCHAR2.*\\)",
+            "description": "Индекс на текстовом поле"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "unique index IDX_Z#B_REP_RESULT_UNI { UNIQUE_ID; -- STRING_4000 }",
+      "code_example_good": "unique index IDX_Z#B_REP_RESULT_UNI { UNIQUE_TEST_ID; -- STRING_200 }",
+      "fix_instruction": "Уменьшить размер поля, использовать GIST/GIN индекс или исключить неиспользуемые поля.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STOR",
+      "subcategory": "STOR.INDEXES",
+      "tags": ["index", "btree", "size", "limit"]
+    },
+    "v53.PROC.WHENOTHERS.п.3.5": {
+      "code": "v53.PROC.WHENOTHERS.п.3.5",
+      "source": "v53",
+      "short_description": "Добавление ROLLBACK или RAISE в WHEN OTHERS",
+      "documentation_text": "PostgreSQL в отличие от Oracle «портит» транзакцию при возникновении исключений большинства групп. На текущий момент конструкция when others перехватывает исключения всех групп. Поэтому без правильной обработки исключений что-либо получить/положить в базу не удастся.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "WHEN\\s+OTHERS\\s+THEN(?!.*?(ROLLBACK|RAISE))",
+            "description": "WHEN OTHERS без ROLLBACK/RAISE"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "exception when others then null;",
+      "code_example_good": "exception when others then rollback; raise;",
+      "fix_instruction": "Добавить ROLLBACK и RAISE в блок WHEN OTHERS или использовать &sp/&rb макросы.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.EXCEPTIONS",
+      "tags": ["exception", "rollback", "raise"]
+    },
+    "v53.PROC.EMPTY_STRING.п.3.2": {
+      "code": "v53.PROC.EMPTY_STRING.п.3.2",
+      "source": "v53",
+      "short_description": "Пустая строка и NULL",
+      "documentation_text": "В PostgreSQL пустая строка '' is not null. Это отличается от поведения в Oracle. Это надо учитывать при написании кода запросов к БД. Код следует написать таким образом, чтоб не допускать появления '' в текстовых полях БД.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "=\\s*''|''\\s*=",
+            "description": "Сравнение с пустой строкой"
+          },
+          {
+            "pattern": ":=\\s*''",
+            "description": "Присваивание пустой строки"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "if s = '' then",
+      "code_example_good": "if s is null then",
+      "fix_instruction": "Заменить сравнение с пустой строкой на IS NULL.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["empty string", "null"]
+    },
+    "v53.PROC.EXECUTE.п.3.3": {
+      "code": "v53.PROC.EXECUTE.п.3.3",
+      "source": "v53",
+      "short_description": "Экранирование имён таблиц в execute immediate",
+      "documentation_text": "Рекомендуется избегать прямого вызова в базу и использовать для этого соответствующие пакеты runtime.calc, runtime.plp и пр. В случае необходимости использования execute immediate требуется писать запрос таким образом, чтобы он мог одинаково проигрываться в разных средах.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "EXECUTE\\s+IMMEDIATE\\s+'[^']*\\bZ#[A-Z_]+\\b[^']*'",
+            "description": "EXECUTE IMMEDIATE с именем таблицы"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "EXECUTE\\s+IMMEDIATE\\s+'[^']*\"Z#[A-Z_]+\"[^']*'",
+            "description": "Уже экранировано"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "execute immediate 'truncate table Z#DBI_TEST';",
+      "code_example_good": "execute immediate 'truncate table \"Z#DBI_TEST\"';",
+      "fix_instruction": "Добавить двойные кавычки вокруг имен таблиц в execute immediate.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.SQL",
+      "tags": ["dynamic sql", "execute", "escape"]
+    },
+    "v53.PROC.DYNAMIC_SQL.п.3.3": {
+      "code": "v53.PROC.DYNAMIC_SQL.п.3.3",
+      "source": "v53",
+      "short_description": "Замена DBMS_SQL на RUNTIME.CALC",
+      "documentation_text": "Запрещается в ходе новых разработок использование синтаксиса динамических запросов с использованием пакетов DBMS_SQL, RTL.execute_sql, RTL.exec_sql_out, UTILS.open_cursor. Вместо них рекомендуется использовать процедуры и функции библиотек ::[RUNTIME].[CALC], ::[RUNTIME].[PLP].",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "dbms_sql\\.open_cursor|dbms_sql\\.parse|dbms_sql\\.execute|dbms_sql\\.close_cursor|rtl\\.execute_sql|rtl\\.exec_sql_out|utils\\.open_cursor",
+            "description": "DBMS_SQL или аналоги"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "v_cursor := dbms_sql.open_cursor();",
+      "code_example_good": "v_cursor := ::[RUNTIME].[CALC].plp_c();",
+      "fix_instruction": "Заменить DBMS_SQL на ::[RUNTIME].[CALC] или ::[RUNTIME].[PLP].",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.SQL",
+      "tags": ["dynamic sql", "dbms_sql"]
+    },
+    "v53.PROC.MACROS.п.3.4": {
+      "code": "v53.PROC.MACROS.п.3.4",
+      "source": "v53",
+      "short_description": "Запрет макросов execute и process",
+      "documentation_text": "Макросы execute и process типа без Oracle точно не будут работать, нужно исключить их использование.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "pragma\\s+macro\\([^,]+,[^,]+,\\s*(execute|process)\\)",
+            "description": "Макрос execute/process"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "pragma macro(RSM,'Z$ANYTOOLS_RS_A_MACRO.make_selects([1])',execute);",
+      "code_example_good": "-- макрос удалён",
+      "fix_instruction": "Удалить макросы с опциями execute и process.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.MACROS",
+      "tags": ["macro", "substitution"]
+    },
+    "v53.PROC.TRIGGER.п.3.8": {
+      "code": "v53.PROC.TRIGGER.п.3.8",
+      "source": "v53",
+      "short_description": "Замена триггеров БД на операции-триггеры",
+      "documentation_text": "Триггеры базы данных относятся к серверному коду и возможны к использованию только для Платформы 1 и Платформы 2МСА. Для архитектуры DBI есть возможность использовать операции типа Триггер, но они не совместимы с Платформой 1.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "CREATE\\s+TRIGGER\\b",
+            "description": "CREATE TRIGGER"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "CREATE OR REPLACE TRIGGER USR_TVR_TRIG BEFORE INSERT ON Z#UD_CODE_NAME",
+      "code_example_good": "@before(insert, delete, update) trigger TVR_TRIG is ...",
+      "fix_instruction": "Заменить триггер БД на операцию типа Триггер с аннотацией @before/@after.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["trigger", "database", "plsql"]
+    },
+    "v53.PROC.CODEGEN.п.3.15": {
+      "code": "v53.PROC.CODEGEN.п.3.15",
+      "source": "v53",
+      "short_description": "Запрет кодогенерации операций и представлений",
+      "documentation_text": "В архитектуре DBI запрещено из PLPlus кода операций создавать новые операции и представления, менять существующие, удалять операции, вызывать перекомпиляцию. Нужно избавляться или переписывать на динамическое исполнение кода.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(CREATE|ALTER|DROP)\\s+(OPERATION|VIEW)",
+            "description": "Кодогенерация операций/представлений"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "create operation ...",
+      "code_example_good": "::[RUNTIME].[PLP].plp_c(...)",
+      "fix_instruction": "Заменить кодогенерацию на динамическое исполнение через ::[RUNTIME].[PLP].",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["codegen", "operations"]
+    },
+    "v53.PROC.CHARSET.п.3.16": {
+      "code": "v53.PROC.CHARSET.п.3.16",
+      "source": "v53",
+      "short_description": "Использование RUNTIME.CHARSET для кодировок",
+      "documentation_text": "Для унификации работы с кодировками символов создана библиотека ::[RUNTIME].[CHARSET], содержащая функции, поддерживаемые в DBI. Запрещено использование функций: nchr, asciistr, compose, decompose, dump, unistr, lengthc, length2, length4, substrc, substr2, substr4, NLS_INITCAP, NLS_LOWER, NLS_UPPER, NLS_CHARSET_DECL_LEN, NLS_CHARSET_ID, NLS_CHARSET_NAME, NLSSORT.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(nchr|asciistr|compose|decompose|dump|unistr|lengthc|length2|length4|substrc|substr2|substr4|NLS_INITCAP|NLS_LOWER|NLS_UPPER|NLS_CHARSET_|NLSSORT)\\(",
+            "description": "Запрещенные функции"
+          },
+          {
+            "pattern": "convert\\(",
+            "description": "Функция convert"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "v_str := convert(v_text, 'UTF8', 'CL8ISO8859P5');",
+      "code_example_good": "v_str := ::[RUNTIME].[CHARSET].clob_to_clob(v_text, 'UTF8', 'CL8ISO8859P5');",
+      "fix_instruction": "Заменить запрещенные функции на ::[RUNTIME].[CHARSET].*",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.CHARSET",
+      "tags": ["charset", "encoding"]
+    },
+    "v53.PROC.COND_COMPILE.п.3.21": {
+      "code": "v53.PROC.COND_COMPILE.п.3.21",
+      "source": "v53",
+      "short_description": "Запрет условной компиляции",
+      "documentation_text": "Все разновидности условной компиляции запрещены и не имеют смысла в DBI, т.к. программный код поставляется уже в скомпилированном виде. Варианты условной компиляции: --#IF на основе execute/process макроса, IF_DEF на основе pragma define.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "--#IF|--#ELSE|--#ENDIF",
+            "description": "#IF конструкции"
+          },
+          {
+            "pattern": "IF_DEF\\s*\\(|pragma\\s+define\\b",
+            "description": "IF_DEF/pragma define"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "--#IF DEFINED(DEBUG)\n    debug('test');\n--#ENDIF",
+      "code_example_good": "debug('test');",
+      "fix_instruction": "Удалить условную компиляцию или заменить на статичный код.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.MACROS",
+      "tags": ["conditional compilation"]
+    },
+    "v53.PROC.NATIVEID.п.3.26": {
+      "code": "v53.PROC.NATIVEID.п.3.26",
+      "source": "v53",
+      "short_description": "NativeID для метаданных",
+      "documentation_text": "На уровне Платформы ведется плановая работа по переводу синтетических идентификаторов операций и представлений на NativeID. Вместо числового идентификатора в колонке ID таблиц methods и criteria будут храниться идентификаторы типа КОРОТКОЕ_ИМЯ_КЛАССА.КОРОТКОЕ_ИМЯ_ОПЕРАЦИИ.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "ref\\s+\\[METHOD\\]|ref\\s+\\[CRITERIA\\]",
+            "description": "Ссылка на метод/представление"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "v_id number; rMeth ref [METHOD]; begin v_id := rMeth%id;",
+      "code_example_good": "v_id varchar2(100); rMeth ref [METHOD]; begin v_id := rMeth%id;",
+      "fix_instruction": "Использовать VARCHAR2 для хранения идентификаторов операций и представлений.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["nativeid", "identifiers"]
+    },
+    "v53.PROC.ID_SIZE.п.3.27": {
+      "code": "v53.PROC.ID_SIZE.п.3.27",
+      "source": "v53",
+      "short_description": "Размер идентификатора бизнес-данных",
+      "documentation_text": "В PostgreSQL максимальная размерность sequence, которая генерирует идентификаторы строк таблиц Z# - bigint. Таким образом, размерность строковой или числовой переменной для хранения ID должна быть не менее 20 символов.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(\\w+)\\s+(NUMBER|VARCHAR2|STRING)\\s*\\(([0-9]|1[0-9])\\)\\s*;",
+            "description": "ID в типе меньше 20"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "v_id number(10);",
+      "code_example_good": "v_id number(20);",
+      "fix_instruction": "Увеличить размерность типа для хранения ID до 20 символов.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["id", "bigint", "size"]
+    },
+    "v53.PROC.SAVEPOINT_LIMIT.п.3.18.2": {
+      "code": "v53.PROC.SAVEPOINT_LIMIT.п.3.18.2",
+      "source": "v53",
+      "short_description": "Ограничение на количество подтранзакций",
+      "documentation_text": "В БД PostgreSQL есть ограничение на количество создаваемых подтранзакций внутри одной транзакции, связанное с деградацией производительности. Каждая точка отката порождает одну подтранзакцию. Настоятельно не рекомендуется допускать превышение 64 подтранзакций.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "savepoint\\s+\\w+",
+            "description": "SAVEPOINT"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "for i in 1..v_tbl.count loop savepoint SAVE ... exception when others then rollback to SAVE; end loop;",
+      "code_example_good": "for i in 1..v_tbl.count loop savepoint SAVE ... if mod(i,10) = 0 then commit; end if; exception when others then rollback to SAVE; end loop;",
+      "fix_instruction": "Группировать savepoint с периодическим commit, не превышая 64 подтранзакции.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.TRANSACTIONS",
+      "tags": ["savepoint", "subtransaction"]
+    },
+    "v53.PROC.REPORT.п.3.10": {
+      "code": "v53.PROC.REPORT.п.3.10",
+      "source": "v53",
+      "short_description": "Операции типа Отчет не поддерживаются",
+      "documentation_text": "Не поддерживаются в архитектуре DBI. Следует переписать на OOXML.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\<Report\\>|\\<MethodPresentation.*Report",
+            "description": "Операция типа Отчет"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "<MethodPresentation><Properties><Report>report.rdf</Report>",
+      "code_example_good": "OOXML отчет",
+      "fix_instruction": "Переписать отчет на технологию OOXML.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["report", "oracle reports"]
+    },
+    "v53.PROC.DYNAMIC_PL.п.3.28": {
+      "code": "v53.PROC.DYNAMIC_PL.п.3.28",
+      "source": "v53",
+      "short_description": "Динамический PL+",
+      "documentation_text": "Т.к. в DBI нет макросов условной компиляции, нельзя перекомпилировать статичный код операции, то на замену приходит динамический PL+. Для работы с динамическим PL+ есть две библиотеки: ::[RUNTIME].[PLP] (базовая, работает в ТЯ1 и DBI) и ::[RUNTIME].[PLP2] (расширяет возможности, работает только в режимах 2MCA, 2MCA DBI).",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "::\\[RUNTIME\\]\\.\\[PLP\\]\\.|::\\[RUNTIME\\]\\.\\[PLP2\\]\\.",
+            "description": "Динамический PL+"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "-- условная компиляция или кодогенерация",
+      "code_example_good": "::[RUNTIME].[PLP].plp_c(strPlp);",
+      "fix_instruction": "Заменить условную компиляцию/кодогенерацию на динамический PL+ через ::[RUNTIME].[PLP] или ::[RUNTIME].[PLP2].",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["dynamic", "pl", "plp", "plp2"]
+    },
+    "v53.PROC.SORT_BY_ID.п.3.29": {
+      "code": "v53.PROC.SORT_BY_ID.п.3.29",
+      "source": "v53",
+      "short_description": "Сортировка по ID не рекомендуется",
+      "documentation_text": "В общем случае в DBI не гарантируется, что запись с меньшим ID будет вставлена в таблицу раньше, чем запись с большим ID. Поэтому не рекомендуется использовать сортировку по ID для понимания временного порядка записей.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "ORDER\\s+BY.*\\%id",
+            "description": "Сортировка по ID"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "order by a%id",
+      "code_example_good": "order by a.[DATE]",
+      "fix_instruction": "Использовать другой критерий сортировки, например, по дате.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "PROC",
+      "subcategory": "PROC.OTHER",
+      "tags": ["sort", "id", "order by"]
+    },
+    "тдс20240828.DML_JOIN.стр.1": {
+      "code": "тдс20240828.DML_JOIN.стр.1",
+      "source": "тдс20240828",
+      "short_description": "Запрет DML с присоединением немодифицируемых таблиц",
+      "documentation_text": "Операторы update/delete должны быть написаны так, чтобы они модифицировали/удаляли только один источник данных, не генерируя в секции «from» дополнительного объединения с другими немодифицируемыми источниками данных. В операторах update/delete запрещено явное или неявное присоединение немодифицируемых таблиц.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(UPDATE|DELETE)\\s+\\w+\\s+IN\\s+.*?WHERE.*?\\w+\\.\\[\\w+\\]\\s*=\\s*\\w+",
+            "description": "DML с JOIN"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "delete x in ref_doc.[USER_TYPE] where x.[CODE] = 'CR_TUN_ACC_TRANS'",
+      "code_example_good": "delete x in ref_doc.[USER_TYPE] where x = ::[USER_TYPE]([CODE]='CR_TUN_ACC_TRANS')",
+      "fix_instruction": "Переписать DML без JOIN, используя подзапросы.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.JOINS",
+      "tags": ["dml", "join", "update", "delete"]
+    },
+    "тдс20240828.FETCH_ROWNUM.стр.7": {
+      "code": "тдс20240828.FETCH_ROWNUM.стр.7",
+      "source": "тдс20240828",
+      "short_description": "Ограничение выборки fetch вместо rownum",
+      "documentation_text": "Для ограничения выборки вместо псевдоколонки 'rownum' следует использовать конструкцию 'fetch X'. Запрещается в подзапросе конструкции exists использовать fetch, так как это приведет к полной выборке по подзапросу, а затем только ограничению строк выборки подзапроса.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "EXISTS\\s*\\(.*FETCH\\s+FIRST",
+            "description": "EXISTS с FETCH"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "where exists (select 1 from t fetch first 1 rows only)",
+      "code_example_good": "where exists (select 1 from t)",
+      "fix_instruction": "Убрать FETCH из подзапроса EXISTS.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "SQL",
+      "subcategory": "SQL.DML.LIMIT",
+      "tags": ["fetch", "exists", "subquery"]
+    },
+    "тдс20240828.TRANS_ABORTED.стр.29": {
+      "code": "тдс20240828.TRANS_ABORTED.стр.29",
+      "source": "тдс20240828",
+      "short_description": "Прерванная транзакция",
+      "documentation_text": "При возникновении большинства ошибок в PostgreSQL транзакция считается прерванной. Для продолжения работы в БД есть два варианта: зафиксировать транзакцию или откатить транзакцию на точку отката, установленную до возникновения ошибки.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "exception\\s+when\\s+others\\s+then(?!.*?(rollback|raise))",
+            "description": "WHEN OTHERS без rollback/raise"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "exception when others then null;",
+      "code_example_good": "exception when others then &rb(point1); raise;",
+      "fix_instruction": "Добавить rollback или raise в блок WHEN OTHERS.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.TRANSACTIONS",
+      "tags": ["transaction", "aborted", "rollback"]
+    },
+    "тдс20240828.COND_COMPILE.стр.35": {
+      "code": "тдс20240828.COND_COMPILE.стр.35",
+      "source": "тдс20240828",
+      "short_description": "Запрет условной компиляции",
+      "documentation_text": "Запрещены любые условные компиляции, кроме системных(JAVA/DBI).",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "--#IF|--#ELSE|--#ENDIF|IF_DEF\\s*\\(|pragma\\s+define\\b",
+            "description": "Условная компиляция"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "--#ifdef JAVA\n    ...\n--#endif",
+      "code_example_good": "-- удалено",
+      "fix_instruction": "Удалить все конструкции условной компиляции.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "PROC",
+      "subcategory": "PROC.MACROS",
+      "tags": ["conditional compilation"]
+    },
+    "тклоик20240828.THIS_FORBIDDEN.стр.3": {
+      "code": "тклоик20240828.THIS_FORBIDDEN.стр.3",
+      "source": "тклоик20240828",
+      "short_description": "Запрет THIS для инициализации",
+      "documentation_text": "Запрещается использовать идентификатор THIS для инициализации переменных в секции деклараций закладок Тело и Проверка в операциях. В связи с особенностями работы ТЯ внутренняя кэш-переменная или структура могут быть еще не проинициализированы в этом месте сгенерированного pl/sql пакета операции.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "var\\s+\\w+\\s+\\w+\\s*:=\\s*THIS\\.",
+            "description": "THIS в инициализации"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "var aVar number := THIS.[ACC_DT];",
+      "code_example_good": "begin aVar := THIS.[ACC_DT]; end;",
+      "fix_instruction": "Перенести инициализацию с THIS в тело блока.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "DEV",
+      "subcategory": "DEV.RESTRICTIONS",
+      "tags": ["this", "initialization"]
+    },
+    "тклоик20240828.NO_GOTO.стр.5": {
+      "code": "тклоик20240828.NO_GOTO.стр.5",
+      "source": "тклоик20240828",
+      "short_description": "Запрет GOTO",
+      "documentation_text": "Запрещается использование синтаксиса GOTO <LABEL>. Если при проведении доработок встречена такая конструкция, необходимо переписать алгоритм.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bGOTO\\s+\\w+\\b|<<\\w+>>",
+            "description": "GOTO или метка"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "goto test;",
+      "code_example_good": "while test1 <= 10 loop test1 := test1 + 1; end loop;",
+      "fix_instruction": "Заменить GOTO на циклы или условные конструкции.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DEV",
+      "subcategory": "DEV.RESTRICTIONS",
+      "tags": ["goto", "control"]
+    },
+    "тклоик20240828.NO_OBJECTS_VIEW.стр.3": {
+      "code": "тклоик20240828.NO_OBJECTS_VIEW.стр.3",
+      "source": "тклоик20240828",
+      "short_description": "Запрет запросов к OBJECTS, COL2OBJ, REFS",
+      "documentation_text": "Запрещается делать запросы к VIEW - OBJECTS, COL2OBJ, REFS. Т.к. эти вьюшки строятся на основе большого количества таблиц, то запросы к ним негативно сказываются как на производительности текущего процесса, так и всей системы в целом.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(OBJECTS|COL2OBJ|REFS)\\b",
+            "description": "Запрещенные представления"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select * from OBJECTS where id = ...",
+      "code_example_good": "select * from ::[METACLASS] where ...",
+      "fix_instruction": "Заменить обращение к OBJECTS, COL2OBJ, REFS на метаклассы.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "DEV",
+      "subcategory": "DEV.RESTRICTIONS",
+      "tags": ["objects", "performance"]
+    },
+    "тклоик20240828.NO_MULTI_MODIFIER.стр.3": {
+      "code": "тклоик20240828.NO_MULTI_MODIFIER.стр.3",
+      "source": "тклоик20240828",
+      "short_description": "Запрет нескольких модификаторов % подряд",
+      "documentation_text": "Запрещается использовать более одного модификатора типа '%модификатор' друг за другом в том случае, если PL+ после использования какого-либо не последнего в строке модификатора не знает тип получившейся ссылки или массива.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\w+%\\w+%\\w+",
+            "description": "Несколько модификаторов % подряд"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "st := sd%parent%state;",
+      "code_example_good": "prod := sd%parent; st := prod%state;",
+      "fix_instruction": "Разбить цепочку модификаторов на отдельные шаги.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "DEV",
+      "subcategory": "DEV.RESTRICTIONS",
+      "tags": ["modifier"]
+    },
+    "тклоик20240828.NO_SAVEPOINT_DIRECT.стр.5": {
+      "code": "тклоик20240828.NO_SAVEPOINT_DIRECT.стр.5",
+      "source": "тклоик20240828",
+      "short_description": "Запрет прямых SAVEPOINT/ROLLBACK",
+      "documentation_text": "Нельзя использовать конструкции: SAVEPOINT <имя точки> и ROLLBACK <имя точки> НАПРЯМУЮ. Нужно использовать макросы, генерирующие уникальные наименования точек в разных операциях.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bSAVEPOINT\\s+\\w+\\b|\\bROLLBACK\\s+TO\\s+SAVEPOINT\\s+\\w+\\b",
+            "description": "Прямой SAVEPOINT/ROLLBACK"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "savepoint sp1; rollback to sp1;",
+      "code_example_good": "&sp(sp1); &rb(sp1);",
+      "fix_instruction": "Заменить прямой SAVEPOINT/ROLLBACK на макросы &sp/&rb.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "DEV",
+      "subcategory": "DEV.RESTRICTIONS",
+      "tags": ["savepoint", "rollback"]
+    },
+    "тклоик20240828.NO_PLSQL_INSERT.стр.8": {
+      "code": "тклоик20240828.NO_PLSQL_INSERT.стр.8",
+      "source": "тклоик20240828",
+      "short_description": "Запрет PL/SQL вставок",
+      "documentation_text": "Запрещается использовать pl/sql вставки. Если при проведении доработок встречена такая вставка, необходимо ее переписать на PL+. Исключение: случаи, когда никакими другими механизмами реализовать требуемую логику нельзя.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "--\\s*begin\\s+pl/sql|--\\s*begin\\s+sql",
+            "description": "PL/SQL или SQL вставка"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "-- begin pl/sql\nselect * from dual\n-- end pl/sql",
+      "code_example_good": "for (select x(...) in dual%rowtype) loop ...",
+      "fix_instruction": "Переписать PL/SQL вставку на PL+ синтаксис.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DEV",
+      "subcategory": "DEV.RESTRICTIONS",
+      "tags": ["plsql", "insert"]
+    },
+    "PlpCheck.JAVA.CALL_STACK_ANALYSIS.п.1": {
+      "code": "PlpCheck.JAVA.CALL_STACK_ANALYSIS.п.1",
+      "source": "PlpCheck",
+      "short_description": "Анализ размерности стэка ошибки",
+      "documentation_text": "Анализ стека вызовов в целом является плохой практикой, при этом стеки вызовов в PL-SQL и Java могут отличаться из-за особенностей именования пакетов/классов. Поэтому запрещено анализировать стек вызовов в процедурном программном коде без указания достаточного размера стека(32000).",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "utils\\.call_stack(?!\\s*\\(\\s*32000\\s*\\))|utils\\.error_stack(?!\\s*\\(\\s*true\\s*,\\s*32000\\s*\\))",
+            "description": "call_stack/error_stack без размера 32000"
+          },
+          {
+            "pattern": "(like|instr|regexp_like|regexp_instr|replace|regexp_replace).*['\"](Z#|Z\\$).*['\"]",
+            "description": "Поиск Z# или Z$ в стеке"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "if instr(utils.call_stack(), 'PUB_DEAL_OPER') < 1 then",
+      "code_example_good": "if instr(utils.call_stack(32000), 'PUB_DEAL_OPER') < 1 then",
+      "fix_instruction": "Добавить размер 32000 в вызов call_stack/error_stack. Убрать поиск Z# или Z$.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["call stack", "error", "stack"]
+    },
+    "PlpCheck.JAVA.COLUMNS_LIMIT_EXCEEDED.п.1": {
+      "code": "PlpCheck.JAVA.COLUMNS_LIMIT_EXCEEDED.п.1",
+      "source": "PlpCheck",
+      "short_description": "Контроль количества колонок в запросах",
+      "documentation_text": "Разыменование реквизита в hibernate может привести к join'ам таблиц из иерархии ТБП и выбору почти всех колонок из этих таблиц. Однако в PostgreSQL есть ограничение на максимальное число колонок в выборке - 1664. Запрос сломается, если число колонок превысит данное значение.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "select.*\\[.*\\].*in.*::\\[.*\\]",
+            "description": "SELECT с разыменованием"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select a(a%rowtype) in ::[MAIN_DOCUM] where ...",
+      "code_example_good": "Сделать родительский ТБП абстрактным или убрать обращение к родительскому ТБП",
+      "fix_instruction": "Сделать родительский ТБП абстрактным или убрать обращение к родительскому ТБП.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["columns", "limit", "hibernate"]
+    },
+    "PlpCheck.JAVA.CONV_STREAM_CHECKS.п.1": {
+      "code": "PlpCheck.JAVA.CONV_STREAM_CHECKS.п.1",
+      "source": "PlpCheck",
+      "short_description": "Проверки прикладных конвертаций",
+      "documentation_text": "Конвертации, обрабатывающие прикладные данные, должны выполняться в несколько потоков. Данная проверка определяет наличие и корректность обработки параметров 'количество потоков' и 'номер потока'.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "P#STREAM#COUNT|P#STREAM#NUM",
+            "description": "Параметры потоков"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "A20240418_EDI_1( P#STREAM#NUM in [SHORT3] default null ) is execute is cnt integer; begin P#STREAM#COUNT := nvl(P#STREAM#COUNT, 1); end;",
+      "code_example_good": "A20240418_EDI_1( P#STREAM#NUM in [SHORT3] default null, P#STREAM#COUNT in [SHORT3] default null ) is execute is cnt integer; begin P#STREAM#COUNT := nvl(P#STREAM#COUNT, 1); P#STREAM#NUM := nvl(P#STREAM#NUM, 0); select a(a) in ::[UD_CODE_NAME] all where mod(a%id, P#STREAM#COUNT) = P#STREAM#NUM into cnt; end;",
+      "fix_instruction": "Добавить параметры P#STREAM#COUNT и P#STREAM#NUM, их инициализацию и разделение данных по потокам.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "JAVA",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["conversion", "stream", "thread"]
+    },
+    "PlpCheck.JAVA.GOTO.п.1": {
+      "code": "PlpCheck.JAVA.GOTO.п.1",
+      "source": "PlpCheck",
+      "short_description": "Запрет использования конструкции goto",
+      "documentation_text": "Запрещается использование синтаксиса GOTO. Если при проведении доработок встречена такая конструкция, необходимо переписать алгоритм.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bGOTO\\s+\\w+\\b|<<\\w+>>",
+            "description": "GOTO или метка"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "goto test;",
+      "code_example_good": "while test1 <= 10 loop test1 := test1 + 1; end loop;",
+      "fix_instruction": "Заменить GOTO на циклы или условные конструкции.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["goto", "control"]
+    },
+    "PlpCheck.JAVA.INSERT_PLSQL.п.1": {
+      "code": "PlpCheck.JAVA.INSERT_PLSQL.п.1",
+      "source": "PlpCheck",
+      "short_description": "Запрет PL/SQL и SQL вставок",
+      "documentation_text": "Запрещается использовать pl/sql вставки. Если при проведении доработок встречена такая вставка, необходимо ее переписать на PL+.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "--\\s*begin\\s+pl/sql|--\\s*begin\\s+sql",
+            "description": "PL/SQL или SQL вставка"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "-- begin pl/sql\nselect * from dual\n-- end pl/sql",
+      "code_example_good": "for (select x(...) in dual%rowtype) loop ...",
+      "fix_instruction": "Переписать PL/SQL вставку на PL+ синтаксис.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["insert", "plsql", "sql"]
+    },
+    "PlpCheck.JAVA.INSERT_WITH_ID.п.1": {
+      "code": "PlpCheck.JAVA.INSERT_WITH_ID.п.1",
+      "source": "PlpCheck",
+      "short_description": "Вставка с предопределенным идентификатором",
+      "documentation_text": "Вставка записей через hibernate, всегда генерирует новый идентификатор, вне зависимости от передачи параметра 'выражение для значения ссылки'. В идеале отказаться от предустановки идентификатора и получать его после инсерта, если же необходимо вставить с конкретным ID, тогда переписывать на вставку без использования hibernate.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "::\\[.*\\]%insert\\(.*,\\s*.*%id\\)",
+            "description": "Вставка с ID"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "txt_job_ref := ::[TEXT_JOBS]%insert(txt_job, txt_job%id);",
+      "code_example_good": "insert into ::[TEXT_JOBS] t(t%id = oTxt_job%id, t%rowtype = oTxt_job%rowtype) return t into rTxt_job_ref;",
+      "fix_instruction": "Отказаться от предустановки ID при вставке или переписать на insert into.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "JAVA",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["insert", "id", "hibernate"]
+    },
+    "PlpCheck.STYLE.ALIAS_COLUMN_VIEW.п.1": {
+      "code": "PlpCheck.STYLE.ALIAS_COLUMN_VIEW.п.1",
+      "source": "PlpCheck",
+      "short_description": "Отсутствие алиаса к колонке в представлении",
+      "documentation_text": "При создании расширений к представлениям, у которых, хотя бы у одной колонки нет алиаса, ширина всех колонок слетает на умолчательное.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "select\\s+[^,]+\\s+in\\s+::\\[[A-Z_]+\\]",
+            "description": "Колонка без алиаса в представлении"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "select\\s+[^,]+\\s+:+\\s+[A-Z_]+\\s+in\\s+::\\[[A-Z_]+\\]",
+            "description": "С алиасом"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select a(a.[ATTR]) in ::[CLS];",
+      "code_example_good": "select a(a.[ATTR] : ATTR) in ::[CLS];",
+      "fix_instruction": "Добавить алиас для каждой колонки в представлении (например, `a.[ATTR] : ATTR`).",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STYLE",
+      "subcategory": "STYLE.VIEWS",
+      "tags": ["view", "alias", "column"]
+    },
+    "PlpCheck.STYLE.BAD_PREFIX.п.4.3": {
+      "code": "PlpCheck.STYLE.BAD_PREFIX.п.4.3",
+      "source": "PlpCheck",
+      "short_description": "Проверка префиксов: v,t,gt,cur,gcur,ret,p,cn,gcn",
+      "documentation_text": "Объявления type или subtype должны начинаться с t_ или gt_. Объявления констант должны начинаться с cn_ или gcn_. Параметры функций и процедур должны начинаться с p_. Переменные объявленные в локальной секции должны начинаться с v_. Объявление курсоров должно начинаться с cur_ или gcur_. Переменные используемые в качестве результата функции должны начинаться с ret_.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(?i)\\b(type|subtype)\\s+(?!t_|gt_)[a-z_]+",
+            "description": "Тип без правильного префикса"
+          },
+          {
+            "pattern": "(?i)\\b(const)\\s+(?!cn_|gcn_)[a-z_]+",
+            "description": "Константа без правильного префикса"
+          },
+          {
+            "pattern": "(?i)\\b(procedure|function)\\s*\\([^)]*\\b(?!p_)[a-z_]+\\)",
+            "description": "Параметр без p_"
+          },
+          {
+            "pattern": "(?i)\\b(cursor)\\s+(?!cur_|gcur_)[a-z_]+",
+            "description": "Курсор без правильного префикса"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "type TVar is record(a number); public TVar2 is record(a number);",
+      "code_example_good": "type t_var is record(a number); public gt_var2 is record(a number);",
+      "fix_instruction": "Исправить префикс согласно правилам.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STYLE",
+      "subcategory": "STYLE.PREFIXES",
+      "tags": ["prefix", "naming"]
+    },
+    "PlpCheck.STYLE.CODE_IN_COMMENT.п.4.6": {
+      "code": "PlpCheck.STYLE.CODE_IN_COMMENT.п.4.6",
+      "source": "PlpCheck",
+      "short_description": "Выявлять закомментированный код",
+      "documentation_text": "Закомментированный код считается плохим тоном и запрещен во многих регламентах. Проверка может давать ложные срабатывания. Чтобы их точно исключить, можно добавить кириллицу.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "/\\*.*?(;|select|from|where|if|then|else|end|loop)\\s*\\*/|--.*?(;|select|from|where|if|then|else|end|loop)",
+            "description": "Закомментированный код"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "begin /* select x(1) in ::[XXX] into zzz;*/ null; end;",
+      "code_example_good": "begin null; end;",
+      "fix_instruction": "Удалить закомментированный код.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STYLE",
+      "subcategory": "STYLE.COMMENTS",
+      "tags": ["comment", "code", "cleanup"]
+    },
+    "PlpCheck.STYLE.CONTINUE_EXIT_OFF_THE_LOOP.п.1": {
+      "code": "PlpCheck.STYLE.CONTINUE_EXIT_OFF_THE_LOOP.п.1",
+      "source": "PlpCheck",
+      "short_description": "continue/exit вне цикла",
+      "documentation_text": "Использование continue или exit вне цикла запрещено.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bcontinue\\b|\\bexit\\b",
+            "description": "continue или exit"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "\\bcontinue\\b.*?loop|\\bexit\\b.*?loop",
+            "description": "В цикле"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "for i in 1..2 loop null; end loop; if x=1 then continue; elsif x=2 then exit; end if;",
+      "code_example_good": "for i in 1..2 loop if x=1 then continue; end if; end loop;",
+      "fix_instruction": "Перенести continue/exit внутрь цикла.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STYLE",
+      "subcategory": "STYLE.CONTROL",
+      "tags": ["continue", "exit", "loop"]
+    },
+    "PlpCheck.STYLE.CRIT_EXT_IN_OLD_FORMAT.п.1": {
+      "code": "PlpCheck.STYLE.CRIT_EXT_IN_OLD_FORMAT.п.1",
+      "source": "PlpCheck",
+      "short_description": "Старый формат расширения представления",
+      "documentation_text": "При создании расширений представлений в старом формате (как копии базового со всеми его колонками) при обновлении базового расширения с большой вероятностью может стать невалидным расширение. Чтобы избежать такой проблемы, нужно использовать новый формат расширения.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "view\\s+VW_CRIT.*EXT.*instead\\s+of\\s+VW_CRIT.*\\{.*select.*in\\s+::\\[.*\\]",
+            "description": "Старый формат расширения"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "view\\s+VW_CRIT.*EXT.*instead\\s+of\\s+VW_CRIT.*\\{.*select.*in\\s+VW_CRIT",
+            "description": "Новый формат"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "view VW_CRIT_CLS_EXT instead of VW_CRIT_CLS { type main is select a(a.[ATTR] : ATTR, a.[ATTR2] : ATTR2) in ::[CLS] all; }",
+      "code_example_good": "view VW_CRIT_CLS_EXT instead of VW_CRIT_CLS { type main is select a(a.[ATTR2] : ATTR2) in VW_CRIT_CLS; }",
+      "fix_instruction": "Переписать расширение представления в новом формате, используя базовое представление как источник.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STYLE",
+      "subcategory": "STYLE.VIEWS",
+      "tags": ["view", "extension", "format"]
+    },
+    "PlpCheck.STYLE.DEREFERENCING_TO_OUT_PARAM.п.1": {
+      "code": "PlpCheck.STYLE.DEREFERENCING_TO_OUT_PARAM.п.1",
+      "source": "PlpCheck",
+      "short_description": "Передача в out параметры реквизитов ссылочных переменных",
+      "documentation_text": "При передаче разыменнованного значения по ссылке в out параметр Платформа вычитывает значение, передает, а после сохраняет обратно. Т.е. можно не заметить, если внутри функции/процедуры/метода значение переопределится и запишется измененное.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\w+\\.\\[\\w+\\]\\s*,\\s*\\w+\\s+out",
+            "description": "Разыменованное поле как out параметр"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "pSomeAction(rMd.[ACC_DT]);",
+      "code_example_good": "pSomeAction(rMd);",
+      "fix_instruction": "Передавать саму ссылку, а не разыменованное поле.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STYLE",
+      "subcategory": "STYLE.REFERENCES",
+      "tags": ["dereference", "out", "param"]
+    },
+    "PlpCheck.STYLE.EXIST_ALL_OR_COLLECTIONS.п.4.7": {
+      "code": "PlpCheck.STYLE.EXIST_ALL_OR_COLLECTIONS.п.4.7",
+      "source": "PlpCheck",
+      "short_description": "Требовать обязательного указания опции all или collections",
+      "documentation_text": "Часто разработчик забывает что у ТБП или его родителя есть колонка collection_id и если пишет селект без опции all, то компилятор сам добавляет условия на collection_id is null, это может привести к неожиданному результату.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "FROM\\s+\\[([A-Z][A-Z0-9_#]+)\\](?!\\s+all\\s*:)",
+            "description": "ТБП без all"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "FROM\\s+\\[([A-Z][A-Z0-9_#]+)\\]\\s+\\w+\\s+all",
+            "description": "Уже есть all"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "for x in ::[DEPN] loop null; end loop;",
+      "code_example_good": "for x in ::[DEPN] all loop null; end loop;",
+      "fix_instruction": "Добавить опцию all или collection после источника данных.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STYLE",
+      "subcategory": "STYLE.SYNTAX",
+      "tags": ["exist", "all", "collection"]
+    },
+    "PlpCheck.STYLE.FIXME_NOT_ALLOWED.п.1": {
+      "code": "PlpCheck.STYLE.FIXME_NOT_ALLOWED.п.1",
+      "source": "PlpCheck",
+      "short_description": "Пометка FIXME в комментариях",
+      "documentation_text": "При конвертации исходников из A1 в A2 могут возникать комментарии с пометкой FIXME – это те строки, которые А2 не смог однозначно конвертировать и которые нужно ОБЯЗАТЕЛЬНО разрешить руками.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "FIXME",
+            "description": "FIXME в комментарии"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "/* FIXME В представлении присутствует hint оптимизации. Возможен некорректный код! */",
+      "code_example_good": "/* Удалено */",
+      "fix_instruction": "Удалить комментарий с FIXME или исправить код.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "STYLE",
+      "subcategory": "STYLE.COMMENTS",
+      "tags": ["fixme", "comment"]
+    },
+    "PlpCheck.STYLE.FORM_SIZE.п.1": {
+      "code": "PlpCheck.STYLE.FORM_SIZE.п.1",
+      "source": "PlpCheck",
+      "short_description": "Размер формы",
+      "documentation_text": "Экранная форма не должна превышать размер 1024х768. Реальный размер формы в пикселях при ее отображении Навигатором зависит от размера шрифта, установленного в Windows. Разработка ведется с условием, что формы в Навигаторе будут отображаться у пользователя, у которого в Windows выставлен шрифт «Normal size» (DPI=96).",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "<Width>[0-9]{4,}|<Height>[0-9]{4,}",
+            "description": "Размер формы > 1024x768"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "<Width>1200</Width><Height>900</Height>",
+      "code_example_good": "<Width>1024</Width><Height>738</Height>",
+      "fix_instruction": "Уменьшить размер формы до 1024x768 (по вертикали 738 с учетом строки состояния Windows).",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "STYLE",
+      "subcategory": "STYLE.FORM",
+      "tags": ["form", "size", "resolution"]
+    },
+    "PlpCheck.STYLE.FUNCRETURNKEYWORD.п.1": {
+      "code": "PlpCheck.STYLE.FUNCRETURNKEYWORD.п.1",
+      "source": "PlpCheck",
+      "short_description": "Использование returning в объявлении функции",
+      "documentation_text": "Данное ключевое слово устарело и не описано на текущий момент в грамматике PLPLUS, необходимо использовать 'return;'.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\breturning\\b",
+            "description": "returning в описании функции"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "function test returning number is",
+      "code_example_good": "function test return number is",
+      "fix_instruction": "Заменить returning на return.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "STYLE",
+      "subcategory": "STYLE.SYNTAX",
+      "tags": ["function", "return", "returning"]
+    },
+    "PlpCheck.STYLE.FUNCTIONS_IN_BODY_OR_VALIDATE.п.4.18": {
+      "code": "PlpCheck.STYLE.FUNCTIONS_IN_BODY_OR_VALIDATE.п.4.18",
+      "source": "PlpCheck",
+      "short_description": "Функции в EXECUTE/VALIDATE",
+      "documentation_text": "Запрещается объявление процедур/функций в блоках декларации на вкладках «Тело» и «Проверка». Тело процедуры/функции может быть создано ТОЛЬКО на вкладке «Локальные описания» операции.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "execute\\s+is\\s+(function|procedure)|validate\\s+is\\s+(function|procedure)",
+            "description": "Функция/процедура в EXECUTE/VALIDATE"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "execute is function getTest(p_test number) return number is begin return p_test; end; begin null; end;",
+      "code_example_good": "library CHECKSTYLE is function getTest(p_test number) is begin return p_test; end; end;",
+      "fix_instruction": "Вынести функцию/процедуру в локальные описания операции.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STYLE",
+      "subcategory": "STYLE.PROCEDURAL",
+      "tags": ["function", "procedure", "body"]
+    },
+    "PlpCheck.STYLE.GLOBAL_VAR.п.4.10": {
+      "code": "PlpCheck.STYLE.GLOBAL_VAR.п.4.10",
+      "source": "PlpCheck",
+      "short_description": "Глобальные переменные",
+      "documentation_text": "Запрещается использование глобальных переменных. Вместо них необходимо использовать локальную переменную с двумя функциями/процедурами позволяющими установить или получить эту переменную.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "^\\s*public\\s+\\w+\\s+(varchar2|string|number|date|boolean|ref|rowtype)\\s*;",
+            "description": "Глобальная переменная"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "public gv_test number;",
+      "code_example_good": "v_test number; public function getTest return number is begin return v_test; end; public procedure setTest(p_test number) is begin v_test := p_test; end;",
+      "fix_instruction": "Заменить глобальную переменную на локальную с get/set функциями.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "STYLE",
+      "subcategory": "STYLE.VARIABLES",
+      "tags": ["global", "variable"]
+    },
+    "PlpCheck.STYLE.IF_EXIT_TO_EXIT_WHEN.п.1": {
+      "code": "PlpCheck.STYLE.IF_EXIT_TO_EXIT_WHEN.п.1",
+      "source": "PlpCheck",
+      "short_description": "exit when вместо if exit",
+      "documentation_text": "Предпочтительнее использовать 'exit when' вместо 'if ... then exit; end if;'.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "if\\s+.*\\s+then\\s+exit\\s*;",
+            "description": "if exit"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "if i > 10 then exit; end if;",
+      "code_example_good": "exit when i > 10;",
+      "fix_instruction": "Заменить if ... then exit на exit when.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "STYLE",
+      "subcategory": "STYLE.CONTROL",
+      "tags": ["if", "exit", "exit when"]
+    },
+    "PlpCheck.STYLE.METHOD_AVAILABILITY.п.1": {
+      "code": "PlpCheck.STYLE.METHOD_AVAILABILITY.п.1",
+      "source": "PlpCheck",
+      "short_description": "Флаги доступности операции",
+      "documentation_text": "Контролируется одновременная установка флагов 'Абсолютно доступна' и 'Может быть активизирована пользователем' на вкладке Properties в редакторе формы операции. В противном случае возникает недопонимание в части настройки подсистемы доступа.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "AvailableForAll.*true.*UserActivatable.*true|UserActivatable.*true.*AvailableForAll.*true",
+            "description": "Одновременные флаги"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "<AvailableForAll>true</AvailableForAll><UserActivatable>true</UserActivatable>",
+      "code_example_good": "<AvailableForAll>true</AvailableForAll><UserActivatable>false</UserActivatable>",
+      "fix_instruction": "Установить только один из флагов доступности.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "STYLE",
+      "subcategory": "STYLE.PROPERTIES",
+      "tags": ["method", "availability", "flag"]
+    },
+    "PlpCheck.STYLE.METH_PARAM_AND_VAR_FULL_NAMES.п.1": {
+      "code": "PlpCheck.STYLE.METH_PARAM_AND_VAR_FULL_NAMES.п.1",
+      "source": "PlpCheck",
+      "short_description": "Полное имя переменной/параметра",
+      "documentation_text": "Полные названия параметров и переменных операции должны быть не-пустыми и содержать кириллицу. Могут содержать латиницу, цифры и спец.символы, но только при присутствии кириллических символов.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "@name\\s*\\(\\s*['\"][^а-яА-Я]*['\"]\\s*\\)",
+            "description": "Имя без кириллицы"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "@name\\s*\\(\\s*['\"][^а-яА-Я]*[а-яА-Я][^а-яА-Я]*['\"]\\s*\\)",
+            "description": "С кириллицей"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "@name('') P_PAR in [STRING_10]",
+      "code_example_good": "@name('Имя') P_PAR in [STRING_10]",
+      "fix_instruction": "Добавить кириллическое описание параметра или переменной.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "STYLE",
+      "subcategory": "STYLE.NAMING",
+      "tags": ["parameter", "variable", "name"]
+    },
+    "PlpCheck.STYLE.METH_PARAM_AND_VAR_NAMES.п.1": {
+      "code": "PlpCheck.STYLE.METH_PARAM_AND_VAR_NAMES.п.1",
+      "source": "PlpCheck",
+      "short_description": "Префиксы P_ и V_",
+      "documentation_text": "Идентификаторы параметров операции должны начинаться с префикса P_, идентификаторы переменных - с префикса V_, так же идентификаторы должны быть в верхнем регистре.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\b(p_|v_)\\w+\\s+(varchar2|string|number|date|boolean|ref|rowtype)\\s*[;(]",
+            "description": "Префиксы p_/v_ в нижнем регистре"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "\\b(P_|V_)[A-Z][A-Z0-9_]*\\s+(varchar2|string|number|date|boolean|ref|rowtype)\\s*[;(]",
+            "description": "Правильные префиксы"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "p_PAR in [STRING_10]",
+      "code_example_good": "P_PAR in [STRING_10]",
+      "fix_instruction": "Использовать P_ для параметров и V_ для переменных в верхнем регистре.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "STYLE",
+      "subcategory": "STYLE.NAMING",
+      "tags": ["parameter", "variable", "case"]
+    },
+    "PlpCheck.STYLE.NATIONAL_CURRENCY.п.1": {
+      "code": "PlpCheck.STYLE.NATIONAL_CURRENCY.п.1",
+      "source": "PlpCheck",
+      "short_description": "Обращения к нацвалюте",
+      "documentation_text": "Любые обращения к нацвалюте, кроме ::[SYSTEM].[VARIABLES].NatCur, считаются некорректными. Если прикладной код с некорректным обращением в конвертации будет выложен на дистрибутив, то будет ошибка при установке обновления на схему дополнений/эталона.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "::\\[FT_MONEY\\]\\([^)]*(RUB|RUR|643|810)[^)]*\\)",
+            "description": "Обращение к нацвалюте"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "::\\[SYSTEM\\]\\.\\[VARIABLES\\]\\.NatCur",
+            "description": "Разрешенное обращение"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "::[FT_MONEY]([CUR_SHORT] = 'RUB')",
+      "code_example_good": "::[SYSTEM].[VARIABLES].NatCur",
+      "fix_instruction": "Заменить обращение к нацвалюте на ::[SYSTEM].[VARIABLES].NatCur.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "STYLE",
+      "subcategory": "STYLE.CURRENCY",
+      "tags": ["national", "currency", "style"]
+    },
+    "PlpCheck.STYLE.NOT_MENTIONED.п.4.8": {
+      "code": "PlpCheck.STYLE.NOT_MENTIONED.п.4.8",
+      "source": "PlpCheck",
+      "short_description": "Неиспользуемые сущности",
+      "documentation_text": "Если объявленная сущность не упоминается в операции, то она должна быть удалена, так как не имеет смысла. Проверка анализирует: непубличные функции/процедуры, параметры, непубличные переменные, непубличные типы, переменные циклов, алиасы.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\b\\w+\\s+(varchar2|string|number|date|boolean|ref|rowtype|integer|type|procedure|function)\\s*[;(]",
+            "description": "Объявление сущности"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "public procedure proc (x out number, y in number, w in out number) is idx number; num number; loc number; begin null; end;",
+      "code_example_good": "public procedure proc (x out number, y in number) is idx number; num number; begin idx := y; end;",
+      "fix_instruction": "Удалить неиспользуемые сущности.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "STYLE",
+      "subcategory": "STYLE.VARIABLES",
+      "tags": ["variable", "unused"]
+    },
+    "PlpCheck.STYLE.ORDERED_CONTROLS.п.1": {
+      "code": "PlpCheck.STYLE.ORDERED_CONTROLS.п.1",
+      "source": "PlpCheck",
+      "short_description": "Порядок элементов на форме",
+      "documentation_text": "Необходимо устанавливать и упорядочивать порядок обхода элементов при разработке и изменении экранной формы соответственно правилу: слева направо, сверху вниз. Для этого удобно использовать признак 'Авт. установка порядка движения'.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "<TabIndex>\\d+</TabIndex>",
+            "description": "TabIndex"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "TabIndex не упорядочены",
+      "code_example_good": "TabIndex упорядочены слева направо, сверху вниз",
+      "fix_instruction": "Упорядочить TabIndex элементов формы слева направо, сверху вниз.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "STYLE",
+      "subcategory": "STYLE.FORM",
+      "tags": ["controls", "order", "tabindex"]
+    },
+    "PlpCheck.STYLE.PREFIX_TYPE_IN_VAR_NAME.п.4.4": {
+      "code": "PlpCheck.STYLE.PREFIX_TYPE_IN_VAR_NAME.п.4.4",
+      "source": "PlpCheck",
+      "short_description": "Префикс типа в имени переменной",
+      "documentation_text": "Наименование переменной или параметра должно содержать префикс типа в соответствии со следующими отношениями: number - 'n', integer - 'i', boolean - 'b', reference - 'r', string - 's', table или varray - 't', structure или record - 'o'.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\b(\\w+)\\s+(number|integer|boolean|ref|string|table|varray|record)\\s*[;(]",
+            "description": "Переменная без префикса типа"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "\\b([niprsto]|v_[niprsto]|p_[niprsto]|cn_[niprsto]|cur_[niprsto]|g_[niprsto])\\w+\\s+(number|integer|boolean|ref|string|table|varray|record)\\s*[;(]",
+            "description": "С префиксом типа"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "p_code varchar2(100); countVar integer;",
+      "code_example_good": "p_sCode varchar2(100); iCountVar integer;",
+      "fix_instruction": "Добавить префикс типа (n, i, b, r, s, t, o) после префикса назначения.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STYLE",
+      "subcategory": "STYLE.NAMING",
+      "tags": ["prefix", "type", "naming"]
+    },
+    "PlpCheck.STYLE.RAISE_IN_OTHERS.п.1": {
+      "code": "PlpCheck.STYLE.RAISE_IN_OTHERS.п.1",
+      "source": "PlpCheck",
+      "short_description": "Выход из others без pragma error",
+      "documentation_text": "Нельзя при обработке исключений в программном коде использовать блок 'exception when others' без особой на то причины. Если перехватывать необходимо прикладные исключения – необходимо использовать константы пакета message, например APP_EXCEPTION.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "exception\\s+when\\s+others\\s+then(?!.*?(raise|pragma|rollback|return))",
+            "description": "WHEN OTHERS без выхода"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "exception\\s+when\\s+others\\s+then\\s+\\w+\\s*;",
+            "description": "С выходом"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "exception when others then null;",
+      "code_example_good": "exception when others then raise;",
+      "fix_instruction": "Добавить raise, rollback, pragma error или return в блок WHEN OTHERS.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STYLE",
+      "subcategory": "STYLE.EXCEPTIONS",
+      "tags": ["raise", "others", "exception"]
+    },
+    "PlpCheck.STYLE.RESERVED_PREFIX.п.4.5": {
+      "code": "PlpCheck.STYLE.RESERVED_PREFIX.п.4.5",
+      "source": "PlpCheck",
+      "short_description": "Зарезервированный префикс",
+      "documentation_text": "Если объявление не попадает ни под одно из правил (объявление в локальном описании, параметр функции, используется в качестве return, не тип, не курсор), то имя переменной не должно начинаться с: v_,gv_,t_,gt,cur_,gcur_,ret_,p_,cn_,gcn_.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\b(v_|gv_|t_|gt|cur_|gcur_|ret_|p_|cn_|gcn_)\\w+\\s+\\w+\\s*[;(]",
+            "description": "Зарезервированный префикс"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "function getTest return number is v_test number; begin null; end;",
+      "code_example_good": "function getTest return number is test number; begin null; end;",
+      "fix_instruction": "Убрать зарезервированный префикс у переменной.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STYLE",
+      "subcategory": "STYLE.NAMING",
+      "tags": ["reserved", "prefix"]
+    },
+    "PlpCheck.STYLE.SAVEPOINT_ROLLBACK_USAGE.п.4.11": {
+      "code": "PlpCheck.STYLE.SAVEPOINT_ROLLBACK_USAGE.п.4.11",
+      "source": "PlpCheck",
+      "short_description": "Макросы &sp/&rb для savepoint",
+      "documentation_text": "Необходимо использовать макросы &sp/&rb, которые обеспечивают уникальность точки отката добавляя к ней идентификатор метода. Иначе можно пересечься с именем и получить ошибку при исполнении.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bSAVEPOINT\\s+\\w+\\b|\\bROLLBACK\\s+TO\\s+SAVEPOINT\\s+\\w+\\b",
+            "description": "Прямой SAVEPOINT/ROLLBACK"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "&sp\\(|&rb\\(",
+            "description": "Макросы"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "savepoint xyz; rollback to xyz;",
+      "code_example_good": "&sp(xyz); &rb(xyz);",
+      "fix_instruction": "Заменить прямой SAVEPOINT/ROLLBACK на макросы &sp/&rb.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STYLE",
+      "subcategory": "STYLE.SYNTAX",
+      "tags": ["savepoint", "rollback", "macro"]
+    },
+    "PlpCheck.STYLE.STRING_AS_CLASS.п.4.15": {
+      "code": "PlpCheck.STYLE.STRING_AS_CLASS.п.4.15",
+      "source": "PlpCheck",
+      "short_description": "Строка как идентификатор ТБП",
+      "documentation_text": "В выражениях сравнения и присваивания, включающих переменные с модификаторами класса (%class, %parentclass, %classparent), переменные типа refstring или алиасы выборок, определенные с использованием модификаторов класса, проверяется наличие строковых констант.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "'([A-Z][A-Z0-9_#]+)'\\s*(%class|%id|%statename)",
+            "description": "Строка вместо ::[CLASS]"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "if a%class = 'AC_FIN' then",
+      "code_example_good": "if a%class = ::[AC_FIN]%class then",
+      "fix_instruction": "Использовать ::[CLASS]%class вместо строки.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STYLE",
+      "subcategory": "STYLE.SYNTAX",
+      "tags": ["string", "class", "modifier"]
+    },
+    "PlpCheck.STYLE.TRIVIAL_EXCEPTION_HANDLER.п.1": {
+      "code": "PlpCheck.STYLE.TRIVIAL_EXCEPTION_HANDLER.п.1",
+      "source": "PlpCheck",
+      "short_description": "Значимые конструкции в exception",
+      "documentation_text": "В блоках exception производится поиск хотя бы одной конструкции отличающейся от настроенного перечня тривиальных конструкций (stdio.put_line_buf, stdio.put_line_pipe, debug_pipe).",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "exception\\s+when\\s+others\\s+then\\s+(stdio\\.put_line_buf|stdio\\.put_line_pipe|debug_pipe)\\s*\\(",
+            "description": "Только тривиальные операции"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "exception\\s+when\\s+others\\s+then\\s+(raise|rollback|return|pragma)",
+            "description": "Значимые операции"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "exception when others then debug_pipe('test'); null;",
+      "code_example_good": "exception when others then raise;",
+      "fix_instruction": "Добавить значимую операцию (raise, rollback, return) в блок exception.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STYLE",
+      "subcategory": "STYLE.EXCEPTIONS",
+      "tags": ["exception", "handler", "style"]
+    },
+    "PlpCheck.STYLE.UPPER_CASED_VARCHAR2.п.1": {
+      "code": "PlpCheck.STYLE.UPPER_CASED_VARCHAR2.п.1",
+      "source": "PlpCheck",
+      "short_description": "VARCHAR2 в верхнем регистре",
+      "documentation_text": "Проверяется использование varchar2 и string в описаниях только в нижнем регистре.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bVARCHAR2\\b|\\bSTRING\\b",
+            "description": "VARCHAR2/STRING в верхнем регистре"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "\\bvarchar2\\b|\\bstring\\b",
+            "description": "В нижнем регистре"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "var Varchar2;",
+      "code_example_good": "var varchar2;",
+      "fix_instruction": "Использовать varchar2 и string в нижнем регистре.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "STYLE",
+      "subcategory": "STYLE.NAMING",
+      "tags": ["varchar2", "case", "style"]
+    },
+    "PlpCheck.STYLE.USES_RIP_OBJECT.п.1": {
+      "code": "PlpCheck.STYLE.USES_RIP_OBJECT.п.1",
+      "source": "PlpCheck",
+      "short_description": "Объекты с RIP в начале имени",
+      "documentation_text": "Использование объекта (ТБП, реквизит, метод, представление) с полным именем, начинающимся с 'RIP' или члена (реквизит, метод, представление) ТБП, с полным именем, начинающимся с 'RIP'.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "RIP\\.|RIP_",
+            "description": "RIP в начале имени"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "r_rip ref [RIP_TEST_ATTR];",
+      "code_example_good": "r_rip ref [TEST_ATTR];",
+      "fix_instruction": "Переименовать объект, убрав префикс RIP.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "STYLE",
+      "subcategory": "STYLE.NAMING",
+      "tags": ["rip", "object"]
+    },
+    "PlpCheck.STYLE.VALIDATE_DEFAULT_TWICE.п.1": {
+      "code": "PlpCheck.STYLE.VALIDATE_DEFAULT_TWICE.п.1",
+      "source": "PlpCheck",
+      "short_description": "Повторные блоки DEFAULT в валидации",
+      "documentation_text": "После загрузки из А1 в А2 иногда добавляется дополнительный блок DEFAULT в валидаторе. Это логика часто дублируется в «настоящем», сделанном разработчиком if'е.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "if\\s+p_message\\s*=\\s*'DEFAULT'",
+            "description": "Блок DEFAULT валидации"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "validate is begin if p_message = 'DEFAULT' then P_NEW_CODE := this.[CODE]; P_NEW_NAME := this.[NAME]; end if; begin if P_MESSAGE='DEFAULT' then P_NEW_CODE := upper (this.[CODE] || '_COPY'); P_NEW_NAME := this.[NAME]; end if; end; end;",
+      "code_example_good": "validate is begin if P_MESSAGE='DEFAULT' then P_NEW_CODE := upper (this.[CODE] || '_COPY'); P_NEW_NAME := this.[NAME]; end if; end;",
+      "fix_instruction": "Удалить дублирующийся блок DEFAULT валидации.",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "STYLE",
+      "subcategory": "STYLE.VALIDATE",
+      "tags": ["validate", "default", "duplicate"]
+    },
+    "PlpCheck.STYLE.VALIDATE_ELSE_INFO.п.1": {
+      "code": "PlpCheck.STYLE.VALIDATE_ELSE_INFO.п.1",
+      "source": "PlpCheck",
+      "short_description": "Блок else для p_message/p_info",
+      "documentation_text": "В конструкциях if проверяется наличие обращения к переменным p_message или p_info. Если у такого условия будет присутствовать блок else выдается предупреждение.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "if\\s+(p_message|p_info)\\s*=\\s*.*?else\\s+",
+            "description": "if с else для p_message/p_info"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "validate is begin if p_message = 'DEFAULT' then null; else null; end if; end;",
+      "code_example_good": "validate is begin if p_message = 'DEFAULT' then null; elseif p_message = 'VALIDATE' then null; end if; end;",
+      "fix_instruction": "Заменить else на конкретное условие (например, 'VALIDATE').",
+      "priority": "LOW",
+      "priority_level": 3,
+      "category": "STYLE",
+      "subcategory": "STYLE.VALIDATE",
+      "tags": ["validate", "else", "style"]
+    },
+    "PlpCheck.STYLE.VARIABLE_SAME_NAME.п.1": {
+      "code": "PlpCheck.STYLE.VARIABLE_SAME_NAME.п.1",
+      "source": "PlpCheck",
+      "short_description": "Дублирование имени объявления",
+      "documentation_text": "На одном уровне видимости проверяется пересечение объявлений: макросов, типов, функций, процедур, переменных, объявления вида for i in 1..10 loop.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\b(declare|type|function|procedure|var|for)\\s+(\\w+)\\b",
+            "description": "Объявление"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "declare test1 number; begin for test1 in 1..10 loop var test1 number; end loop; end;",
+      "code_example_good": "declare test1 number; begin for test2 in 1..10 loop var test3 number; end loop; end;",
+      "fix_instruction": "Использовать уникальные имена для объявлений.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STYLE",
+      "subcategory": "STYLE.NAMING",
+      "tags": ["variable", "duplicate", "name"]
+    },
+    "PlpCheck.STYLE.WRONG_ATTR_SYNTAX.п.4.13": {
+      "code": "PlpCheck.STYLE.WRONG_ATTR_SYNTAX.п.4.13",
+      "source": "PlpCheck",
+      "short_description": "Обращение к реквизиту в формате [ATTRIBUTE]",
+      "documentation_text": "Обращение к реквизиту должно быть в виде [ATTR].",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\w+\\.([A-Z][A-Z0-9_#]+)(?![\\[\\w*\\]])",
+            "description": "Атрибут без []"
+          },
+          {
+            "pattern": "(\\w+)%([A-Z][A-Z0-9_#]+)",
+            "description": "Модификатор без []"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "ref_acc ::[MAIN_DOCUM].acc_dt%type;",
+      "code_example_good": "ref_acc ::[MAIN_DOCUM].[ACC_DT]%type;",
+      "fix_instruction": "Использовать [ATTR] для обращения к реквизиту.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STYLE",
+      "subcategory": "STYLE.SYNTAX",
+      "tags": ["attribute", "syntax"]
+    },
+    "PlpCheck.STYLE.WRONG_CLASS_SYNTAX.п.4.12": {
+      "code": "PlpCheck.STYLE.WRONG_CLASS_SYNTAX.п.4.12",
+      "source": "PlpCheck",
+      "short_description": "Обращение к классу в формате ::[CLASS]",
+      "documentation_text": "Обращение к ТБП должно быть в виде ::[CLASS] в коде и [CLASS] при объявлении структуры. При объявлении переменных с указанием типа переменной в виде ::[CLASS], переменная будет объявлена как ссылка, рекомендуется писать ref [CLASS].",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\b(FROM|INTO|JOIN|SELECT)\\s+([A-Z][A-Z0-9_#]+)\\b(?!\\s*\\[)",
+            "description": "Класс без ::[]"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "FROM\\s+DUAL|FROM\\s+VW_|FROM\\s+V\\$",
+            "description": "Исключения"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "declare ref_md main_docum; begin ::[RUNTIME].[STDIO].put_line_buf(main_docum(1=1)); end;",
+      "code_example_good": "declare ref_md ref [MAIN_DOCUM]; struct_md [MAIN_DOCUM]; begin ::[RUNTIME].[STDIO].put_line_buf(::[MAIN_DOCUM](1=1)); end;",
+      "fix_instruction": "Использовать ::[CLASS_NAME] для обращения к классу.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STYLE",
+      "subcategory": "STYLE.SYNTAX",
+      "tags": ["class", "syntax", "namespace"]
+    },
+    "PlpCheck.STYLE.WRONG_LOCAL_PREFIX.п.1": {
+      "code": "PlpCheck.STYLE.WRONG_LOCAL_PREFIX.п.1",
+      "source": "PlpCheck",
+      "short_description": "Префиксы для локальных ТБП",
+      "documentation_text": "Локальные объекты должны иметь в коротком и полном наименовании один из задаваемых настройкой локальных префиксов. Может быть несколько пар префиксов для короткого наименования и полного.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "class\\s+[A-Z][A-Z0-9_]+|view\\s+VW_[A-Z][A-Z0-9_]+",
+            "description": "Локальный ТБП/представление"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "class\\s+(VND_|FTC_)|view\\s+VW_(VND_|FTC_)",
+            "description": "С префиксом"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "class CLS; @name('Локальный метод') static method METH is ...",
+      "code_example_good": "class CLS; @name('ВНД. Локальный метод') static method VND_METH is ...",
+      "fix_instruction": "Добавить локальный префикс (например, VND_) к локальному объекту.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STYLE",
+      "subcategory": "STYLE.NAMING",
+      "tags": ["local", "prefix", "extension"]
+    },
+    "PlpCheck.STYLE.WRONG_METHOD_SYNTAX.п.4.14": {
+      "code": "PlpCheck.STYLE.WRONG_METHOD_SYNTAX.п.4.14",
+      "source": "PlpCheck",
+      "short_description": "Обращение к методу в формате ::[CLASS].[METHOD]",
+      "documentation_text": "Обращение к методу должно быть в виде ::[CLASS].[METHOD], всегда с указанием ТБП.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "([A-Z][A-Z0-9_#]+)\\.([a-z][a-zA-Z0-9_#]+)\\s*\\(",
+            "description": "Метод без ::[]"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "(stdio|rtl|utils|message|constant|standard|stdlib|dbf|lock_info|security|rc\\$inter)\\.",
+            "description": "Системные методы"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "[STDIO].put_line_buf(::[SYSTEM].variables.OpDate);",
+      "code_example_good": "::[RUNTIME].[STDIO].put_line_buf(::[SYSTEM].[VARIABLES].OpDate);",
+      "fix_instruction": "Использовать ::[CLASS].[METHOD] для вызова метода.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "STYLE",
+      "subcategory": "STYLE.SYNTAX",
+      "tags": ["method", "syntax"]
+    },
+    "PlpCheck.STYLE.WRONG_REF_SYNTAX.п.1": {
+      "code": "PlpCheck.STYLE.WRONG_REF_SYNTAX.п.1",
+      "source": "PlpCheck",
+      "short_description": "Ссылка в виде ref [CLASS]",
+      "documentation_text": "Декларирование ссылки на ТБП должно быть в виде 'ref [CLASS]'.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "::\\[[A-Z][A-Z0-9_#]+\\]\\s+\\w+\\s*;",
+            "description": "Ссылка через ::[]"
+          },
+          {
+            "pattern": "ref\\s+([A-Z][A-Z0-9_#]+)",
+            "description": "ref без []"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "ref\\s+\\[[A-Z][A-Z0-9_#]+\\]",
+            "description": "Правильный синтаксис"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "declare ref_md ::[MAIN_DOCUM]; ref_md2 ref main_docum;",
+      "code_example_good": "declare ref_md ref [MAIN_DOCUM]; ref_md2 ref [MAIN_DOCUM];",
+      "fix_instruction": "Использовать 'ref [CLASS]' для объявления ссылки.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "STYLE",
+      "subcategory": "STYLE.SYNTAX",
+      "tags": ["ref", "syntax"]
+    },
+    "PlpCheck.DBI.CONCAT_CONTROL.п.1": {
+      "code": "PlpCheck.DBI.CONCAT_CONTROL.п.1",
+      "source": "PlpCheck",
+      "short_description": "Контроль конкатенаций",
+      "documentation_text": "Если в коде многократно выполняется dbms_lob.write, dbms_lob.writeappend, dbms_lob.append для CLOB/BLOB, либо многократно выполняется конкатенация ||,concat для varchar2, рекомендуется использовать специальную библиотеку конкатенации ::[RUNTIME].[CONCAT_LIB].",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "dbms_lob\\.(write|writeappend|append)|\\|\\||concat\\(",
+            "description": "Конкатенация"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "::\\[RUNTIME\\]\\.\\[CONCAT_LIB\\]",
+            "description": "Уже используется CONCAT_LIB"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "begin loop dbms_lob.writeappend(...); end loop; end;",
+      "code_example_good": "begin loop dbms_lob.writeappend(...); exit; end loop; end;",
+      "fix_instruction": "Использовать ::[RUNTIME].[CONCAT_LIB] для многократной конкатенации.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["concat", "clob", "blob", "memory"]
+    },
+    "PlpCheck.DBI.COND_COMPILE_COMMENT.п.1": {
+      "code": "PlpCheck.DBI.COND_COMPILE_COMMENT.п.1",
+      "source": "PlpCheck",
+      "short_description": "Условные компиляции в комментариях",
+      "documentation_text": "DBI стремится отказаться от использования Базы Данных при разработки приложений на платформе DBI, поэтому условные компиляции(#if/#elsif) с условиями требующими запуска для проверки значения запрещены.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "--#if|--#elsif|--#endif",
+            "description": "Условная компиляция в комментариях"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "--#if R2 and not exists(DBI)",
+      "code_example_good": "-- удалено",
+      "fix_instruction": "Удалить условную компиляцию из комментариев.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["conditional", "compile"]
+    },
+    "PlpCheck.DBI.CONNECTBY2WITH.п.1": {
+      "code": "PlpCheck.DBI.CONNECTBY2WITH.п.1",
+      "source": "PlpCheck",
+      "short_description": "Иерархические запросы через connect by",
+      "documentation_text": "При переходе на DBI версию приложения необходимо исключить использование Oracle специфической конструкции connect by. В ANSI SQL ближайшая аналогия это with (with recursive для PostgreSQL).",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "CONNECT\\s+BY\\s+PRIOR|CONNECT\\s+NOCYCLE\\s+BY",
+            "description": "CONNECT BY"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "for (select d(d: id, level: lev) in ::[DEPART] connect by d = prior d.[HIGH] start d = rDep order by level) loop null; end loop;",
+      "code_example_good": "with recursive rec_part(id, hi, lev) as (select d(d: id, d.[HIGH]: hi, 1: lev) in ::[DEPART] where d = rDep union all select d(d: id, d.[HIGH]: hi, prev.lev + 1: lev) in ::[DEPART] inner join (rec_part: prev) on (d = prev.hi)) select d(d.id, d.lev) in rec_part order by d.lev loop null; end loop;",
+      "fix_instruction": "Заменить CONNECT BY на WITH RECURSIVE.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["connect by", "with", "recursive"]
+    },
+    "PlpCheck.DBI.CONSTANT_IN_ORDER_AND_GROUP_BY.п.1": {
+      "code": "PlpCheck.DBI.CONSTANT_IN_ORDER_AND_GROUP_BY.п.1",
+      "source": "PlpCheck",
+      "short_description": "Константы в order/group by",
+      "documentation_text": "PostgreSQL не допускает сортировки и группировки по не числовым константам. Числовые константы воспринимаются как порядковые номера колонок.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "ORDER\\s+BY\\s+'[^']+'|GROUP\\s+BY\\s+'[^']+'",
+            "description": "Строковая константа в ORDER/GROUP BY"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "for (select x(1) in ::[MAIN_DOCUM] order by '1', ::[MAIN_DOCUM]%class, sysdate) loop null; end loop;",
+      "code_example_good": "for (select x(1) in ::[MAIN_DOCUM] order by 1) loop null; end loop;",
+      "fix_instruction": "Заменить строковые константы на числовые в ORDER/GROUP BY.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["constant", "order", "group by"]
+    },
+    "PlpCheck.DBI.CONSTANT_ORDER_BY_ON_UDF.п.1": {
+      "code": "PlpCheck.DBI.CONSTANT_ORDER_BY_ON_UDF.п.1",
+      "source": "PlpCheck",
+      "short_description": "Номер колонки в order by с UDF",
+      "documentation_text": "UDF в select превращаются в null и вычисляются после выполнения запроса. При наличии константных чисел в order by проверяется, есть ли UDF в select. Если есть, выводится предупреждение.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "ORDER\\s+BY\\s+\\d+",
+            "description": "Номер колонки в ORDER BY"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "for (select d(d d_ref, ::[DEPN].[LIB_DEBT].GETSUMMDEBT(d, 10) d_sum) in ::[DEPN] order by 2) loop null; end loop;",
+      "code_example_good": "for (select d(d d_ref, ::[DEPN].[LIB_DEBT].GETSUMMDEBT(d, 10) d_sum) in ::[DEPN]) loop null; end loop;",
+      "fix_instruction": "Использовать имя колонки в ORDER BY вместо номера.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["order by", "constant", "udf"]
+    },
+    "PlpCheck.DBI.CONTROLTABLECOLUMNSTYPE.п.1": {
+      "code": "PlpCheck.DBI.CONTROLTABLECOLUMNSTYPE.п.1",
+      "source": "PlpCheck",
+      "short_description": "Типы данных реквизитов ТБП",
+      "documentation_text": "Данная проверка контролирует типы реквизитов создаваемых/редактируемых ТБП. На текущий момент запрещены: 'Вложенный массив' (только для ТБП, имеющих экземпляры), METACLASS, METHOD, STATES, OBJECT, CLASS_ATTRIBUTES, METHOD_CONTROLS, INTERVAL.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\[[A-Z_]+\\]\\s+\\[CALC_TUN_NESTED\\]|\\[METHOD\\]|\\[INTERVAL\\]",
+            "description": "Запрещенный тип реквизита"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "class DMT_5172 { @name('s001') S001 [CALC_TUN_NESTED]; }",
+      "code_example_good": "class DMT_5172 { @name('s001') S001 [STRING_32]; }",
+      "fix_instruction": "Изменить тип реквизита на разрешенный.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["table", "column", "type"]
+    },
+    "PlpCheck.DBI.CROSS_DB_QUERY.п.1": {
+      "code": "PlpCheck.DBI.CROSS_DB_QUERY.п.1",
+      "source": "PlpCheck",
+      "short_description": "Обращение к данным из разных DAO",
+      "documentation_text": "Прикладные данные и метаданные в проектах DBI располагаются в разных источниках, поэтому обращение к ним в одном операторе невозможно.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "from\\s+::\\[[A-Z_]+\\].*join\\s+::\\[[A-Z_]+\\]",
+            "description": "Разные DAO в одном запросе"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select distinct f(f.[CODE] code) in ::[FP_TUNE] where f.[CANONS].[CANON_CLASS].[NAME] like '%документ%'",
+      "code_example_good": "select c(c documentClass) in ::[METACLASS] where c.[NAME] like '%документ%' ... select distinct f(f.[CODE] code) in ::[FP_TUNE] where f.[CANONS].[CANON_CLASS] = c.documentClass",
+      "fix_instruction": "Разделить запрос на несколько, чтобы данные из разных DAO не смешивались.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["cross", "db", "query", "metadata"]
+    },
+    "PlpCheck.DBI.DISTINCT_AND_ORDER_BY.п.1": {
+      "code": "PlpCheck.DBI.DISTINCT_AND_ORDER_BY.п.1",
+      "source": "PlpCheck",
+      "short_description": "DISTINCT и ORDER BY",
+      "documentation_text": "В PostgreSQL при попытке выполнить SQL в котором будет distinct и order by с различающимися выражениями выдаст исключение. Также при наличии бинда в выражении сортировки драйвер биндит их отдельно.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "SELECT\\s+DISTINCT.*ORDER\\s+BY",
+            "description": "DISTINCT и ORDER BY"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select distinct a(nvl(a.[ACC_DT], a.[ACC_KT])) in ::[MAIN_DOCUM] order by a.[ACC_DT]",
+      "code_example_good": "select distinct a(nvl(a.[ACC_DT], a.[ACC_KT])) in ::[MAIN_DOCUM] order by nvl(a.[ACC_DT], a.[ACC_KT])",
+      "fix_instruction": "Использовать одинаковые выражения в DISTINCT и ORDER BY.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["distinct", "order by"]
+    },
+    "PlpCheck.DBI.DISTINCT_UDF.п.1": {
+      "code": "PlpCheck.DBI.DISTINCT_UDF.п.1",
+      "source": "PlpCheck",
+      "short_description": "DISTINCT с UDF",
+      "documentation_text": "Использование DISTINCT в выборке с вычисляемыми колонками применяется не к результату функции, а к ее параметрам. Поэтому применение distinct совместно с UDF не целесообразно.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "SELECT\\s+DISTINCT.*[A-Z_]+\\([^)]*\\)",
+            "description": "DISTINCT с UDF"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "%statename|%classname",
+            "description": "Разрешенные модификаторы"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select a(distinct a.[CODE], get_type(a%id)) in ::[TBP]",
+      "code_example_good": "select a(a.[CODE], get_type(a%id)) in ::[TBP]",
+      "fix_instruction": "Убрать DISTINCT при использовании UDF.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["distinct", "udf"]
+    },
+    "PlpCheck.DBI.EXCEPTIONLOOP.п.1": {
+      "code": "PlpCheck.DBI.EXCEPTIONLOOP.п.1",
+      "source": "PlpCheck",
+      "short_description": "Exceptionloop в DML",
+      "documentation_text": "При использовании EXCEPTIONLOOP во внутреннем цикле DML оператора в pl/sql добавляется конструкция SAVE EXCEPTIONS для forall выражения. Для PostgreSQL нет возможности откатить только ошибочные исполнения цикла.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bEXCEPTIONLOOP\\b",
+            "description": "EXCEPTIONLOOP"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "@target\\(java:=false\\)|pragma if_def\\(dbi,false\\)",
+            "description": "Не для DBI"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "delete for i in 1..2 exceptionloop c in ::[ACCOUNT] where c = ac_ref(i);",
+      "code_example_good": "delete for i in 1..2 loop c in ::[ACCOUNT] where c = ac_ref(i); end loop;",
+      "fix_instruction": "Заменить EXCEPTIONLOOP на LOOP.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["exceptionloop", "dml"]
+    },
+    "PlpCheck.DBI.EXECUTEIMMEDIATE.п.1": {
+      "code": "PlpCheck.DBI.EXECUTEIMMEDIATE.п.1",
+      "source": "PlpCheck",
+      "short_description": "Execute immediate",
+      "documentation_text": "В DBI в разных СУБД разный синтаксис исполнения анонимных блоков. Код написанный для Oracle не сможет исполнится в Postgresql и наоборот. Данная проверка контролирует вызовы execute immediate, rtl.execute_sql, rtl.exec_sql_out, storage_utils.execute_sql, dbms_sql.parse, utils.open_cursor.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "EXECUTE\\s+IMMEDIATE|rtl\\.execute_sql|rtl\\.exec_sql_out|storage_utils\\.execute_sql|dbms_sql\\.parse|utils\\.open_cursor",
+            "description": "Dynamic SQL"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "execute immediate 'select substr(version, 1, instr(version, '.')-1) from v$instance where rownum <=1' into res;",
+      "code_example_good": "execute immediate 'select substr(version, 1, instr(version, '.')-1) from v$instance fetch 1' into res;",
+      "fix_instruction": "Исправить SQL в execute immediate для совместимости с DBI.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["execute immediate", "dynamic"]
+    },
+    "PlpCheck.DBI.FORM_TRANSACT_CONTROL.п.1": {
+      "code": "PlpCheck.DBI.FORM_TRANSACT_CONTROL.п.1",
+      "source": "PlpCheck",
+      "short_description": "Операция контролирует транзакцию",
+      "documentation_text": "Операция, контролирующая транзакцию, на время своей работы приводит к удержанию горизонта транзакций в БД PostgreSQL, что начинает негативно сказываться на работе всей БД.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "<ControlTransaction>true</ControlTransaction>",
+            "description": "Признак ControlTransaction"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "FORM_TRANSACT_CONTROL.*Причина отключения проверки:",
+            "description": "Комментарий-исключение"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "<ControlTransaction>true</ControlTransaction>",
+      "code_example_good": "<ControlTransaction>false</ControlTransaction>",
+      "fix_instruction": "Отключить признак 'Операция контролирует транзакцию'.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["form", "transaction", "control"]
+    },
+    "PlpCheck.DBI.FUNC_ATTR_DEREFERENCE.п.1": {
+      "code": "PlpCheck.DBI.FUNC_ATTR_DEREFERENCE.п.1",
+      "source": "PlpCheck",
+      "short_description": "Разыменование функциональных атрибутов",
+      "documentation_text": "В DBI разыменование функциональных атрибутов в SQL выражениях приводит к join по UDF.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\w+\\.\\[\\w+\\]\\.\\[\\w+\\]",
+            "description": "Цепочка разыменований"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select ac(ac.[REF_ACC].[MAIN_V_ID] : C_REF_ACC) in ::[TIP_ACC] all where ac.[PRODUCT] in ( 'INKASS', 'SPRAV_INKASS', 'Инкассация' )",
+      "code_example_good": "select ac(ac.[REF_ACC] : C_REF_ACC) in ::[TIP_ACC] all where ac.[PRODUCT] in ( 'INKASS', 'SPRAV_INKASS', 'Инкассация' )",
+      "fix_instruction": "Убрать разыменование функциональных атрибутов в SQL.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["functional", "attribute", "sql"]
+    },
+    "PlpCheck.DBI.HINT_INDEX_ORDER_BY.п.1": {
+      "code": "PlpCheck.DBI.HINT_INDEX_ORDER_BY.п.1",
+      "source": "PlpCheck",
+      "short_description": "Хинт на индекс",
+      "documentation_text": "В запросах PostgreSQL с хинтом на индекс не работает сортировка данных, если она не указана явно. В Oracle же происходит неявная сортировка. Необходимо гарантировать, что не происходит неявной сортировки данных.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "pragma hint\\('.*index.*'\\)",
+            "description": "Хинт на индекс"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "ORDER\\s+BY",
+            "description": "Есть ORDER BY"
+          },
+          {
+            "pattern": "hint указан для выбора индекса, а не для сортировки данных",
+            "description": "Комментарий-исключение"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "pragma hint('index_desc(a1 IDX_Z#FP_TUNE_VALH_COL_DATE)'); for (select x(x.[VALDATE]:VALDATE) in p_arr) loop v_date := x.[VALDATE]; exit; end loop;",
+      "code_example_good": "pragma hint('index_desc(a1 IDX_Z#FP_TUNE_VALH_COL_DATE)'); for (select x(x.[VALDATE]:VALDATE) in p_arr order by x.[VALDATE] desc) loop v_date := x.[VALDATE]; exit; end loop;",
+      "fix_instruction": "Добавить ORDER BY при использовании хинта на индекс.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["hint", "index", "order by"]
+    },
+    "PlpCheck.DBI.INDEX_LENGTH.п.1": {
+      "code": "PlpCheck.DBI.INDEX_LENGTH.п.1",
+      "source": "PlpCheck",
+      "short_description": "Размерность полей индексов",
+      "documentation_text": "В PostgreSQL нельзя создать BTREE индекс с длинной индексируемого поля более 2704 байта. В зоне риска находятся все индексы с общим размером текстовых полей более 676 символов.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "index\\s+[A-Z_]+\\s*\\{[^}]+STRING_[0-9]{4,}[^}]+\\}",
+            "description": "Индекс с большим текстовым полем"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "@property\\('PG.METHOD_CLAUSE:=GIN'\\)|@property\\('PG.METHOD_CLAUSE:=GIST'\\)",
+            "description": "GIN/GIST индекс"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "unique index IDX_Z#B_REP_RESULT_UNI { UNIQUE_ID; -- STRING_4000 }",
+      "code_example_good": "unique index IDX_Z#B_REP_RESULT_UNI { UNIQUE_TEST_ID; -- STRING_200 }",
+      "fix_instruction": "Уменьшить размер поля или использовать GIN/GIST индекс.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["index", "length", "postgresql"]
+    },
+    "PlpCheck.DBI.MACROEXECUTEPROCESS.п.1": {
+      "code": "PlpCheck.DBI.MACROEXECUTEPROCESS.п.1",
+      "source": "PlpCheck",
+      "short_description": "Макросы EXECUTE/PROCESS",
+      "documentation_text": "Для исполнения макросов с опцией EXECUTE/PROCESS требуется База Данных в которой происходит вычисление подставляемого кода вместо макроса. DBI стремится отказаться от использования Базы Данных при разработки приложений на платформе DBI.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "pragma\\s+macro\\([^,]+,[^,]+,\\s*(execute|process)\\)",
+            "description": "Макрос EXECUTE/PROCESS"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "pragma macro(RSM,'Z$ANYTOOLS_RS_A_MACRO.make_selects([1])',execute);",
+      "code_example_good": "-- макрос удалён",
+      "fix_instruction": "Удалить макрос с опцией EXECUTE/PROCESS.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["macro", "execute", "process"]
+    },
+    "PlpCheck.DBI.MACROEXECUTEPROCESS_COMMENT.п.1": {
+      "code": "PlpCheck.DBI.MACROEXECUTEPROCESS_COMMENT.п.1",
+      "source": "PlpCheck",
+      "short_description": "Макросы EXECUTE/PROCESS в комментариях",
+      "documentation_text": "В комментариях допускаются команды вида #define, #undef, #include, #ifdef, #ifndef, #if, #elsif, #else, #endif. Данная проверка реагирует на команду define и проверяет что в опциях есть process или execute.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "#define\\s+\\w+\\s+(process|execute)",
+            "description": "Макрос в комментарии"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "#define MACRO_NAME process",
+      "code_example_good": "#define MACRO_NAME usual",
+      "fix_instruction": "Удалить макрос с опцией EXECUTE/PROCESS из комментариев.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["macro", "execute", "process"]
+    },
+    "PlpCheck.DBI.MACRO_CALL_EXECUTEPROCESS.п.1": {
+      "code": "PlpCheck.DBI.MACRO_CALL_EXECUTEPROCESS.п.1",
+      "source": "PlpCheck",
+      "short_description": "Вызов макросов execute/process",
+      "documentation_text": "Фактически данная проверка является аналогом 2х других: MACROEXECUTEPROCESS_COMMENT и MACROEXECUTEPROCESS, но только светить маркеры будет не на декларации такого макроса, а на его использовании.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "&[A-Z_]+",
+            "description": "Вызов макроса"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "&CALC_SUM(1,2)",
+      "code_example_good": "-- макрос удалён",
+      "fix_instruction": "Заменить вызов макроса с EXECUTE/PROCESS на альтернативу.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["macro", "call", "execute", "process"]
+    },
+    "PlpCheck.DBI.MANY_SUB_TRANSACTIONS.п.1": {
+      "code": "PlpCheck.DBI.MANY_SUB_TRANSACTIONS.п.1",
+      "source": "PlpCheck",
+      "short_description": "Большое количество подтранзакций",
+      "documentation_text": "В БД PostgreSQL есть ограничение на количество создаваемых подтранзакций внутри одной транзакции, связанное с деградацией производительности. Каждая точка отката порождает одну подтранзакцию. Настоятельно не рекомендуется допускать превышение 64 подтранзакций.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "savepoint\\s+\\w+",
+            "description": "SAVEPOINT в цикле"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "commit\\s*;",
+            "description": "Есть commit"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "for i in 1..v_tbl.count loop savepoint SAVE ... exception when others then rollback to SAVE; end loop;",
+      "code_example_good": "for i in 1..v_tbl.count loop savepoint SAVE ... if mod(i,10) = 0 then commit; end if; exception when others then rollback to SAVE; end loop;",
+      "fix_instruction": "Группировать savepoint с периодическим commit, не превышая 64 подтранзакции.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["subtransactions", "savepoint"]
+    },
+    "PlpCheck.DBI.MATCHING_TYPES.п.1": {
+      "code": "PlpCheck.DBI.MATCHING_TYPES.п.1",
+      "source": "PlpCheck",
+      "short_description": "Соответствие типов",
+      "documentation_text": "При переходе на DBI версию приложения необходимо использовать совместимые типы данных или их явные преобразования в конструкциях, результатом компиляции которых является SQL-операторы. Это связано с тем, что в различных диалектах SQL могут различаться правила неявного приведения типов.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\w+\\s*\\+\\s*\\w+|\\w+\\s*-\\s*\\w+",
+            "description": "Арифметические операции с разными типами"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "to_number\\(|to_char\\(|cast\\(",
+            "description": "Явное приведение"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "d.[DATE_PROV] - d.[DATE_DOC] > 1",
+      "code_example_good": "cast(d.[DATE_PROV], [date]) - cast(d.[DATE_DOC], [date]) > 1",
+      "fix_instruction": "Использовать явное приведение типов или совместимые типы.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["types", "data", "conversion"]
+    },
+    "PlpCheck.DBI.MAX_SIZE_ID.п.1": {
+      "code": "PlpCheck.DBI.MAX_SIZE_ID.п.1",
+      "source": "PlpCheck",
+      "short_description": "Размерность типов для ссылок",
+      "documentation_text": "Размерность типа сущности, в которую сохраняется ссылочная переменная, должна быть не менее 20 символов. Допустимые типы в которых сейчас могут храниться ссылочные переменные – целое число и строка.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(NUMBER|VARCHAR2|STRING)\\s*\\(([0-9]|1[0-9])\\)",
+            "description": "Размерность меньше 20"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "(NUMBER|VARCHAR2|STRING)\\s*\\([2-9][0-9]+\\)",
+            "description": "Размерность >= 20"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "idobj [NUM10]; begin idobj := refm%id; end;",
+      "code_example_good": "idobj number; begin idobj := refm%id; end;",
+      "fix_instruction": "Увеличить размерность типа до 20 символов.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["id", "size", "string", "number"]
+    },
+    "PlpCheck.DBI.NATIVE_ID_OBJ_IDENTIFIER.п.1": {
+      "code": "PlpCheck.DBI.NATIVE_ID_OBJ_IDENTIFIER.п.1",
+      "source": "PlpCheck",
+      "short_description": "Присваивание ссылок на methods/criteria",
+      "documentation_text": "В режиме NativeID в колонке id таблиц methods и criteria будет храниться строка вида КОРОТКОЕ_ИМЯ_ТБП.КОРОТКОЕ_ИМЯ_ОПЕРАЦИИ. Таким образом, присваивание ссылок на methods или criteria в числовые сущности повлечет ошибки числа или значения.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(ref\\s+\\[METHOD\\]|ref\\s+\\[CRITERIA\\])\\s*:=\\s*\\w+%id",
+            "description": "Присваивание ID метода/критерия"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "v_id := rMeth%id;",
+      "code_example_good": "v_id := rMeth%id; -- где v_id имеет тип varchar2",
+      "fix_instruction": "Использовать varchar2 для хранения идентификаторов методов и критериев.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["nativeid", "method", "criteria"]
+    },
+    "PlpCheck.DBI.NESTED_TABLE.п.1": {
+      "code": "PlpCheck.DBI.NESTED_TABLE.п.1",
+      "source": "PlpCheck",
+      "short_description": "Вложенные таблицы в SQL",
+      "documentation_text": "В DBI работа с varray от пользовательского record возможна только в процедурном коде, выполнять SQL запросы к переменным такого типа нельзя.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "SELECT.*IN\\s+[A-Z_]+\\s+WHERE\\s+\\w+\\.\\[\\w+\\]\\s+IN\\s+[A-Z_]+",
+            "description": "Вложенная таблица"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "varray\\s*\\(0\\)\\s+of\\s+(number|string|varchar2)",
+            "description": "Скалярный varray"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "declare type t_rec is record(a number); type t_tbl is varray(0) of t_rec; tA t_tbl; begin for (select tb(tb.a : SID) in tA) loop null; end loop; end;",
+      "code_example_good": "declare type t_tbl1 is varray(0) of ref [DEPN]; tA1 t_tbl1; begin for (select tb(tb.column_value : SID) in tA1) loop null; end loop; end;",
+      "fix_instruction": "Использовать varray от скалярных типов или переписать на процедурный цикл.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["nested", "table", "sql"]
+    },
+    "PlpCheck.DBI.OBLIGATORY_IN_OTHERS.п.1": {
+      "code": "PlpCheck.DBI.OBLIGATORY_IN_OTHERS.п.1",
+      "source": "PlpCheck",
+      "short_description": "Битая транзакция в PostgreSQL",
+      "documentation_text": "PostgreSQL в отличие от Oracle «портит» транзакцию при возникновении исключений большинства групп. После возникновения таких ошибок попытка выполнения любой команды SQL/DML будет сопровождаться исключением группы 25 – Invalid Transaction state.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "exception\\s+when\\s+others\\s+then",
+            "description": "WHEN OTHERS"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "exception\\s+when\\s+others\\s+then\\s+&rb\\(|rollback|raise",
+            "description": "С rollback/raise"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "exception when dup_val_on_index then pragma error('Номер не уникален!'); end;",
+      "code_example_good": "exception when dup_val_on_index then &rb(SET); pragma error('Номер не уникален!'); end;",
+      "fix_instruction": "Добавить rollback или raise в блок WHEN OTHERS.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["exception", "rollback", "raise"]
+    },
+    "PlpCheck.DBI.OUTER_JOIN.п.1": {
+      "code": "PlpCheck.DBI.OUTER_JOIN.п.1",
+      "source": "PlpCheck",
+      "short_description": "Внешние соединения через (true)",
+      "documentation_text": "При переходе на DBI версию приложения желательно исключить реализацию внешних соединений через конструкцию (true). В PL+ есть ANSI синтаксис join-ов, желательно перейти на него.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\w+\\[\\w+\\]\\(true\\)",
+            "description": "(true) в условии"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "LEFT\\s+JOIN|RIGHT\\s+JOIN",
+            "description": "Уже ANSI JOIN"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "where p.[ACC_DEBTS_CR](true) = af",
+      "code_example_good": "left join (::[AC_FIN] af) on p.[ACC_DEBTS_CR] = af",
+      "fix_instruction": "Заменить (true) на LEFT/RIGHT JOIN.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["outer join", "ansi"]
+    },
+    "PlpCheck.DBI.REFERENCED_TO_OBJECT.п.1": {
+      "code": "PlpCheck.DBI.REFERENCED_TO_OBJECT.п.1",
+      "source": "PlpCheck",
+      "short_description": "Переход в OBJECT",
+      "documentation_text": "В DBI нет представления OBJECT через, которое можно было бы от ID получить CLASS_ID. Поэтому при создании колонки с автоматическим переходом в 'Обобщенную ссылку'(REFERENCE) это не будет работать.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "select.*\\[REFERENCE\\].*in.*::\\[.*\\]",
+            "description": "Переход в OBJECT"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "cast_to\\(::\\[REFERENCE\\],.*:.*\\)",
+            "description": "Явное приведение"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select x(x.[OBJ_REF] : C_OBJ_REF) in ::[TBP] all;",
+      "code_example_good": "select x(cast_to(::[REFERENCE], x.[OBJ_CLASS]||':'||x.[OBJ_REF]) : C_OBJ_REF) in ::[TBP] all;",
+      "fix_instruction": "Вычислить CLASS_ID самостоятельно и сконкатенировать с ID через двоеточие.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["reference", "object", "view"]
+    },
+    "PlpCheck.DBI.REFERENCE_COMPARISON.п.1": {
+      "code": "PlpCheck.DBI.REFERENCE_COMPARISON.п.1",
+      "source": "PlpCheck",
+      "short_description": "Сравнение ссылочных переменных",
+      "documentation_text": "В общем случае в DBI не гарантируется, что запись с меньшим ID будет вставлена в таблицу раньше, чем запись с большим ID. Поэтому никакой вывод нельзя сделать на основании что id1 > id2.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\w+%id\\s*[><]=?\\s*\\w+%id|\\w+%id\\s*[><]=?\\s*\\d+",
+            "description": "Сравнение ID"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "\\w+%id\\s*=\\s*\\w+%id|\\w+%id\\s*=\\s*\\d+",
+            "description": "Равенство"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "if refm%id < idobj then return; end if;",
+      "code_example_good": "if refm%id = idobj then return; end if;",
+      "fix_instruction": "Не использовать сравнения больше/меньше для ссылок.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["reference", "comparison"]
+    },
+    "PlpCheck.DBI.ROWNUM.п.1": {
+      "code": "PlpCheck.DBI.ROWNUM.п.1",
+      "source": "PlpCheck",
+      "short_description": "Использование rownum",
+      "documentation_text": "При переходе на DBI версию приложения необходимо исключить использование псевдоколонки Oracle rownum. В ANSI SQL есть конструкция позволяющая вернуть только определенные строки результирующего SQL. В PL+ это реализовано через конструкции offset и fetch.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bROWNUM\\b",
+            "description": "ROWNUM"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "where rownum < 2",
+      "code_example_good": "fetch 1",
+      "fix_instruction": "Заменить rownum на FETCH FIRST.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["rownum", "oracle", "postgresql"]
+    },
+    "PlpCheck.DBI.SCHEMA_IN_DDL.п.1": {
+      "code": "PlpCheck.DBI.SCHEMA_IN_DDL.п.1",
+      "source": "PlpCheck",
+      "short_description": "Схема в DDL и grant/revoke",
+      "documentation_text": "В PostgreSQL при создании объекта БД без указания схемы, объект будет создан на схеме, указанной первой в search_path. Поэтому при выполнении DDL из прикладного кода, обязательно указывайте имя схемы.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "CREATE\\s+(TABLE|INDEX|VIEW|SEQUENCE|FUNCTION)\\s+[A-Z#]+|GRANT.*ON\\s+[A-Z#]+",
+            "description": "DDL без схемы"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "CREATE\\s+(TABLE|INDEX|VIEW|SEQUENCE|FUNCTION)\\s+[a-z]+\\.|GRANT.*ON\\s+[a-z]+\\.",
+            "description": "С указанием схемы"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "CREATE TABLE plants ( plant_id NUMBER PRIMARY KEY, common_name VARCHAR2(15) );",
+      "code_example_good": "CREATE TABLE app.plants ( plant_id NUMBER PRIMARY KEY, common_name VARCHAR2(15) );",
+      "fix_instruction": "Добавить схему в DDL команды.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["ddl", "schema", "postgresql"]
+    },
+    "PlpCheck.DBI.SELECTANALYTICARGUMENT.п.1": {
+      "code": "PlpCheck.DBI.SELECTANALYTICARGUMENT.п.1",
+      "source": "PlpCheck",
+      "short_description": "Операторы оконных функций Oracle",
+      "documentation_text": "В ANSI SQL не поддержаны конструкции в функции ANALYTIC: keep, within group - в PostgreSQL есть, но имеет другое значение. Также в стандарте SQL определены параметры RESPECT NULLS или IGNORE NULLS для функций lead, lag, first_value, last_value и nth_value.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "analytic\\([^,]+,\\s*'[^']*(keep|within group|ignore nulls|respect nulls|from first|from last)[^']*'",
+            "description": "Специфичные для Oracle параметры"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "analytic(LISTAGG(x.[NAZN],','), 'within group(order by 1) over (partition by [1])', x.[ACC_KT])",
+      "code_example_good": "analytic(LISTAGG(x.[NAZN],','), 'over (partition by [1])', x.[ACC_KT])",
+      "fix_instruction": "Убрать специфичные для Oracle параметры аналитических функций.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["analytic", "keep", "within group"]
+    },
+    "PlpCheck.DBI.SELECTLOCKWAIT.п.1": {
+      "code": "PlpCheck.DBI.SELECTLOCKWAIT.п.1",
+      "source": "PlpCheck",
+      "short_description": "wait в select for update",
+      "documentation_text": "Для разных СУБД есть различные возможности блокировки строк при выполнении select. Для Oracle допустимо написать 'lock wait X', в то время как в PostgreSQL нет оператора 'wait' и тем более нельзя указать время.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "SELECT.*FOR\\s+UPDATE.*WAIT\\s+\\d+",
+            "description": "SELECT FOR UPDATE WAIT"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "SELECT.*FOR\\s+UPDATE.*NOWAIT",
+            "description": "NOWAIT"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "for (select x(x : REF_1) in ::[MAIN_DOCUM] lock wait 5) loop null; end loop;",
+      "code_example_good": "for (select x(x : REF_1) in ::[MAIN_DOCUM]) loop x.REF_1%lock; end loop;",
+      "fix_instruction": "Убрать WAIT из SELECT FOR UPDATE.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["select", "lock", "wait"]
+    },
+    "PlpCheck.DBI.SYSTEM_VIEWS.п.1": {
+      "code": "PlpCheck.DBI.SYSTEM_VIEWS.п.1",
+      "source": "PlpCheck",
+      "short_description": "Запрещенные таблицы/представления",
+      "documentation_text": "Системные представления вида 'v$', 'gv$', 'aq$', 'dba_', 'user_', 'all_', 'nls_', 'mgw_' актуальны только для Oracle. Системные таблицы платформы ЦФТ не доступны: sources, errors, dependencies, cursors, rtl_entries, rtl_parameters, host2plp, cursors_bind, cursors_view, deployment_supply, host_sources, host_errors, objects, col2obj.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "(v\\$|gv\\$|dba_|user_|all_|nls_|mgw_|sources|errors|dependencies|cursors|rtl_entries|rtl_parameters|host2plp|cursors_bind|cursors_view|deployment_supply|host_sources|host_errors|objects|col2obj)\\b",
+            "description": "Запрещенное представление/таблица"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "VW_DB_SESSION|dual|v\\$session_longops",
+            "description": "Разрешенные"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select t(t.SID : SID) in gv$session%rowtype loop null; end loop;",
+      "code_example_good": "select t(t.SID : SID) in VW_DB_SESSION%rowtype loop null; end loop;",
+      "fix_instruction": "Заменить запрещенное представление на разрешенное.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["system", "view", "postgresql"]
+    },
+    "PlpCheck.DBI.UPDATE_DELETE_BY_SUBQUERY.п.1": {
+      "code": "PlpCheck.DBI.UPDATE_DELETE_BY_SUBQUERY.п.1",
+      "source": "PlpCheck",
+      "short_description": "update/delete по подзапросу",
+      "documentation_text": "Изменение и удаление по подзапросу имеет различный синтаксис в Oracle и PG, из-за этого невозможно сформировать корректный SQL для java.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "UPDATE\\s+\\w+\\s+IN\\s+::\\[.*\\]\\s+WHERE.*\\w+\\.\\[\\w+\\]\\.\\[\\w+\\]",
+            "description": "UPDATE по подзапросу"
+          },
+          {
+            "pattern": "DELETE\\s+\\w+\\s+IN\\s+::\\[.*\\]\\s+WHERE.*\\w+\\.\\[\\w+\\]\\.\\[\\w+\\]",
+            "description": "DELETE по подзапросу"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "UPDATE\\s+\\w+\\s+IN\\s+::\\[.*\\]\\s+WHERE\\s+\\w+\\s*=\\s*::\\[.*\\]",
+            "description": "По первичному ключу"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "update d(d.[NAZN] = 'test') in ::[MAIN_DOCUM] where d.[KOD_NAZN_PAY].[KOD_NAZN] = 'KOD';",
+      "code_example_good": "update d(d.[NAZN] = 'test') in ::[MAIN_DOCUM] where d.[KOD_NAZN_PAY] = ::[KOD_N_PAY]([KOD_NAZN] = 'KOD');",
+      "fix_instruction": "Переписать UPDATE/DELETE без подзапроса.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["update", "delete", "subquery"]
+    },
+    "PlpCheck.DBI.USER_IF_DEF.п.1": {
+      "code": "PlpCheck.DBI.USER_IF_DEF.п.1",
+      "source": "PlpCheck",
+      "short_description": "Условные компиляции",
+      "documentation_text": "Для выполнения задачи поставки приложения ЦФТ-Банк в скомпилированном виде, необходимо отказаться от любых условных компиляций, кроме системных(JAVA/DBI) и тех что будут принудительно взведены в какое-то значение.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "pragma\\s+if_def|--#if|#ifdef",
+            "description": "Условная компиляция"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "pragma\\s+if_def\\s*\\(\\s*(JAVA|DBI)\\s*\\)",
+            "description": "Системные"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "pragma if_def(R2)",
+      "code_example_good": "pragma if_def(JAVA)",
+      "fix_instruction": "Убрать условную компиляцию, кроме системных (JAVA/DBI).",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["conditional", "compile", "if_def"]
+    },
+    "PlpCheck.DBI.USESQLCODE.п.1": {
+      "code": "PlpCheck.DBI.USESQLCODE.п.1",
+      "source": "PlpCheck",
+      "short_description": "Использование SQLCODE",
+      "documentation_text": "В DBI нельзя оперировать системными кодами исключений зарезервированными СУБД, т.к. они разные для Oracle и PostgreSQL. Системными исключениями считаются все коды за пределами пользовательского диапазона(-20000..-20999).",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "sqlcode\\s*[><=!]",
+            "description": "Использование SQLCODE"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "sqlcode\\s*=\\s*-[0-9]{5}|sqlcode\\s*=\\s*[0-9]+",
+            "description": "Сравнение с кодом"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "if sqlcode = 1436 then",
+      "code_example_good": "if sqlcode = -20000 then",
+      "fix_instruction": "Использовать только пользовательские коды исключений (-20000..-20999).",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["sqlcode", "dbi", "exception"]
+    },
+    "PlpCheck.DBI.VERIFY_TYPE_IN_WITH.п.1": {
+      "code": "PlpCheck.DBI.VERIFY_TYPE_IN_WITH.п.1",
+      "source": "PlpCheck",
+      "short_description": "Размерность строк в рекурсивном запросе",
+      "documentation_text": "PostgreSQL в рекурсивных запросах тип колонки берет из не рекурсивной части, т.е. первого select-а. Если в данном SQL будет использован вывод какой-нибудь колонки из таблицы со строковым типом ограниченной длины, то PostgreSQL будет контролировать, чтобы в рекурсивной части он не мог получить строку большей длины.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "WITH\\s+RECURSIVE.*UNION\\s+ALL",
+            "description": "Рекурсивный запрос"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "coalesce\\(",
+            "description": "Функция coalesce безопасна"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "with recursive rec(num, accsArr, path) as (select acc(acc.[MAIN_V_ID] : num, acc.[ACCS_ARR] : accsArr, ',' || acc%id || ',' : path) in ::[AC_FIN] all where acc.[MAIN_V_ID] = accNum union all select acc(nvl(acc.[ACCOUNT].[MAIN_V_ID], acc.[ACC_NUM]) : num, acc.[ACCOUNT].[ACCS_ARR] : accsArr, r.PATH || acc%id || ',' : path) in ::[LINK_ACCS] join (rec : r) on acc%collection = r.accsArr and instr(r.path, ',' || acc%id || ',') = 0 all where acc.[VID] = ::[ACC_LINK]([CODE] = 'CHANGE_NUM')) select r(r.num : res) in rec into tAccsNumbers;",
+      "code_example_good": "with recursive rec(num, accsArr, path) as (select acc(acc.[MAIN_V_ID] : num, acc.[ACCS_ARR] : accsArr, ',' || acc%id || ',' : path) in ::[AC_FIN] all where acc.[MAIN_V_ID] = accNum union all select acc(coalesce(acc.[ACCOUNT].[MAIN_V_ID], acc.[ACC_NUM]) : num, acc.[ACCOUNT].[ACCS_ARR] : accsArr, r.PATH || acc%id || ',' : path) in ::[LINK_ACCS] join (rec : r) on acc%collection = r.accsArr and instr(r.path, ',' || acc%id || ',') = 0 all where acc.[VID] = ::[ACC_LINK]([CODE] = 'CHANGE_NUM')) select r(r.num : res) in rec into tAccsNumbers;",
+      "fix_instruction": "Использовать coalesce для строковых полей в рекурсивной части.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["with", "recursive", "type"]
+    },
+    "PlpCheck.DBI.WITHRECURSIVEMODEL.п.1": {
+      "code": "PlpCheck.DBI.WITHRECURSIVEMODEL.п.1",
+      "source": "PlpCheck",
+      "short_description": "Иерархические запросы по модели данных",
+      "documentation_text": "По таблицам модели данных иерархические запросы не работают, т.к. не поддержан синтаксис в Ignite.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "WITH\\s+RECURSIVE.*(classes|class_attributes|methods|criteria)\\b",
+            "description": "WITH RECURSIVE по метаданным"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "with recursive rec_part(id, hi, lev) as (select d(d: id, d.[PARENT_ID]: hi, 1: lev) in classes%rowtype where d = rDep union all select d(d: id, d.[PARENT_ID]: hi, prev.lev + 1: lev) in classes%rowtype inner join (rec_part: prev) on (d = prev.hi)) select d(d.id, d.lev) in rec_part order by d.lev loop null; end loop;",
+      "code_example_good": "with recursive rec_part(id, hi, lev) as (select d(d: id, d.[PARENT_ID]: hi, 1: lev) in ::[DEPART] where d = rDep union all select d(d: id, d.[PARENT_ID]: hi, prev.lev + 1: lev) in ::[DEPART] inner join (rec_part: prev) on (d = prev.hi)) select d(d.id, d.lev) in rec_part order by d.lev loop null; end loop;",
+      "fix_instruction": "Не использовать WITH RECURSIVE по таблицам модели данных.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["with recursive", "model"]
+    },
+    "PlpCheck.DBI.XMLTYPE_IN_SQL.п.1": {
+      "code": "PlpCheck.DBI.XMLTYPE_IN_SQL.п.1",
+      "source": "PlpCheck",
+      "short_description": "XMLType в sql выражениях",
+      "documentation_text": "В DBI использование функций XMLType запрещено в SQL выражениях, т.к. этот тип отсутствует в PostgreSQL.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "XMLType\\(|XMLTYPE\\(",
+            "description": "XMLType в SQL"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "::\\[RUNTIME\\]\\.\\[XML_DB\\]",
+            "description": "Библиотека XML_DB"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "XMLType(a1.[DATA]).extract('/Answer/LegalImpossibility')",
+      "code_example_good": "::[RUNTIME].[XML_DB].extract(...)",
+      "fix_instruction": "Заменить XMLType в SQL на использование ::[RUNTIME].[XML_DB] в процедурном коде.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["xmltype", "sql"]
+    },
+    "PlpCheck.DBI_SQL.OBLIGATORY_UNIQUE_ALIAS.п.1": {
+      "code": "PlpCheck.DBI_SQL.OBLIGATORY_UNIQUE_ALIAS.п.1",
+      "source": "PlpCheck",
+      "short_description": "Уникальность алиасов в select",
+      "documentation_text": "Если в выборке несколько колонок с константами и выражениями без алиасов, то будет ошибка вида: Encountered a duplicated sql alias [?column?] during auto-discovery of a native-sql query.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "SELECT\\s+[^,]+,\\s*[^:]+\\s+FROM",
+            "description": "Колонка без алиаса"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "SELECT\\s+[^,]+\\s*:\\s*\\w+",
+            "description": "С алиасом"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "execute immediate 'select 123, 456 c_name, 789, \"qaz\" c_name, c_name, 135 c_name, 123 from \"Z#USER\"' into v_nZ;",
+      "code_example_good": "execute immediate 'select 123 alias_1, 456 c_name_1, 789 alias_2, \"qaz\" c_name_2, c_name alias_3, 135 c_name_3, 123 alias_4 from \"Z#USER\"' into v_nZ;",
+      "fix_instruction": "Добавить уникальные алиасы для всех колонок в SELECT.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI_SQL",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["alias", "unique", "sql"]
+    },
+    "PlpCheck.DBI_SQL.QUOTING.п.1": {
+      "code": "PlpCheck.DBI_SQL.QUOTING.п.1",
+      "source": "PlpCheck",
+      "short_description": "Кавычки в SQL",
+      "documentation_text": "У PostgreSQL и Oracle есть отличие в том, как производится поиск ссылочного объекта в SQL выражении. Имена таблиц, колонок или алиасов PostgreSQL перед исполнением переводит в нижний регистр, а Oracle - в верхний. Исключения составляют ссылки, обрамленные двойными кавычками.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\bZ#[A-Z_]+\\b",
+            "description": "Имя таблицы без кавычек"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "\"Z#[A-Z_]+\"",
+            "description": "В кавычках"
+          },
+          {
+            "pattern": "ID|STATE_ID|SN|SU|CLASS_ID|COLLECTION_ID|C_",
+            "description": "Системные колонки"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "execute immediate 'truncate table Z#ACCOUNT#ARC';",
+      "code_example_good": "execute immediate 'truncate table \"Z#ACCOUNT#ARC\"';",
+      "fix_instruction": "Заключить имена таблиц с # в двойные кавычки.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI_SQL",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["quoting", "sql", "postgresql"]
+    },
+    "PlpCheck.DBI_JAVA.ERROR_MESSAGE_ANALYSIS.п.1": {
+      "code": "PlpCheck.DBI_JAVA.ERROR_MESSAGE_ANALYSIS.п.1",
+      "source": "PlpCheck",
+      "short_description": "Анализ текста sqlerrm и error_stack",
+      "documentation_text": "Анализ текста ошибки в целом является плохой практикой, при этом тексты ошибок в PL-SQL и Java могут отличаться из-за особенностей именования пакетов/классов, отсутствия кодов ошибок ORA-... и других отличий. В DBI к этим отличиям добавляется отличие текстов ошибок, генерируемых СУБД Oracle и PostgreSQL.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "sqlerrm\\s+like|sqlerrm\\s+instr|error_stack\\s+like|error_stack\\s+instr",
+            "description": "Анализ текста ошибки"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "::\\[RUNTIME\\]\\.\\[PRINTFUN\\]\\.SQLERRM_INF",
+            "description": "Разрешенная функция"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "if sqlerrm like 'ORA-01436%' then",
+      "code_example_good": "if sqlcode = 1436 then",
+      "fix_instruction": "Использовать sqlcode вместо анализа текста ошибки.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI_JAVA",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["error", "sqlerrm", "stack"]
+    },
+    "PlpCheck.DBI_JAVA.INVALID_INIT.п.1": {
+      "code": "PlpCheck.DBI_JAVA.INVALID_INIT.п.1",
+      "source": "PlpCheck",
+      "short_description": "Использование %init",
+      "documentation_text": "Контролируются следующие конструкции: %init от reference с одним параметром (работает только без параметров или с двумя), %init от rowtable с передачей количества очищаемых записей (работает только без параметров), %init от rowtable с передачей rowtable дочернего или родительного объекта (не работает), %init над структурой с передачей структуры дочернего или родительного объекта и использованием 2х параметров (работает только с одним параметром), %init над коллекцией структур с передачей коллекции структур дочернего ТБП (не работает).",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "%init\\s*\\(",
+            "description": "%init"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "\\w+%init\\s*\\(\\s*\\)",
+            "description": "Без параметров"
+          },
+          {
+            "pattern": "\\w+%init\\s*\\(\\s*\\w+,\\s*\\w+\\s*\\)",
+            "description": "С двумя параметрами"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "rVRef%init(true); oVArr%init(5); oVParent%init(oVObj,true); oVArr%init(oVArr2); tVArr3%init(tVArr4);",
+      "code_example_good": "rVRef%init(true, true); oVArr%init; oVParent%init(oVObj); tVArr4%init(tVArr3);",
+      "fix_instruction": "Исправить параметры %init согласно документации.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "DBI_JAVA",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["init", "modifier"]
+    },
+    "PlpCheck.DBI_JAVA.JSON_TYPES.п.1": {
+      "code": "PlpCheck.DBI_JAVA.JSON_TYPES.п.1",
+      "source": "PlpCheck",
+      "short_description": "Использование JSON",
+      "documentation_text": "Для работы с документами формата JSON в архитектуре DBI реализована поддержка только библиотеки ::[RUNTIME].[LIB_JSON]. Все остальные варианты: объектные типы Oracle (JSON_Object_T, JSON_ELEMENT_T, JSON_Array_T, JSON_KEY_LIST, JSON_SCALAR_T) и PLJSON поддерживаться не будут.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "JSON_OBJECT_T|JSON_ELEMENT_T|JSON_ARRAY_T|JSON_SCALAR_T|JSON_KEY_LIST|JSON_VALUE|JSON_TABLE|JSON_LIST|PLJSON",
+            "description": "Oracle JSON или PLJSON"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "::\\[RUNTIME\\]\\.\\[LIB_JSON\\]",
+            "description": "Разрешенная библиотека"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "l_JSON_ELEMENT_T JSON_ELEMENT_T;",
+      "code_example_good": "v_json ::[RUNTIME].[LIB_JSON].T_JSON_ELEMENT;",
+      "fix_instruction": "Заменить Oracle JSON/PLJSON на ::[RUNTIME].[LIB_JSON].",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI_JAVA",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["json", "library"]
+    },
+    "PlpCheck.DBI_JAVA.NULL_IS_NULL_TO_JAVA.п.1": {
+      "code": "PlpCheck.DBI_JAVA.NULL_IS_NULL_TO_JAVA.п.1",
+      "source": "PlpCheck",
+      "short_description": "null is [not] null в java",
+      "documentation_text": "Осуществляется поиск в процедурном коде конструкций вида null is [not] null. Такие конструкции могут встретиться при подстановке в макрос с проверкой на null параметра null.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "null\\s+is\\s+not\\s+null|null\\s+is\\s+null",
+            "description": "null is [not] null"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "if null is null then",
+      "code_example_good": "if nvl(param, 0) = 0 then",
+      "fix_instruction": "Заменить null is [not] null на соответствующую проверку.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "DBI_JAVA",
+      "subcategory": "DBI.ADAPTATION",
+      "tags": ["null", "is null", "java"]
+    },
+    "PlpCheck.JAVA_PLSQL.ACCESS_STATIC.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.ACCESS_STATIC.п.1",
+      "source": "PlpCheck",
+      "short_description": "Обращение к статическому экземпляру",
+      "documentation_text": "Статических экземпляров в системе очень мало, создаются они по флагу статического реквизита на ТБП. Проверка считывает из БД все реквизиты помеченные флагом статического и в случае диагностики обращения к такому реквизиту не считает это ошибкой, также не считает ошибкой обращение к любым полям ТБП SYSTEM(это хард код).",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "::\\[SYSTEM\\]\\.[A-Z_]+\\]|::\\[MAIN_DOCUM\\]\\.[A-Z_]+\\]",
+            "description": "Обращение к статическому экземпляру"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "acc := ::[MAIN_DOCUM].[ACC_DT];",
+      "code_example_good": "doc := ...; acc := doc.[ACC_DT];",
+      "fix_instruction": "Использовать переменную-ссылку, а не обращаться к статическому экземпляру.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["static", "class", "instance"]
+    },
+    "PlpCheck.JAVA_PLSQL.ANALYTIC_AND_FETCH_BAD_USE.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.ANALYTIC_AND_FETCH_BAD_USE.п.1",
+      "source": "PlpCheck",
+      "short_description": "Аналитические функции с fetch/exists",
+      "documentation_text": "Использование аналитических функций совместно с fetch или внутри exist приводит к увеличению времени работы запроса. Причина - аналитическая функция при использовании fetch или exists применяется ко всем строкам запроса.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "FETCH\\s+FIRST|EXISTS\\s*\\(.*FETCH",
+            "description": "FETCH или EXISTS"
+          },
+          {
+            "pattern": "row_number\\(\\)\\s*over|count\\(1\\)|sum\\(|min\\(|max\\(",
+            "description": "Аналитическая функция"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select count(1) from z#main_docum md, z#records r where r.c_doc = md.id FETCH FIRST 1 ROWS ONLY",
+      "code_example_good": "select count(1) from z#main_docum md, z#records r where r.c_doc = md.id",
+      "fix_instruction": "Убрать аналитическую функцию или FETCH/EXISTS.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["analytic", "fetch", "exists"]
+    },
+    "PlpCheck.JAVA_PLSQL.CARTESIAN_JOIN.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.CARTESIAN_JOIN.п.1",
+      "source": "PlpCheck",
+      "short_description": "Cartesian join в планах запросов",
+      "documentation_text": "При наличии такой конструкции в плане, скорее всего забыли наложить какое-то условие.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "CARTESIAN\\s+JOIN",
+            "description": "Cartesian Join в плане"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select * from Z#AC_FIN acc1, Z#AC_FIN acc2 where acc1.C_VID = 123 and acc2.C_VID = 321",
+      "code_example_good": "select * from Z#AC_FIN acc1, Z#AC_FIN acc2 where acc1.C_VID = 123 and acc2.C_VID = 321 and acc1.id = acc2.id",
+      "fix_instruction": "Добавить условие соединения для таблиц.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["cartesian", "join", "plan"]
+    },
+    "PlpCheck.JAVA_PLSQL.COMPILE_MISSING_COND.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.COMPILE_MISSING_COND.п.1",
+      "source": "PlpCheck",
+      "short_description": "Полнота условий поиска экземпляров",
+      "documentation_text": "Данная проверка создана на основе представления о том как в системе организована работа со справочником 'Универсальный справочник кодов/наименований'(UD_CODE_NAME). Суть в чем, разработчик данного справочника заложил что наполнять его нужно по ключу из двух полей 'Код'(CODE) и 'Код справочника'(UD_CODE), но некоторые пренебрегают этим условием на этапе компиляции.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "::\\[[A-Z_]+\\]\\([^)]*\\)(?!.*and.*\\[UD_CODE\\])",
+            "description": "Поиск экземпляра без полного условия"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "::\\[[A-Z_]+\\]\\([^)]*%id[^)]*\\)",
+            "description": "По ID"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "::[UD_CODE_NAME]([CODE] = 'X')",
+      "code_example_good": "::[UD_CODE_NAME]([UD_CODE] = 'Y' and [CODE] = 'X')",
+      "fix_instruction": "Добавить все необходимые условия для уникальной идентификации экземпляра.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["compile", "condition", "unique"]
+    },
+    "PlpCheck.JAVA_PLSQL.DYNAMIC_PLP.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.DYNAMIC_PLP.п.1",
+      "source": "PlpCheck",
+      "short_description": "Контроль динамического PLP",
+      "documentation_text": "Данная проверка предназначена для того, чтобы запустить все имеющиеся проверки в плагине над выражением передаваемым в функции из операции ::[RUNTIME].[PLP].",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "::\\[RUNTIME\\]\\.\\[PLP\\]\\.(PLP_|plp_)",
+            "description": "Динамический PLP"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "::[RUNTIME].[PLP].PLP_N('select x(x.[DOCUMENT_NUM]) in ::[MAIN_DOCUM] all where rownum < 2 into Result;');",
+      "code_example_good": "::[RUNTIME].[PLP].PLP_N('select x(x.[DOCUMENT_NUM]) in ::[MAIN_DOCUM] all fetch 1 into Result;');",
+      "fix_instruction": "Исправить динамический PL+ код для совместимости с DBI.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["dynamic", "plp", "validation"]
+    },
+    "PlpCheck.JAVA_PLSQL.ENDLESS_CYCLE.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.ENDLESS_CYCLE.п.1",
+      "source": "PlpCheck",
+      "short_description": "Наличие бесконечного цикла",
+      "documentation_text": "Бесконечные циклы не имеют из себя выхода и исполнение дальнейшего функционала будет невозможно. К бесконечным циклам относится: loop без условия exit или с условием exit в котором проверяется выполнение условия по переменной, которая не меняется в теле цикла; while в котором проверяется выполнение условия по переменной, которая не меняется в теле цикла.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "loop\\s+\\n(?!.*exit)|while\\s+.*\\s+loop\\s+\\n(?!.*\\w+\\s*:=)",
+            "description": "Бесконечный цикл"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "loop\\s+\\n.*exit|while\\s+.*\\s+loop\\s+\\n.*\\w+\\s*:=",
+            "description": "С выходом"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "loop null; end loop;",
+      "code_example_good": "loop exit when i > 10; i := i + 1; end loop;",
+      "fix_instruction": "Добавить условие выхода из цикла.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["infinite", "loop", "exit"]
+    },
+    "PlpCheck.JAVA_PLSQL.FETCH_OVER_SUBQUERY.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.FETCH_OVER_SUBQUERY.п.1",
+      "source": "PlpCheck",
+      "short_description": "Fetch над подзапросом",
+      "documentation_text": "В некоторых случаях использование fetch над подзапросом либо бессмысленно, либо не дает оптимизатору выбирать более оптимальный план, поскольку оптимизации Oracle рассчитаны на применение fetch совместно с сортировкой.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "SELECT.*IN\\s*\\(.*FETCH\\s+FIRST",
+            "description": "FETCH над подзапросом"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "UNION|MINUS|INTERSECT",
+            "description": "С set операторами"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select x(x.idx : idx) in (select y(y : idx) in ::[TBP] order by y.[REQ]) fetch 1",
+      "code_example_good": "select y(y : idx) in ::[TBP] order by y.[REQ] fetch 1",
+      "fix_instruction": "Переписать запрос без подзапроса.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["fetch", "subquery"]
+    },
+    "PlpCheck.JAVA_PLSQL.FULL_INDEX_SCAN.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.FULL_INDEX_SCAN.п.1",
+      "source": "PlpCheck",
+      "short_description": "FULL INDEX SCAN в планах",
+      "documentation_text": "Когда операция синхронизирована с БД, делается explain всех курсоров и в плане производится поиск FULL INDEX SCAN. Также на результат накладывается ограничение по максимально допустимому cardinality из настройки.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "FULL\\s+INDEX\\s+SCAN",
+            "description": "FULL INDEX SCAN в плане"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select C_MAIN_V_ID from Z#AC_FIN where C_MAIN_V_ID not like '40817%'",
+      "code_example_good": "select C_MAIN_V_ID from Z#AC_FIN where C_MAIN_V_ID like '40817%'",
+      "fix_instruction": "Добавить условие для использования индекса.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["index", "scan", "plan"]
+    },
+    "PlpCheck.JAVA_PLSQL.FULL_TABLE_SCAN.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.FULL_TABLE_SCAN.п.1",
+      "source": "PlpCheck",
+      "short_description": "FULL TABLE SCAN в планах",
+      "documentation_text": "Когда операция синхронизирована с БД, делается explain всех курсоров и в плане производится поиск FULL TABLE SCAN. Также на результат накладывается ограничение по максимально допустимому cardinality из настройки.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "FULL\\s+TABLE\\s+SCAN",
+            "description": "FULL TABLE SCAN в плане"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select * from Z#AC_FIN acc1",
+      "code_example_good": "select * from Z#AC_FIN acc1 where acc1.C_MAIN_V_ID = '40817'",
+      "fix_instruction": "Добавить условие фильтрации для использования индекса.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["table", "scan", "plan"]
+    },
+    "PlpCheck.JAVA_PLSQL.FUNCTION_BREAK_INDEX.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.FUNCTION_BREAK_INDEX.п.1",
+      "source": "PlpCheck",
+      "short_description": "Преобразования над индексированными полями",
+      "documentation_text": "Если в плане запроса обнаружен TABLE FULL SCAN, но в условиях фильтрации есть индексированные поля, то это может означать, что преобразования над полями мешают использованию индекса.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "WHERE\\s+\\w+\\s*\\([^)]*\\)\\s*=",
+            "description": "Функция над полем в WHERE"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select * from Z#AC_FIN where substr(C_MAIN_V_ID,1,5) = '40817'",
+      "code_example_good": "select * from Z#AC_FIN where C_MAIN_V_ID like '40817%'",
+      "fix_instruction": "Использовать индексируемые выражения в условиях фильтрации.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["index", "function", "plan"]
+    },
+    "PlpCheck.JAVA_PLSQL.INDEX_CAN_USE_BETTER.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.INDEX_CAN_USE_BETTER.п.1",
+      "source": "PlpCheck",
+      "short_description": "Использование части составного индекса",
+      "documentation_text": "Если в плане запроса обнаружен составной индекс, но обращение к индексу производится только по части его полей, а другая часть полей числится в условиях фильтрации, то индекс может быть использован лучше.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "INDEX\\s+SCAN.*IDX_.*WHERE\\s+\\w+\\s*=\\s*\\w+\\s+AND\\s+\\w+\\s*=",
+            "description": "Составной индекс"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select * from Z#MAIN_DOCUM where key = 1000 and C_ACC_DT = '40817' and trunc(C_DATE_PROV) > sysdate",
+      "code_example_good": "select * from Z#MAIN_DOCUM where key = 1000 and C_ACC_DT = '40817' and C_DATE_PROV >= trunc(sysdate)+1",
+      "fix_instruction": "Использовать все поля составного индекса в условиях фильтрации.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["index", "composite", "plan"]
+    },
+    "PlpCheck.JAVA_PLSQL.MULTIPLE_MODIFIERS.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.MULTIPLE_MODIFIERS.п.1",
+      "source": "PlpCheck",
+      "short_description": "Запрет модификаторов от %parent",
+      "documentation_text": "%parent без указания в скобках класса воспринимается как работа с обобщенной ссылкой или массивом. Применение к нему повторного модификатора приводит к запросам к одному из тяжелых системных представлений - OBJECTS, COL2OBJ, REFS.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "%parent(?!\\().*%",
+            "description": "%parent без параметров с модификатором"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "%parent%id",
+            "description": "%parent%id разрешен"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "st := sd%parent%state;",
+      "code_example_good": "prod := sd%parent; st := prod%state;",
+      "fix_instruction": "Разбить цепочку модификаторов на отдельные шаги.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["modifier", "parent"]
+    },
+    "PlpCheck.JAVA_PLSQL.NOT_CLOSED_CURSOR.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.NOT_CLOSED_CURSOR.п.1",
+      "source": "PlpCheck",
+      "short_description": "Закрытие курсоров",
+      "documentation_text": "Если обнаружена конструкция %open или .open над переменной типа ref cursor, тогда на этом же уровне видимости производится поиск .close.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\w+\\.(open|%open)\\s*\\(",
+            "description": "Открытие курсора"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "\\w+\\.close\\s*\\(|%close\\s*\\(",
+            "description": "Закрытие курсора"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "vcur_dual_closed.open; begin null; exception when others then vcur_dual_closed.close(); end;",
+      "code_example_good": "vcur_dual_closed.open; begin vcur_dual_closed.close(); exception when others then vcur_dual_closed.close(); end;",
+      "fix_instruction": "Закрывать курсор во всех ветках выполнения.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["cursor", "open", "close"]
+    },
+    "PlpCheck.JAVA_PLSQL.NOT_HANDLED_CURSOR_EXCEPTIONS.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.NOT_HANDLED_CURSOR_EXCEPTIONS.п.1",
+      "source": "PlpCheck",
+      "short_description": "Закрытие курсоров в обработчиках исключений",
+      "documentation_text": "Если обнаружена конструкция %open или .open над переменной типа ref cursor, тогда на этом же уровне видимости производится поиск .close в блоке exception.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\w+\\.(open|%open)\\s*\\(",
+            "description": "Открытие курсора"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "exception\\s+when\\s+others\\s+then.*\\w+\\.close\\s*\\(",
+            "description": "Закрытие в exception"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "vcur_dual_closed.open; begin vcur_dual_closed.close(); end;",
+      "code_example_good": "vcur_dual_closed.open; begin vcur_dual_closed.close(); exception when others then vcur_dual_closed.close(); raise; end;",
+      "fix_instruction": "Закрывать курсор в блоке exception при возникновении ошибки.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["cursor", "exception", "handler"]
+    },
+    "PlpCheck.JAVA_PLSQL.NOT_RETURN_STATEMENT.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.NOT_RETURN_STATEMENT.п.1",
+      "source": "PlpCheck",
+      "short_description": "Функции без результирующего значения",
+      "documentation_text": "Данная проверка контролирует объявления функций, а также execute секцию в операциях с объявленным результирующим типом. В рамках проверки функции проверяется наличие return блока во всех возможных ветвлениях программного кода.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "function\\s+\\w+\\s+return\\s+\\w+\\s+is",
+            "description": "Функция с возвращаемым значением"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "function\\s+\\w+\\s+return\\s+\\w+\\s+is.*return\\s+\\w+",
+            "description": "С return"
+          },
+          {
+            "pattern": "pragma\\s+error|raise|message\\.app_error",
+            "description": "С исключением"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "public function err_wolk4 return number is bCase number; begin if 1 = 2 then return null; else begin case bCase of :1: return null; :2: return null; else pragma error('asd'); end; exception when message.app_exception then null; end; end if; end;",
+      "code_example_good": "public function ok_wolk4 return number is bCase number; begin if 1 = 2 then return null; else begin case bCase of :1: return null; :2: return null; else pragma error('asd'); end; exception when message.app_exception then return null; end; end if; end;",
+      "fix_instruction": "Добавить return во все ветки выполнения функции.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["function", "return"]
+    },
+    "PlpCheck.JAVA_PLSQL.NVL_IN_SELECT.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.NVL_IN_SELECT.п.1",
+      "source": "PlpCheck",
+      "short_description": "NVL с функцией/select во втором параметре",
+      "documentation_text": "Функция nvl всегда вычисляет значения обоих параметров, а coalesce только если предыдущий вернул null, поэтому при таких сложных конструкциях предпочтительней использовать coalesce.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "nvl\\s*\\([^,]+,\\s*(select|\\w+\\()",
+            "description": "NVL с функцией/select"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "coalesce\\(",
+            "description": "Coalesce"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "nvl(m.[ACC_DT], (select m1(m1.[ACC_KT]) in ::[MAIN_DOCUM] where m1 = m))",
+      "code_example_good": "coalesce(m.[ACC_DT], (select m1(m1.[ACC_KT]) in ::[MAIN_DOCUM] where m1 = m))",
+      "fix_instruction": "Заменить NVL на COALESCE.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["nvl", "coalesce", "select"]
+    },
+    "PlpCheck.JAVA_PLSQL.PARALLEL_EXECUTION.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.PARALLEL_EXECUTION.п.1",
+      "source": "PlpCheck",
+      "short_description": "Запрет хинта parallel",
+      "documentation_text": "В аргументе pragma hint производится поиск фразы parallel.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "pragma\\s+hint\\s*\\([^)]*parallel[^)]*\\)",
+            "description": "Хинт parallel"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "pragma hint ('PARALLEL (8)');",
+      "code_example_good": "-- удалено",
+      "fix_instruction": "Удалить хинт parallel.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["parallel", "hint"]
+    },
+    "PlpCheck.JAVA_PLSQL.PARTITION_ALL.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.PARTITION_ALL.п.1",
+      "source": "PlpCheck",
+      "short_description": "Ключ секционирования в селектах",
+      "documentation_text": "Когда операция синхронизирована с БД, делается explain всех курсоров и в плане производится поиск PARTITION ALL. Чтобы исключить из проверки ТБП секционированные по KEY есть настройка допустимого количества секций для полного перебора, по умолчанию она равна 4м.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "PARTITION\\s+ALL",
+            "description": "PARTITION ALL в плане"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "select * from Z#AD_RECORDS where C_ACC_NUM like '40817%'",
+      "code_example_good": "select * from Z#AD_RECORDS where C_ACC_NUM like '40817%' and C_REP_DATE >= sysdate - 10",
+      "fix_instruction": "Добавить условие по ключу секционирования.",
+      "priority": "HIGH",
+      "priority_level": 1,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["partition", "scan", "plan"]
+    },
+    "PlpCheck.JAVA_PLSQL.REF_NONTABLE.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.REF_NONTABLE.п.1",
+      "source": "PlpCheck",
+      "short_description": "Ссылка на класс без экземпляров",
+      "documentation_text": "Нельзя делать объявления вида ref [CLASS], если у данного класса нет таблицы. Под такие ТБП попадают структуры вида [REQ_CLIENT], скалярные типы, например [SUMMA]. А также ссылочные ТБП у которых нет родительского класса типа 'Массив ссылок'.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "ref\\s+\\[[A-Z_]+\\]|::\\[[A-Z_]+\\]",
+            "description": "Ссылка на ТБП"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "ref\\s+\\[[A-Z_]+\\]\\s+\\w+\\s+;",
+            "description": "Ссылка"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "vSumma ref [SUMMA]; vReqClient ref [REQ_CLIENT];",
+      "code_example_good": "vSumma [SUMMA]; vReqClient [REQ_CLIENT];",
+      "fix_instruction": "Не использовать ref для скалярных типов и структур.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["reference", "class", "table"]
+    },
+    "PlpCheck.JAVA_PLSQL.SIZELESS.п.4.17": {
+      "code": "PlpCheck.JAVA_PLSQL.SIZELESS.п.4.17",
+      "source": "PlpCheck",
+      "short_description": "Размерность строковых переменных",
+      "documentation_text": "Проверяются переменные типа string, varchar, varchar2, nstring, nvarchar2, char, byte или raw без указания размерности.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "\\b(\\w+)\\s+(varchar2|string|char|raw|byte)\\s*[;(]",
+            "description": "Строковая переменная без размера"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "varchar2\\s*\\(\\d+\\)|string\\s*\\(\\d+\\)",
+            "description": "С размером"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "procedure test(p_a varchar2) is begin p_a := nvl(p_a, '0'); end;",
+      "code_example_good": "procedure test(p_a varchar2(32000)) is begin p_a := nvl(p_a, '0'); end;",
+      "fix_instruction": "Добавить размерность для строковой переменной.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["sizeless", "varchar2"]
+    },
+    "PlpCheck.JAVA_PLSQL.SIZE_RESTRICTION.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.SIZE_RESTRICTION.п.1",
+      "source": "PlpCheck",
+      "short_description": "Size-модификатор при сравнении с 0/1",
+      "documentation_text": "В случаях сравнения %size с 0 или 1 подсчет всех записей не требуется, достаточно ограничиться одной строкой. Исправление: %size(1).",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "%size\\s*\\(\\s*0\\s*\\)\\s*[=<>!]|%size\\s*\\(\\s*null\\s*\\)\\s*[=<>!]",
+            "description": "%size с 0 или null"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "%size\\s*\\(\\s*1\\s*\\)",
+            "description": "%size(1)"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "return p(3)%size(null) < 1;",
+      "code_example_good": "return p(3)%size(1) > 0;",
+      "fix_instruction": "Заменить %size(0) или %size(null) на %size(1).",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["size", "restriction"]
+    },
+    "PlpCheck.JAVA_PLSQL.THIS_IN_DEFAULT.п.1": {
+      "code": "PlpCheck.JAVA_PLSQL.THIS_IN_DEFAULT.п.1",
+      "source": "PlpCheck",
+      "short_description": "THIS для инициализации переменных",
+      "documentation_text": "Производится поиск объявлений в которых есть секция инициализации. В выражении проверяется наличие объекта this с последующим обращением к реквизитам. Накладывается ограничение что объявление попадет в самый первый блок declare блоков execute или validate.",
+      "regex_patterns": {
+        "for_search": [
+          {
+            "pattern": "var\\s+\\w+\\s+\\w+\\s*:=\\s*THIS\\.",
+            "description": "THIS в инициализации"
+          }
+        ],
+        "for_ignore": [
+          {
+            "pattern": "begin\\s+var\\s+\\w+\\s+\\w+\\s*:=\\s*THIS\\.",
+            "description": "В теле"
+          },
+          {
+            "pattern": "^\\s*--.*",
+            "description": "Комментарии"
+          }
+        ]
+      },
+      "code_example_bad": "validate is begin var aVar number := THIS.[ACC_DT]; end;",
+      "code_example_good": "validate is begin begin var aVar number := THIS.[ACC_DT]; end; end;",
+      "fix_instruction": "Перенести инициализацию с THIS в тело блока.",
+      "priority": "MEDIUM",
+      "priority_level": 2,
+      "category": "JAVA_PLSQL",
+      "subcategory": "JAVA.OPTIMIZATION",
+      "tags": ["this", "default", "initialization"]
+    }
+  }
+}

@@ -1,0 +1,376 @@
+# ПОЛНОЕ ЗАДАНИЕ ДЛЯ KODA
+## АДАПТАЦИЯ АРМ-МОДУЛЕЙ ПОД DBI (POSTGRESQL) ПО РУБРИКАТОРУ v5.0.0
+
+---
+
+**Дата:** 2026-08-17
+**Версия задания:** 1.0
+**Рубрикатор:** F:\TO_DBI\DATA\Рубрикатор v5 (v5.0.0)
+
+---
+
+## 1. ОБЩАЯ ИНФОРМАЦИЯ
+
+- **Задача:** Переписать все АРМ-модули проекта под DBI (PostgreSQL)
+- **Рубрикатор:** F:\TO_DBI\DATA\Рубрикатор v5 (v5.0.0)
+- **Результат:** Исправленные файлы + отчёт об изменениях
+- **История изменений:** Да, в отдельном файле CHANGELOG.md
+- **Примеры для сравнения:** Нет, всё делаем с нуля
+- **Версия DBI:** Неизвестно (универсальная адаптация)
+- **Версия PostgreSQL:** Универсально
+- **Используемые файлы рубрикатора:** Все (1-5 + find_issues.sql)
+- **Приоритет исправлений:** Все (HIGH + MEDIUM + LOW)
+- **PlpCheck-правила:** Новый флаг на GUI-форме (опционально)
+- **Срок выполнения:** Без ограничений
+
+---
+
+## 2. СТРУКТУРА РУБРИКАТОРА v5.0.0
+
+```
+F:\TO_DBI\DATA\Рубрикатор v5\
+│
+├── 1.RUBRICATOR_FILES v5.md         # Список файлов для анализа (4 источника)
+├── 2.RUBRICATOR_CATEGORIES v5.md    # Категории правил (36 категорий)
+├── 3.RUBRICATOR_FIXES v5.md         # Полный список правил (160 правил)
+├── 4.RUBRICATOR_PROMPT v5.json      # AI-промпты (64 правила)
+├── 5.RUBRICATOR_PARSER_SQL v5.json  # Гибридный парсер (27 правил)
+├── find_issues v5.sql               # SQL-скрипт поиска (59 запросов)
+└── README_RUBRICATOR v5.md          # Полная документация
+```
+
+---
+
+## 3. СТАТИСТИКА РУБРИКАТОРА v5.0.0
+
+**По категориям:**
+- SQL/DML: 36
+- Хранение (STOR): 16
+- Процедурный код (PROC): 48
+- Интеграции (INT): 5
+- Кэширование (CACHE): 14
+- Разработка (DEV): 17
+- Локальные объекты (LOCAL): 8
+- PlpCheck (STYLE): 16
+- ИТОГО: 160
+
+**По приоритетам:**
+- HIGH: 68
+- MEDIUM: 68
+- LOW: 24
+
+**По источникам:**
+- v50.docx: 144
+- PlpCheck: 16
+
+---
+
+## 4. ЭТАПЫ ВЫПОЛНЕНИЯ
+
+**ЭТАП 1: АНАЛИЗ КОДА**
+1. Загрузи все АРМ-модули проекта
+2. Выполни логический анализ по find_issues v5.sql
+3. Определи проблемные места по категориям
+4. Сформируй список проблем для каждого файла
+
+**ЭТАП 2: АВТОМАТИЧЕСКОЕ ИСПРАВЛЕНИЕ (REGEX)**
+Используй 5.RUBRICATOR_PARSER_SQL v5.json
+1. Найди совпадения по regex-паттернам
+2. Выполни замену по transform-шаблонам
+3. Для hybrid-правил используй algorithmic_hint
+4. Примени правила с transform_type = 'regex'
+
+**ЭТАП 3: AI-АНАЛИЗ СЛОЖНЫХ СЛУЧАЕВ**
+Используй 4.RUBRICATOR_PROMPT v5.json
+1. Для правил с ai_analysis_required = true
+2. Проанализируй контекст (контекст_требуется)
+3. Выполни исправление по fix_instruction
+4. Используй fix_template для замены
+
+**ЭТАП 4: ПРОВЕРКА PlpCheck (ОПЦИОНАЛЬНО)**
+ЕСЛИ на GUI-форме установлен флаг "Добавлять PlpCheck-правила":
+1. Примени все 16 правил PlpCheck.STYLE.*
+2. Исправь префиксы (v_, n_, d_, b_, lr_, lrec_, tb_)
+3. Исправь синтаксис (::[CLASS], [ATTR], ::[CLASS].[METHOD])
+4. Добавь размерность VARCHAR2/STRING
+5. Замени SAVEPOINT на &sp/&rb
+
+**ЭТАП 5: ФОРМИРОВАНИЕ РЕЗУЛЬТАТА**
+1. Исправленные файлы АРМ-модулей
+2. Отчёт CHANGELOG.md с изменениями
+3. Список проблем для ручной проверки
+4. Статистика исправлений по категориям
+
+---
+
+## 5. ПРИОРИТЕТЫ ИСПРАВЛЕНИЙ
+
+### 🔴 HIGH ПРИОРИТЕТ (68 правил) — ИСПРАВЛЯТЬ ОБЯЗАТЕЛЬНО
+
+**SQL/DML (критические) - 21 правило:**
+- v50.SQL.OUTERJOIN.п.1.1 - Замена (+) на LEFT/RIGHT JOIN
+- v50.SQL.ROWNUM.п.1.2 - Замена rownum на FETCH FIRST
+- v50.SQL.UDF.п.1.3 - Запрет UDF в WHERE/GROUP BY/ORDER BY
+- v50.SQL.CAST.п.1.5 - Явное приведение типов
+- v50.SQL.DECODE.п.1.6.1 - Замена DECODE на CASE
+- v50.SQL.CONNECTBY.п.1.8 - Замена CONNECT BY на WITH RECURSIVE
+- v50.SQL.SYSVIEW.п.1.9 - Замена v$session на VW_DB_SESSION
+- v50.SQL.SYSTABLES.п.1.10 - Запрет SELECT из системных таблиц ТЯ
+- v50.SQL.ORACLE_PKG.п.1.11 - Запрет Oracle supplied PL/SQL пакетов
+- v50.SQL.TABLE_SELECT.п.1.13 - Замена SELECT FROM TABLE()
+- v50.SQL.DML_JOIN.п.1.17 - Переписывание DML с JOIN на подзапросы
+- v50.SQL.HINTS.п.1.18 - Удаление подсказок оптимизатора
+- v50.SQL.VW_CRIT_RPT.п.1.19 - Ограничения при SELECT из VW_*
+- v50.SQL.PSEUDO.п.1.20 - Запрет псевдоколонок Oracle
+- v50.SQL.CONTEXT.п.1.23 - Замена sys_context('USERENV','DB_NAME')
+- v50.SQL.DDL.п.1.24 - Указание схемы в DDL
+- v50.SQL.EXCEPTIONLOOP.п.1.25 - Запрет конструкции exceptionloop
+- v50.SQL.BIND_GROUP.п.1.26 - Запрет bind переменных в GROUP BY/DISTINCT/ORDER BY
+- v50.SQL.REF_SELECT.п.1.27 - Запрет выборки из ссылок
+- v50.SQL.BULK.п.1.28 - Включение batch для bulk операций
+- v50.SQL.FETCH_EXISTS.тдс20240828.стр.5 - Запрет fetch в подзапросе EXISTS
+
+**Хранение (STOR) - 4 правила:**
+- v50.STOR.DATE.п.2.2 - Замена DATE на DATE_TIME
+- v50.STOR.UNIQUE_IDX.п.2.6.2 - NULL в составных уникальных индексах
+- v50.STOR.INDEX.п.2.6.3 - Учёт ограничения 2704 байт для BTREE
+- v50.STOR.TEMP.п.2.8 - Замена временных таблиц на VARRAY
+
+**Процедурный код (PROC) - 18 правил:**
+- v50.PROC.CRYPTO.п.3.1.2 - Замена dbms_crypto на INT_EXT_CALL_001
+- v50.PROC.SMTP.п.3.1.3 - Замена utl_smtp на INT_EMAIL_001
+- v50.PROC.JSON.п.3.1.4 - Использование [RUNTIME].[LIB_JSON]
+- v50.PROC.HTTP.п.3.1.6 - Замена utl_http на HTTP_MGR
+- v50.PROC.UTILS.п.3.1.1 - Замена утилитных функций ТЯ
+- v50.PROC.EMPTY_STRING.п.3.2 - Пустая строка и NULL
+- v50.PROC.EXECUTE.п.3.3 - Экранирование имён таблиц в execute immediate
+- v50.PROC.DYNAMIC_SQL.п.3.3 - Замена DBMS_SQL на [RUNTIME].[CALC]
+- v50.PROC.WHENOTHERS.п.3.5 - Добавление ROLLBACK или RAISE в WHEN OTHERS
+- v50.PROC.XML.п.3.6 - Использование [RUNTIME].[XML_DB]
+- v50.PROC.MACROS.п.3.4 - Запрет макросов execute и process
+- v50.PROC.TRIGGER.п.3.8 - Замена триггеров БД на операции-триггеры
+- v50.PROC.TYPING.п.3.11 - Ограничения типизации
+- v50.PROC.CODEGEN.п.3.15 - Запрет кодогенерации операций
+- v50.PROC.CHARSET.п.3.16 - Использование [RUNTIME].[CHARSET]
+- v50.PROC.COND_COMPILE.п.3.21 - Запрет условной компиляции
+- v50.PROC.NATIVEID.п.3.26 - NativeID для метаданных
+- v50.PROC.ID_SIZE.п.3.27 - Размер идентификатора бизнес-данных
+
+**Интеграции (INT) - 2 правила:**
+- v50.INT.DBLINK.п.4.2 - Замена Database Link на REST/SOAP
+- v50.INT.QUEUE.п.4.4 - Использование [RUNTIME].[AQ_LIB]
+
+**Кэширование (CACHE) - 2 правила:**
+- v50.CACHE.REF.п.6.10 - Получение полей сразу в курсоре
+- v50.CACHE.CONFIG.п.6.13 - Настройка кэша 2 уровня в config_orm.xml
+
+**PlpCheck HIGH - 9 правил:**
+- PlpCheck.STYLE.BAD_PREFIX.п.4.3 - Некорректный префикс переменной
+- PlpCheck.STYLE.PREFIX_TYPE.п.4.4 - Переменная без префикса типа
+- PlpCheck.STYLE.RESERVED_PREFIX.п.4.5 - Зарезервированный префикс
+- PlpCheck.STYLE.SAVEPOINT_ROLLBACK.п.4.11 - SAVEPOINT → &sp, ROLLBACK TO SAVEPOINT → &rb
+- PlpCheck.STYLE.WRONG_CLASS.п.4.12 - CLASS → ::[CLASS]
+- PlpCheck.STYLE.WRONG_ATTR.п.4.13 - .ATTR → .[ATTR]
+- PlpCheck.STYLE.WRONG_METHOD.п.4.14 - CLASS.method → ::[CLASS].[method]
+- PlpCheck.STYLE.STRING_AS_CLASS.п.4.15 - 'CLASS' → ::[CLASS]%class
+- PlpCheck.STYLE.DEREFERENCE_OUT.п.4.16 - Разыменованное поле в out параметре
+
+---
+
+### 🟡 MEDIUM ПРИОРИТЕТ (68 правил) — ЖЕЛАТЕЛЬНО
+
+- v50.SQL.FUNC_REQ.п.1.14 - Ограничения функциональных реквизитов
+- v50.SQL.XMLTYPE.п.1.15 - Запрет XMLType в SQL-запросах
+- v50.SQL.XMLQUERY.п.1.16 - Замена XMLQuery на execute immediate
+- v50.SQL.SIMPLE_VIEW.п.1.21 - Запрет простых представлений
+- v50.STOR.NESTED.п.2.1 - Запрет nested table
+- v50.STOR.ROWID.п.2.3 - Запрет идентификации по rowid
+- v50.STOR.PARTITION.п.2.4 - Секционирование не поддерживается
+- v50.STOR.PARTITION_PROF.п.2.5 - Секционирование по профилю
+- v50.STOR.GLOBAL_IDX.п.2.6.1 - Глобальные индексы не поддерживаются
+- v50.STOR.OLE.п.2.7 - OLE объекты не поддерживаются
+- v50.STOR.COLUMNS_LIMIT.п.2.9 - Количество колонок > 1664
+- v50.STOR.SPEC_CHARS.п.2.10 - Запрет спецсимволов в коротких именах
+- v50.PROC.UTL_URL.п.3.1.5 - Замена utl_url на [RUNTIME].[HTTP_MGR]
+- v50.PROC.UTL_TCP.п.3.1.7 - Замена utl_tcp на [RUNTIME].[TCP_MGR]
+- v50.PROC.HASH_VALUE.п.3.1.8 - Особенности utils.hash_value/hash_value2
+- v50.PROC.SQLCODE.п.3.7 - Ограничения SQLCODE/SQLSTATE
+- v50.PROC.REPORT.п.3.10 - Операции типа "Отчёт" не поддерживаются
+- v50.PROC.REGEXP.п.3.12 - Различия в регулярных выражениях
+- v50.PROC.LOB.п.3.13 - Ограничения LOB объектов
+- v50.PROC.SAVEPOINT_LIMIT.п.3.18.2 - Ограничение на количество подтранзакций (64)
+- v50.PROC.TRANSACT_CONTROL.п.3.18.3 - Признак "Операция контролирует транзакцию"
+- v50.PROC.SAVEPOINT_LENGTH.п.3.18.4 - Размерность имени savepoint (макс 63)
+- v50.PROC.SET_THIS.п.3.20 - Конструкция set_this
+- v50.PROC.PARENT_REF.п.3.22 - Обращение к реквизитам родительского класса
+- v50.PROC.GENERIC_REF.п.3.24 - Обобщенные ссылки в представлении
+- тклоик20240828.DEV.THIS_FORBIDDEN.стр.3 - Запрет THIS для инициализации
+- тклоик20240828.DEV.NO_OBJECTS_VIEW.стр.3 - Запрет запросов к OBJECTS, COL2OBJ, REFS
+- тклоик20240828.DEV.NO_MULTI_MODIFIER.стр.3 - Запрет нескольких модификаторов % подряд
+- тклоик20240828.DEV.VARCHAR_SIZE.стр.4 - Указывать размерность VARCHAR2/STRING
+- тклоик20240828.DEV.NO_SAVEPOINT_DIRECT.стр.5 - Запрет прямых SAVEPOINT/ROLLBACK
+- тклоик20240828.DEV.GLOBAL_VAR.стр.7 - Запрет глобальных переменных
+- тклоик20240828.LOCAL.CYRILLIC.стр.1 - Запрет кириллицы в вычисляемых кодах
+- тклоик20240828.LOCAL.EXTENSION.стр.1 - Флаг "Объединённый пакет"
+- тклоик20240828.LOCAL.VIEW_FILTER.стр.2 - Установка глобальных переменных только в EXECUTE
+- тклоик20240828.LOCAL.VIEW_USER.стр.2 - Замена USER на [RUNTIME].[STDLIB].userid
+- PlpCheck.STYLE.CODE_IN_COMMENT.п.4.6 - Закомментированный код
+- PlpCheck.STYLE.EXIST_ALL.п.4.7 - ТБП без all/collection
+- PlpCheck.STYLE.SIZELESS.п.4.17 - VARCHAR2/STRING без размера
+- PlpCheck.STYLE.FUNCTIONS_IN_BODY.п.4.18 - Функции в EXECUTE/VALIDATE
+
+---
+
+### 🟢 LOW ПРИОРИТЕТ (24 правила) — ПО ВОЗМОЖНОСТИ
+
+- v50.SQL.LOCK_WAIT.п.1.22 - Блокировка строк с ожиданием
+- v50.STOR.TEMP_INIT.тдс20240828.стр.8 - Вызов init_temp_table() перед использованием
+- v50.STOR.INDEX_GIST.тклоик20240828.стр.4 - Использование GIST индекса для LIKE
+- v50.STOR.VARRAY_LIMIT.п.5.2 - Ограничение VARRAY (до 10 000 записей)
+- v50.STOR.LONG_TRANS.п.5.3 - Длительные транзакции (не более 20 минут)
+- v50.PROC.PIPELINED.п.3.9 - Pipelined functions
+- v50.PROC.UNREACHABLE.п.3.14.1 - Unreachable code
+- v50.PROC.METHOD_SIZE.п.3.14.2 - Превышение 65535 bytes limit
+- v50.PROC.JOBS.п.3.19 - Задания по расписанию (очередь 2MCA)
+- v50.PROC.COMPILE_TARGET.п.3.25 - Различная реализация для Oracle/PostgreSQL
+- v50.PROC.CONCAT_LIB.п.3.23 - Использование CONCAT_LIB для конкатенации
+- v50.INT.CLIENT.п.4.3 - Подключение внешнего клиентского приложения
+- v50.INT.SYNC.п.4.4.1 - Синхронное взаимодействие Интегратора
+- v50.CACHE.TERMS.п.6.1 - Термины кэширования
+- v50.CACHE.HIBERNATE.п.6.2 - Роль hibernate в платформе
+- v50.CACHE.ALGORITHM.п.6.3 - Алгоритм кэширования
+- v50.CACHE.FUNCTIONS.п.6.4 - Функции управления кэшем
+- v50.CACHE.FLUSH.п.6.5 - Сброс кэша
+- v50.CACHE.FIELDS.п.6.6 - Кэшируемые поля ORM объекта
+- v50.CACHE.LEVEL1.п.6.7 - Кэш первого уровня
+- v50.CACHE.LEVEL2.п.6.8 - Кэш второго уровня
+- v50.CACHE.SESSIONS.п.6.9 - Сессии
+- v50.CACHE.READ.п.6.10 - Обращение к кэшу при чтении
+- v50.CACHE.WRITE.п.6.11 - Обращение к кэшу при изменении
+- v50.CACHE.INSERT.п.6.12 - Обращение к кэшу при вставке
+- PlpCheck.STYLE.NOT_MENTIONED.п.4.8 - Неиспользуемые переменные
+- PlpCheck.STYLE.VALIDATE_DEFAULT.п.4.9 - Повторяющиеся DEFAULT валидации
+- PlpCheck.STYLE.GLOBAL_VAR.п.4.10 - Глобальные переменные
+
+---
+
+## 6. ПРАВИЛА PlpCheck (НОВЫЕ В v5.0.0) - ПОЛНЫЙ СПИСОК (16 ПРАВИЛ)
+
+1. PlpCheck.STYLE.BAD_PREFIX.п.4.3 - Некорректный префикс переменной (HIGH)
+2. PlpCheck.STYLE.PREFIX_TYPE.п.4.4 - Переменная без префикса типа (HIGH)
+3. PlpCheck.STYLE.RESERVED_PREFIX.п.4.5 - Зарезервированный префикс (HIGH)
+4. PlpCheck.STYLE.CODE_IN_COMMENT.п.4.6 - Закомментированный код (MEDIUM)
+5. PlpCheck.STYLE.EXIST_ALL.п.4.7 - ТБП без all/collection (MEDIUM)
+6. PlpCheck.STYLE.NOT_MENTIONED.п.4.8 - Неиспользуемые переменные (LOW)
+7. PlpCheck.STYLE.VALIDATE_DEFAULT.п.4.9 - Повторяющиеся DEFAULT валидации (LOW)
+8. PlpCheck.STYLE.GLOBAL_VAR.п.4.10 - Глобальные переменные (LOW)
+9. PlpCheck.STYLE.SAVEPOINT_ROLLBACK.п.4.11 - SAVEPOINT → &sp, ROLLBACK TO SAVEPOINT → &rb (HIGH)
+10. PlpCheck.STYLE.WRONG_CLASS.п.4.12 - CLASS → ::[CLASS] (HIGH)
+11. PlpCheck.STYLE.WRONG_ATTR.п.4.13 - .ATTR → .[ATTR] (HIGH)
+12. PlpCheck.STYLE.WRONG_METHOD.п.4.14 - CLASS.method → ::[CLASS].[method] (HIGH)
+13. PlpCheck.STYLE.STRING_AS_CLASS.п.4.15 - 'CLASS' → ::[CLASS]%class (HIGH)
+14. PlpCheck.STYLE.DEREFERENCE_OUT.п.4.16 - Разыменованное поле в out параметре (HIGH)
+15. PlpCheck.STYLE.SIZELESS.п.4.17 - VARCHAR2/STRING без размера (MEDIUM)
+16. PlpCheck.STYLE.FUNCTIONS_IN_BODY.п.4.18 - Функции в EXECUTE/VALIDATE (MEDIUM)
+
+**Примеры исправлений PlpCheck:**
+
+WRONG_CLASS (п.4.12): Было: SELECT * FROM CLIENT c -> Стало: SELECT * FROM ::[CLIENT] c
+
+WRONG_ATTR (п.4.13): Было: c.id, c.name -> Стало: c.[id], c.[name]
+
+WRONG_METHOD (п.4.14): Было: CLIENT.get_name(p_id) -> Стало: ::[CLIENT].[get_name](p_id)
+
+STRING_AS_CLASS (п.4.15): Было: v_class := 'CLIENT'%class -> Стало: v_class := ::[CLIENT]%class
+
+SAVEPOINT_ROLLBACK (п.4.11): Было: SAVEPOINT sp1; -> Стало: &sp('sp1');
+
+SIZELESS (п.4.17): Было: v_name varchar2; -> Стало: v_name varchar2(100);
+
+PREFIX_TYPE (п.4.4): Было: id number; -> Стало: n_id number;
+
+BAD_PREFIX (п.4.3): Было: bad_var varchar2(100); -> Стало: v_bad_var varchar2(100);
+
+---
+
+## 7. ПРИМЕРЫ ИСПРАВЛЕНИЙ (ОСНОВНЫЕ ПРАВИЛА)
+
+**OUTER JOIN (v50.SQL.OUTERJOIN.п.1.1):** Было: SELECT * FROM t1, t2 WHERE t1.id = t2.id(+) -> Стало: SELECT * FROM t1 LEFT JOIN t2 ON t1.id = t2.id
+
+**ROWNUM (v50.SQL.ROWNUM.п.1.2):** Было: SELECT * FROM t WHERE rownum <= 10 -> Стало: SELECT * FROM t FETCH FIRST 10 ROWS ONLY
+
+**DECODE (v50.SQL.DECODE.п.1.6.1):** Было: SELECT decode(status,1,'A',2,'B','?') FROM t -> Стало: SELECT CASE status WHEN 1 THEN 'A' WHEN 2 THEN 'B' ELSE '?' END FROM t
+
+**CONNECT BY (v50.SQL.CONNECTBY.п.1.8):** Было: SELECT * FROM t CONNECT BY PRIOR id = parent_id START WITH parent_id IS NULL -> Стало: WITH RECURSIVE cte AS (SELECT * FROM t WHERE parent_id IS NULL UNION ALL SELECT t2.* FROM t t2 JOIN cte ON t2.parent_id = cte.id) SELECT * FROM cte
+
+**DATE (v50.STOR.DATE.п.2.2):** Было: v_date DATE; -> Стало: v_date DATE_TIME;
+
+**WHEN OTHERS (v50.PROC.WHENOTHERS.п.3.5):** Было: EXCEPTION WHEN OTHERS THEN NULL; -> Стало: EXCEPTION WHEN OTHERS THEN ROLLBACK; RAISE;
+
+**EMPTY STRING (v50.PROC.EMPTY_STRING.п.3.2):** Было: WHERE name = '' -> Стало: WHERE name IS NULL
+
+**DBMS_CRYPTO (v50.PROC.CRYPTO.п.3.1.2):** Было: dbms_crypto.hash(src, dbms_crypto.hash_md5) -> Стало: ::[PCORE_INTERFACE].[INT_EXT_CALL_001].HSH_B(...)
+
+**UTL_HTTP (v50.PROC.HTTP.п.3.1.6):** Было: utl_http.request(...) -> Стало: ::[RUNTIME].[HTTP_MGR].url_get(...)
+
+---
+
+## 8. GUI-ФОРМА: НОВЫЙ ФЛАГ
+
+На форме "Адаптация АРМ под DBI (PostgreSQL)" добавить новый флаг:
+☐ Добавлять PlpCheck-правила (стиль кода)
+
+**Логика работы флага:**
+
+При включённом флаге (☑) применяются все 16 правил PlpCheck: исправляются префиксы (v_, n_, d_, b_, lr_, lrec_, tb_), исправляется синтаксис (::[CLASS], [ATTR], ::[CLASS].[METHOD]), добавляется размерность VARCHAR2/STRING, SAVEPOINT заменяется на &sp/&rb, удаляется закомментированный код, удаляются неиспользуемые переменные, выносятся повторяющиеся DEFAULT валидации, глобальные переменные заменяются на параметры, функции из EXECUTE/VALIDATE выносятся в основное тело.
+
+При выключенном флаге (☐) правила PlpCheck не применяются, исправляются только правила v50 (144 правила), стиль кода не изменяется, синтаксис PlpCheck не исправляется.
+
+---
+
+## 9. ФОРМАТ ОТЧЁТА (CHANGELOG.md)
+
+Журнал изменений АРМ-модулей. Версия: 1.0.0. Дата: 2026-08-17. Рубрикатор: v5.0.0.
+
+Статистика: Всего файлов, всего исправлений, HIGH, MEDIUM, LOW, PlpCheck (если флаг включён).
+
+По каждому файлу: для каждого исправления указать код правила, приоритет, категорию, строку, что было, что стало, обоснование.
+
+Отдельно список проблем, требующих ручной проверки: для каждой проблемы указать файл, строку, описание, рекомендацию, код правила.
+
+Рекомендации: проверить все файлы с пометкой "требует ручной проверки", выполнить компиляцию всех модулей после исправлений, протестировать бизнес-логику на тестовом стенде, при необходимости скорректировать размерность VARCHAR2.
+
+---
+
+## 10. КОНТРОЛЬНЫЙ СПИСОК ВЫПОЛНЕНИЯ
+
+ДО НАЧАЛА РАБОТЫ: проверен доступ к рубрикатору v5.0.0 (F:\TO_DBI\DATA\Рубрикатор v5), получены все АРМ-модули проекта, установлены настройки GUI-формы, определён флаг "Добавлять PlpCheck-правила".
+
+ВО ВРЕМЯ РАБОТЫ: выполнен анализ find_issues v5.sql, применены regex-правила (5.RUBRICATOR_PARSER_SQL v5.json), выполнен AI-анализ сложных случаев (4.RUBRICATOR_PROMPT v5.json), применены PlpCheck-правила (если флаг включён), сформирован CHANGELOG.md, сформирован список для ручной проверки.
+
+ПОСЛЕ ЗАВЕРШЕНИЯ: все HIGH-правила исправлены, все MEDIUM-правила проверены, все LOW-правила обработаны (по возможности), бизнес-логика сохранена, комментарии сохранены, код компилируется, отчёт сформирован.
+
+---
+
+## 11. КЛЮЧЕВЫЕ ПРАВИЛА ДЛЯ ПРОВЕРКИ (ТОП-10)
+
+1. v50.SQL.OUTERJOIN.п.1.1 - (+) → LEFT/RIGHT JOIN
+2. v50.SQL.ROWNUM.п.1.2 - ROWNUM → FETCH FIRST
+3. v50.SQL.DECODE.п.1.6.1 - DECODE → CASE
+4. v50.SQL.CONNECTBY.п.1.8 - CONNECT BY → WITH RECURSIVE
+5. v50.STOR.DATE.п.2.2 - DATE → DATE_TIME
+6. v50.PROC.WHENOTHERS.п.3.5 - Добавить ROLLBACK/RAISE
+7. v50.PROC.EMPTY_STRING.п.3.2 - '' → IS NULL
+8. PlpCheck.STYLE.WRONG_CLASS.п.4.12 - CLASS → ::[CLASS]
+9. PlpCheck.STYLE.WRONG_ATTR.п.4.13 - .ATTR → .[ATTR]
+10. PlpCheck.STYLE.SAVEPOINT_ROLLBACK.п.4.11 - SAVEPOINT → &sp/&rb
+
+---
+
+## 12. ЗАПУСК
+
+1. Скопируй это полное задание в Koda
+2. Укажи путь к рубрикатору: F:\TO_DBI\DATA\Рубрикатор v5
+3. Укажи путь к АРМ-модулям
+4. Настрой GUI-форму (флаг PlpCheck по желанию)
+5. Запусти выполнение

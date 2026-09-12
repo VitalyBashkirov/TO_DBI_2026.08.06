@@ -6,12 +6,11 @@
   "recursive": true,
   "only_modified": true,
   "preserve_structure": true,
-  "selected_rules": [
-    "v50",
-    "тдс20240828",
-    "тклоик20240828",
-    "README"
-  ],
+  "clean_output": true,
   "max_log_size_mb": 2,
-  "selected_priorities": []
+  "selected_priorities": [
+    "HIGH",
+    "MEDIUM",
+    "LOW"
+  ]
 }

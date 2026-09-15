@@ -18,6 +18,398 @@ except ImportError:
     PLPlusAIAnalyzer = None
     AIAnalysisResult = None
 
+# ============================================================
+# DS 042 (Приложение Б): константа отладки уровня модуля.
+# True — включить отладочные принты [DS_042-DEBUG]; False — отключить.
+# ============================================================
+DEBUG_FILTER = True
+
+
+# ============================================================
+# DS 032: ПРАВИЛА PlpCheck, НЕ ПРИМЕНИМЫЕ К .plp ФАЙЛАМ
+# ============================================================
+# Эти правила дают ложные срабатывания на процедурном PL+ коде (.plp):
+# либо относятся только к чистому SQL, либо реализованы отдельными
+# многострочными проверками ЦФТ-стиля (см. _check_plp_*).
+PLP_EXCLUDED_RULES: Set[str] = {
+    # Ложные срабатывания на PL+ синтаксис
+    'plpcheck.SYNTAX_ERROR',
+    'plpcheck.VARIABLE_SAME_NAME',
+    'plpcheck.NO_RECURSION_COMMENT',
+    'plpcheck.VBS_LINKING_ERROR',
+    'plpcheck.PURE_UDF',
+    'plpcheck.PURE_SQL_DBLINK',
+    'plpcheck.PURE_SQL_OUTER_JOIN',
+    'plpcheck.PURE_SQL_MINUS_NOT_DBI',
+    'plpcheck.PURE_SQL_PSEUDOCOL_UNSUPPORTED',
+    'plpcheck.PURE_SQL_FUNCTION_UNSUPPORTED',
+    'plpcheck.PURE_SQL_VIEW_IN_CONDITION',
+    'plpcheck.PURE_SQL_SELECT_FROM_ARRAY',
+    'plpcheck.PURE_SQL_SELECTANALYTICARGUMENT',
+    'plpcheck.PURE_SQL_JSON_TYPES',
+    'plpcheck.PURE_XMLTYPE_IN_SQL',
+    'plpcheck.PURE_SQL_CONNECTBY2WITH',
+    'plpcheck.METH_PARAM_AND_VAR_NAMES',
+    'plpcheck.METH_PARAM_AND_VAR_FULL_NAMES',
+    'plpcheck.WRONG_LOCAL_PREFIX',
+    'plpcheck.WRONG_CLASS_SYNTAX',
+    'plpcheck.WRONG_ATTR_SYNTAX',
+    'plpcheck.REF_NONTABLE',
+    'plpcheck.RESERVED_PREFIX',
+    'plpcheck.CONCAT_CONTROL',
+    'plpcheck.MACRO_CALL_EXECUTEPROCESS',
+    'plpcheck.PLATFORM_INTEGER_MISMATCH',
+    'plpcheck.ACCESS_STATIC',
+    # DS 033: ВАЖНО — BAD_PREFIX, NOT_MENTIONED, WRONG_METHOD_SYNTAX,
+    # CODE_IN_COMMENT, PREFIX_TYPE_IN_VAR_NAME, OUTER_JOIN НЕ включены сюда
+    # (см. PLP_MULTILINE_IMPLEMENTED_RULES ниже)
+}
+
+# ============================================================
+# DS 033: ПРАВИЛА С ТОЧНЫМИ МНОГОСТРОЧНЫМИ РЕАЛИЗАЦИЯМИ
+# ============================================================
+# Эти правила АКТИВНЫ и проверяются точными многострочными функциями
+# _check_plp_* в scan_file(). Их regex-паттерны из рубрикатора здесь
+# НЕ применяются, чтобы не дублировать срабатывания и не давать ложных
+# находок (проверено на REPS_EXP_115_1.plp: regex-путь давал 41 проблему
+# вместо 26 и ложный outer_join).
+PLP_MULTILINE_IMPLEMENTED_RULES: Set[str] = {
+    'plpcheck.BAD_PREFIX',            # _check_plp_bad_prefix
+    'plpcheck.NOT_MENTIONED',         # _check_plp_not_mentioned
+    'plpcheck.PREFIX_TYPE_IN_VAR_NAME',  # _check_plp_prefix_type_in_var_name
+    'plpcheck.WRONG_METHOD_SYNTAX',   # _check_plp_wrong_method_syntax
+    'plpcheck.CODE_IN_COMMENT',       # _check_plp_code_in_comment
+    'plpcheck.OUTER_JOIN',            # точная проверка планируется; regex даёт ложные срабатывания на PL+
+}
+
+# ============================================================
+# DS 032: МАППИНГ ПРАВИЛ PlpCheck НА КОРОТКИЕ ИМЕНА (CHECK)
+# ============================================================
+PLPCHECK_RULE_NAMES: Dict[str, str] = {
+    'plpcheck.BAD_PREFIX': 'bad_prefix',
+    'plpcheck.NOT_MENTIONED': 'not_mentioned',
+    'plpcheck.WRONG_METHOD_SYNTAX': 'wrong_method_syntax',
+    'plpcheck.CODE_IN_COMMENT': 'code_in_comment',
+    'plpcheck.PREFIX_TYPE_IN_VAR_NAME': 'prefix_type_in_var_name',
+    'plpcheck.SYNTAX_ERROR': 'syntax_error',
+    'plpcheck.VARIABLE_SAME_NAME': 'variable_same_name',
+    'plpcheck.NO_RECURSION_COMMENT': 'no_recursion_comment',
+    'plpcheck.VBS_LINKING_ERROR': 'vbs_linking_error',
+    'plpcheck.PURE_UDF': 'pure_udf',
+    'plpcheck.PURE_SQL_DBLINK': 'pure_sql_dblink',
+    'plpcheck.OUTER_JOIN': 'outer_join',
+    'plpcheck.METH_PARAM_AND_VAR_NAMES': 'meth_param_and_var_names',
+    'plpcheck.METH_PARAM_AND_VAR_FULL_NAMES': 'meth_param_and_var_full_names',
+    'plpcheck.WRONG_LOCAL_PREFIX': 'wrong_local_prefix',
+    'plpcheck.WRONG_CLASS_SYNTAX': 'wrong_class_syntax',
+    'plpcheck.WRONG_ATTR_SYNTAX': 'wrong_attr_syntax',
+    'plpcheck.REF_NONTABLE': 'ref_nontable',
+    'plpcheck.RESERVED_PREFIX': 'reserved_prefix',
+    'plpcheck.PLATFORM_INTEGER_MISMATCH': 'platform_integer_mismatch',
+    'plpcheck.CONCAT_CONTROL': 'concat_control',
+    'plpcheck.MACRO_CALL_EXECUTEPROCESS': 'macro_call_executeprocess',
+    'plpcheck.ACCESS_STATIC': 'access_static',
+}
+
+# ============================================================
+# DS 032: УРОВНИ ПРАВИЛ (LEVEL)
+# ============================================================
+PLPCHECK_RULE_LEVELS: Dict[str, str] = {
+    'plpcheck.BAD_PREFIX': 'WARNING',
+    'plpcheck.NOT_MENTIONED': 'WARNING',
+    'plpcheck.WRONG_METHOD_SYNTAX': 'WARNING',
+    'plpcheck.CODE_IN_COMMENT': 'WARNING',
+    'plpcheck.PREFIX_TYPE_IN_VAR_NAME': 'WARNING',
+    'plpcheck.SYNTAX_ERROR': 'ERROR',
+    'plpcheck.VARIABLE_SAME_NAME': 'WARNING',
+    'plpcheck.NO_RECURSION_COMMENT': 'WARNING',
+    'plpcheck.VBS_LINKING_ERROR': 'ERROR',
+    'plpcheck.PURE_UDF': 'WARNING',
+    'plpcheck.PURE_SQL_DBLINK': 'WARNING',
+    'plpcheck.OUTER_JOIN': 'WARNING',
+}
+
+# ============================================================
+# DS 032 / DS 044: ТИПЫ ПРАВИЛ (TYPE) — синхронизированы с эталоном ЦФТ-PlpCheck
+# Значения — список затронутых технологий (STYLE, DBI, JAVA, PLSQL, ...)
+# через запятую, как в колонке TYPE отчёта report_all.html.
+# ============================================================
+PLPCHECK_RULE_TYPES: Dict[str, str] = {
+    # --- STYLE (одиночный) ---
+    'plpcheck.BAD_PREFIX': 'STYLE',
+    'plpcheck.NOT_MENTIONED': 'STYLE',
+    'plpcheck.CODE_IN_COMMENT': 'STYLE',
+    'plpcheck.WRONG_METHOD_SYNTAX': 'STYLE',
+    'plpcheck.PREFIX_TYPE_IN_VAR_NAME': 'STYLE',
+    'plpcheck.VALIDATE_DEFAULT_TWICE': 'STYLE',
+    'plpcheck.VALIDATE_ELSE_INFO': 'STYLE',
+    'plpcheck.EXIST_ALL_OR_COLLECTIONS': 'STYLE',
+    'plpcheck.STRING_AS_CLASS': 'STYLE',
+    'plpcheck.RESERVED_PREFIX': 'STYLE',
+    'plpcheck.METH_PARAM_AND_VAR_NAMES': 'STYLE',
+    'plpcheck.METH_PARAM_AND_VAR_FULL_NAMES': 'STYLE',
+    'plpcheck.FUNCTIONS_IN_BODY_OR_VALIDATE': 'STYLE',
+    'plpcheck.VARIABLE_SAME_NAME': 'STYLE',
+    'plpcheck.WRONG_REF_SYNTAX': 'STYLE',
+    'plpcheck.WRONG_CLASS_SYNTAX': 'STYLE',
+    'plpcheck.WRONG_ATTR_SYNTAX': 'STYLE',
+    'plpcheck.WRONG_LOCAL_PREFIX': 'STYLE',
+    'plpcheck.GLOBAL_VAR': 'STYLE',
+    'plpcheck.IF_EXIT_TO_EXIT_WHEN': 'STYLE',
+    'plpcheck.RAISE_IN_OTHERS': 'STYLE',
+    'plpcheck.TRIVIAL_EXCEPTION_HANDLER': 'STYLE',
+    'plpcheck.NATIONAL_CURRENCY': 'STYLE',
+    'plpcheck.CONCAT_CONTROL': 'STYLE',
+    'plpcheck.ACCESS_STATIC': 'STYLE',
+    'plpcheck.PLATFORM_INTEGER_MISMATCH': 'STYLE',
+    # --- DBI (одиночный) ---
+    'plpcheck.DIRECT_COMPARISON_WITH_NULL': 'DBI',
+    'plpcheck.SYSTEM_VIEWS': 'DBI',
+    'plpcheck.OUTER_JOIN': 'DBI',
+    'plpcheck.SUBOPTIMAL_QUERY_WROWNUM': 'DBI',
+    'plpcheck.OBLIGATORY_IN_OTHERS': 'DBI',
+    'plpcheck.ROWNUM': 'DBI',
+    'plpcheck.UPDATE_DELETE_BY_SUBQUERY': 'DBI',
+    'plpcheck.REF_NONTABLE': 'DBI',
+    'plpcheck.NOT_CLOSED_CURSOR': 'DBI',
+    'plpcheck.NOT_CLOSED_FILE': 'DBI',
+    'plpcheck.NOT_HANDLED_CURSOR_EXCEPTIONS': 'DBI',
+    'plpcheck.MATCHING_TYPES': 'DBI',
+    'plpcheck.CONNECTBY2WITH': 'DBI',
+    'plpcheck.SELECTANALYTICARGUMENT': 'DBI',
+    'plpcheck.PURE_SQL_DBLINK': 'DBI',
+    'plpcheck.MACRO_CALL_EXECUTEPROCESS': 'DBI',
+    # --- Составные типы ---
+    'plpcheck.NO_RECURSION_COMMENT': 'DBI,JAVA,PLSQL',
+    'plpcheck.UDF': 'DBI,JAVA,PLSQL',
+    'plpcheck.PURE_UDF': 'DBI,JAVA,PLSQL',
+    'plpcheck.SIZELESS': 'JAVA,PLSQL',
+    'plpcheck.NOT_RETURN_STATEMENT': 'JAVA,PLSQL',
+    'plpcheck.ANALYTIC_AND_FETCH_BAD_USE': 'JAVA,PLSQL',
+    'plpcheck.SAVEPOINT_ROLLBACK_USAGE': 'PLSQL,STYLE',
+    'plpcheck.INSERT_PLSQL': 'JAVA',
+    'plpcheck.GOTO': 'JAVA',
+    'plpcheck.REGEXP_DIFF_IN_JAVA': 'DBI,JAVA',
+    'plpcheck.SUBOPTIMAL_EXPLICIT_DB_ROUNDRTIP': 'DBI,JAVA',
+    'plpcheck.CALL_STACK_ANALYSIS': 'DBI,JAVA',
+    'plpcheck.DEREFERENCE_IN_LOOP': 'PLSQL',
+    # --- Прочие ---
+    'plpcheck.SYNTAX_ERROR': 'SYNTAX',
+    'plpcheck.VBS_LINKING_ERROR': 'LINKING',
+}
+
+# ============================================================
+# DS 032: СООТВЕТСТВИЕ ТИПА ПЕРЕМЕННОЙ И ПРЕФИКСНОЙ БУКВЫ
+# ============================================================
+PLP_TYPE_LETTERS: Dict[str, str] = {
+    'number': 'n',
+    'integer': 'i',
+    'boolean': 'b',
+    'ref': 'r',
+    'string': 's',
+    'varchar2': 's',
+    'date': 'd',
+    'timestamp': 'd',
+    'rowtype': 'o',
+    'record': 'o',
+    'table': 't',
+    'varray': 't',
+}
+
+
+# ============================================================
+# DS 036: МАППИНГ ПРАВИЛ PlpCheck НА 7 КАТЕГОРИЙ + OTHER
+# (категории из 2.RUBRICATOR_CATEGORIES v5.md, №31-37)
+# ============================================================
+# Эвристика (вариант A из DS 036):
+#   category DBI + subcategory DBI.PURE_SQL -> SQL.CHECKS
+#   category DBI (прочие)                   -> DBI.ADAPTATION
+#   category WEB                            -> WEB.ADAPTATION
+#   category DEV + subcategory DEV.NAMING   -> STYLE.PREFIXES
+#   category DEV + subcategory DEV.STYLE    -> STYLE.PREFIXES
+#   правило PREFIX_TYPE_IN_VAR_NAME         -> STYLE.PREFIX_COMBINATION
+#   остальные                               -> OTHER
+PLPCHECK_RULE_TO_CATEGORY: Dict[str, str] = {
+    # --- STYLE.PREFIXES (DEV.NAMING + DEV.STYLE) ---
+    'plpcheck.BAD_PREFIX': 'STYLE.PREFIXES',
+    'plpcheck.RESERVED_PREFIX': 'STYLE.PREFIXES',
+    'plpcheck.WRONG_LOCAL_PREFIX': 'STYLE.PREFIXES',
+    'plpcheck.METH_PARAM_AND_VAR_NAMES': 'STYLE.PREFIXES',
+    'plpcheck.METH_PARAM_AND_VAR_FULL_NAMES': 'STYLE.PREFIXES',
+    'plpcheck.USES_RIP_OBJECT': 'STYLE.PREFIXES',
+    'plpcheck.CODE_IN_COMMENT': 'STYLE.PREFIXES',
+    'plpcheck.NOT_MENTIONED': 'STYLE.PREFIXES',
+    'plpcheck.WRONG_METHOD_SYNTAX': 'STYLE.PREFIXES',
+    'plpcheck.WRONG_ATTR_SYNTAX': 'STYLE.PREFIXES',
+    'plpcheck.WRONG_CLASS_SYNTAX': 'STYLE.PREFIXES',
+    'plpcheck.WRONG_REF_SYNTAX': 'STYLE.PREFIXES',
+    'plpcheck.FUNCRETURNKEYWORD': 'STYLE.PREFIXES',
+    'plpcheck.FUNCTIONS_IN_BODY_OR_VALIDATE': 'STYLE.PREFIXES',
+    'plpcheck.GLOBAL_VAR': 'STYLE.PREFIXES',
+    'plpcheck.IF_EXIT_TO_EXIT_WHEN': 'STYLE.PREFIXES',
+    'plpcheck.NO_RECURSION_COMMENT': 'STYLE.PREFIXES',
+    'plpcheck.SAVEPOINT_ROLLBACK_USAGE': 'STYLE.PREFIXES',
+    'plpcheck.STRING_AS_CLASS': 'STYLE.PREFIXES',
+    'plpcheck.UPPER_CASED_VARCHAR2': 'STYLE.PREFIXES',
+    'plpcheck.VALIDATE_ELSE_INFO': 'STYLE.PREFIXES',
+    'plpcheck.VARIABLE_SAME_NAME': 'STYLE.PREFIXES',
+    # --- STYLE.PREFIX_COMBINATION ---
+    'plpcheck.PREFIX_TYPE_IN_VAR_NAME': 'STYLE.PREFIX_COMBINATION',
+    # --- SQL.CHECKS (DBI.PURE_SQL) ---
+    'plpcheck.PURE_SQL_CONNECTBY2WITH': 'SQL.CHECKS',
+    'plpcheck.PURE_SQL_DBLINK': 'SQL.CHECKS',
+    'plpcheck.PURE_SQL_FUNCTION_UNSUPPORTED': 'SQL.CHECKS',
+    'plpcheck.PURE_SQL_JSON_TYPES': 'SQL.CHECKS',
+    'plpcheck.PURE_SQL_MINUS_NOT_DBI': 'SQL.CHECKS',
+    'plpcheck.PURE_SQL_OUTER_JOIN': 'SQL.CHECKS',
+    'plpcheck.PURE_SQL_PSEUDOCOL_UNSUPPORTED': 'SQL.CHECKS',
+    'plpcheck.PURE_SQL_SELECTANALYTICARGUMENT': 'SQL.CHECKS',
+    'plpcheck.PURE_SQL_SELECT_FROM_ARRAY': 'SQL.CHECKS',
+    'plpcheck.PURE_SQL_VIEW_IN_CONDITION': 'SQL.CHECKS',
+    'plpcheck.PURE_UDF': 'SQL.CHECKS',
+    'plpcheck.PURE_XMLTYPE_IN_SQL': 'SQL.CHECKS',
+    # --- WEB.ADAPTATION (category WEB) ---
+    'plpcheck.CONTROLS_VALIDATE_NAME': 'WEB.ADAPTATION',
+    'plpcheck.EXCEL_WORD_LIBS_WEB': 'WEB.ADAPTATION',
+    'plpcheck.REPORT_METHODS_WEB': 'WEB.ADAPTATION',
+    'plpcheck.WEB_REPORT': 'WEB.ADAPTATION',
+    'plpcheck.HOT_KEY_PROHIBITED': 'WEB.ADAPTATION',
+    'plpcheck.VBS_LINKING_ERROR': 'WEB.ADAPTATION',
+    'plpcheck.WEB_NOT_IMPLEMENTED': 'WEB.ADAPTATION',
+    # --- DBI.ADAPTATION (category DBI, кроме DBI.PURE_SQL) ---
+    'plpcheck.CROSS_DB_QUERY': 'DBI.ADAPTATION',
+    'plpcheck.COND_COMPILE_COMMENT': 'DBI.ADAPTATION',
+    'plpcheck.USER_IF_DEF': 'DBI.ADAPTATION',
+    'plpcheck.INSERT_WITH_ID': 'DBI.ADAPTATION',
+    'plpcheck.UPDATE_DELETE_BY_SUBQUERY': 'DBI.ADAPTATION',
+    'plpcheck.DYNAMIC_PLP': 'DBI.ADAPTATION',
+    'plpcheck.EXECUTEIMMEDIATE': 'DBI.ADAPTATION',
+    'plpcheck.OBLIGATORY_UNIQUE_ALIAS': 'DBI.ADAPTATION',
+    'plpcheck.NOT_HANDLED_CURSOR_EXCEPTIONS': 'DBI.ADAPTATION',
+    'plpcheck.OBLIGATORY_IN_OTHERS': 'DBI.ADAPTATION',
+    'plpcheck.USESQLCODE': 'DBI.ADAPTATION',
+    'plpcheck.USE_LOCAL_OBJECT_IN_EXTENSION': 'DBI.ADAPTATION',
+    'plpcheck.RESTRICTIONS_ON_IGNITE_FUNCTIONS': 'DBI.ADAPTATION',
+    'plpcheck.SUBOPTIMAL_EXPLICIT_DB_ROUNDRTIP': 'DBI.ADAPTATION',
+    'plpcheck.JSON_TYPES': 'DBI.ADAPTATION',
+    'plpcheck.CONTROLTABLECOLUMNSTYPE': 'DBI.ADAPTATION',
+    'plpcheck.INDEX_LENGTH': 'DBI.ADAPTATION',
+    'plpcheck.ROWIDIDENTIFIEDTABLE': 'DBI.ADAPTATION',
+    'plpcheck.WITHRECURSIVEMODEL': 'DBI.ADAPTATION',
+    'plpcheck.ACCESS_STATIC': 'DBI.ADAPTATION',
+    'plpcheck.COMPILE_MISSING_COND': 'DBI.ADAPTATION',
+    'plpcheck.REFERENCED_TO_OBJECT': 'DBI.ADAPTATION',
+    'plpcheck.ANALYTIC_AND_FETCH_BAD_USE': 'DBI.ADAPTATION',
+    'plpcheck.CARTESIAN_JOIN': 'DBI.ADAPTATION',
+    'plpcheck.CONCAT_CONTROL': 'DBI.ADAPTATION',
+    'plpcheck.CONV_STREAM_CHECKS': 'DBI.ADAPTATION',
+    'plpcheck.DEREFERENCE_IN_LOOP': 'DBI.ADAPTATION',
+    'plpcheck.FORM_TRANSACT_CONTROL': 'DBI.ADAPTATION',
+    'plpcheck.FULL_INDEX_SCAN': 'DBI.ADAPTATION',
+    'plpcheck.FULL_TABLE_SCAN': 'DBI.ADAPTATION',
+    'plpcheck.FUNCTION_BREAK_INDEX': 'DBI.ADAPTATION',
+    'plpcheck.INDEX_CAN_USE_BETTER': 'DBI.ADAPTATION',
+    'plpcheck.MANY_SUB_TRANSACTIONS': 'DBI.ADAPTATION',
+    'plpcheck.MULTIPLE_MODIFIERS': 'DBI.ADAPTATION',
+    'plpcheck.PARTITION_ALL': 'DBI.ADAPTATION',
+    'plpcheck.SIZE_RESTRICTION': 'DBI.ADAPTATION',
+    'plpcheck.SUBOPTIMAL_QUERY_WROWNUM': 'DBI.ADAPTATION',
+    'plpcheck.SUBOPTIMAL_UNSELECTED_COL_USAGE': 'DBI.ADAPTATION',
+    'plpcheck.UDF': 'DBI.ADAPTATION',
+    'plpcheck.NOT_CLOSED_CURSOR': 'DBI.ADAPTATION',
+    'plpcheck.NOT_CLOSED_FILE': 'DBI.ADAPTATION',
+    'plpcheck.CALL_STACK_ANALYSIS': 'DBI.ADAPTATION',
+    'plpcheck.COLUMNS_LIMIT_EXCEEDED': 'DBI.ADAPTATION',
+    'plpcheck.DEREFERENCING_TO_OUT_PARAM': 'DBI.ADAPTATION',
+    'plpcheck.ERROR_MESSAGE_ANALYSIS': 'DBI.ADAPTATION',
+    'plpcheck.EXCEPTIONLOOP': 'DBI.ADAPTATION',
+    'plpcheck.INSERT_PLSQL': 'DBI.ADAPTATION',
+    'plpcheck.INVALID_INIT': 'DBI.ADAPTATION',
+    'plpcheck.MACROEXECUTEPROCESS': 'DBI.ADAPTATION',
+    'plpcheck.MACROEXECUTEPROCESS_COMMENT': 'DBI.ADAPTATION',
+    'plpcheck.MACRO_CALL_EXECUTEPROCESS': 'DBI.ADAPTATION',
+    'plpcheck.NULL_IS_NULL_TO_JAVA': 'DBI.ADAPTATION',
+    'plpcheck.PARALLEL_EXECUTION': 'DBI.ADAPTATION',
+    'plpcheck.REFERENCE_COMPARISON': 'DBI.ADAPTATION',
+    'plpcheck.RESTRICT_REFERENCES_BAD_USE': 'DBI.ADAPTATION',
+    'plpcheck.ROWID': 'DBI.ADAPTATION',
+    'plpcheck.SAVEPOINT_ROLLBACK_MACRO_PARAM_LENGTH': 'DBI.ADAPTATION',
+    'plpcheck.SAVEPOINT_ROLLBACK_NAME_LENGTH': 'DBI.ADAPTATION',
+    'plpcheck.CONNECTBY2WITH': 'DBI.ADAPTATION',
+    'plpcheck.CONSTANT_IN_ORDER_AND_GROUP_BY': 'DBI.ADAPTATION',
+    'plpcheck.CONSTANT_ORDER_BY_ON_UDF': 'DBI.ADAPTATION',
+    'plpcheck.DIRECT_COMPARISON_WITH_NULL': 'DBI.ADAPTATION',
+    'plpcheck.DISTINCT_AND_ORDER_BY': 'DBI.ADAPTATION',
+    'plpcheck.DISTINCT_UDF': 'DBI.ADAPTATION',
+    'plpcheck.EMPTY_STRING_IN_CURSOR': 'DBI.ADAPTATION',
+    'plpcheck.EXIST_ALL_OR_COLLECTIONS': 'DBI.ADAPTATION',
+    'plpcheck.FETCH_OVER_SUBQUERY': 'DBI.ADAPTATION',
+    'plpcheck.FUNC_ATTR_DEREFERENCE': 'DBI.ADAPTATION',
+    'plpcheck.HINT_INDEX_ORDER_BY': 'DBI.ADAPTATION',
+    'plpcheck.INTERVAL_NOT_SELECT': 'DBI.ADAPTATION',
+    'plpcheck.MATCHING_TYPES': 'DBI.ADAPTATION',
+    'plpcheck.NESTED_TABLE': 'DBI.ADAPTATION',
+    'plpcheck.NVL_IN_SELECT': 'DBI.ADAPTATION',
+    'plpcheck.OUTER_JOIN': 'DBI.ADAPTATION',
+    'plpcheck.QUOTING': 'DBI.ADAPTATION',
+    'plpcheck.ROWNUM': 'DBI.ADAPTATION',
+    'plpcheck.SCHEMA_IN_DDL': 'DBI.ADAPTATION',
+    'plpcheck.SELECTANALYTICARGUMENT': 'DBI.ADAPTATION',
+    'plpcheck.SELECTLOCKWAIT': 'DBI.ADAPTATION',
+    'plpcheck.SQL_FUNCTION_UNSUPPORTED': 'DBI.ADAPTATION',
+    'plpcheck.SYSTEM_VIEWS': 'DBI.ADAPTATION',
+    'plpcheck.VERIFY_TYPE_IN_WITH': 'DBI.ADAPTATION',
+    'plpcheck.XMLTYPE_IN_SQL': 'DBI.ADAPTATION',
+    'plpcheck.REGEXP_DIFF_IN_JAVA': 'DBI.ADAPTATION',
+    'plpcheck.MAX_SIZE_ID': 'DBI.ADAPTATION',
+    'plpcheck.NATIVE_ID_OBJ_IDENTIFIER': 'DBI.ADAPTATION',
+    'plpcheck.NOT_CLASS_REF_TABLE_PARAM': 'DBI.ADAPTATION',
+    'plpcheck.PLATFORM_INTEGER_MISMATCH': 'DBI.ADAPTATION',
+    'plpcheck.REF_NONTABLE': 'DBI.ADAPTATION',
+    'plpcheck.ROWTYPE_DECLARED_PUBLIC': 'DBI.ADAPTATION',
+    'plpcheck.SIZELESS': 'DBI.ADAPTATION',
+    'plpcheck.ALIAS_COLUMN_VIEW': 'DBI.ADAPTATION',
+    'plpcheck.CRIT_EXT_IN_OLD_FORMAT': 'DBI.ADAPTATION',
+    'plpcheck.UDF_IN_FILTER_FORMULA': 'DBI.ADAPTATION',
+    # --- OTHER (category DEV, кроме DEV.NAMING/DEV.STYLE) ---
+    'plpcheck.CONTINUE_EXIT_OFF_THE_LOOP': 'OTHER',
+    'plpcheck.ENDLESS_CYCLE': 'OTHER',
+    'plpcheck.NOT_RETURN_STATEMENT': 'OTHER',
+    'plpcheck.FIXME_NOT_ALLOWED': 'OTHER',
+    'plpcheck.VALIDATE_DEFAULT_TWICE': 'OTHER',
+    'plpcheck.GETOBJECTINIFELSESECTION': 'OTHER',
+    'plpcheck.RAISE_IN_OTHERS': 'OTHER',
+    'plpcheck.TRIVIAL_EXCEPTION_HANDLER': 'OTHER',
+    'plpcheck.GOTO': 'OTHER',
+    'plpcheck.THIS_IN_DEFAULT': 'OTHER',
+    'plpcheck.METHOD_AVAILABILITY': 'OTHER',
+    'plpcheck.NATIONAL_CURRENCY': 'OTHER',
+    'plpcheck.SYNTAX_ERROR': 'OTHER',
+    'plpcheck.EDIT_HOTKEY': 'OTHER',
+    'plpcheck.FORM_SIZE': 'OTHER',
+    'plpcheck.ORDERED_CONTROLS': 'OTHER',
+}
+
+# ============================================================
+# DS 037: КАТЕГОРИИ PlpCheck ДЛЯ GUI И ОТЧЁТА
+# (из 2.RUBRICATOR_CATEGORIES v5.md, №31-37 + OTHER)
+# ============================================================
+# Структура: (код_категории, описание, CHECK-значения через запятую)
+# Константа перенесена из gui_app.py (DS 036) в scanner.py (Вариант A из DS 037),
+# чтобы быть доступной и сканеру, и GUI (gui_app.py импортирует её отсюда).
+PLPCHECK_CATEGORIES: List[Tuple[str, str, str]] = [
+    ('PLSQL.OPTIMIZATION',        'Оптимизация (2L/перевызов БД)',   ''),
+    ('JAVA.OPTIMIZATION',         'Оптимизация (СП/Java)',           ''),
+    ('DBI.ADAPTATION',            'Адаптация под PostgreSQL',        ''),
+    ('SQL.CHECKS',                'Проверки чистого SQL',            ''),
+    ('WEB.ADAPTATION',            'Адаптация под Веб-Навигатор',     ''),
+    ('STYLE.PREFIXES',            'Префиксы и оформление',
+        'bad_prefix, not_mentioned, wrong_method_syntax, code_in_comment'),
+    ('STYLE.PREFIX_COMBINATION',  'Комбинированные префиксы',
+        'prefix_type_in_var_name'),
+    ('OTHER',                     'Прочие PlpCheck-правила',          ''),
+]
+
 
 @dataclass
 class Issue:
@@ -33,6 +425,8 @@ class Issue:
     rubricator_example_code: str = ''
     rubricator_example_fixed: str = ''
     tags: List[str] = None
+    # DS 032: секция кода (PRIVATE/EXECUTE/...) для ЦФТ-формата отчёта
+    section: str = ''
     
     def __post_init__(self):
         if self.tags is None:
@@ -53,9 +447,17 @@ class PLPlusScanner:
         'тклоик20240828.NO_INTEGER_FOR_ID.стр.4' # INTEGER для ID
     }
     
-    def __init__(self, config: dict, selected_rules: List[str] = None, rubricator_prompts=None):
+    def __init__(self, config: dict, selected_rules: List[str] = None, rubricator_prompts=None,
+                 plpcheck_categories: List[str] = None, abort_callback=None):
         self.config = config
         self.selected_rules = selected_rules or []
+        # DS 036: выбранные категории PlpCheck (7 категорий + OTHER)
+        self.plpcheck_categories = plpcheck_categories or []
+        # DS 038: callback прерывания — возвращает True, если пользователь нажал «Прервать»
+        self.abort_callback = abort_callback
+        # DS 040: процент выполнения при прерывании
+        # None — если не прервано; иначе float (0.0–100.0)
+        self.abort_percent = None
         self.issues: List[Issue] = []
         self.stats: Dict[str, int] = {}
         self.in_block_comment = False
@@ -177,6 +579,27 @@ class PLPlusScanner:
                 # Определяем источник (v53, тдс20240828, тклоик20240828, PlpCheck)
                 file_code = rule_key.split('.')[0]
                 
+                # DS 032/033: правила PlpCheck, не применимые к .plp файлам
+                # (PLP_EXCLUDED_RULES — ложные срабатывания;
+                #  PLP_MULTILINE_IMPLEMENTED_RULES — реализованы точными
+                #  многострочными проверками _check_plp_*)
+                if file_code.lower() == 'plpcheck' and (
+                    rule_key in PLP_EXCLUDED_RULES or
+                    rule_key in PLP_MULTILINE_IMPLEMENTED_RULES
+                ):
+                    reason = 'исключено' if rule_key in PLP_EXCLUDED_RULES else 'реализовано многострочной проверкой'
+                    print(f"[DS 033] Правило {rule_key} {reason} для .plp файлов (regex пропущен)")
+                    continue
+                
+                # DS 036: фильтрация правил PlpCheck по выбранным категориям.
+                # plpcheck_categories пуст -> PlpCheck выключен в GUI, все правила проходят
+                # (совместимость с прежним поведением); не пуст -> только выбранные категории.
+                if file_code.lower() == 'plpcheck' and self.plpcheck_categories:
+                    rule_category = PLPCHECK_RULE_TO_CATEGORY.get(rule_key, 'OTHER')
+                    if rule_category not in self.plpcheck_categories:
+                        print(f"[DS 036] Правило {rule_key} пропущено (категория {rule_category} не выбрана)")
+                        continue
+                
                 # Фильтрация по выбранным файлам (DS 021, DS 016: регистронезависимо)
                 # selected_rules содержит КОДЫ ФАЙЛОВ рубрикатора (v53, PlpCheck, тдс20240828, тклоик20240828),
                 # а file_code - префикс правила. Сопоставляем через маппинг код файла -> префиксы правил.
@@ -273,6 +696,15 @@ class PLPlusScanner:
         
         Многострочные проверки захардкожены с кодами правил; здесь определяется
         файл рубрикатора по префиксу правила и проверяется его выбор.
+        
+        DS 034: поддерживаются ОБА формата selected_rules (как в DS 024 для
+        _load_patterns_from_rubricator):
+        - коды файлов: ['PlpCheck', 'v53'] — сравнение по file_code;
+        - коды правил: ['plpcheck.BAD_PREFIX', 'v53.SQL.OUTERJOIN.п.1.1'] —
+          сравнение по полному коду правила (так передаёт GUI из
+          _get_rules_for_selected_files).
+        Без пункта 3 многострочные проверки отключались при запуске из GUI:
+        file_code 'plpcheck' не совпадал точным вхождением с кодами правил.
         """
         if not self.selected_rules:
             return True
@@ -294,7 +726,35 @@ class PLPlusScanner:
         file_code = prefix_to_file.get(rule_prefix, rule_prefix)
         # Регистронезависимое сравнение (DS 016)
         selected_lower = [s.lower() for s in self.selected_rules]
-        return file_code.lower() in selected_lower
+        
+        # 1) Выбран файл рубрикатора целиком (['PlpCheck', ...])
+        if file_code.lower() in selected_lower:
+            # DS 036: если задан фильтр категорий, многострочные проверки
+            # PlpCheck выполняются только для выбранных категорий
+            if rule_prefix == 'plpcheck' and self.plpcheck_categories:
+                rule_category = PLPCHECK_RULE_TO_CATEGORY.get(rule_code, 'OTHER')
+                return rule_category in self.plpcheck_categories
+            return True
+        
+        # 2) DS 034: переданы коды правил — проверяем точный код этого правила
+        if rule_code.lower() in selected_lower:
+            # DS 036: фильтр категорий применяется и здесь
+            if rule_prefix == 'plpcheck' and self.plpcheck_categories:
+                rule_category = PLPCHECK_RULE_TO_CATEGORY.get(rule_code, 'OTHER')
+                return rule_category in self.plpcheck_categories
+            return True
+        
+        # 3) DS 034: переданы коды правил — совпадение файла-источника
+        #    (selected_rules содержит коды того же файла, например
+        #     'plpcheck.BAD_PREFIX' для rule_code 'plpcheck.NOT_MENTIONED')
+        if any(s.startswith(rule_prefix + '.') for s in selected_lower):
+            # DS 036: фильтр категорий применяется и здесь
+            if rule_prefix == 'plpcheck' and self.plpcheck_categories:
+                rule_category = PLPCHECK_RULE_TO_CATEGORY.get(rule_code, 'OTHER')
+                return rule_category in self.plpcheck_categories
+            return True
+        
+        return False
     
     def _check_multiline_when_others(self, lines: List[str]) -> List[Tuple[int, str]]:
         """Многострочный поиск WHEN OTHERS без ROLLBACK/RAISE (тдс20240828.TRANS_ABORTED.стр.29)"""
@@ -405,6 +865,312 @@ class PLPlusScanner:
                 issues.append((i + 1, line.strip()))
         return issues
     
+    # ============================================================
+    # DS 032: МНОГОСТРОЧНЫЕ ПРОВЕРКИ PlpCheck (СИНХРОНИЗАЦИЯ С ЦФТ)
+    # ============================================================
+    
+    def _plp_capitalize(self, name: str) -> str:
+        """DS 032: первая буква — заглавная, остальное без изменений (dp -> Dp, fmtHMS -> FmtHMS)"""
+        return name[0].upper() + name[1:] if name else name
+    
+    def _plp_type_letter(self, type_str: str) -> str:
+        """DS 032: префиксная буква типа по соглашению ЦФТ (number->n, string->s, ref->r...)"""
+        t = type_str.lower().strip()
+        if t.startswith('['):
+            # [STRING_1000], [BOOLEAN] и т.п. — строковые ТБП-типы
+            return 's' if 'string' in t.lower() else ''
+        if t.startswith('&'):
+            return ''  # пользовательский тип — буква неизвестна
+        return PLP_TYPE_LETTERS.get(t, '')
+    
+    def _plp_parse_sections(self, lines: List[str]) -> Dict[int, str]:
+        """DS 032: определить секцию (PRIVATE/EXECUTE) для каждой строки файла."""
+        sections = {}
+        current = 'PRIVATE'
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip().lower()
+            if re.match(r'^method\s+\w+\s+is$', stripped) or re.match(r'^method\s+\w+\s+is\b', stripped):
+                current = 'PRIVATE'
+            elif re.match(r'^execute\s+is$', stripped) or re.match(r'^execute\s+is\b', stripped):
+                current = 'EXECUTE'
+            sections[i] = current
+        return sections
+    
+    def _plp_iter_declarations(self, lines: List[str]):
+        """DS 032: итератор по объявлениям переменных.
+        
+        Возвращает кортежи (line_num, var_name, type_str, is_execute_section).
+        Распознаёт: 'x integer:=0;', 'fmt string(10):=...', 'lrBranch ref [BRANCH];',
+        'lrecBrInfo &pkg.type;', 'P_FILE_XML [STRING_1000];'
+        """
+        sections = self._plp_parse_sections(lines)
+        # тип: базовый тип | ref [CLASS] | [CLASS] | &pkg.type
+        decl_re = re.compile(
+            r'^\s*(\w+)\s+('
+            r'integer|number|string|varchar2|date|boolean|timestamp|rowtype'
+            r'|(?:ref\s*)?\[[\w\d_]+\]'
+            r'|&[\w.]+'
+            r')\s*(\(\s*\d+\s*\))?\s*(?::=|;)',
+            re.IGNORECASE
+        )
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith('--') or stripped.startswith('@') \
+               or stripped.lower().startswith(('class', 'method', 'execute', 'begin',
+                                              'pragma', 'function', 'end', 'if', 'return')):
+                continue
+            m = decl_re.match(line)
+            if m:
+                var_name = m.group(1)
+                type_str = m.group(2)
+                # 'ref [CLASS]' — нормализуем к 'ref'
+                if type_str.lower().startswith('ref'):
+                    type_str = 'ref'
+                yield i, var_name, type_str, sections.get(i, 'PRIVATE') == 'EXECUTE'
+    
+    def _plp_suggest_var_name(self, var_name: str, type_str: str, is_param: bool = False) -> str:
+        """DS 032: предложить корректное имя по соглашению ЦФТ.
+        
+        Переменные: v_<буква типа><Имя> (dp integer -> v_iDp);
+        для ref с префиксом 'lr' — v_r + остаток (lrBranch -> v_rBranch);
+        для неизвестного типа — v_ + имя (lrecBrInfo -> v_lrecBrInfo).
+        Параметры: p_<буква типа><Имя> (v1 boolean -> p_bV1).
+        """
+        base = 'p_' if is_param else 'v_'
+        letter = self._plp_type_letter(type_str)
+        
+        if not letter:
+            # Неизвестный тип: просто добавляем базовый префикс
+            return base + var_name
+        
+        # Если имя в camelCase (ведущие строчные + заглавная),
+        # ведущая строчная часть считается неправильным префиксом и отбрасывается:
+        # fmtHMS -> HMS -> v_sHMS, lrBranch -> Branch -> v_rBranch
+        if not is_param:
+            m = re.match(r'^[a-z]+(?=[A-Z])', var_name)
+            if m and m.end() < len(var_name):
+                var_name = var_name[m.end():]
+        
+        return f'{base}{letter}{self._plp_capitalize(var_name)}'
+    
+    def _check_plp_bad_prefix(self, lines: List[str]) -> List[Tuple[int, str, str]]:
+        """DS 032: bad_prefix — некорректные префиксы переменных и параметров (PRIVATE-секция).
+        
+        Возвращает список (line_num, message, original_line).
+        """
+        issues = []
+        sections = self._plp_parse_sections(lines)
+        func_re = re.compile(r'^\s*function\s+(\w+)\s*\((.*)\)\s*return', re.IGNORECASE)
+        param_re = re.compile(
+            r'(\w+)\s+(boolean|varchar2|string|number|integer|date)(\s*\(\s*\d+\s*\))?',
+            re.IGNORECASE
+        )
+        
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('--') or stripped.startswith('@'):
+                continue
+            if sections.get(i, 'PRIVATE') != 'PRIVATE':
+                continue  # в EXECUTE работает prefix_type_in_var_name
+            
+            # Параметры локальных функций: function NAME(p1 type, p2 type) return ...
+            fm = func_re.match(line)
+            if fm:
+                func_name = fm.group(1)
+                params_str = fm.group(2)
+                for pm in param_re.finditer(params_str):
+                    p_name = pm.group(1)
+                    p_type = pm.group(2)
+                    if p_name.lower() == func_name.lower():
+                        continue
+                    expected = f'p_{self._plp_type_letter(p_type)}'
+                    if not p_name.lower().startswith(expected):
+                        new_name = self._plp_suggest_var_name(p_name, p_type, is_param=True)
+                        msg = f'Не корректный префикс, пожалуйста переименуйте в "{new_name}"'
+                        issues.append((i, msg, stripped))
+                continue
+        
+        # Объявления переменных PRIVATE-секции
+        for line_num, var_name, type_str, is_exec in self._plp_iter_declarations(lines):
+            if is_exec:
+                continue
+            letter = self._plp_type_letter(type_str)
+            if letter:
+                expected = f'v_{letter}'
+                ok = var_name.lower().startswith(expected)
+            else:
+                ok = var_name.lower().startswith('v_')
+            if not ok:
+                new_name = self._plp_suggest_var_name(var_name, type_str)
+                msg = f'Не корректный префикс, пожалуйста переименуйте в "{new_name}"'
+                issues.append((line_num, msg, lines[line_num - 1].strip()))
+        
+        return issues
+    
+    def _check_plp_prefix_type_in_var_name(self, lines: List[str]) -> List[Tuple[int, str, str]]:
+        """DS 032: prefix_type_in_var_name — имя не содержит префикс типа (EXECUTE-секция).
+        
+        Возвращает список (line_num, message, original_line).
+        """
+        issues = []
+        for line_num, var_name, type_str, is_exec in self._plp_iter_declarations(lines):
+            if not is_exec:
+                continue
+            letter = self._plp_type_letter(type_str)
+            if letter and not var_name.lower().startswith(letter):
+                new_name = f'{letter}{self._plp_capitalize(var_name)}'
+                msg = (f'Наименование переменной не содержит префикс типа, '
+                       f'пожалуйста переименуйте в "{new_name}"')
+                issues.append((line_num, msg, lines[line_num - 1].strip()))
+        return issues
+    
+    def _check_plp_not_mentioned(self, lines: List[str]) -> List[Tuple[int, str, str]]:
+        """DS 032: not_mentioned — неиспользуемые объявления переменных и функций.
+        
+        Возвращает список (line_num, message, original_line).
+        """
+        issues = []
+        declared = {}   # name -> (line_num, kind, original_line)
+        
+        for line_num, var_name, type_str, is_exec in self._plp_iter_declarations(lines):
+            declared[var_name] = (line_num, 'var', lines[line_num - 1].strip())
+        
+        # Объявленные функции
+        func_re = re.compile(r'^\s*function\s+(\w+)\s*\(', re.IGNORECASE)
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('--'):
+                continue
+            fm = func_re.match(line)
+            if fm:
+                declared[fm.group(1)] = (i, 'func', stripped)
+        
+        # Поиск упоминаний вне строки объявления
+        for name, (decl_line, kind, original_line) in declared.items():
+            pattern = re.compile(rf'\b{re.escape(name)}\b')
+            used = False
+            for i, line in enumerate(lines, 1):
+                if i == decl_line:
+                    continue
+                if pattern.search(line):
+                    used = True
+                    break
+            if not used:
+                if kind == 'func':
+                    msg = f'Функция {name} нигде не вызывается. Проверьте внимательно программный код.'
+                else:
+                    msg = f'Переменная {name} более нигде не упоминается. Проверьте внимательно программный код.'
+                issues.append((decl_line, msg, original_line))
+        
+        return issues
+    
+    def _check_plp_wrong_method_syntax(self, lines: List[str]) -> List[Tuple[int, str, str]]:
+        """DS 032: wrong_method_syntax — обращение к методу без полного пути ::[CLASS].[METHOD].
+        
+        Возвращает список (line_num, message, original_line).
+        """
+        issues = []
+        # Системные ТБП с кратким написанием (настройка ::[RUNTIME])
+        runtime_map = {'str': '::[RUNTIME].[STR]'}
+        call_re = re.compile(r'\[(\w+)\]\.(\w+)\s*\(')
+        
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('--'):
+                continue
+            for m in call_re.finditer(line):
+                prefix = line[:m.start()]
+                # Полный путь: [CLASS] является частью цепочки после ::
+                # (например, ::[RUNTIME].[STR].Set_Par(...) -> prefix '::[RUNTIME].')
+                prefix_stripped = prefix.rstrip()
+                if '::' in prefix_stripped and prefix_stripped.endswith(('.', '::')):
+                    continue  # полный путь уже указан
+                class_name = m.group(1)
+                full_path = runtime_map.get(
+                    class_name.lower(), f'::[{class_name}].[{m.group(2).upper()}]'
+                )
+                msg = f'Обращение к методу должно быть в формате {full_path}'
+                issues.append((i, msg, stripped))
+        return issues
+    
+    def _plp_has_code_signs(self, text: str) -> bool:
+        """DS 032: содержит ли текст признаки исполняемого кода."""
+        if ';' in text:
+            return True
+        keywords = r'\b(if|then|else|elsif|begin|end|loop|while|for|select|from|where|' \
+                   r'insert|update|delete|return|function|procedure|declare|case|when)\b'
+        if re.search(keywords, text, re.IGNORECASE):
+            return True
+        if ':=' in text:
+            return True
+        return False
+    
+    def _check_plp_code_in_comment(self, lines: List[str]) -> List[Tuple[int, str, str]]:
+        """DS 032: code_in_comment — закомментированный код.
+        
+        Однострочные '--' комментарии: репортится первая строка каждой группы
+        подряд идущих комментариев с признаками кода.
+        Блочные '/* ... */' комментарии: репортится строка открытия, если
+        внутри блока есть признаки кода.
+        
+        Возвращает список (line_num, message, original_line).
+        """
+        issues = []
+        
+        # --- Блочные комментарии: трекинг /* ... */ ---
+        in_block = False
+        opener_line = None
+        block_content = []
+        block_issues = []  # (line_num, original_line)
+        for i, line in enumerate(lines, 1):
+            j = 0
+            while j < len(line):
+                if not in_block:
+                    idx = line.find('/*', j)
+                    if idx == -1:
+                        break
+                    in_block = True
+                    opener_line = i
+                    block_content = []
+                    j = idx + 2
+                else:
+                    idx = line.find('*/', j)
+                    if idx == -1:
+                        block_content.append(line[j:])
+                        j = len(line)
+                    else:
+                        block_content.append(line[j:idx])
+                        j = idx + 2
+                        in_block = False
+                        if opener_line is not None:
+                            if self._plp_has_code_signs(' '.join(block_content)):
+                                block_issues.append((opener_line, 'Удалите закомментированный код',
+                                                     lines[opener_line - 1].strip()))
+                            opener_line = None
+        
+        # --- Однострочные '--' комментарии: группы подряд идущих ---
+        group_first = None
+        prev_had_code = False
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('--'):
+                has_code = self._plp_has_code_signs(stripped[2:])
+                if has_code and not prev_had_code:
+                    group_first = i
+                prev_had_code = has_code
+            else:
+                if prev_had_code and group_first is not None:
+                    issues.append((group_first, 'Удалите закомментированный код',
+                                   lines[group_first - 1].strip()))
+                prev_had_code = False
+                group_first = None
+        if prev_had_code and group_first is not None:
+            issues.append((group_first, 'Удалите закомментированный код',
+                           lines[group_first - 1].strip()))
+        
+        issues.extend(block_issues)
+        return issues
+    
     def scan_file(self, file_path: Path, log_callback=None) -> List[Issue]:
         """Сканирование одного файла"""
         issues = []
@@ -413,6 +1179,14 @@ class PLPlusScanner:
         
         # DS 023: отладочный вывод
         print(f"[DEBUG] scan_file: {getattr(file_path, 'name', file_path)}, selected_rules: {self.selected_rules}")
+        
+        # DS 033: отладочный вывод для диагностики проверок PlpCheck
+        print(f"[DEBUG-DS033] selected_rules={self.selected_rules}")
+        print(f"[DEBUG-DS033] PATTERNS загружено: {len(self.PATTERNS)}")
+        print(f"[DEBUG-DS033] _is_rule_selected('plpcheck.BAD_PREFIX')={self._is_rule_selected('plpcheck.BAD_PREFIX')}")
+        print(f"[DEBUG-DS033] _is_rule_selected('plpcheck.NOT_MENTIONED')={self._is_rule_selected('plpcheck.NOT_MENTIONED')}")
+        print(f"[DEBUG-DS033] _is_rule_selected('plpcheck.WRONG_METHOD_SYNTAX')={self._is_rule_selected('plpcheck.WRONG_METHOD_SYNTAX')}")
+        print(f"[DEBUG-DS033] _is_rule_selected('plpcheck.CODE_IN_COMMENT')={self._is_rule_selected('plpcheck.CODE_IN_COMMENT')}")
         
         try:
             if log_callback:
@@ -582,26 +1356,8 @@ class PLPlusScanner:
                     if log_callback:
                         log_callback(f"    [МНОГОСТРОЧНЫЙ] Найдено {bad_code} в строке {line_num}", 'warning')
             
-            # 4. NOT_MENTIONED: неиспользуемые переменные (PlpCheck.STYLE.NOT_MENTIONED) — DS 022: фильтр
-            if self._is_rule_selected('PlpCheck.STYLE.NOT_MENTIONED'):
-                not_mentioned_issues = self._check_multiline_not_mentioned(self.lines)
-                for line_num, description in not_mentioned_issues:
-                    issue = Issue(
-                        file_path=str(file_path.resolve()),
-                        line_number=line_num,
-                        issue_type='PlpCheck.STYLE.NOT_MENTIONED',
-                        description=description,
-                        original_code=self.lines[line_num - 1][:200] if line_num <= len(self.lines) else '',
-                        category='STYLE',
-                        rubricator_code='PlpCheck.STYLE.NOT_MENTIONED',
-                        rubricator_full_description='Объявленные, но неиспользуемые переменные увеличивают размер кода и вносят путаницу.',
-                        rubricator_example_code='tmp_data number;',
-                        rubricator_example_fixed='',
-                        tags=['unused', 'variables']
-                    )
-                    issues.append(issue)
-                    if log_callback:
-                        log_callback(f"    [МНОГОСТРОЧНЫЙ] Найдено неиспользуемое объявление в строке {line_num}", 'warning')
+            # 4. NOT_MENTIONED: неиспользуемые переменные — DS 032: заменена точной
+            #    проверкой _check_plp_not_mentioned (см. блок DS 032 ниже)
             
             # 5. VARCHAR2/STRING без размера (тклоик20240828.VARCHAR_SIZE.стр.4) — DS 022: фильтр
             if self._is_rule_selected('тклоик20240828.VARCHAR_SIZE.стр.4'):
@@ -644,6 +1400,114 @@ class PLPlusScanner:
                     issues.append(issue)
                     if log_callback:
                         log_callback(f"    [МНОГОСТРОЧНЫЙ] Найдено INTEGER в строке {line_num}", 'warning')
+            
+            # ========== DS 032: ПРОВЕРКИ PlpCheck ЦФТ-СТИЛЯ ==========
+            file_section_map = self._plp_parse_sections(self.lines)
+            
+            # 1. bad_prefix (plpcheck.BAD_PREFIX)
+            if self._is_rule_selected('plpcheck.BAD_PREFIX'):
+                bp_issues = self._check_plp_bad_prefix(self.lines)
+                print(f"[DEBUG-DS033] _check_plp_bad_prefix нашел: {len(bp_issues)}")
+                for line_num, message, bad_code in bp_issues:
+                    issue = Issue(
+                        file_path=str(file_path.resolve()),
+                        line_number=line_num,
+                        issue_type='plpcheck.BAD_PREFIX',
+                        description=message,
+                        original_code=bad_code[:200],
+                        category='DEV',
+                        rubricator_code='plpcheck.BAD_PREFIX',
+                        rubricator_full_description='Проверка префиксов: v,t,gt,cur,gcur,ret,p,cn,gcn',
+                        tags=['prefix', 'naming', 'style'],
+                        section=file_section_map.get(line_num, 'PRIVATE')
+                    )
+                    issues.append(issue)
+                    if log_callback:
+                        log_callback(f"    [PlpCheck] bad_prefix в строке {line_num}: {message}", 'warning')
+            
+            # 2. not_mentioned (plpcheck.NOT_MENTIONED)
+            if self._is_rule_selected('plpcheck.NOT_MENTIONED'):
+                nm_issues = self._check_plp_not_mentioned(self.lines)
+                print(f"[DEBUG-DS033] _check_plp_not_mentioned нашел: {len(nm_issues)}")
+                for line_num, message, bad_code in nm_issues:
+                    issue = Issue(
+                        file_path=str(file_path.resolve()),
+                        line_number=line_num,
+                        issue_type='plpcheck.NOT_MENTIONED',
+                        description=message,
+                        original_code=bad_code[:200],
+                        category='DEV',
+                        rubricator_code='plpcheck.NOT_MENTIONED',
+                        rubricator_full_description='Непубличные сущности, объявленные в операции, должны в ней упоминаться',
+                        tags=['unused', 'declaration', 'mention'],
+                        section=file_section_map.get(line_num, 'PRIVATE')
+                    )
+                    issues.append(issue)
+                    if log_callback:
+                        log_callback(f"    [PlpCheck] not_mentioned в строке {line_num}: {message}", 'warning')
+            
+            # 3. prefix_type_in_var_name (plpcheck.PREFIX_TYPE_IN_VAR_NAME)
+            if self._is_rule_selected('plpcheck.PREFIX_TYPE_IN_VAR_NAME'):
+                pt_issues = self._check_plp_prefix_type_in_var_name(self.lines)
+                print(f"[DEBUG-DS033] _check_plp_prefix_type_in_var_name нашел: {len(pt_issues)}")
+                for line_num, message, bad_code in pt_issues:
+                    issue = Issue(
+                        file_path=str(file_path.resolve()),
+                        line_number=line_num,
+                        issue_type='plpcheck.PREFIX_TYPE_IN_VAR_NAME',
+                        description=message,
+                        original_code=bad_code[:200],
+                        category='DEV',
+                        rubricator_code='plpcheck.PREFIX_TYPE_IN_VAR_NAME',
+                        rubricator_full_description='Наименование переменной должно содержать префикс типа',
+                        tags=['variable', 'prefix', 'type'],
+                        section=file_section_map.get(line_num, 'EXECUTE')
+                    )
+                    issues.append(issue)
+                    if log_callback:
+                        log_callback(f"    [PlpCheck] prefix_type_in_var_name в строке {line_num}: {message}", 'warning')
+            
+            # 4. wrong_method_syntax (plpcheck.WRONG_METHOD_SYNTAX)
+            if self._is_rule_selected('plpcheck.WRONG_METHOD_SYNTAX'):
+                wm_issues = self._check_plp_wrong_method_syntax(self.lines)
+                print(f"[DEBUG-DS033] _check_plp_wrong_method_syntax нашел: {len(wm_issues)}")
+                for line_num, message, bad_code in wm_issues:
+                    issue = Issue(
+                        file_path=str(file_path.resolve()),
+                        line_number=line_num,
+                        issue_type='plpcheck.WRONG_METHOD_SYNTAX',
+                        description=message,
+                        original_code=bad_code[:200],
+                        category='DEV',
+                        rubricator_code='plpcheck.WRONG_METHOD_SYNTAX',
+                        rubricator_full_description='Обращение к методу в формате ::[CLASS].[METHOD]',
+                        tags=['method', 'syntax', 'path'],
+                        section=file_section_map.get(line_num, 'EXECUTE')
+                    )
+                    issues.append(issue)
+                    if log_callback:
+                        log_callback(f"    [PlpCheck] wrong_method_syntax в строке {line_num}: {message}", 'warning')
+            
+            # 5. code_in_comment (plpcheck.CODE_IN_COMMENT)
+            if self._is_rule_selected('plpcheck.CODE_IN_COMMENT'):
+                cc_issues = self._check_plp_code_in_comment(self.lines)
+                print(f"[DEBUG-DS033] _check_plp_code_in_comment нашел: {len(cc_issues)}")
+                for line_num, message, bad_code in cc_issues:
+                    issue = Issue(
+                        file_path=str(file_path.resolve()),
+                        line_number=line_num,
+                        issue_type='plpcheck.CODE_IN_COMMENT',
+                        description=message,
+                        original_code=bad_code[:200],
+                        category='DEV',
+                        rubricator_code='plpcheck.CODE_IN_COMMENT',
+                        rubricator_full_description='Закомментированный код считается плохим тоном и запрещен в многих регламентах.',
+                        tags=['comment', 'code', 'style'],
+                        section=file_section_map.get(line_num, 'EXECUTE')
+                    )
+                    issues.append(issue)
+                    if log_callback:
+                        log_callback(f"    [PlpCheck] code_in_comment в строке {line_num}", 'warning')
             
             # ========== ФАЗА 2: AI-АНАЛИЗ СЛОЖНЫХ ПРАВИЛ ==========
             if self.ai_analyzer and hasattr(self, '_rubricator_rules'):
@@ -723,10 +1587,43 @@ class PLPlusScanner:
         all_files = [f for f in file_finder(file_pattern) if not self._should_exclude(f)]
         total_files = len(all_files)
         
+        # DS 034: отладочный вывод списка найденных файлов (Шаги 1-2 диагностики)
+        print(f"[DEBUG-DS034] scan_directory: source_dir={source_dir}, pattern={file_pattern}, recursive={recursive}")
+        print(f"[DEBUG-DS034] Найдено файлов для сканирования: {len(all_files)}")
+        for f in all_files[:5]:
+            print(f"[DEBUG-DS034]   - {f}")
+        
         if log_callback and total_files > 0:
             log_callback(f"\nВсего файлов для сканирования: {total_files}", 'info')
         
-        for plp_file in all_files:
+        for idx, plp_file in enumerate(all_files, 1):
+            # DS 038: проверка прерывания (кнопка «Прервать» в GUI)
+            if self.abort_callback and self.abort_callback():
+                # DS 042: отладка переменных прерывания (обёрнуто в DEBUG_FILTER)
+                if DEBUG_FILTER:
+                    print(f"[DS_042-DEBUG] total_files={total_files}")
+                    print(f"[DS_042-DEBUG] idx={idx}")
+                    print(f"[DS_042-DEBUG] files_scanned={files_scanned}")
+                    print(f"[DS_042-DEBUG] abort_percent (до)={self.abort_percent}")
+                # DS 040/DS 042: процент ОБРАБОТАННЫХ файлов на момент прерывания
+                if total_files > 0:
+                    self.abort_percent = files_scanned / total_files * 100.0
+                else:
+                    self.abort_percent = 0.0
+                # DS 042: отладка
+                if DEBUG_FILTER:
+                    print(f"[DS_042-DEBUG] abort_percent (после)={self.abort_percent}")
+                if log_callback:
+                    log_callback(
+                        f"[ПРЕРВАНО] Сканирование остановлено пользователем. "
+                        f"Обработано файлов: {files_scanned} из {total_files} "
+                        f"({self.abort_percent:.2f}%)",
+                        'warning'
+                    )
+                break
+            
+            # DS 034: отладочный вывод вызова scan_file (Шаг 2)
+            print(f"[DEBUG-DS034] scan_directory: вызываю scan_file для {plp_file.name}")
             file_issues = self.scan_file(plp_file, log_callback=log_callback)
             files_scanned += 1
             
@@ -802,14 +1699,26 @@ class PLPlusScanner:
             by_file[issue.file_path].append(issue)
         return by_file
         
-    def _parse_class_and_method(self, file_path) -> Tuple[str, str, str]:
-        """Парсинг имени класса, метода и секции из файла (DS 025)"""
+    def _parse_class_and_method(self, file_path, line_number: int = None) -> Tuple[str, str, str]:
+        """Парсинг имени класса, метода и секции из файла (DS 025).
+
+        DS 038 (Проблема C): если передан line_number — секция определяется
+        ПО СТРОКЕ проблемы (последний маркер секции до этой строки),
+        а не по первому вхождению секции в файле.
+        DS 044: для представлений (view VW_CRIT_*, VW_RPT_*, VW_SQL_*)
+        секция = пустая строка, как в эталонном отчёте ЦФТ-PlpCheck.
+        """
         class_name = "UNKNOWN"
         method_name = "UNKNOWN"
         section = "PRIVATE"
         
         try:
             content, _ = read_file_with_encoding(Path(file_path))
+            lines = content.splitlines()
+
+            # DS 044: определяем — это представление (view) или операция (class)
+            is_view = bool(re.search(r'^\s*view\s+\w+', content, re.MULTILINE))
+
             # Ищем класс
             class_match = re.search(r'\bclass\s+(\w+)', content)
             if class_match:
@@ -818,10 +1727,37 @@ class PLPlusScanner:
             method_match = re.search(r'\bmethod\s+(\w+)\s+is', content, re.IGNORECASE)
             if method_match:
                 method_name = method_match.group(1)
-            # Ищем секцию (PRIVATE / EXECUTE / VALIDATE / PUBLIC)
-            section_match = re.search(r'\b(PRIVATE|EXECUTE|VALIDATE|PUBLIC)\b', content)
-            if section_match:
-                section = section_match.group(1)
+            # DS 044: для представления имя = имя view
+            if is_view and method_name == "UNKNOWN":
+                view_name_match = re.search(r'^\s*view\s+(\w+)', content, re.MULTILINE)
+                if view_name_match:
+                    method_name = view_name_match.group(1)
+
+            # DS 044: для представлений секция всегда пуста — как в ЦФТ
+            if is_view:
+                return class_name, method_name, ""
+
+            # DS 038: карта секций по строкам — маркеры "private is",
+            # "execute is", "validate is", "public is"
+            section_markers = []  # [(line_num, section_name), ...]
+            for i, line in enumerate(lines, 1):
+                m = re.match(r'^(private|execute|validate|public)\s+is\b',
+                             line.strip(), re.IGNORECASE)
+                if m:
+                    section_markers.append((i, m.group(1).upper()))
+            
+            if line_number is not None and section_markers:
+                # Секция = последний маркер на строке <= line_number
+                current_section = "PRIVATE"  # до первого маркера
+                for marker_line, marker_section in section_markers:
+                    if marker_line <= line_number:
+                        current_section = marker_section
+                    else:
+                        break
+                section = current_section
+            elif section_markers:
+                # line_number не указан — первая секция в файле
+                section = section_markers[0][1]
         except Exception:
             pass
         
@@ -843,9 +1779,73 @@ class PLPlusScanner:
                 return 'ERROR_STYLE'
         return 'WARNING_STYLE'
     
+    def _generate_active_rubricators_lines(self) -> List[str]:
+        """DS 037: строки блока «Активные рубрикаторы и флаги» для отчёта.
+
+        Определяет активность рубрикаторов по кодам правил в self.selected_rules
+        (GUI передаёт коды правил вида 'plpcheck.BAD_PREFIX', 'v53...', либо
+        коды файлов 'PlpCheck', 'v53' — поддерживаются оба варианта).
+        """
+        lines = ["Активные рубрикаторы и флаги:"]
+
+        selected_lower = [s.lower() for s in (self.selected_rules or [])]
+
+        # DS 037 (ЗАДАЧА 6): ни один рубрикатор не выбран
+        if not selected_lower:
+            lines.append("  (ни один рубрикатор не выбран)")
+            return lines
+
+        # (ключ, отображаемое имя, префиксы кодов правил)
+        rubricators = [
+            ('v53',            'v53',            ('v53.', 'v50.')),
+            ('тдс20240828',    'тдс20240828',    ('тдс20240828.',)),
+            ('тклоик20240828', 'тклоик20240828', ('тклоик20240828.',)),
+            ('PlpCheck',       'PlpCheck',       ('plpcheck.',)),
+        ]
+
+        for code, name, prefixes in rubricators:
+            # Активность: точное совпадение кода файла ИЛИ префикс кода правила
+            is_on = any(s == code.lower() or s.startswith(prefixes) for s in selected_lower)
+            lines.append(f"  {name:<18}: {'ВКЛ' if is_on else 'ВЫКЛ'}")
+
+            # DS 037: для PlpCheck — детализация по категориям
+            if code == 'PlpCheck' and is_on:
+                active_lower = [c.lower() for c in (self.plpcheck_categories or [])]
+
+                # DS 037 (ЗАДАЧА 5): PlpCheck выбран, но категории пусты
+                if not active_lower:
+                    lines.append("    └ (ни одна категория не выбрана — PlpCheck-правила не применялись)")
+                else:
+                    total = len(PLPCHECK_CATEGORIES)
+                    for idx, (cat_code, _cat_descr, _cat_checks) in enumerate(PLPCHECK_CATEGORIES):
+                        cat_on = cat_code.lower() in active_lower
+                        cat_status = 'ВКЛ' if cat_on else 'ВЫКЛ'
+                        prefix = '└' if idx == total - 1 else '├'
+                        lines.append(f"    {prefix} {cat_code:<26}: {cat_status}")
+
+        return lines
+
+    def _normalize_check_name(self, issue_type: str) -> str:
+        """DS 044: нормализация CHECK — без префикса plpcheck., в нижнем регистре.
+
+        Если правило есть в PLPCHECK_RULE_NAMES — берём значение оттуда
+        (значения уже без префикса и в нижнем регистре).
+        Иначе — снимаем префикс ``plpcheck.`` и приводим к нижнему регистру.
+        """
+        if issue_type in PLPCHECK_RULE_NAMES:
+            return PLPCHECK_RULE_NAMES[issue_type]
+        name = issue_type
+        if name.startswith('plpcheck.'):
+            name = name[len('plpcheck.'):]
+        return name.lower()
+
     def generate_report(self, output_path: Path):
         """Генерация отчёта. DS 025: если расширение .html - генерируется HTML-таблица
-        в формате дистрибутивного PlpCheck-отчёта, иначе - прежний Markdown."""
+        в формате дистрибутивного PlpCheck-отчёта.
+        DS 032: Markdown-отчёт синхронизирован с эталонным логом ЦФТ-PlpCheck:
+        таб-разделяемая таблица № | CLASS_ID | SHORT_NAME | SECTION | LINE | CHECK |
+        LEVEL | TYPE | ERROR | PLAN.
+        """
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
         # DS 025: HTML-отчёт в формате дистрибутивного PlpCheck
@@ -853,67 +1853,107 @@ class PLPlusScanner:
             self._generate_html_report(output_path)
             return
         
-        by_file = {}
+        # DS 030: удаление дубликатов
+        unique_issues = []
+        seen = set()
         for issue in self.issues:
-            if issue.file_path not in by_file:
-                by_file[issue.file_path] = []
-            by_file[issue.file_path].append(issue)
+            key = (issue.file_path, issue.line_number, issue.issue_type, issue.description)
+            if key not in seen:
+                seen.add(key)
+                unique_issues.append(issue)
         
-        # DS 029: Markdown-отчёт в формате дистрибутивного PlpCheck-лога
-        # (одна строка на проблему: КЛАСС.МЕТОД.СЕКЦИЯ:СТРОКА ТИП: ОПИСАНИЕ)
-        if not self.issues:
+        if not unique_issues:
             with open(output_path, 'w', encoding='utf-8') as f:
-                f.write("PlpCheck Отчёт\n")
+                f.write("CFT Platform IDE Version: 2.36.431 (АРМ «Адаптация под DBI»)\n")
                 f.write(f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                # DS 037: блок активных рубрикаторов и флагов
+                f.write("\n".join(self._generate_active_rubricators_lines()))
+                f.write("\n\n")
                 f.write("Проблем не найдено.\n")
             print(f"Отчёт сохранён: {output_path}")
             return
         
-        # Кэш метаданных по файлам
+        # DS 032: формирование строк таблицы в формате ЦФТ-PlpCheck
         meta_cache = {}
-        
-        # Формируем строки: {КЛАСС}.{МЕТОД}.{СЕКЦИЯ}:{СТРОКА} {ТИП}: {ОПИСАНИЕ} | ПЛАН: {ИСПРАВЛЕНИЕ}
-        report_lines = []
-        for issue in self.issues:
+        rows = []
+        for issue in unique_issues:
             fp = issue.file_path
             if fp not in meta_cache:
                 meta_cache[fp] = self._parse_class_and_method(fp)
-            class_name, method_name, section = meta_cache[fp]
+            class_name, method_name, default_section = meta_cache[fp]
             
+            # CHECK: короткое имя правила PlpCheck без префикса, в нижнем регистре (DS 044)
+            check_name = self._normalize_check_name(issue.issue_type)
+            # LEVEL: WARNING/ERROR
+            if issue.issue_type in PLPCHECK_RULE_LEVELS:
+                level = PLPCHECK_RULE_LEVELS[issue.issue_type]
+            else:
+                level = 'ERROR' if self._get_severity_level(issue.issue_type) == 'ERROR_STYLE' else 'WARNING'
+            # TYPE: STYLE/SYNTAX/SQL/... или категория правила
+            issue_type_ru = PLPCHECK_RULE_TYPES.get(issue.issue_type, issue.category.upper())
+            # SECTION: точная секция (DS 032) или секция из метаданных файла.
+            # DS 038 (Проблема C): если issue.section пуст — секция определяется
+            # ПО СТРОКЕ проблемы, а не по первому вхождению секции в файле
+            if issue.section:
+                section = issue.section
+            else:
+                _, _, section = self._parse_class_and_method(fp, line_number=issue.line_number)
+            # PLAN
             plan = self._generate_plan(issue.issue_type, issue.description)
-            report_lines.append(
-                f"{class_name}.{method_name}.{section}:{issue.line_number} "
-                f"{issue.issue_type}: {issue.description} | ПЛАН: {plan}"
+            
+            rows.append({
+                'class': class_name,
+                'method': method_name,
+                'section': section,
+                'line': issue.line_number,
+                'check': check_name,
+                'level': level,
+                'type': issue_type_ru,
+                'error': issue.description,
+                'plan': plan,
+                'file': fp,
+            })
+        
+        # Сортировка: файл -> строка -> not_mentioned первым -> алфавит CHECK
+        def _row_sort_key(r):
+            check_order = 0 if r['check'] == 'not_mentioned' else 1
+            return (r['file'], r['line'], check_order, r['check'])
+        
+        rows.sort(key=_row_sort_key)
+        
+        # Таблица в формате эталонного лога ЦФТ-PlpCheck (таб-разделяемая)
+        header = "№	CLASS_ID	SHORT_NAME	SECTION	LINE	CHECK	LEVEL	TYPE	ERROR	PLAN"
+        sep = "-" * 149
+        table_lines = [header, sep]
+        for i, r in enumerate(rows, 1):
+            table_lines.append(
+                f"{i}	{r['class']}	{r['method']}	{r['section']}	{r['line']}	"
+                f"{r['check']}	{r['level']}	{r['type']}	{r['error']}	{r['plan']}"
             )
         
-        # Сортировка по классу, методу, строке (строка извлекается из начала строки отчёта)
-        def _sort_key(s):
-            # Формат: КЛАСС.МЕТОД.СЕКЦИЯ:СТРОКА ...
-            try:
-                loc, rest = s.split(' ', 1)
-                cls_meth_sec, line_str = loc.rsplit(':', 1)
-                return (cls_meth_sec, int(line_str))
-            except (ValueError, IndexError):
-                return (s, 0)
-        
-        report_lines.sort(key=_sort_key)
-        
-        # DS 030: удаление дубликатов (сохраняем порядок сортировки)
-        unique_lines = []
-        seen = set()
-        for line in report_lines:
-            if line not in seen:
-                unique_lines.append(line)
-                seen.add(line)
-        
         with open(output_path, 'w', encoding='utf-8') as f:
-            f.write("PlpCheck Отчёт\n")
-            f.write(f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Всего проблем: {len(report_lines)}\n")
-            f.write(f"Уникальных проблем: {len(unique_lines)}\n")
-            f.write(f"Всего файлов: {len(meta_cache)}\n\n")
-            f.write("\n".join(unique_lines))
-            f.write("\n")
+            f.write("CFT Platform IDE Version: 2.36.431 (АРМ «Адаптация под DBI»)\n")
+            f.write(f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            # DS 037: блок активных рубрикаторов и флагов
+            f.write("\n".join(self._generate_active_rubricators_lines()))
+            f.write("\n\n")
+            f.write("\n".join(table_lines))
+            f.write("\n\n")
+            # DS 041: при прерывании «Всего» вводит в заблуждение — обработана
+            # только часть файлов. Вариант B: при прерывании «Обработано»,
+            # при завершении — привычное «Всего».
+            total_word = "Обработано" if self.abort_percent is not None else "Всего"
+            f.write(f"{total_word} проблем: {len(self.issues)}\n")
+            # DS 033: «Уникальных» считается группировкой по (LINE, CHECK) —
+            # как в эталонном логе ЦФТ-PlpCheck (два bad_prefix на строке 17
+            # схлопываются в одну уникальную позицию)
+            unique_line_check = len(set((r['file'], r['line'], r['check']) for r in rows))
+            f.write(f"Уникальных проблем: {unique_line_check}\n")
+            f.write(f"{total_word} файлов: {len(meta_cache)}\n")
+            # DS 043: упрощённая строка прерывания (без HTML-тегов, без эмодзи)
+            if self.abort_percent is not None:
+                f.write("\n")
+                f.write(f"ПРЕРВАНО НА {self.abort_percent:.2f} %\n")
         
         print(f"Отчёт сохранён: {output_path}")
     
@@ -933,16 +1973,26 @@ class PLPlusScanner:
             fp = issue.file_path
             if fp not in parsed_cache:
                 parsed_cache[fp] = self._parse_class_and_method(fp)
-            class_name, method_name, section = parsed_cache[fp]
+            class_name, method_name, _ = parsed_cache[fp]
+            # DS 038 (Проблема C): секция по строке проблемы, а не по первому вхождению
+            if issue.section:
+                section = issue.section
+            else:
+                _, _, section = self._parse_class_and_method(fp, line_number=issue.line_number)
             severity = self._get_severity_level(issue.issue_type)
+            # DS 044: LEVEL — без суффикса _STYLE (WARNING / ERROR, как в ЦФТ)
+            level_clean = severity.replace('_STYLE', '')
             plan_data = self._generate_issue_with_plan(issue, len(rows), parsed_cache)
             rows.append({
                 'class': class_name,
                 'method': method_name,
                 'section': section,
                 'line': issue.line_number,
-                'type': issue.issue_type,
-                'level': severity,
+                # DS 044: CHECK — без префикса plpcheck., в нижнем регистре
+                'check': self._normalize_check_name(issue.issue_type),
+                # DS 044: TYPE — затронутые технологии (STYLE, DBI,JAVA,PLSQL, ...)
+                'type': PLPCHECK_RULE_TYPES.get(issue.issue_type, issue.category.upper()),
+                'level': level_clean,
                 'description': issue.description,
                 'plan': plan_data['plan'],
                 'corrected_lines': plan_data['corrected_lines'],
@@ -964,7 +2014,7 @@ class PLPlusScanner:
         
         body_rows = []
         for i, r in enumerate(rows, 1):
-            css = 'error' if r['level'] == 'ERROR_STYLE' else ('warning' if r['level'] == 'WARNING_STYLE' else 'info')
+            css = 'error' if r['level'] == 'ERROR' else ('warning' if r['level'] == 'WARNING' else 'info')
             
             # Формируем строку ПЛАН с информацией об исправлениях
             plan_html = html_module.escape(r['plan'])
@@ -988,11 +2038,31 @@ class PLPlusScanner:
                 f'<td>{html_module.escape(str(r["method"]))}</td>'
                 f'<td>{html_module.escape(str(r["section"]))}</td>'
                 f'<td>{r["line"]}</td>'
-                f'<td>{html_module.escape(str(r["type"]))}</td>'
+                f'<td>{html_module.escape(str(r["check"]))}</td>'
                 f'<td>{html_module.escape(r["level"])}</td>'
+                f'<td>{html_module.escape(str(r["type"]))}</td>'
                 f'<td>{html_module.escape(str(r["description"]))}</td>'
                 f'<td>{plan_html}</td>'
                 f'</tr>'
+            )
+        
+        # DS 042: условные заголовки + блок прерывания
+        is_aborted = self.abort_percent is not None
+        label_issues = "Обработано проблем" if is_aborted else "Всего найдено проблем"
+        label_files = "Обработано файлов" if is_aborted else "Всего файлов"
+        meta_html = (
+            f'<p class="meta">Дата: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} &nbsp;|&nbsp;\n'
+            f'   {label_issues}: {len(rows)} &nbsp;|&nbsp;\n'
+            f'   {label_files}: {len(parsed_cache)}</p>'
+        )
+        # DS 042: блок ⚠ ПРЕРВАНО
+        if is_aborted:
+            meta_html += (
+                f'\n<div style="background:#FFF4CC; color:#8B6914; '
+                f'font-weight:bold; padding:8px 12px; border:1px solid #FFA500; '
+                f'margin-bottom:20px;">'
+                f'⚠ ПРЕРВАНО НА {self.abort_percent:.2f} %'
+                f'</div>'
             )
         
         html_content = f'''<!DOCTYPE html>
@@ -1012,13 +2082,15 @@ class PLPlusScanner:
         tr.warning td {{ background: #fdebd0; }}
         tr.info td {{ background: #d6eaf8; }}
         .meta {{ color: #7f8c8d; font-size: 13px; }}
+        .active-rubricators {{ background: #fff; border: 1px solid #bdc3c7; padding: 10px 14px;
+            font-family: 'Consolas', 'Courier New', monospace; font-size: 13px;
+            white-space: pre; margin-bottom: 20px; color: #2c3e50; }}
     </style>
 </head>
 <body>
     <h1>PlpCheck Отчёт</h1>
-    <p class="meta">Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} &nbsp;|&nbsp;
-       Всего найдено проблем: {len(rows)} &nbsp;|&nbsp;
-       Всего файлов: {len(parsed_cache)}</p>
+    {meta_html}
+    <div class="active-rubricators">{html_module.escape(chr(10).join(self._generate_active_rubricators_lines()))}</div>
     <h2>Статистика</h2>
     <table>
         <thead><tr><th>Уровень</th><th>Количество</th></tr></thead>
@@ -1028,14 +2100,15 @@ class PLPlusScanner:
     <table>
         <thead>
             <tr>
-                <th>#</th>
-                <th>Класс</th>
-                <th>Метод</th>
-                <th>Секция</th>
-                <th>Строка</th>
-                <th>Тип</th>
-                <th>Уровень</th>
-                <th>Описание</th>
+                <th>№</th>
+                <th>CLASS_ID</th>
+                <th>SHORT_NAME</th>
+                <th>SECTION</th>
+                <th>LINE</th>
+                <th>CHECK</th>
+                <th>LEVEL</th>
+                <th>TYPE</th>
+                <th>ERROR</th>
                 <th>ПЛАН</th>
             </tr>
         </thead>

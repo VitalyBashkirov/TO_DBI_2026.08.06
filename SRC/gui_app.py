@@ -42,6 +42,11 @@ APP_RELEASE = f"{_release:03d}"
 # Константы для логов
 MAX_LOG_SIZE_MB = 2  # Максимальный размер логов в МБ (по умолчанию)
 
+# DS 036 (ревизия 2): Категории PlpCheck из 2.RUBRICATOR_CATEGORIES v5.md (№31-37) + OTHER
+# DS 037: константа перенесена в scanner.py (Вариант A) — доступна и сканеру, и GUI
+from analyzer.scanner import PLPCHECK_CATEGORIES
+
+
 
 class DBIMigrationApp:
     """Основное приложение"""
@@ -102,6 +107,14 @@ class DBIMigrationApp:
         # Ссылка на кнопки для управления доступностью
         self.btn_scan = None
         self.btn_fix = None
+        
+        # DS 038 (Проблема A): флаги управления прерыванием
+        self.scan_running = False       # True, пока идёт сканирование/исправление/генерация
+        self.scan_aborted = False       # True, если пользователь нажал «Прервать»
+        self.btn_abort = None           # Кнопка «Прервать» (создаётся в _create_widgets)
+        # DS 041: заморозка индикатора при прерывании + процент прерывания
+        self._progress_frozen = False   # True — обычные обновления value игнорируются
+        self.abort_percent = None       # None — не прервано; иначе float (0.0–100.0)
         
         # Создаём главное меню
         self._create_menu()
@@ -186,27 +199,31 @@ class DBIMigrationApp:
             self.log("=" * 60, 'info')
     
     def display_log_line(self, line: str):
-        """Вывод строки PlpCheck-отчёта с цветовой подсветкой (DS 030).
+        """Вывод строки PlpCheck-отчёта с цветовой подсветкой (DS 030, DS 032).
         
-        Формат: КЛАСС.МЕТОД.СЕКЦИЯ:СТРОКА ТИП: ОПИСАНИЕ | ПЛАН: {план}
+        Формат ЦФТ-PlpCheck (таб-разделяемый):
+        №	CLASS_ID	SHORT_NAME	SECTION	LINE	CHECK	LEVEL	TYPE	ERROR	PLAN
         Подсветка: локация (синий), номер строки (зелёный), тип (оранжевый),
         описание (чёрный), ПЛАН (красный жирный).
         """
         import re
         match = re.match(
-            r'^([\w.]+):(\d+)\s+([\w.]+):\s(.*?)\s\|\sПЛАН:\s(.*)$', line
+            r'^(\d+)	([\w.]+)	([\w.]+)	(\w+)	(\d+)	([\w.]+)	(\w+)	(\w+)	([^	]*?)(?:	(.*))?$',
+            line
         )
         if not match:
             self.log(line, 'info')
             return
         
-        location, line_number, issue_type, description, plan = match.groups()
+        num, class_id, short_name, section, line_number, check, level, itype, error, plan = match.groups()
         self.log_with_tags([
-            (f"{location}:", 'class_method'),
+            (f"{num} ", 'line_number'),
+            (f"{class_id}.{short_name}.{section}:", 'class_method'),
             (f"{line_number} ", 'line_number'),
-            (f"{issue_type}: ", 'issue_type'),
-            (f"{description} | ", 'description'),
-            (f"ПЛАН: {plan}", 'plan'),
+            (f"{check} ", 'issue_type'),
+            (f"[{level}/{itype}] ", 'description'),
+            (f"{error}", 'description'),
+            (f" | ПЛАН: {plan}" if plan else "", 'plan'),
         ])
     
     def _create_menu(self):
@@ -380,10 +397,56 @@ class DBIMigrationApp:
                         variable=self.fix_only_found_var, style='Green.TCheckbutton').grid(row=1, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
         
 # Чекбокс PlpCheck — включение/выключение правил стиля кода
-        ttk.Checkbutton(options_frame, text="Добавлять PlpCheck-правила (стиль кода)", 
+        # DS 038 (Проблема E): переименовано из "Добавлять PlpCheck-правила (стиль кода)"
+        ttk.Checkbutton(options_frame, text="2. Рубрикатор PlpCheck", 
                         variable=self.plpcheck_enabled_var).grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
         # Синхронизация флага PlpCheck с чекбоксом в дереве правил
         self.plpcheck_enabled_var.trace_add('write', lambda *args: self._sync_plpcheck_checkbox())
+        
+        # DS 036: группа флагов категорий PlpCheck (7 категорий + OTHER)
+        self.frame_plpcheck_categories = ttk.Frame(options_frame)
+        self.frame_plpcheck_categories.grid(row=2, column=1, sticky=tk.W, padx=(30, 0), pady=(5, 0))
+        
+        # DS 036: чекбокс "Выбрать все PlpCheck-категории"
+        self.var_plpcheck_all = tk.BooleanVar(value=True)
+        self.chk_plpcheck_all = ttk.Checkbutton(
+            self.frame_plpcheck_categories,
+            text="Выбрать все PlpCheck-категории",
+            variable=self.var_plpcheck_all,
+            command=self._toggle_all_plpcheck_categories,
+            state='disabled'  # DS 036: disabled пока PlpCheck не выбран
+        )
+        self.chk_plpcheck_all.pack(anchor='w')
+        
+        # DS 036: 8 чекбоксов категорий (7 + OTHER) с CHECK-значениями
+        self.var_plpcheck_categories = {}
+        self.chk_plpcheck_categories = {}
+        for code, descr, checks in PLPCHECK_CATEGORIES:
+            var = tk.BooleanVar(value=True)
+            self.var_plpcheck_categories[code] = var
+            chk = ttk.Checkbutton(
+                self.frame_plpcheck_categories,
+                text=f"PlpCheck: {code} — {descr}",
+                variable=var,
+                command=self._update_plpcheck_all_checkbox,
+                state='disabled'  # DS 036: disabled пока PlpCheck не выбран
+            )
+            chk.pack(anchor='w')
+            self.chk_plpcheck_categories[code] = chk
+            
+            # DS 036 (ревизия 2): CHECK-значения серым текстом под чекбоксом
+            if checks:
+                lbl = ttk.Label(
+                    self.frame_plpcheck_categories,
+                    text=f"CHECK: {checks}",
+                    font=('Segoe UI', 8),
+                    foreground='#666666',
+                    anchor='w'
+                )
+                lbl.pack(anchor='w', padx=(20, 0))
+        
+        # DS 036: синхронизация доступности категорий при переключении флага PlpCheck
+        self.plpcheck_enabled_var.trace_add('write', lambda *args: self._on_plpcheck_toggle())
         
         # DS 018: чекбоксы приоритетов HIGH/MEDIUM/LOW (фильтр правил)
         priority_frame = ttk.Frame(options_frame)
@@ -483,6 +546,18 @@ class DBIMigrationApp:
         ttk.Button(journal_buttons, text="Очистить журнал", command=self.clear_log).pack(side=tk.LEFT, padx=3)
         ttk.Button(journal_buttons, text="Копировать в буфер", command=self.copy_log).pack(side=tk.LEFT, padx=3)
         
+        # DS 039: кнопка "Прервать" — полностью стандартный вид (без красного фона)
+        self.btn_abort = tk.Button(
+            journal_buttons,
+            text="⏹ Прервать",
+            command=self.on_abort_click,
+            state='disabled',
+            font=('Segoe UI', 9, 'bold'),
+            padx=10, pady=2,
+            relief=tk.RAISED
+        )
+        self.btn_abort.pack(side=tk.LEFT, padx=3)
+        
         # Скроллы и журнал
         log_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
         log_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
@@ -491,6 +566,16 @@ class DBIMigrationApp:
         # Индикатор выполнения — процент в той же строке (под журналом)
         progress_frame = ttk.Frame(scrollable_frame, padding="5")
         progress_frame.pack(fill=tk.X, padx=5, pady=3)
+        
+        # DS 040: стиль для жёлтого индикатора при прерывании
+        style = ttk.Style()
+        style.configure(
+            "Yellow.Horizontal.TProgressbar",
+            background='#FFA500',
+            troughcolor='#e0e0e0',
+            lightcolor='#FFA500',
+            darkcolor='#FFA500'
+        )
         
         self.progress = ttk.Progressbar(progress_frame, mode='determinate')
         self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -511,6 +596,15 @@ class DBIMigrationApp:
         self.log_text.tag_configure('issue_type', foreground='#cc6600')
         self.log_text.tag_configure('description', foreground='#000000')
         self.log_text.tag_configure('plan', foreground='#cc0000', font=('Consolas', 9, 'bold'))
+        
+        # DS 030: кликабельные ссылки на сохранённые отчёты (Отчёт/Методичка/DeepScan)
+        self.log_text.tag_configure('report_link', foreground='#0066cc', underline=True,
+                                    font=('Consolas', 9, 'bold'))
+        self.log_text.tag_bind('report_link', '<Button-1>', self._open_report_link)
+        self.log_text.tag_bind('report_link', '<Enter>',
+                               lambda e: self.log_text.configure(cursor='hand2'))
+        self.log_text.tag_bind('report_link', '<Leave>',
+                               lambda e: self.log_text.configure(cursor=''))
         
         # Вкладка журнала изменений
         self.changelog_frame = ttk.LabelFrame(scrollable_frame, text="Журнал изменений", padding="5")
@@ -696,6 +790,137 @@ class DBIMigrationApp:
                 self.rules_tree.set(item_id, 'selected', '✓' if new_state else '✗')
                 self.rules_changed = True
                 self._reset_progress()
+    
+    def on_abort_click(self):
+        """DS 038 (Проблема A): обработчик кнопки «Прервать» — установить флаг прерывания.
+        Работающий поток проверяет флаг через abort_callback и останавливается."""
+        if not self.scan_running:
+            return
+        
+        # DS 041: перекрасить индикатор в жёлтый СРАЗУ, до установки scan_aborted —
+        # НЕ сбрасывать value, только перекрасить (видно, на каком этапе прервано)
+        try:
+            if hasattr(self, 'progress'):
+                self.progress.configure(style="Yellow.Horizontal.TProgressbar")
+                self.progress.update_idletasks()   # принудительное обновление UI
+        except Exception as e:
+            print(f"[DS 041] Ошибка перекраски индикатора: {e}")
+        # DS 041: заморозить индикатор — последующие обновления (50/75/100%)
+        # не должны перекрывать процент прерывания (Дефект 3: разная длина)
+        self._progress_frozen = True
+        
+        self.scan_aborted = True
+        self.log("[ПРЕРВАНО] Пользователь нажал «Прервать». Завершаем текущую операцию...", 'warning')
+        self.btn_abort.config(state='disabled')
+    
+    def _abort_requested(self) -> bool:
+        """DS 038: callback для сканера — проверка флага прерывания (потокобезопасно)."""
+        return self.scan_aborted
+    
+    def _set_status_running(self):
+        """DS 043: установить статус 'Выполняется...' при старте длительной операции."""
+        try:
+            self.status_label.config(text="Выполняется...")
+        except Exception as e:
+            print(f"[DS 043] Ошибка установки статуса: {e}")
+
+    def _start_abortable_operation(self):
+        """DS 038: активировать кнопку «Прервать» перед запуском операции."""
+        # DS 043: статус-бар → "Выполняется..." сразу при старте любой из
+        # трёх длительных операций (скан/фикс/тест-генерация)
+        self._set_status_running()
+        self.scan_running = True
+        self.scan_aborted = False
+        # DS 041: разморозить индикатор для новой операции
+        self._progress_frozen = False
+        # DS 040: сброс стиля индикатора (стандартный цвет) при старте новой операции
+        if hasattr(self, 'progress'):
+            self.progress.configure(style="Horizontal.TProgressbar")
+        if self.btn_abort:
+            self.btn_abort.config(state='normal')
+    
+    def _finish_abortable_operation(self):
+        """DS 038: сбросить флаги и деактивировать кнопку «Прервать» (в finally)."""
+        self.scan_running = False
+        self.scan_aborted = False
+        # DS 042: гарантированный сброс кнопки «Прервать» с проверкой существования
+        try:
+            if self.btn_abort and self.btn_abort.winfo_exists():
+                self.btn_abort.config(state='disabled')
+                self.btn_abort.update_idletasks()
+        except Exception as e:
+            print(f"[DS 042] Ошибка сброса btn_abort: {e}")
+    
+    def _progress_update(self, pct, force=False):
+        """DS 041: установить индикатор выполнения.
+        При заморозке (прерывание) обычные обновления игнорируются —
+        индикатор остаётся на проценте прерывания (одинаковая длина).
+        force=True — явная установка процента прерывания (разрешена)."""
+        if self._progress_frozen and not force:
+            return
+        self.root.after(0, lambda p=pct: self.progress.config(value=p))
+        self.root.after(0, lambda p=pct: self.progress_label.config(text=f"{p:.2f}%" if isinstance(p, float) else f"{p}%"))
+    
+    def _on_plpcheck_toggle(self):
+        """DS 036: Включить/отключить доступность дочерних чекбоксов PlpCheck."""
+        enabled = self.plpcheck_enabled_var.get()
+        state = 'normal' if enabled else 'disabled'
+        
+        # Чекбокс "Выбрать все"
+        if hasattr(self, 'chk_plpcheck_all'):
+            self.chk_plpcheck_all.config(state=state)
+        
+        # 8 чекбоксов категорий
+        if hasattr(self, 'chk_plpcheck_categories'):
+            for chk in self.chk_plpcheck_categories.values():
+                chk.config(state=state)
+    
+    def _toggle_all_plpcheck_categories(self):
+        """DS 036: Установить/снять все флаги PlpCheck-категорий."""
+        if not self.plpcheck_enabled_var.get():
+            return
+        value = self.var_plpcheck_all.get()
+        for var in self.var_plpcheck_categories.values():
+            var.set(value)
+    
+    def _update_plpcheck_all_checkbox(self):
+        """DS 036: Синхронизировать флаг 'Выбрать все' с состоянием категорий.
+        DS 038 (Проблема D): синхронизация работает в ОБОИХ направлениях и
+        не зависит от флага PlpCheck (ранее при выключенном PlpCheck
+        синхронизация прерывалась и «Выбрать все» застревал в неверном состоянии).
+        """
+        if not hasattr(self, 'var_plpcheck_categories') or not self.var_plpcheck_categories:
+            return
+        all_selected = all(var.get() for var in self.var_plpcheck_categories.values())
+        if self.var_plpcheck_all.get() != all_selected:
+            self.var_plpcheck_all.set(all_selected)
+    
+    def _has_selected_plpcheck_categories(self) -> bool:
+        """DS 036: Есть ли хотя бы одна выбранная категория PlpCheck."""
+        if not self.plpcheck_enabled_var.get():
+            return True  # PlpCheck не выбран — не мешаем
+        return any(var.get() for var in self.var_plpcheck_categories.values())
+    
+    def _check_plpcheck_categories_before_action(self) -> bool:
+        """
+        DS 036: Проверка перед действиями (Сканировать, Исправлять, Генерация).
+        Возвращает True, если можно продолжать; False — если пользователь отменил.
+        """
+        if not self.plpcheck_enabled_var.get():
+            return True  # PlpCheck не выбран — не мешаем
+        
+        if self._has_selected_plpcheck_categories():
+            return True  # Хотя бы одна категория выбрана — OK
+        
+        # Ни одна категория не выбрана — предупреждаем
+        result = messagebox.askyesno(
+            "PlpCheck: категории не выбраны",
+            "Рубрикатор PlpCheck выбран, но ни одна категория не отмечена.\n\n"
+            "PlpCheck-правила не будут применены.\n\n"
+            "Продолжить без PlpCheck-правил?",
+            icon='warning'
+        )
+        return result
     
     def _on_priority_filter_change(self):
         """Обработка изменения чекбоксов HIGH/MEDIUM/LOW (DS 018)"""
@@ -1343,6 +1568,54 @@ class DBIMigrationApp:
         self.log_text.see(tk.END)
         self.root.update_idletasks()
         
+    def _log_report_saved(self, report_path, fmt: str):
+        """DS 030: сообщение о сохранении отчёта + отдельная кликабельная ссылка
+        с полным путём к файлу. Клик открывает файл (HTML в браузере и т.д.).
+        
+        Используется для всех отчётов: Отчёт (HTML/MD), Методичка, DeepScan.
+        """
+        self.log(f"Отчёт сохранён ({fmt}):", 'success')
+        self.log_with_tags([
+            (str(report_path), 'report_link'),
+            ("  (клик — открыть)", 'debug'),
+        ])
+    
+    def _open_report_link(self, event=None):
+        """DS 030: клик по ссылке отчёта в журнале — открыть файл под курсором."""
+        try:
+            idx = self.log_text.index(tk.CURRENT)
+        except Exception:
+            return
+        self._open_link_at(idx)
+    
+    def _open_link_at(self, idx) -> bool:
+        """DS 030: извлечь полный путь ссылки тега report_link по индексу журнала
+        и открыть файл. Возвращает True, если файл открыт."""
+        if 'report_link' not in self.log_text.tag_names(idx):
+            return False
+        # Расширяем диапазон тега report_link, содержащий индекс:
+        # nextrange от idx даёт конец диапазона (если idx внутри — начало == idx),
+        # prevrange от конца даёт начало диапазона, оканчивающегося не позже конца.
+        nextrange = self.log_text.tag_nextrange('report_link', idx)
+        if not nextrange:
+            return False
+        end_idx = nextrange[1]
+        prevrange = self.log_text.tag_prevrange('report_link', end_idx)
+        if not prevrange:
+            return False
+        path = self.log_text.get(prevrange[0], end_idx).strip()
+        if not path:
+            return False
+        try:
+            if not os.path.isfile(path):
+                self.log(f"Файл отчёта не найден: {path}", 'error')
+                return False
+            os.startfile(path)  # Windows: открытие ассоциированным приложением
+            return True
+        except Exception as e:
+            self.log(f"Не удалось открыть отчёт: {e}", 'error')
+            return False
+        
     def _log_separator(self, title: str = None):
         """Вывод разделителя в журнал"""
         separator = "=" * 80
@@ -1411,6 +1684,19 @@ class DBIMigrationApp:
                         self._on_priority_filter_change()
                     if self._selected_priorities:
                         self.log(f"Восстановлены приоритеты: {', '.join(self._selected_priorities)}", 'info')
+                    
+                    # DS 036: восстановление состояния категорий PlpCheck
+                    if hasattr(self, 'var_plpcheck_categories'):
+                        saved_categories = settings.get('plpcheck_categories', None)
+                        if saved_categories is None:
+                            # Первый запуск — все категории включены
+                            saved_categories = [code for code, _, _ in PLPCHECK_CATEGORIES]
+                        for code, var in self.var_plpcheck_categories.items():
+                            var.set(code in saved_categories)
+                        # Синхронизация UI
+                        self.var_plpcheck_all.set(all(var.get() for var in self.var_plpcheck_categories.values()))
+                        self._on_plpcheck_toggle()
+                        self.log(f"Восстановлены категории PlpCheck: {', '.join(saved_categories)}", 'info')
                         
                 self.log("Настройки загружены", 'info')
                 
@@ -1446,6 +1732,11 @@ class DBIMigrationApp:
             'max_log_size_mb': MAX_LOG_SIZE_MB,
             'selected_priorities': list(getattr(self, '_selected_priorities', []))
         }
+        # DS 036: сохранение выбранных категорий PlpCheck
+        if hasattr(self, 'var_plpcheck_categories'):
+            settings['plpcheck_categories'] = [
+                code for code, var in self.var_plpcheck_categories.items() if var.get()
+            ]
         try:
             with open(settings_path, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, ensure_ascii=False, indent=2)
@@ -1652,6 +1943,10 @@ class DBIMigrationApp:
     
     def start_scan(self):
         """Запуск сканирования в отдельном потоке"""
+        # DS 036: проверка выбранных категорий PlpCheck
+        if not self._check_plpcheck_categories_before_action():
+            return  # Пользователь отменил
+        
         # Валидация ИК и РК перед запуском (DS 008)
         validation = self.validate_directories()
         
@@ -1678,6 +1973,9 @@ class DBIMigrationApp:
         self.btn_scan.state(['disabled'])
         self.btn_fix.state(['disabled'])
         
+        # DS 038: активировать кнопку «Прервать»
+        self._start_abortable_operation()
+        
         # Запускаем сканирование в отдельном потоке с deep_mode=False
         thread = threading.Thread(target=self._run_scan, args=(False,), daemon=True)
         thread.start()
@@ -1689,9 +1987,14 @@ class DBIMigrationApp:
             deep_mode: Если True - использовать углублённое сканирование
         """
         try:
-            # Сброс индикатора
-            self.root.after(0, lambda: self.progress.config(value=0))
-            self.root.after(0, lambda: self.progress_label.config(text="0%"))
+            # Сброс индикатора (DS 041: через _progress_update — уважает заморозку)
+            self._progress_update(0)
+            # DS 040: сброс процента прерывания (новое сканирование)
+            # DS 041: переустановка стиля убрана из потока — выполнялась через
+            # root.after и могла ПЕРЕКРЫТЬ жёлтый стиль, установленный в
+            # on_abort_click (гонка). Синхронный сброс стиля уже есть в
+            # _start_abortable_operation (главный поток, до запуска потока).
+            self.abort_percent = None
             
             # Если были изменения в правилах и рубрикатор не открывался
             if self.rules_changed:
@@ -1735,6 +2038,14 @@ class DBIMigrationApp:
                 self.root.after(0, lambda: self.log("\n[PlpCheck] Флаг выключен — правила стиля кода не применяются", 'info'))
             else:
                 self.root.after(0, lambda: self.log("\n[PlpCheck] Флаг включён — применяются правила стиля кода", 'info'))
+            
+            # DS 036: фильтр категорий PlpCheck
+            self.plpcheck_categories_filter = [
+                code for code, var in self.var_plpcheck_categories.items() if var.get()
+            ]
+            self.root.after(0, lambda: self.log(
+                f"[PlpCheck] Категории: {', '.join(self.plpcheck_categories_filter) or 'нет'}",
+                'info'))
             
             selected_rules = self._get_rules_for_selected_files(selected_files)
             
@@ -1815,24 +2126,30 @@ class DBIMigrationApp:
                 self.root.after(0, self.load_rubricator_on_start)
             
             # Сброс прогресса
-            self.root.after(0, lambda: self.progress.config(value=0))
-            self.root.after(0, lambda: self.progress_label.config(text="0%"))
+            self._progress_update(0)
             
             # Создание сканера
             from analyzer.scanner import PLPlusScanner
-            scanner = PLPlusScanner(config, selected_rules, self.rubricator_prompts)
+            scanner = PLPlusScanner(config, selected_rules, self.rubricator_prompts,
+                                    plpcheck_categories=getattr(self, 'plpcheck_categories_filter', []),
+                                    abort_callback=self._abort_requested)  # DS 038
             
             # Логирование вызова Парсера SQL
             self.root.after(0, lambda: self.log("\n[ПАРСЕР SQL] Начало сканирования и анализа...", 'highlight'))
             self.root.after(0, lambda: self.log(f"  Источник: {config['paths']['source_dir']}", 'debug'))
             self.root.after(0, lambda: self.log(f"  Правила: {len(selected_rules)}", 'debug'))
             
-            self.root.after(0, lambda: self.progress.config(value=10))
-            self.root.after(0, lambda: self.progress_label.config(text="10%"))
+            self._progress_update(10)
             
             # Callback для вывода в журнал (вызывается в главном потоке)
             def scan_log(message, level='info'):
                 self.root.after(0, lambda m=message, l=level: self.log(m, l))
+                # DS 040: обновление индикатора из сообщений «Прогресс» сканера
+                import re as _re
+                m = _re.search(r'Прогресс: (\d+)/(\d+) \((\d+)%\)', message)
+                if m:
+                    pct = int(m.group(3))
+                    self._progress_update(pct)
             
             # Callback для вывода с разными тегами
             def scan_log_with_tags(parts):
@@ -1841,8 +2158,16 @@ class DBIMigrationApp:
             # Сканирование
             scan_results = scanner.scan_directory(log_callback=scan_log)
             
-            self.root.after(0, lambda: self.progress.config(value=50))
-            self.root.after(0, lambda: self.progress_label.config(text="50%"))
+            # DS 040: сохранить процент прерывания из сканера (None если не прервано)
+            self.abort_percent = getattr(scanner, 'abort_percent', None)
+            
+            # DS 040: при прерывании индикатор остаётся на проценте прерывания
+            # (жёлтый стиль уже применён в on_abort_click), не перескакиваем на 50%
+            # DS 041: force=True — явная установка авторитетного процента прерывания
+            if self.abort_percent is not None:
+                self._progress_update(self.abort_percent, force=True)
+            else:
+                self._progress_update(50)
             
             # Завершение работы Парсера SQL
             self.root.after(0, lambda: self.log(f"\n[ПАРСЕР SQL] Завершено:", 'highlight'))
@@ -1866,29 +2191,33 @@ class DBIMigrationApp:
             for issue_type, count in scan_results.get('by_type', {}).items():
                 self.root.after(0, lambda t=issue_type, c=count: self.log(f"  {t}: {c}", 'info'))
             
-            # Вывод AI-результатов
-            if scanner.ai_results:
-                self.root.after(0, lambda: self.log(f"\n[AI-АНАЛИЗ] Результаты анализа сложных правил:", 'highlight'))
-                self.root.after(0, lambda: self.log(f"  Всего проанализировано: {len(scanner.ai_results)}", 'info'))
-                for ai_result in scanner.ai_results[:10]:  # Показываем первые 10
-                    self.root.after(0, 
-                        lambda r=ai_result: self.log(
-                            f"  [{r.rule_code}] строка {r.line_number}: {r.steps_summary} ({r.confidence:.0%})", 
-                            'warning'
-                        )
-                    )
-                if len(scanner.ai_results) > 10:
-                    self.root.after(0, 
-                        lambda: self.log(f"  ... и ещё {len(scanner.ai_results) - 10} результатов", 'info')
-                    )
-            
             self.root.after(0, lambda: self.log(f"\nОтчёт сохранён: {output_path}", 'info'))
             
-            self.root.after(0, lambda: self.progress.config(value=100))
-            self.root.after(0, lambda: self.progress_label.config(text="100%"))
+            # DS 042: различаем завершённое и прерванное сканирование.
+            # ВАЖНО: scan_aborted ещё не сброшен (сброс — в finally через
+            # _finish_abortable_operation), поэтому условие корректно.
+            if self.scan_aborted:
+                abort_pct = self.abort_percent or 0.0
+                self.root.after(0, lambda p=abort_pct: self._log_separator(f"СКАНИРОВАНИЕ ПРЕРВАНО НА {p:.2f} %"))
+            else:
+                self.root.after(0, lambda: self._log_separator("СКАНИРОВАНИЕ ЗАВЕРШЕНО УСПЕШНО"))
+            # DS 042: статус-бар различает завершение и прерывание
+            # (scan_aborted ещё не сброшен — сброс в finally)
+            if self.scan_aborted:
+                self.root.after(0, lambda: self.set_status("Прервано"))
+            else:
+                self.root.after(0, lambda: self.set_status("Готово"))
             
-            self.root.after(0, lambda: self._log_separator("СКАНИРОВАНИЕ ЗАВЕРШЕНО УСПЕШНО"))
-            self.root.after(0, lambda: self.set_status("Готово"))
+# DS 040: при прерывании индикатор остаётся на проценте прерывания (не 100%)
+            # DS 041: через _progress_update — force=True для авторитетного процента
+            # DS 042: если прервано, но abort_percent не установился (клик после
+            # последнего файла) — всё равно НЕ прорисовываем 100%
+            if self.abort_percent is not None:
+                self._progress_update(self.abort_percent, force=True)
+            elif self.scan_aborted:
+                pass  # оставляем текущее значение (заморожено в on_abort_click)
+            else:
+                self._progress_update(100)
             
             # Показываем результаты
             self.root.after(0, lambda: self.btn_scan.state(['!disabled']))
@@ -1902,17 +2231,98 @@ class DBIMigrationApp:
                 'stats': scan_results
             }
             
+            # DS 040: окно результата — обычное или «прервано на xxx.xx %»
             self.root.after(0, 
-                lambda: messagebox.showinfo("Сканирование завершено", 
-                          f"Найдено *.plp файлов: {scan_results.get('files_scanned', 0)}\n"
-                          f"Проблемных конструкций: {scan_results.get('total_issues', 0)}\n"
-                          f"С AI-анализом: {len(scanner.ai_results)}\n"
-                          f"Отчёт: {output_path}")
+                lambda: self._show_scan_result_dialog(
+                    files_count=scan_results.get('files_scanned', 0),
+                    issues_count=scan_results.get('total_issues', 0),
+                    report_path=output_path)
             )
             
         except Exception as e:
             self.log(f"[!] Ошибка сканирования: {e}", 'error')
             messagebox.showerror("Ошибка", f"Сканирование завершилось с ошибкой:\n{e}")
+        finally:
+            # DS 039: ВСЕГДА разблокируем «Сканировать»/«Исправить»
+            # (успех / ошибка / прерывание) — раньше только в ветке успеха
+            self.root.after(0, lambda: self.btn_scan.state(['!disabled']))
+            self.root.after(0, lambda: self.btn_fix.state(['!disabled']))
+            # DS 038: сброс флагов прерывания и деактивация кнопки
+            self.root.after(0, self._finish_abortable_operation)
+    
+    def _show_scan_result_dialog(self, files_count, issues_count, report_path):
+        """DS 040: окно результата сканирования (обычное или прерванное).
+        Нативный messagebox не поддерживает смену фона — используется tk.Toplevel."""
+        is_aborted = self.abort_percent is not None
+
+        # DS 040: расчёт процента прерывания
+        abort_percent = self.abort_percent or 0.0
+
+        if is_aborted:
+            title = f"Сканирование прервано на {abort_percent:.2f} %"
+            bg_color = '#FFF4CC'      # светло-жёлтый
+            fg_color = '#8B6914'      # тёмно-жёлтый для текста
+            icon_symbol = '⚠'
+        else:
+            title = "Сканирование завершено"
+            bg_color = '#FFFFFF'
+            fg_color = '#333333'
+            icon_symbol = 'ℹ'
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title(title)
+        dialog.configure(bg=bg_color)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        # Заголовок
+        header = tk.Label(
+            dialog,
+            text=f"{icon_symbol}  {title}",
+            font=('Segoe UI', 11, 'bold'),
+            bg=bg_color,
+            fg=fg_color
+        )
+        header.pack(padx=20, pady=(15, 10))
+
+        # Тело
+        body_text = (
+            f"Найдено *.plp файлов: {files_count}\n"
+            f"Проблемных конструкций: {issues_count}\n"
+            f"Отчёт: {report_path}"
+        )
+        if is_aborted:
+            body_text += f"\n\n⚠ Прервано пользователем на {abort_percent:.2f} %"
+
+        body = tk.Label(
+            dialog,
+            text=body_text,
+            justify='left',
+            bg=bg_color,
+            fg=fg_color,
+            font=('Segoe UI', 9)
+        )
+        body.pack(padx=20, pady=(0, 15))
+
+        # Кнопка OK
+        ok_btn = tk.Button(
+            dialog,
+            text="OK",
+            command=dialog.destroy,
+            width=10,
+            bg='#FFA500' if is_aborted else 'SystemButtonFace',
+            fg='white' if is_aborted else 'SystemButtonText'
+        )
+        ok_btn.pack(pady=(0, 15))
+
+        # Центрирование
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() - dialog.winfo_width()) // 2
+        y = (dialog.winfo_screenheight() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{x}+{y}")
+
+        self.root.wait_window(dialog)
     
     def start_deep_scan(self):
         """Запуск глубокого сканирования в отдельном потоке"""
@@ -1941,6 +2351,10 @@ class DBIMigrationApp:
     
     def start_fix(self):
         """Запуск исправления кода"""
+        # DS 036: проверка выбранных категорий PlpCheck
+        if not self._check_plpcheck_categories_before_action():
+            return  # Пользователь отменил
+        
         if not self.source_dir_var.get():
             messagebox.showerror("Ошибка", "Укажите исходный каталог!")
             return
@@ -1981,6 +2395,9 @@ class DBIMigrationApp:
         # Отключаем кнопки на время работы
         self.btn_scan.state(['disabled'])
         self.btn_fix.state(['disabled'])
+        
+        # DS 038: активировать кнопку «Прервать»
+        self._start_abortable_operation()
         
         # Сброс индикатора
         self.progress.config(value=0)
@@ -2023,8 +2440,7 @@ class DBIMigrationApp:
                 self.root.after(0, lambda: self.log("\n[0/5] Копирование структуры каталогов и файлов...", 'info'))
                 files_copied = self._copy_directory_structure(source_dir, result_dir)
                 self.root.after(0, lambda: self.log(f"  Скопировано файлов: {files_copied}", 'info'))
-                self.root.after(0, lambda: self.progress.config(value=5))
-                self.root.after(0, lambda: self.progress_label.config(text="5%"))
+                self._progress_update(5)
             
             # Подготовка конфигурации
             config = {
@@ -2063,6 +2479,14 @@ class DBIMigrationApp:
                 self.root.after(0, lambda: self.log("\n[PlpCheck] Флаг выключен — правила стиля кода не применяются", 'info'))
             else:
                 self.root.after(0, lambda: self.log("\n[PlpCheck] Флаг включён — применяются правила стиля кода", 'info'))
+            
+            # DS 036: фильтр категорий PlpCheck
+            self.plpcheck_categories_filter = [
+                code for code, var in self.var_plpcheck_categories.items() if var.get()
+            ]
+            self.root.after(0, lambda: self.log(
+                f"[PlpCheck] Категории: {', '.join(self.plpcheck_categories_filter) or 'нет'}",
+                'info'))
             
             selected_rules = self._get_rules_for_selected_files(selected_files)
             
@@ -2127,8 +2551,7 @@ class DBIMigrationApp:
                 self.root.after(0, self.load_rubricator_on_start)
             
             # Сброс прогресса
-            self.root.after(0, lambda: self.progress.config(value=0))
-            self.root.after(0, lambda: self.progress_label.config(text="0%"))
+            self._progress_update(0)
             
             # Логирование вызова Парсера SQL (ПЕРЕД созданием сканера)
             self.log("\n[ПАРСЕР SQL] Начало сканирования и анализа...", 'highlight')
@@ -2138,7 +2561,9 @@ class DBIMigrationApp:
             
             # Создание сканера
             from analyzer.scanner import PLPlusScanner
-            scanner = PLPlusScanner(config, selected_rules, self.rubricator_prompts)
+            scanner = PLPlusScanner(config, selected_rules, self.rubricator_prompts,
+                                    plpcheck_categories=getattr(self, 'plpcheck_categories_filter', []),
+                                    abort_callback=self._abort_requested)  # DS 038
             
             # Callback для вывода в журнал
             def scan_log(message, level='info'):
@@ -2147,8 +2572,7 @@ class DBIMigrationApp:
             # Сканирование
             scan_results = scanner.scan_directory(log_callback=scan_log)
             
-            self.root.after(0, lambda: self.progress.config(value=40))
-            self.root.after(0, lambda: self.progress_label.config(text="40%"))
+            self._progress_update(40)
             
             # Завершение работы Парсера SQL
             self.log(f"\n[ПАРСЕР SQL] Завершено:", 'highlight')
@@ -2162,8 +2586,7 @@ class DBIMigrationApp:
             
             if scan_results.get('total_issues', 0) == 0:
                 self.root.after(0, lambda: self.log("\n[!] Проблем не найдено. Исправление не требуется.", 'warning'))
-                self.root.after(0, lambda: self.progress.config(value=0))
-                self.root.after(0, lambda: self.progress_label.config(text="0%"))
+                self._progress_update(0)
                 self.root.after(0, lambda: self.set_status("Готово"))
                 self.root.after(0, lambda: self._log_separator("ИСПРАВЛЕНИЕ КОДА ЗАВЕРШЕНО (проблем не найдено)"))
                 self.root.after(0, lambda: self.btn_scan.state(['!disabled']))
@@ -2176,8 +2599,7 @@ class DBIMigrationApp:
             source_name = source_dir.name
             fixer = PLPlusFixer(config, iteration, clean_output=self.clean_output_var.get())
             
-            self.root.after(0, lambda: self.progress.config(value=50))
-            self.root.after(0, lambda: self.progress_label.config(text="50%"))
+            self._progress_update(50)
             
             # Определение каталога результатов
             if config['output']['preserve_structure']:
@@ -2199,16 +2621,14 @@ class DBIMigrationApp:
                                                   log_level=self.log_level_var.get(),
                                                   fix_only_found=self.fix_only_found_var.get())
             
-            self.root.after(0, lambda: self.progress.config(value=75))
-            self.root.after(0, lambda: self.progress_label.config(text="75%"))
+            self._progress_update(75)
             
             # Сохранение лога
             self.root.after(0, lambda: self.log("\n[3/5] Сохранение лога...", 'info'))
             log_path = Path(config['paths']['logs_dir']) / f'fix_log_{source_name}_{iteration}.md'
             fixer.save_log(log_path)
             
-            self.root.after(0, lambda: self.progress.config(value=90))
-            self.root.after(0, lambda: self.progress_label.config(text="90%"))
+            self._progress_update(90)
             
             # Вывод результатов
             self.root.after(0, lambda: self.log("\n[4/5] Финализация...", 'info'))
@@ -2234,8 +2654,7 @@ class DBIMigrationApp:
                 for issue_type, count in scan_results['by_type'].items():
                     self.root.after(0, lambda t=issue_type, c=count: self.log(f"  {t}: {c}", 'info'))
             
-            self.root.after(0, lambda: self.progress.config(value=100))
-            self.root.after(0, lambda: self.progress_label.config(text="100%"))
+            self._progress_update(100)
             
             self.root.after(0, lambda: self._log_separator("ИСПРАВЛЕНИЕ КОДА ЗАВЕРШЕНО УСПЕШНО"))
             self.root.after(0, lambda: self.set_status("Готово"))
@@ -2288,13 +2707,17 @@ class DBIMigrationApp:
             self.root.after(0, lambda: self.btn_fix.state(['!disabled']))
             self.root.after(0, lambda: self.set_status("Готово"))
             self.root.after(0, lambda: messagebox.showerror("Ошибка", f"Исправление завершилось с ошибкой:\n{error_msg}"))
+        finally:
+            # DS 043: финальный статус-бар (до сброса флагов)
+            self.root.after(0, lambda: self.set_status("Прервано" if self.scan_aborted else "Готово"))
+            # DS 038: сброс флагов прерывания и деактивация кнопки
+            self.root.after(0, self._finish_abortable_operation)
     
     def _run_archive(self, results_dir: Path, source_dir: Path):
         """Рабочая функция архивации (вызывается в отдельном потоке)"""
         try:
             self.root.after(0, lambda: self.log("\n[5/5] Архивация результатов...", 'info'))
-            self.root.after(0, lambda: self.progress.config(value=95))
-            self.root.after(0, lambda: self.progress_label.config(text="95%"))
+            self._progress_update(95)
             
             # Архив создаётся в родительском каталоге результатов
             archive_path = results_dir.parent / f"{results_dir.name}.zip"
@@ -2320,8 +2743,7 @@ class DBIMigrationApp:
             else:
                 self.root.after(0, lambda: self.log(f"  .pck файл не найден в источнике: {source_pck}", 'warning'))
             
-            self.root.after(0, lambda: self.progress.config(value=100))
-            self.root.after(0, lambda: self.progress_label.config(text="100%"))
+            self._progress_update(100)
             
             archive_str = str(archive_path)
             if len(archive_str) >= 2 and archive_str[1] == ':':
@@ -2355,11 +2777,18 @@ class DBIMigrationApp:
     
     def start_test_generation(self):
         """Запуск генерации тестовых .plp-файлов"""
+        # DS 036: проверка выбранных категорий PlpCheck
+        if not self._check_plpcheck_categories_before_action():
+            return  # Пользователь отменил
+        
         # Проверка: выбран ли хотя бы один файл в рубрикаторе
         any_rule_selected = any(var.get() for var in self.selected_rules.values())
         if not any_rule_selected:
             messagebox.showerror("Ошибка", "Выберите хотя бы один файл в рубрикаторе!")
             return
+        
+        # DS 038: активировать кнопку «Прервать»
+        self._start_abortable_operation()
         
         # Запускаем генерацию в отдельном потоке
         thread = threading.Thread(target=self._run_test_generation, daemon=True)
@@ -2465,9 +2894,20 @@ class DBIMigrationApp:
                             self.root.after(0, lambda fc=file_code: self.log(f"  ⚠️ Правил не найдено для файла: {fc}", 'warning'))
                     matched_rules = sorted(set(matched_rules))
                 
-                # Формируем отсортированный список правил
-                sorted_rules = matched_rules
+# Формируем отсортированный список правил
+                # DS 038 (доработка): фильтруем правила, отсутствующие в
+                # generator.rubricator_v3.rules (например, коды PRIORITY_RULES
+                # вида 'PlpCheck.DBI.*.п.1') — иначе all_rules[rule_code] даёт KeyError
+                missing = [r for r in matched_rules if r not in all_rules]
+                sorted_rules = [r for r in matched_rules if r in all_rules]
+                if missing:
+                    self.root.after(0, lambda m=len(missing): self.log(
+                        f"  Пропущено правил (нет в генераторе v5.0.0): {m}", 'warning'))
                 total = len(sorted_rules)
+                if not sorted_rules:
+                    self.root.after(0, lambda: self.log("Нет правил для генерации после фильтрации", 'warning'))
+                    self.root.after(0, lambda: self.set_status("Готово"))
+                    return
                 self.root.after(0, lambda t=total: self.log(f"Сводный файл: {t} правил v5.0.0", 'info'))
                 
                 # Генерируем один сводный файл
@@ -2504,7 +2944,20 @@ class DBIMigrationApp:
                 lines.append('')
                 
                 # Секции для каждого правила
+                aborted = False
+                processed_rules = 0
                 for i, rule_code in enumerate(sorted_rules, 1):
+                    # DS 038 (доработка): проверка прерывания в цикле генерации —
+                    # кнопка «Прервать» останавливает генерацию между правилами
+                    if self.scan_aborted:
+                        aborted = True
+                        self.root.after(0, lambda n=processed_rules, t=total: self.log(
+                            f"[ПРЕРВАНО] Генерация тестовых .plp остановлена пользователем. "
+                            f"Обработано правил: {n} из {t}", 'warning'))
+                        self.root.after(0, lambda: self.set_status("Прервано"))
+                        break
+                    
+                    processed_rules = i
                     rule = all_rules[rule_code]
                     short_desc = rule.short_description[:60] if rule.short_description else '...'
                     
@@ -2652,22 +3105,28 @@ class DBIMigrationApp:
                 lines.append(f'-- Дата генерации: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
                 lines.append('-- ============================================================================')
                 
-                # Записываем файл
-                content = '\n'.join(lines)
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                
-                self.root.after(0, lambda fp=file_path: self.log(f"  ✅ Создан: {fp.name}", 'success'))
-                self.root.after(0, lambda t=total: self.log(f"\nСоздано сводных файлов: 1 ({t} правил)", 'info'))
-                
-                self.root.after(0, lambda: self._log_separator("ГЕНЕРАЦИЯ ЗАВЕРШЕНА"))
-                self.root.after(0, lambda: self.set_status("Готово"))
-                
-                self.root.after(0, 
-                    lambda: messagebox.showinfo("Генерация завершена", 
-                              f"Создан сводный файл: {file_path.name}\n\n"
-                              f"Правил: {total}\n\n"
-                              f"Каталог: {test_dir}"))
+                # DS 038 (доработка): при прерывании файл НЕ сохраняется
+                if aborted:
+                    self.root.after(0, lambda n=processed_rules: self.log(
+                        f"[ПРЕРВАНО] Сводный файл не создан (обработано правил: {n}). "
+                        f"Повторите генерацию без прерывания для полного файла.", 'warning'))
+                else:
+                    # Записываем файл
+                    content = '\n'.join(lines)
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    
+                    self.root.after(0, lambda fp=file_path: self.log(f"  ✅ Создан: {fp.name}", 'success'))
+                    self.root.after(0, lambda t=total: self.log(f"\nСоздано сводных файлов: 1 ({t} правил)", 'info'))
+                    
+                    self.root.after(0, lambda: self._log_separator("ГЕНЕРАЦИЯ ЗАВЕРШЕНА"))
+                    self.root.after(0, lambda: self.set_status("Готово"))
+                    
+                    self.root.after(0, 
+                        lambda: messagebox.showinfo("Генерация завершена", 
+                                  f"Создан сводный файл: {file_path.name}\n\n"
+                                  f"Правил: {total}\n\n"
+                                  f"Каталог: {test_dir}"))
                 
             except ImportError as e:
                 self.root.after(0, lambda: self.log(f"[!] Ошибка импорта TestGenerator: {e}", 'error'))
@@ -2677,7 +3136,15 @@ class DBIMigrationApp:
             error_msg = str(e)
             self.root.after(0, lambda: self.log(f"[!] Ошибка генерации: {error_msg}", 'error'))
             self.root.after(0, lambda: self.set_status("Готово"))
-    
+        finally:
+            # DS 039: ВСЕГДА разблокируем «Сканировать»/«Исправить» после генерации
+            self.root.after(0, lambda: self.btn_scan.state(['!disabled']))
+            self.root.after(0, lambda: self.btn_fix.state(['!disabled']))
+            # DS 043: финальный статус-бар (до сброса флагов)
+            self.root.after(0, lambda: self.set_status("Прервано" if self.scan_aborted else "Готово"))
+            # DS 038: сброс флагов прерывания и деактивация кнопки
+            self.root.after(0, self._finish_abortable_operation)
+
     def _run_test_generation_legacy(self, test_dir: Path):
         """Генерация тестовых файлов по старому алгоритму (из 3.RUBRICATOR_FIXES v5.md)"""
         try:

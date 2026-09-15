@@ -1,52 +1,65 @@
-# Временные файлы IDE
-*.bak
-*.tmp
-*.log
-*.mcs
-*.mp
-
-# Бэкапы АРМ
-backup_*.zip
-
-# Логи АРМ
-logs/
-
-# Временные файлы Python
+# Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
+*.pyc
+*.pyo
+*.pyd
+.venv/
 venv/
-ENV/
-
-# Настройки
-*.swp
-*.swo
-*~
-
-# Бэкапы файлов
-*.2026*
-*.MODIFIED*
 
 # IDE
 .vscode/
 .idea/
 
-# Результаты работы АРМа
-PATCH_OUT/
-RESULTS/
-temp_fix/
+# Exchange and log
+EXCHANGE/bot.log
+EXCHANGE/INBOX/
+EXCHANGE/OUTBOX/
+EXCHANGE/PROCESSED/
+EXCHANGE/result_dir_history.json
 
-# ������� ���������� (�� ��������� � git)
-*.mp4
-*.pdf
-*.docx
-*.doc
-*.rar
-*.mp3
-*.wav
-macro.cache
-*.7z
-*.tar.gz
+# Temp
+temp/
+*.tmp
+diagnostic_DS_038_button.txt
+run_bot.bat
+run_bot_hidden.vbs
+
+# Data
+DATA/DS_*.md
+DATA/OUTERS/
+DATA/CFT Platform IDE Documentation/
+DATA/Рубрикатор v5/OLD v5/
+
+# Backup
+.git_broken_backup/
+*.bak
+
+# Patches (input)
+PATCH_IN/
+
+# Root artifacts
+/DBI_Analysis_Report.docx
+
+# Root junk
+/OUTBOX
+
+# Project status (working docs)
+PROJECT_STATUS/*.txt
+
+# Patches output
+PATCH_OUT/
+
+# Root logs
+/bot.log
+logs/
+logs_Deep/
+
+# AI documentation (binaries)
+SRC/AI_DOCS/
+
+# Backups
+/backup_*.zip
+
+# Presentations and prompts (binaries)
+ПРОМТы/
+Презентация/

@@ -39,10 +39,10 @@ def write_log(message: str):
 # ==================== DS 048: протокол завершения задач ====================
 
 def _log_bot(message: str):
-    """DS 048: запись в bot.log (cp1251, формат [ДД.ММ.ГГГГ ЧЧ:ММ:СС] <Сообщение>)."""
+    """DS 048/DS_050: запись в bot.log (UTF-8 без BOM, формат [ДД.ММ.ГГГГ ЧЧ:ММ:СС] <Сообщение>)."""
     try:
         line = '[%s] %s\r\n' % (datetime.now().strftime('%d.%m.%Y %H:%M:%S'), message)
-        with open(LOG_FILE, 'a', encoding='cp1251', errors='replace') as f:
+        with open(LOG_FILE, 'a', encoding='utf-8', errors='replace') as f:
             f.write(line)
     except Exception as e:
         print(f"[DS 048] Ошибка записи bot.log: {e}")

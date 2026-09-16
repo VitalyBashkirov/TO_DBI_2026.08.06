@@ -1,0 +1,141 @@
+# ============================================================
+# docker-compose.yml — Локальная разработка АРМ "Адаптация под DBI"
+# ============================================================
+# Сервисы:
+#   app          — основное приложение (GUI / headless)
+#   postgres     — тестовая СУБД PostgreSQL 16
+#   test-runner  — автоматический запуск регрессионных тестов
+# ============================================================
+
+version: '3.8'
+
+services:
+  # -----------------------------------------------------------
+  # Основное приложение
+  # -----------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - APP_VERSION=${APP_VERSION:-v26.2.005}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - VCS_REF=${VCS_REF:-$(git rev-parse --short HEAD 2>/dev/null || echo "local")}
+    image: ghcr.io/vitalybashkirov/to_dbi_arm:${IMAGE_TAG:-latest}
+    container_name: to_dbi_arm_app
+
+    # Режим работы: gui или headless
+    environment:
+      - MODE=${ARM_MODE:-gui}
+      - SRC_DIR=${SRC_DIR:-patch_WORK}
+      - DST_DIR=${DST_DIR:-patch_WORK}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DISPLAY=${DISPLAY:-:0}
+
+    # Точки монтирования для обмена данными
+    volumes:
+      # Исходный код для адаптации
+      - ./PATCH_IN:/app/PATCH_IN
+      # Результаты адаптации
+      - ./PATCH_OUT:/app/PATCH_OUT
+      # Логи (сохраняются на хосте)
+      - ./logs_container:/app/logs
+      # X11-сокет (для Linux, GUI-режим)
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      # Шрифты для кириллицы
+      - ./fonts:/usr/share/fonts/custom:ro
+
+    # Сеть
+    networks:
+      - arm_network
+
+    # Зависимость от БД (если нужна)
+    depends_on:
+      - postgres
+
+    # Возобновление после остановки
+    restart: "no"
+
+    # Лимиты ресурсов
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+
+  # -----------------------------------------------------------
+  # Тестовая СУБД PostgreSQL 16
+  # -----------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: to_dbi_arm_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: dbi_test
+      POSTGRES_USER: dbi_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-dbi_test_password_2026}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Инициализация БД из SQL-скриптов (если есть)
+      - ./docker/init-db:/docker-entrypoint-initdb.d:ro
+    networks:
+      - arm_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbi_user -d dbi_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------------------------------------
+  # Тест-раннер — регрессионные и нагрузочные тесты
+  # -----------------------------------------------------------
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/vitalybashkirov/to_dbi_arm:${IMAGE_TAG:-latest}
+    container_name: to_dbi_arm_test
+    environment:
+      - MODE=headless
+      - LOG_LEVEL=INFO
+    volumes:
+      # Те же исходные данные, что и app
+      - ./PATCH_IN:/app/PATCH_IN
+      - ./PATCH_OUT:/app/PATCH_OUT
+      - ./logs_container:/app/logs
+      # Тестовые пакеты (если появятся)
+      - ./tests:/app/tests:ro
+    networks:
+      - arm_network
+    depends_on:
+      - app
+      - postgres
+    command: >
+      bash -c "
+        echo '=== Запуск регрессионных тестов ===' &&
+        if [ -d /app/tests/regress ]; then
+          echo 'Регрессионные тесты: запускаем...' &&
+          python SRC/gui_app.py --headless --scan-only --src-dir /app/PATCH_IN/${SRC_DIR:-patch_WORK} &&
+          echo 'Регрессионные тесты: пройдены'
+        else
+          echo 'Тесты не найдены в /app/tests/regress — пропуск'
+        fi &&
+        echo '=== Тест-раннер завершён ==='
+      "
+    restart: "no"
+
+# -----------------------------------------------------------
+# Сети
+# -----------------------------------------------------------
+networks:
+  arm_network:
+    driver: bridge
+
+# -----------------------------------------------------------
+# Тома
+# -----------------------------------------------------------
+volumes:
+  postgres_data:
+    driver: local

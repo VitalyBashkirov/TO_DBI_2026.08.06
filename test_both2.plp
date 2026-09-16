@@ -1,0 +1,4 @@
+dp1  integer:=0;
+
+function iif(v1 boolean, v2 varchar2(32767), v3 varchar2(32767)) return varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;

@@ -1,0 +1,26 @@
+class HOOK_BANK;
+
+@calculate(false)
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('Тест исправления')
+method test is
+
+--(*)PlpCheck.STYLE.BAD_PREFIX.п.4.3 - Некорректный префикс
+--OLD 2026-08-19 12:35:43
+-- dp1  integer:=0;--управление debug_pipe
+v_iDp1 integer:=0;--управление debug_pipe
+--(*)PlpCheck.STYLE.BAD_PREFIX.п.4.3 - Некорректный префикс
+--OLD 2026-08-19 12:35:43
+-- dp   integer:=0;--управление debug_pipe
+v_iDp integer:=0;--управление debug_pipe
+
+function iif(p_bV1 boolean, p_vV2 varchar2(32767), p_vV3 varchar2(32767)) return varchar2(32767) is
+v_vResult varchar2(32767);
+begin if p_bV1 then return p_vV2; else return p_vV3; end if; end;
+
+begin
+null;
+end;
+end;
+end;

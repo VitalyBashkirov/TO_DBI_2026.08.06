@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ViewPresentation classId="CASE_GRAM" shortName="VW_CRIT_PSH_CASE_GRAM_PLP">
+    <Properties/>
+    <Columns>
+        <Column alias="C_CODE" referenceId="0">
+            <Name>Код</Name>
+            <Resizeable>true</Resizeable>
+            <Width>11</Width>
+        </Column>
+        <Column alias="C_NAME" referenceId="0">
+            <Name>Наименование</Name>
+            <Resizeable>true</Resizeable>
+            <Width>30</Width>
+        </Column>
+    </Columns>
+</ViewPresentation>

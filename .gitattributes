@@ -1,40 +1,29 @@
-# Настройка кодировки для файлов Python
-*.py text working-tree-encoding=UTF-8
-
-# Настройка кодировки для Markdown и текстовых файлов
-*.md text working-tree-encoding=UTF-8
-*.txt text working-tree-encoding=UTF-8
-
-# Настройка кодировки для JSON
-*.json text working-tree-encoding=UTF-8
-
-# Настройка кодировки для скриптов
-*.sh text working-tree-encoding=UTF-8
-*.bat text working-tree-encoding=UTF-8
-*.ps1 text working-tree-encoding=UTF-8
-
-# Отключить авто-конвертацию для бинарных файлов
-*.png binary
-*.jpg binary
-*.jpeg binary
-*.gif binary
-*.ico binary
-*.pdf binary
-*.docx binary
-*.xlsx binary
-*.zip binary
-*.exe binary
-*.dll binary
-
-# Автоматическое определение линеечных окончаний
+# Автоопределение текстовых/бинарных файлов
 * text=auto
 
-# Исключить файлы кэша и временные файлы
-*.pyc binary
-__pycache__/ binary
-*.pyo binary
-*.egg-info/ binary
-*.log binary
-*.bak binary
-*.tmp binary
-~$* binary
+# Явные правила для типов, где важен EOL
+*.py    text eol=lf
+*.json  text eol=lf
+*.sql   text eol=lf
+*.sh    text eol=lf
+*.ps1   text eol=lf
+
+*.md    text eol=crlf
+*.txt   text eol=crlf
+*.bat   text eol=crlf
+*.vbs   text eol=crlf
+
+# Бинарные файлы (без преобразования EOL)
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.docx  binary
+*.xlsx  binary
+*.zip   binary
+*.exe   binary
+*.dll   binary
+*.pyc   binary
+*.pyo   binary

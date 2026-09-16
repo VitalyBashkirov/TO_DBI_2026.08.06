@@ -1,0 +1,8 @@
+VER2
+REM Список элементов
+REM IBS@IBSZ
+REM Версия ТЯ: 7.7.4.9
+REM Версия Администратора проектов: 6.93.0.171
+
+CRIT CASE_GRAM VW_CRIT_PSH_CASE_GRAM
+CRIT CASE_GRAM VW_CRIT_PSH_CASE_GRAM_PLP

@@ -1,0 +1,17 @@
+class HOOK_BANK;
+
+@calculate(false)
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('Тест функции iif')
+method test_iif is
+
+function iif(p_bV1 boolean, p_vV2 varchar2(32767), p_vV3 varchar2(32767)) return varchar2(32767) is
+v_vResult varchar2(32767);
+begin if p_bV1 then return p_vV2; else return p_vV3; end if; end;
+
+begin
+null;
+end;
+end;
+end;

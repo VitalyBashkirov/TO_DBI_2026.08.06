@@ -1,0 +1,3 @@
+function iif(p_bV1 boolean, p_vV2 varchar2(32767), p_vV3 varchar2(32767)) return varchar2(32767) is
+v_vResult varchar2(32767);
+begin if p_bV1 then return p_vV2; else return p_vV3; end if; end;

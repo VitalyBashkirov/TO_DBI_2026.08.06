@@ -1,0 +1,484 @@
+{
+  "response": "full_specification",
+  "project": "АРМ Адаптация под DBI",
+  "koda_version": "1.0",
+  "rubricator_compatibility": "v5.3.0",
+  "date": "2026-08-21",
+  "answers": [
+    {
+      "id": 1,
+      "topic": "Формат обмена",
+      "question": "Какой формат файлов для обмена данными с АРМом ты поддерживаешь?",
+      "answer": {
+        "format": "JSON",
+        "exchange_mechanism": "файловый обмен через PATCH_IN / PATCH_OUT",
+        "request_schema": {
+          "type": "object",
+          "required": ["request", "project", "version", "operation", "files", "rules"],
+          "properties": {
+            "request": {
+              "type": "string",
+              "enum": ["analyze", "fix_by_rule", "fix_all", "generate_changelog", "generate_test"],
+              "description": "тип операции"
+            },
+            "project": {
+              "type": "string",
+              "description": "название проекта"
+            },
+            "version": {
+              "type": "string",
+              "description": "версия проекта"
+            },
+            "operation": {
+              "type": "string",
+              "enum": ["analyze_only", "fix_by_rule", "fix_all", "generate_changelog", "generate_test"],
+              "description": "операция для выполнения"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {"type": "string", "description": "относительный путь к файлу"},
+                  "content": {"type": "string", "description": "содержимое файла"},
+                  "issues": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "line": {"type": "integer"},
+                        "rule": {"type": "string"},
+                        "description": {"type": "string"},
+                        "original_code": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "rules": {
+              "type": "array",
+              "items": {"type": "string"},
+              "description": "список кодов правил для обработки"
+            },
+            "context": {
+              "type": "object",
+              "properties": {
+                "det_layer_applied": {"type": "boolean", "description": "применён ли детерминированный слой"},
+                "det_layer_results": {"type": "object", "description": "результаты работы детерминированного слоя"},
+                "clean_output": {"type": "boolean", "description": "чистый вывод без маркеров"}
+              }
+            }
+          }
+        },
+        "response_schema": {
+          "type": "object",
+          "required": ["status", "project", "version", "results"],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["success", "partial", "error"],
+              "description": "статус выполнения"
+            },
+            "project": {"type": "string"},
+            "version": {"type": "string"},
+            "results": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "file": {"type": "string"},
+                  "modified": {"type": "boolean"},
+                  "new_content": {"type": "string"},
+                  "changes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "line": {"type": "integer"},
+                        "rule": {"type": "string"},
+                        "old_code": {"type": "string"},
+                        "new_code": {"type": "string"},
+                        "reason": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "changelog": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "file": {"type": "string"},
+                  "line": {"type": "integer"},
+                  "rule": {"type": "string"},
+                  "old_code": {"type": "string"},
+                  "new_code": {"type": "string"},
+                  "reason": {"type": "string"}
+                }
+              }
+            },
+            "det_layer_summary": {
+              "type": "object",
+              "properties": {
+                "renames": {"type": "object", "description": "карта переименований"},
+                "deleted_unused": {"type": "array", "description": "удалённые переменные"},
+                "methods_fixed": {"type": "array", "description": "исправленные методы"},
+                "classes_fixed": {"type": "array", "description": "исправленные классы"}
+              }
+            },
+            "errors": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "stats": {
+              "type": "object",
+              "properties": {
+                "files_processed": {"type": "integer"},
+                "files_modified": {"type": "integer"},
+                "changes_count": {"type": "integer"},
+                "rules_applied": {"type": "integer"}
+              }
+            }
+          }
+        },
+        "note": "Детерминированный слой Python обрабатывает ~80-90% механических трансформаций (переименование переменных, обновление ссылок, удаление неиспользуемых, WRONG_CLASS, WRONG_METHOD). KODA обрабатывает сложные/многошаговые случаи."
+      }
+    },
+    {
+      "id": 2,
+      "topic": "Поддерживаемые операции",
+      "question": "Какие типы операций ты поддерживаешь?",
+      "answer": {
+        "supported_operations": [
+          {
+            "operation": "analyze_only",
+            "description": "Только анализ кода, без правок. Возвращает список проблем с рекомендациями.",
+            "input": ["files", "rules"],
+            "output": ["issues", "recommendations"],
+            "det_layer": "не требуется"
+          },
+          {
+            "operation": "fix_by_rule",
+            "description": "Исправить код по конкретному правилу из рубрикатора.",
+            "input": ["files", "rules (one or more)"],
+            "output": ["modified_files", "changelog", "diff"],
+            "det_layer": "если правило покрывается детерминированным слоем — применяется автоматически"
+          },
+          {
+            "operation": "fix_all",
+            "description": "Исправить все возможные проблемы по всем выбранным правилам.",
+            "input": ["files", "rules (all selected)"],
+            "output": ["modified_files", "changelog", "stats"],
+            "det_layer": "применяется полностью перед отправкой в KODA"
+          },
+          {
+            "operation": "generate_changelog",
+            "description": "Сгенерировать журнал изменений в Markdown-таблице.",
+            "input": ["diff_data", "files"],
+            "output": ["changelog_md", "statistics"],
+            "det_layer": "сводка из результатов детерминированного слоя"
+          },
+          {
+            "operation": "generate_test",
+            "description": "Сгенерировать тестовый .plp файл с проблемными конструкциями.",
+            "input": ["rules", "output_dir"],
+            "output": ["test_file_path"],
+            "det_layer": "не требуется"
+          }
+        ],
+        "execution_order": "Детерминированный слой всегда выполняется ПЕРЕД KODA. KODA получает уже обработанный детерминированным слоем код и обрабатывает только оставшиеся сложные случаи."
+      }
+    },
+    {
+      "id": 3,
+      "topic": "Правила для обработки",
+      "question": "Какие правила из рубрикатора v5.3.0 ты лучше всего обрабатываешь?",
+      "answer": {
+        "best_handled": [
+          {
+            "rule": "v53.SQL.OUTERJOIN.п.1.1",
+            "description": "(+) → LEFT/RIGHT JOIN",
+            "layer": "детерминированный (regex)",
+            "confidence": "высокая",
+            "note": "Детерминированный слой обрабатывает 100% случаев через 5.RUBRICATOR_PARSER_SQL v5.json"
+          },
+          {
+            "rule": "v53.SQL.ROWNUM.п.1.2",
+            "description": "ROWNUM → FETCH FIRST",
+            "layer": "детерминированный (regex)",
+            "confidence": "высокая"
+          },
+          {
+            "rule": "v53.SQL.DECODE.п.1.6.1",
+            "description": "DECODE → CASE",
+            "layer": "гибридный",
+            "confidence": "средняя",
+            "note": "Простые DECODE — детерминированный. Сложные вложенные — KODA"
+          },
+          {
+            "rule": "v53.SQL.CONNECTBY.п.1.8",
+            "description": "CONNECT BY → WITH RECURSIVE",
+            "layer": "KODA",
+            "confidence": "средняя",
+            "note": "Требует понимания структуры рекурсии, детерминированный слой не покрывает"
+          },
+          {
+            "rule": "v53.PROC.WHENOTHERS.п.3.5",
+            "description": "WHEN OTHERS + ROLLBACK/RAISE",
+            "layer": "детерминированный (multi-line)",
+            "confidence": "высокая",
+            "note": "Детерминированный слой обрабатывает многострочные блоки через MULTILINE_RULES"
+          },
+          {
+            "rule": "PlpCheck.STYLE.PREFIX_TYPE_IN_VAR_NAME.п.4.4",
+            "description": "Комбинированные префиксы переменных",
+            "layer": "детерминированный",
+            "confidence": "высокая",
+            "note": "ОСНОВНОЙ СЛАБЫЙ ПУНКТ KODA — переименование переменных. Кода исправляет только 5 из 29 переменных. ДЕТЕРМИНИРОВАННЫЙ СЛОЙ обрабатывает 100%: _build_rename_map + _update_references + _remove_unused_variables"
+          }
+        ],
+        "key_insight": "LLM-модели (KODA) не надёжны для детерминированных многошаговых трансформаций. Например, KODA исправляет только ~17% переменных из 29. Детерминированный Python-слой обрабатывает 80-90% механических трансформаций. KODA должен обрабатывать только сложные случаи, где regex не справляется.",
+        "categories_coverage": {
+          "SQL/DML (36 правил)": "90% — детерминированный слой",
+          "Хранение STOR (16 правил)": "85% — детерминированный слой",
+          "Процедурный PROC (48 правил)": "70% — детерминированный + KODA",
+          "Интеграции INT (5 правил)": "60% — KODA",
+          "Кэширование CACHE (14 правил)": "50% — KODA",
+          "Разработка DEV (17 правил)": "40% — KODA",
+          "Локальные LOCAL (8 правил)": "30% — KODA",
+          "PlpCheck STYLE (16 правил)": "100% — детерминированный слой"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "topic": "Формат промптов",
+      "question": "Какой формат промптов тебе наиболее удобен?",
+      "answer": {
+        "current_format": {
+          "description": "ЗАМЕНИТЬ В ФАЙЛЕ {file}: строка {line}: {old} НА: {new}",
+          "problems": [
+            "Не масштабируется — при 100+ изменениях промпт становится огромным",
+            "KODA часто пропускает часть изменений (исправляет 5 из 29)",
+            "Нет структуры — сложно отследить какие изменения применены"
+          ]
+        },
+        "suggested_format": {
+          "description": "Структурированный JSON с правилами и контекстом",
+          "prompt_structure": {
+            "role": "AI-ассистент для адаптации PLPlus кода под DBI",
+            "context": {
+              "project": "АРМ Адаптация под DBI",
+              "det_layer_status": "already_applied",
+              "det_layer_summary": {
+                "renames": {},
+                "deleted": [],
+                "methods_fixed": []
+              }
+            },
+            "instructions": [
+              "1. Проверь, что детерминированный слой уже применил механические исправления",
+              "2. Исправь оставшиеся сложные случаи по указанным правилам",
+              "3. После переименования переменной ОБЯЗАТЕЛЬНО обнови ВСЕ её использования",
+              "4. Верни ТОЛЬКО исправленный код (если clean_output=true)",
+              "5. Все пояснения и обоснования — в журнале"
+            ],
+            "rules_to_apply": [
+              {
+                "code": "v53.SQL.CONNECTBY.п.1.8",
+                "description": "CONNECT BY → WITH RECURSIVE",
+                "examples": {"before": "...", "after": "..."}
+              }
+            ],
+            "output_format": {
+              "clean_mode": "только исправленный код",
+              "with_changelog": "код + блок журнала в конце"
+            }
+          }
+        },
+        "koda_prompts_module": {
+          "file": "SRC/koda_prompts.py",
+          "class": "KodaPrompts",
+          "methods": [
+            "generate_full_fix_prompt(code, rules) — полный промпт с правилами",
+            "generate_clean_output_instruction() — инструкция для чистого вывода"
+          ]
+        },
+        "recommendation": "Используй модуль koda_prompts.py для генерации промптов. Промпт должен содержать: контекст (что уже сделал детерминированный слой), конкретные правила с примерами, чёткие инструкции по формату вывода."
+      }
+    },
+    {
+      "id": 5,
+      "topic": "Интеграция",
+      "question": "Как лучше организовать интеграцию с АРМом через файлы?",
+      "answer": {
+        "file_exchange_pattern": {
+          "request": "PATCH_IN/koda_request_<timestamp>.json",
+          "response": "PATCH_OUT/koda_response_<timestamp>.json",
+          "status_file": "PATCH_IN/koda_status_<timestamp>.json"
+        },
+        "specific_answers": [
+          {
+            "question": "Нужно ли блокировать файлы во время обработки?",
+            "answer": "Да. АРМ должен создавать request-файл и переименовывать его в koda_request_<ts>_locked.json перед запуском обработки. KODA проверяет отсутствие суффикса _locked перед началом. После обработки файл переименовывается в koda_response_<ts>.json."
+          },
+          {
+            "question": "Как обрабатывать ошибки?",
+            "answer": "KODA всегда возвращает JSON с полем status: success/partial/error. При error — поле errors содержит список сообщений. АРМ проверяет статус перед парсингом результатов. При partial — результат применяется частично, ошибки записываются в changelog."
+          },
+          {
+            "question": "Какой таймаут на обработку одного запроса?",
+            "answer": "Рекомендуемый таймаут: 300 секунд (5 минут) на файл. АРМ может настроить через параметр koda_timeout в settings.json. Для batch-обработки (100+ файлов) — 600 секунд."
+          },
+          {
+            "question": "Нужны ли промежуточные статусы (processing, done, error)?",
+            "answer": "Да. Статус-файл koda_status_<ts>.json обновляется в реальном времени:\n- processing — обработка началась\n- progress: {file: N, total: M} — текущий прогресс\n- done — обработка завершена\n- error — ошибка с сообщением\nАРМ читает статус-файл и обновляет прогресс-бар в GUI."
+          }
+        ],
+        "integration_flow": [
+          "1. АРМ: детерминированный слой обрабатывает файл",
+          "2. АРМ: создаёт koda_request_<ts>.json с оставшимися проблемами",
+          "3. AРМ: переименовывает в koda_request_<ts>_locked.json",
+          "4. KODA: проверяет отсутствие _locked, начинает обработку",
+          "5. KODA: обновляет koda_status_<ts>.json (processing → progress → done/error)",
+          "6. KODA: записывает koda_response_<ts>.json",
+          "7. AРМ: читает ответ, применяет изменения, обновляет changelog",
+          "8. AРМ: удаляет locked-файл"
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "topic": "Тестирование",
+      "question": "Как лучше тестировать твою работу?",
+      "answer": {
+        "testing_approach": {
+          "test_file_generator": {
+            "module": "analyzer/test_generator.py",
+            "description": "Генерация тестовых .plp файлов со всеми типами проблем из рубрикатора",
+            "output_dir": "DATA/Тестовые файлы"
+          },
+          "test_files_location": "DATA/Тестовые файлы/"
+        },
+        "specific_answers": [
+          {
+            "question": "Нужен ли тестовый прогон перед основной обработкой?",
+            "answer": "Да. Перед обработкой production-кода рекомендуется:\n1. Запустить test_generator.py для создания тестовых файлов\n2. Обработать тестовые файлы через детерминированный слой и KODA\n3. Сравнить результаты с ожидаемыми (golden files)\n4. При 100% совпадении — запускать на production"
+          },
+          {
+            "question": "Какие тестовые случаи важны?",
+            "answer": "Критические сценарии:\n1. Переименование переменных с обновлением всех ссылок (включая &debug)\n2. Удаление неиспользуемых переменных\n3. Обработка многострочных WHEN OTHERS\n4. CONNECT BY → WITH RECURSIVE (сложная рекурсия)\n5. DECODE с вложенными вызовами\n6. Классы с неправильным синтаксисом\n7. Строковые литералы (не должны быть изменены)\n8. Комментарии (не должны быть изменены)\n9. Подсказки оптимизатора /*+ ... */"
+          },
+          {
+            "question": "Как проверять корректность исправлений?",
+            "answer": "Многоуровневая проверка:\n1. Детерминированная валидация: _validate_fix() — проверка отсутствия старых имён\n2. Счётчик изменений: статистика в ответе KODA\n3. Сравнение с golden files: diff тестового и ожидаемого результата\n4. Повторное сканирование: исправленный файл не должен содержать проблем\n5. Ручная проверка: сложные cases (CONNECT BY, DECODE) — вручную"
+          }
+        ],
+        "recommended_test_cycle": "test_generator → det_layer → KODA → validate → diff → re-scan → approve"
+      }
+    },
+    {
+      "id": 7,
+      "topic": "Обработка ошибок",
+      "question": "Как обрабатывать ошибки в процессе работы?",
+      "answer": {
+        "error_scenarios": [
+          {
+            "scenario": "KODA не может исправить код",
+            "handling": {
+              "status": "error",
+              "action": "Записать ошибку в changelog, пометить строку комментарием --NEW <дата> <правило>",
+              "det_layer": "детерминированный слой уже применил все возможные исправления",
+              "user_notification": "Показать уведомление в GUI: 'Некоторые проблемы требуют ручного исправления'"
+            }
+          },
+          {
+            "scenario": "KODA частично исправил код",
+            "handling": {
+              "status": "partial",
+              "action": "Применить все исправления, записать пропущенные в changelog",
+              "validation": "вызвать _validate_fix() для проверки",
+              "det_layer": "детерминированный слой уже обработал механические случаи"
+            }
+          },
+          {
+            "scenario": "В ответе KODA синтаксическая ошибка",
+            "handling": {
+              "status": "error",
+              "action": "Попытаться распарсить ответ как JSON. Если не удалось — записать raw-ответ в error_log, применить только детерминированные исправления",
+              "recovery": "попробовать повторить запрос с более строгим промптом"
+            }
+          },
+          {
+            "scenario": "Таймаут обработки",
+            "handling": {
+              "status": "error",
+              "action": "Прервать обработку, записать статус в status-файл, применить только детерминированные исправления",
+              "timeout_default": "300 секунд",
+              "retry": "опционально — повторить с уменьшенным набором правил"
+            }
+          }
+        ],
+        "error_hierarchy": [
+          "1. Детерминированный слой — 100% надёжность (regex, AST)",
+          "2. KODA — частичная надёжность, fallback на --NEW",
+          "3. Пользователь — ручное исправление по --NEW комментариям"
+        ],
+        "rollback_strategy": "Перед изменением файла AРМ создаёт backup в PATCH_IN/.backup/<timestamp>/. При ошибке — восстановление из backup."
+      }
+    },
+    {
+      "id": 8,
+      "topic": "Версионирование",
+      "question": "Какая у тебя версия и совместимость с рубрикатором?",
+      "answer": {
+        "koda_version": "1.0",
+        "rubricator_version": "v5.3.0",
+        "rubricator_stats": {
+          "total_rules": 332,
+          "high_priority": 145,
+          "medium_priority": 110,
+          "low_priority": 46
+        },
+        "layer_distribution": {
+          "det_layer_coverage": "80-90%",
+          "koda_layer_coverage": "10-20%",
+          "det_layer_rules": [
+            "PlpCheck.STYLE.BAD_PREFIX.п.4.3 — переименование переменных",
+            "PlpCheck.STYLE.PREFIX_TYPE_IN_VAR_NAME.п.4.4 — префиксы типов",
+            "PlpCheck.STYLE.NOT_MENTIONED.п.4.8 — удаление неиспользуемых",
+            "PlpCheck.STYLE.WRONG_METHOD.п.4.14 — исправление методов",
+            "PlpCheck.STYLE.WRONG_CLASS.п.4.12 — синтаксис классов",
+            "v53.SQL.OUTERJOIN.п.1.1 — (+) → JOIN",
+            "v53.SQL.ROWNUM.п.1.2 — ROWNUM → FETCH FIRST",
+            "v53.PROC.WHENOTHERS.п.3.5 — WHEN OTHERS + ROLLBACK/RAISE"
+          ],
+          "koda_layer_rules": [
+            "v53.SQL.CONNECTBY.п.1.8 — CONNECT BY → WITH RECURSIVE",
+            "v53.SQL.DECODE.п.1.6.1 (complex) — вложенный DECODE → CASE",
+            "v53.INT.DBLINK.п.4.2 — Database Link",
+            "v53.INT.REST_SYNC.п.4.4.1 — REST синхронно",
+            "v53.STOR.NESTED.п.2.1 — Nested table"
+          ]
+        },
+        "backward_compatibility": {
+          "v5.0.0": "полная совместимость",
+          "v5.1.0": "полная совместимость",
+          "v5.2.0": "полная совместимость",
+          "v5.3.0": "текущая версия"
+        },
+        "versioning_strategy": "Версии рубрикатора нумеруются по схеме v{major}.{minor}.{patch}. При изменении формата JSON-рубрикатора — увеличивается minor. При добавлении новых правил — patch. При изменении структуры — major."
+      }
+    }
+  ],
+  "summary": {
+    "architecture": "гибридная: детерминированный Python-слой (80-90%) + KODA LLM (10-20%)",
+    "exchange_format": "JSON через PATCH_IN/PATCH_OUT с блокировкой файлов",
+    "key_principle": "LLM не надёжен для детерминированных многошаговых трансформаций. Детерминированный слой обрабатывает механические исправления, KODA — сложные случаи.",
+    "error_handling": "трёхуровневая: det_layer (100%) → KODA (partial) → user (manual via --NEW)",
+    "testing": "test_generator → det_layer → KODA → validate → diff → re-scan"
+  }
+}

@@ -1,0 +1,137 @@
+class HOOK_BANK;
+
+@calculate(false)
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('ОП. Экспорт Ф-115 (2009.12.28)')
+@tag('COPIED')
+method REPS_EXP_115_1 is
+pragma include(::[DEBUG_TRIGGER].[MACRO_LIB]);
+dp   integer:=0;			--управление debug_pipe
+dp1  integer:=0;			--управление debug_pipe
+
+fmt	   string(10):='dd/mm/yyyy';
+fmt24  string(22):='dd/mm/yyyy HH24:MI:SS';
+fmtHMS string(22):='dd/mm/yyyy HH24:MI:SS';
+
+function iif(v1 boolean, v2  varchar2(32767), v3 varchar2(32767)) return  varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+---------------------------
+pragma macro(lib_cl,	'::[REPS_DATA].[LIB_CLIENT]');
+
+lrBranch		ref	[BRANCH];
+lrecBrInfo			&lib_cl.tp_recBranchInfo;							-- Информация о филиале
+REPS_EXP_115_1 (
+	@name('Реализация отчета')             P_ADDS             in     [STRING_2000],
+	@name('Имя файла на локальной машине') P_FILE_NAME        in out [STRING_1000],
+	@name('Имя файла на сервере')          P_SOURCE_FILE_NAME in out [STRING_1000]
+) return [BOOLEAN] is
+
+execute is
+P_PARAM ref [REPS_PARAMS];	-- ссылка на реализацию филиала
+vDateRep varchar2(10);		-- отчетная дата для наименования файла в формате ПП Дельта
+lvRepPeriod varchar2(5);	-- периодичность отчета для выгрузки в ПП Дельта
+P_FILE_XML [STRING_1000];
+P_FILE_ZIP [STRING_1000];
+begin
+	--&debug(utils.call_stack,dp)
+	&debug('>P_ADDS            >'||P_ADDS,dp)
+	&debug('>P_FILE_NAME       >'||P_FILE_NAME,dp)
+	&debug('>P_SOURCE_FILE_NAME>'||P_SOURCE_FILE_NAME,dp)
+	if P_FILE_NAME is not null then 
+		&debug('Имя файла на сервере уже определено. Выходим',dp)
+		return false;
+	end if;
+	
+/** /
+P_ADDS=^~P_RUN~EXP~^
+^~P_APP~EXP_PSB_001~^
+^~P_PATH~C:\IBSO\DOK~^
+^~P_BOSS~2413891033~^
+^~P_ACCOUNTANT~22645994~^
+^~P_EXECUTOR~8935328~^
+^~P_PHONE~(499)2451562~^
+^~V_HIDE_NUL~0~^
+^~P_OKUD~0409101~^
+^~P_PARAM~4069159772~^
+/**/
+	P_PARAM		:= [str].get_str_par(P_ADDS, 'P_PARAM');
+	&debug('P_PARAM.[BRANCH]='||P_PARAM.[BRANCH].[CODE],dp)
+	&debug('P_PARAM.[BANK]  ='||P_PARAM.[BANK].[NAME],dp)
+	&debug('P_PARAM.[DATE1] ='||to_char(P_PARAM.[DATE1],fmt),dp)
+	&debug('P_PARAM.[DATE2] ='||to_char(P_PARAM.[DATE2],fmt),dp)
+	
+	-- Получение информации о филиале для подстановки рег. номера в имя файла экспорта
+	lrecBrInfo			:= &lib_cl.GetBranchInfo(P_BRANCH	==	P_PARAM.[BRANCH]
+												,P_DATE		==	P_PARAM.[DATE1]
+												,P_BANK		==	P_PARAM.[BANK]);
+	--if lrecBrInfo.f_BIC				is not null then null; &debug(TB$||'БИК                           ='||lrecBrInfo.f_BIC				,dp1)
+	--end if;
+	--if lrecBrInfo.f_BANK_NAME		is not null then null; &debug(TB$||'Наименование                  ='||lrecBrInfo.f_BANK_NAME		,dp1)
+	--end if;
+	if lrecBrInfo.f_REG_NUM			is not null then
+		null; &debug(TB$||'Регистрационный номер         ='||lrecBrInfo.f_REG_NUM			,dp1)
+	end if;
+	--if lrecBrInfo.f_BRANCH_NUM		is not null then null; &debug(TB$||'Порядковый номер филиала      ='||lrecBrInfo.f_BRANCH_NUM		,dp1)
+	--end if;
+	--if lrecBrInfo.f_CORP_ADDR		is not null then null; &debug(TB$||'Адрес                         ='||lrecBrInfo.f_CORP_ADDR		,dp1)
+	--end if;
+	--if lrecBrInfo.f_OKPO			is not null then null; &debug(TB$||'ОКПО                          ='||lrecBrInfo.f_OKPO			,dp1)
+	--end if;
+	--if lrecBrInfo.f_OKATO			is not null then null; &debug(TB$||'ОКАТО                         ='||lrecBrInfo.f_OKATO			,dp1)
+	--end if;
+	--if lrecBrInfo.f_OGRN			is not null then null; &debug(TB$||'ОГРН                          ='||lrecBrInfo.f_OGRN			,dp1)
+	--end if;
+	--if lrecBrInfo.f_INN				is not null then null; &debug(TB$||'ИНН                           ='||lrecBrInfo.f_INN				,dp1)
+	--end if;
+	--if lrecBrInfo.f_KPP				is not null then null; &debug(TB$||'КПП                           ='||lrecBrInfo.f_KPP				,dp1)
+	--end if;
+	--if lrecBrInfo.f_KS				is not null then null; &debug(TB$||'Корр Счёт                     ='||lrecBrInfo.f_KS				,dp1)
+	--end if;
+	--if lrecBrInfo.v_PTK_PREFIX		is not null then null; &debug(TB$||'Префикс для ПТК               ='||lrecBrInfo.v_PTK_PREFIX		,dp1)
+	--end if;
+	--if lrecBrInfo.v_PRN_BANK_NAME	is not null then null; &debug(TB$||'Наименование банка для вывода ='||lrecBrInfo.v_PRN_BANK_NAME	,dp1)
+	--end if;
+	--if lrecBrInfo.v_PRN_ADDR		is not null then null; &debug(TB$||'Адрес банка для вывода        ='||lrecBrInfo.v_PRN_ADDR		,dp1)
+	--end if;
+	--if lrecBrInfo.v_SWIFT			is not null then null; &debug(TB$||'Код СВИФТ                     ='||lrecBrInfo.v_SWIFT			,dp1)
+	--end if;
+/** /
+		if P_REPS_PARAM_F_115.[STROKE] like '%В тыс.руб.%' then
+			V_LIST_APP			:= &runApp.GetExp(V_EXP_COLL);
+			V_PATH.[DST_NAME]	:=	&delta.GetExpFileNames
+											(
+												P_REP			==	V_REPORT_115
+											,	P_PARAM			==	P_REPS_PARAM_F_115
+											,	P_EXP_METH		==	V_LIST_APP.[CODE]
+											,	P_PERIOD_CODE	==	case
+																		when	to_char(P_REPS_PARAM_F_115.[DATE1], 'DD') = '01' then
+																			'M'
+																		else
+																			'NR'
+																	end
+											).vOutputFileName;
+			V_PATH.[DST_PATH]	:= rtrim(::[REPS_DATA].[LIB_FILE].default_local_path, ' \/') || '\';
+			V_PATH.[DST_MASK]	:= 'Все файлы (*.*)|*.*|';
+		else
+			V_LIST_APP			:= null;
+			V_PATH.[DST_NAME]	:= null;
+			V_PATH.[DST_PATH]	:= null;
+		end if;
+/**/
+	P_FILE_ZIP	:= replace(P_FILE_XML, '.xml', '.zip');
+	
+  --P_FILE_NAME := P_FILE_XML;
+	P_FILE_NAME := P_FILE_ZIP;
+	
+	::[RUNTIME].[STR].Set_Par(P_ADDS, 'P_XMLNAME', P_FILE_XML);
+	::[RUNTIME].[STR].Set_Par(P_ADDS, 'V_ZIPNAME', P_FILE_ZIP);
+	::[RUNTIME].[STR].Set_Par(P_ADDS, 'P_FILENAME', P_FILE_NAME);
+
+	&debug('<P_FILE_NAME       <'||P_FILE_NAME,dp)
+	&debug('<P_SOURCE_FILE_NAME<'||P_SOURCE_FILE_NAME,dp)
+	&debug('<P_ADDS            <'||P_ADDS,dp)
+	return false;
+end;
+end;
+end;

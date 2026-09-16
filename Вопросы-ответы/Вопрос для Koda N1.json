@@ -1,0 +1,110 @@
+{
+  "request": "full_specification",
+  "project": "АРМ Адаптация под DBI",
+  "version": "1.0",
+  "rubricator": "v5.3.0",
+  "context": {
+    "interface": "tkinter GUI (Python)",
+    "exchange": "файловый обмен через PATCH_IN / PATCH_OUT",
+    "det_layer": "Python детерминированные правки: переименование переменных, обновление ссылок, удаление неиспользуемых, WRONG_CLASS, WRONG_METHOD",
+    "llm_layer": "KODA — сложные/многошаговые правки",
+    "rules_total": 332,
+    "rules_high": 145,
+    "rules_medium": 110,
+    "rules_low": 46
+  },
+  "questions": [
+    {
+      "id": 1,
+      "topic": "Формат обмена",
+      "question": "Какой формат файлов для обмена данными с АРМом ты поддерживаешь?",
+      "details": "АРМ пишет запрос в PATCH_IN/koda_request_<timestamp>.json, KODA читает и пишет ответ в PATCH_OUT/koda_response_<timestamp>.json",
+      "expected": "JSON схема запроса и ответа"
+    },
+    {
+      "id": 2,
+      "topic": "Поддерживаемые операции",
+      "question": "Какие типы операций ты поддерживаешь?",
+      "options": [
+        "analyze_only — только анализ, без правок",
+        "fix_by_rule — исправить по конкретному правилу",
+        "fix_all — исправить все возможные проблемы",
+        "generate_changelog — сгенерировать журнал изменений",
+        "generate_test — сгенерировать тестовый файл"
+      ]
+    },
+    {
+      "id": 3,
+      "topic": "Правила для обработки",
+      "question": "Какие правила из рубрикатора v5.3.0 ты лучше всего обрабатываешь?",
+      "rules_to_evaluate": [
+        "v53.SQL.OUTERJOIN.п.1.1 — (+) → LEFT/RIGHT JOIN",
+        "v53.SQL.ROWNUM.п.1.2 — ROWNUM → FETCH FIRST",
+        "v53.SQL.DECODE.п.1.6.1 — DECODE → CASE",
+        "v53.SQL.CONNECTBY.п.1.8 — CONNECT BY → WITH RECURSIVE",
+        "v53.PROC.WHENOTHERS.п.3.5 — WHEN OTHERS + ROLLBACK/RAISE",
+        "PlpCheck.STYLE.PREFIX_TYPE_IN_VAR_NAME.п.4.4 — комбинированные префиксы"
+      ],
+      "note": "Детерминированный слой Python обрабатывает: переименование переменных, обновление ссылок, удаление неиспользуемых, WRONG_CLASS, WRONG_METHOD"
+    },
+    {
+      "id": 4,
+      "topic": "Формат промптов",
+      "question": "Какой формат промптов тебе наиболее удобен?",
+      "current_format": "ЗАМЕНИТЬ В ФАЙЛЕ {file}: строка {line}: {old} НА: {new}",
+      "suggested_format": "Структурированный JSON с правилами и контекстом"
+    },
+    {
+      "id": 5,
+      "topic": "Интеграция",
+      "question": "Как лучше организовать интеграцию с АРМом через файлы?",
+      "specific_questions": [
+        "Нужно ли блокировать файлы во время обработки?",
+        "Как обрабатывать ошибки?",
+        "Какой таймаут на обработку одного запроса?",
+        "Нужны ли промежуточные статусы (processing, done, error)?"
+      ]
+    },
+    {
+      "id": 6,
+      "topic": "Тестирование",
+      "question": "Как лучше тестировать твою работу?",
+      "details": "АРМ генерирует тестовые .plp файлы через test_generator.py",
+      "questions": [
+        "Нужен ли тестовый прогон перед основной обработкой?",
+        "Какие тестовые случаи важны?",
+        "Как проверять корректность исправлений?"
+      ]
+    },
+    {
+      "id": 7,
+      "topic": "Обработка ошибок",
+      "question": "Как обрабатывать ошибки в процессе работы?",
+      "scenarios": [
+        "KODA не может исправить код",
+        "KODA частично исправил код",
+        "В ответе KODA синтаксическая ошибка",
+        "Таймаут обработки"
+      ]
+    },
+    {
+      "id": 8,
+      "topic": "Версионирование",
+      "question": "Какая у тебя версия и совместимость с рубрикатором?",
+      "context": "Рубрикатор v5.3.0, 332 правила (145 HIGH, 110 MEDIUM, 46 LOW)"
+    }
+  ],
+  "expected_response": {
+    "format": "JSON",
+    "fields": [
+      "request_format",
+      "supported_operations",
+      "rule_capabilities",
+      "prompt_preferences",
+      "integration_guide",
+      "testing_guide",
+      "error_handling",
+      "version_info"
+    ]
+  }
+}

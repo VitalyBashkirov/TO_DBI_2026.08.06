@@ -1,0 +1,19 @@
+class HOOK_BANK;
+
+@calculate(false)
+@import_plsql(true)
+@this(create_on_start:=true)
+@name('Тест функции iif')
+method test_iif is
+
+--(*)PlpCheck.STYLE.PREFIX_TYPE.п.4.4 - Переменная без префикса типа (требуется проверка)
+--OLD 2026-08-19 09:30:57
+-- function iif(v1 boolean, v2 varchar2(32767), v3 varchar2(32767)) return varchar2(32767) is
+function iif(v_bV1 boolean, v_vV2 varchar2(32767), v_vV3 varchar2(32767)) v_vReturn varchar2(32767) is
+begin if v1 then return v2; else return v3; end if; end;
+
+begin
+null;
+end;
+end;
+end;

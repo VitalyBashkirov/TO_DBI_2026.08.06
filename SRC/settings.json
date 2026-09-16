@@ -1,16 +1,26 @@
 {
-  "source_dir": "F:\\TO_DBI\\PATCH_IN\\patch_TEST_DS",
-  "result_dir": "F:\\TO_DBI\\PATCH_OUT\\patch_TEST_DS",
+  "source_dir": "F:\\TO_DBI\\PATCH_IN\\patch_ALL",
+  "result_dir": "F:\\TO_DBI\\PATCH_OUT\\patch_ALL",
   "file_pattern": "**/*.*",
   "log_level": "Подробный",
   "recursive": true,
   "only_modified": true,
-  "preserve_structure": false,
-  "selected_rules": [
-    "v50",
-    "тдс20240828",
-    "тклоик20240828",
-    "README"
+  "preserve_structure": true,
+  "clean_output": true,
+  "max_log_size_mb": 2,
+  "selected_priorities": [
+    "HIGH",
+    "MEDIUM",
+    "LOW"
   ],
-  "max_log_size_mb": 2
+  "plpcheck_categories": [
+    "PLSQL.OPTIMIZATION",
+    "JAVA.OPTIMIZATION",
+    "DBI.ADAPTATION",
+    "SQL.CHECKS",
+    "WEB.ADAPTATION",
+    "STYLE.PREFIXES",
+    "STYLE.PREFIX_COMBINATION",
+    "OTHER"
+  ]
 }

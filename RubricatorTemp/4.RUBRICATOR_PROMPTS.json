@@ -44,6 +44,11 @@
             "pattern": "(\\w+)%?(\\w+)\\s*=\\s*(\\w+)\\.\\[(\\w+)\\]\\(true\\)",
             "description": "Конструкция like ac%id = gj.[ACCOUNT](true)",
             "flags": "i"
+          },
+          {
+            "pattern": "(\\w+)%?(\\w+)\\s*=\\s*(\\w+)\\.\\[(\\w+)\\]\\(true\\)",
+            "description": "Конструкция like ac%id = gj.[ACCOUNT](true)",
+            "flags": "i"
           }
         ],
         "for_ignore": [

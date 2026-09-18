@@ -4,6 +4,7 @@
 Версия: v05 (с рубрикатором, игнорирование комментариев и строк)
 """
 import re
+import os
 import json
 import shutil
 from pathlib import Path
@@ -11,10 +12,33 @@ from datetime import datetime
 from typing import List, Dict, Tuple, Optional
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from analyzer.scanner import PLPlusScanner, Issue
+from analyzer.scanner import PLPlusScanner, Issue, read_file_with_encoding
 from fixer.markdown_rubricator_loader_v3 import MarkdownRubricatorLoaderV3
 from analyzer.sql_parser import apply_fix as sql_apply_fix
 from fixer.variable_parser import DeterministicFixer, VariableParser
+from rule_engine import get_rule_engine, FLAG_ORDER
+
+# DS_053_Уточнение_5 (задача B): расшифровки флагов — точно как на форме GUI
+# (gui_app.py, подписи чекбоксов блока «Флаги детерминированного фикса»).
+FIX_FLAG_DESCRIPTIONS = {
+    'regex': 'чистые regex-правила',
+    'hybrid': 'полудетерм. с algorithmic_hint',
+    'ai_fallback': 'помечать needs_ai_fix',
+    'ignore': 'не автофиксить, только лог',
+    'backup': 'резервные regex-правила',
+    'other': 'hybrid без algorithmic_hint',
+}
+
+
+def _fix_flags_block(flags: Dict[str, bool], indent: str = '  ') -> List[str]:
+    """Блок «Флаги замены» с расшифровкой (выравнивание по «—»)."""
+    width = max(len(f"{n}: {'V'}") for n in FLAG_ORDER)
+    lines = [f"{indent}Флаги замены:"]
+    for name in FLAG_ORDER:
+        on = flags.get(name, False)
+        left = f"{name}: {'V' if on else 'x'}"
+        lines.append(f"{indent}  {left:<{width}} — {FIX_FLAG_DESCRIPTIONS.get(name, '')}")
+    return lines
 import logging
 
 logger = logging.getLogger(__name__)
@@ -432,6 +456,22 @@ class PLPlusFixer:
         self.skipped_details = []  # Детали пропущенных исправлений для подробного лога
         self.fix_only_found = config.get('output', {}).get('fix_only_found', False)  # Флаг режима вывода
         self.clean_output = clean_output  # Флаг чистого вывода (без маркеров)
+
+        # DS_053: единый RuleEngine + флаги-чекбоксы замены.
+        # По умолчанию включены regex, hybrid и backup — чтобы конвейер реально
+        # исправлял при вызове вне GUI. GUI передаёт явные флаги.
+        self.rule_engine = get_rule_engine()
+        self.flags = {
+            'regex': True, 'hybrid': True, 'ai_fallback': False,
+            'ignore': False, 'backup': True, 'other': False,
+        }
+        # Сводные данные для лога scan_VVxVVx_*.md (собираются в fix_directory).
+        self.scan_log_data = []  # [{file, plan, line_logs:[...], stats:{}}]
+        self.verify_stats = {
+            'total_files': 0, 'total_fixes': 0,
+            'fixed': 0, 'needs_manual': 0, 'needs_ai_fix': 0,
+            'by_rule': {}, 'top_rules': [],
+        }
         
         # Загрузка рубрикатора для получения кратких описаний
         if use_rubricator:
@@ -1226,38 +1266,232 @@ class PLPlusFixer:
         """Формирование строки промпта для комментария"""
         return f"[ПРОМПТ] Проанализируй код: {original_code} | Правило: {issue.issue_type} | Описание: {issue.description} | Обоснование: {issue.rubricator_full_description} | Заключение: Требуется исправление"
     
+    # ============================================================
+    # DS_053: детерминированный конвейер исправления по issues сканера
+    # ============================================================
+
+    def _apply_backup_fix(self, line: str, code: str) -> Optional[str]:
+        """Применить резервные regex-правила self.FIXES[code] к строке.
+
+        Обрабатываются только строковые замены (лямбда-правила стилей
+        обрабатывает DeterministicFixer). Возвращает изменённую строку или None.
+        """
+        if code not in self.FIXES:
+            return None
+        new_line = line
+        for pattern, replacement, case_sensitive, _code in self.FIXES[code]:
+            if replacement is None or callable(replacement):
+                continue
+            flags = 0 if case_sensitive else re.IGNORECASE
+            matches = self._find_code_positions(new_line, pattern, flags)
+            if not matches:
+                continue
+            for start, end, matched_text in reversed(matches):
+                segment = new_line[start:end]
+                fixed_segment = re.sub(pattern, replacement, segment, flags=flags, count=1)
+                new_line = new_line[:start] + fixed_segment + new_line[end:]
+        return new_line if new_line != line else None
+
+    def _apply_issue_fixes(self, lines: List[str],
+                           issues: List[Issue],
+                           dry_run: bool = False) -> Tuple[List[str], List[dict]]:
+        """Применить детерминированные исправления по списку issues сканера.
+
+        Порядок для каждой строки: sql_parser/RuleEngine (regex+hybrid) →
+        backup self.FIXES. Каждое следующее правило применяется к текущему
+        (уже изменённому) состоянию строки.
+
+        DS_053_Уточнение_4 (задача B): метод всегда работает с КОПИЕЙ lines
+        в памяти и сам по себе ничего не пишет на диск (запись результата
+        выполняет вызывающий код — fix_file). Параметр dry_run=True —
+        явная симуляция: вернуть (new_lines, changes) без каких-либо
+        побочных эффектов (используется прогнозом при «Сканировать»).
+
+        Возвращает (обновлённые lines, changes). Каждая change:
+        {line_number, rule_code, bucket, kind, before, after}.
+        """
+        # Группировка issues по номеру строки с сохранением порядка обнаружения.
+        by_line: Dict[int, List[Issue]] = {}
+        for issue in issues:
+            by_line.setdefault(issue.line_number, []).append(issue)
+
+        new_lines = list(lines)
+        changes: List[dict] = []
+
+        for line_number in sorted(by_line):
+            idx = line_number - 1
+            if idx < 0 or idx >= len(new_lines):
+                continue
+            raw = new_lines[idx]
+            # Разделяем перевод строки, отступ и тело.
+            # Важно: сначала отделяем trailing '\n', затем lstrip только тела
+            # (иначе для строки '	\n' lstrip() съест и '\n', и перевод
+            # задвоится при сборке).
+            trailing = '\n' if raw.endswith('\n') else ''
+            core = raw[:-1] if trailing else raw
+            body = core.lstrip()
+            leading_ws = core[:len(core) - len(body)]
+
+            current = body
+            for issue in by_line[line_number]:
+                code = issue.issue_type
+                fixed = None
+                bucket = None
+                kind = None
+
+                # a. sql_parser / RuleEngine (regex + hybrid + other)
+                if self.rule_engine.has_rule(code) and self.rule_engine.rule_enabled(code, self.flags):
+                    res = self.rule_engine.apply_fix(current, code, self.flags)
+                    if res:
+                        fixed, bucket, kind = res
+
+                # b. backup self.FIXES
+                if fixed is None and self.flags.get('backup', False):
+                    b = self._apply_backup_fix(current, code)
+                    if b:
+                        fixed, bucket, kind = b, 'backup', 'transform'
+
+                if fixed is not None and fixed != current:
+                    changes.append({
+                        'line_number': line_number,
+                        'rule_code': code,
+                        'bucket': bucket,
+                        'kind': kind,
+                        'before': current,
+                        'after': fixed,
+                    })
+                    current = fixed
+
+            new_lines[idx] = leading_ws + current + trailing
+
+        return new_lines, changes
+
+    def _verify_file(self, results_path: Path,
+                     issues_before: List[Issue]) -> Dict[str, int]:
+        """Верификация повторным сканом исправленного файла (DS_053).
+
+        Сравнивает число проблем по кодам правил до/после. fixed = исчезнувшие,
+        remaining = оставшиеся (needs_manual или needs_ai_fix). Никогда не
+        помечает проблему исправленной, если она осталась.
+        """
+        verify_scanner = getattr(self, '_verify_scanner', None)
+        after_issues: List[Issue] = []
+        if verify_scanner is not None:
+            try:
+                after_issues = verify_scanner.scan_file(Path(results_path)) or []
+            except Exception as e:
+                logger.warning(f"[FIXER] Ошибка верификации {results_path}: {e}")
+
+        before_by_rule: Dict[str, int] = {}
+        for it in issues_before:
+            before_by_rule[it.issue_type] = before_by_rule.get(it.issue_type, 0) + 1
+        after_by_rule: Dict[str, int] = {}
+        for it in after_issues:
+            after_by_rule[it.issue_type] = after_by_rule.get(it.issue_type, 0) + 1
+
+        result = {
+            'fixed': 0, 'needs_manual': 0, 'needs_ai_fix': 0,
+            'by_rule': {}, 'remaining_by_rule': {},
+        }
+        ai_on = self.flags.get('ai_fallback', False)
+        for code, bcount in before_by_rule.items():
+            acount = after_by_rule.get(code, 0)
+            fixed = max(0, bcount - acount)
+            remaining = acount
+            result['fixed'] += fixed
+            result['by_rule'][code] = fixed
+            if remaining:
+                if ai_on:
+                    result['needs_ai_fix'] += remaining
+                else:
+                    result['needs_manual'] += remaining
+                result['remaining_by_rule'][code] = remaining
+        # Правила, появившиеся после фикса (побочные) — тоже needs_manual.
+        for code, acount in after_by_rule.items():
+            if code not in before_by_rule and acount:
+                if ai_on:
+                    result['needs_ai_fix'] += acount
+                else:
+                    result['needs_manual'] += acount
+                result['remaining_by_rule'][code] = acount
+        return result
+
     def fix_file(self, file_path: Path, issues: List[Issue]) -> Tuple[bool, int]:
         """
-        Исправление одного файла.
-        Возвращает кортеж (изменён_ли_файл, количество_исправлений).
+        Исправление одного файла (детерминированный конвейер DS_053).
+
+        Порядок: issue-fixes (SQL/RuleEngine → backup) → DeterministicFixer
+        (переменные). Возвращает (изменён_ли_файл, количество_исправлений).
         """
-        # 1. Детерминированные правки (переименование, удаление неиспользуемых)
+        # Читаем файл с определением кодировки.
+        try:
+            text, enc = read_file_with_encoding(Path(file_path))
+        except Exception as e:
+            logger.warning(f"[FIXER] Не удалось прочитать {file_path}: {e}")
+            text, enc = None, 'utf-8'
+        if text is None:
+            text = ''
+
+        # DS_053_Уточнение: BOM на выходе — только если он был на входе.
+        # utf-8-sig при записи всегда добавляет BOM, что ломает файлы без BOM.
+        try:
+            has_bom = Path(file_path).read_bytes().startswith(b'\xef\xbb\xbf')
+        except Exception:
+            has_bom = enc == 'utf-8-sig'
+        if enc == 'utf-8-sig' and not has_bom:
+            enc = 'utf-8'
+
+        lines = text.splitlines(keepends=True)
+
+        # 1. Детерминированные исправления по issues (SQL + backup).
+        lines, issue_changes = self._apply_issue_fixes(lines, issues)
+
+        # Сохраняем изменения по issues обратно в файл результата.
+        if issue_changes:
+            try:
+                with open(file_path, 'w', encoding=enc, newline='') as f:
+                    f.write(''.join(lines))
+            except Exception as e:
+                logger.warning(f"[FIXER] Не удалось записать {file_path}: {e}")
+
+        # 2. DeterministicFixer (переименование переменных, неиспользуемые).
         det_fixer = DeterministicFixer()
         result = det_fixer.fix_file(str(file_path))
-        
-        # 2. Если есть изменения — обновляем статистику
+        det_changes = result.get('changes', [])
+
+        # Статистика и changelog по исправлениям issues.
+        for ch in issue_changes:
+            self.stats[ch['rule_code']] = self.stats.get(ch['rule_code'], 0) + 1
+            self.fixed_issues.append({
+                'file': str(file_path),
+                'line_num': ch['line_number'],
+                'issue_type': ch['rule_code'],
+                'bucket': ch['bucket'],
+                'kind': ch['kind'],
+                'original_code': ch['before'],
+                'fixed_code': ch['after'],
+                'timestamp': datetime.now().isoformat(),
+            })
+
+        # Статистика по правкам DeterministicFixer (как раньше).
         if result.get('modified', False):
-            for change in result.get('changes', []):
+            for change in det_changes:
                 if 'old_name' in change:
                     self.stats['PlpCheck.STYLE.PREFIX_TYPE.п.4.4'] = self.stats.get('PlpCheck.STYLE.PREFIX_TYPE.п.4.4', 0) + change.get('count', 0)
                 elif 'deleted' in change:
                     self.stats['PlpCheck.STYLE.NOT_MENTIONED.п.4.8'] = self.stats.get('PlpCheck.STYLE.NOT_MENTIONED.п.4.8', 0) + change.get('count', 0)
-            
-            # Добавляем в changelog
+
+        if issue_changes or result.get('modified', False):
             self.changes_log.append({
                 'file': str(file_path),
                 'iteration': self.iteration,
                 'timestamp': datetime.now().isoformat(),
-                'issues_fixed': len(result.get('changes', [])),
-                'types': ['PlpCheck.STYLE.PREFIX_TYPE.п.4.4', 'PlpCheck.STYLE.NOT_MENTIONED.п.4.8']
+                'issues_fixed': len(issue_changes) + len(det_changes),
+                'types': sorted({ch['rule_code'] for ch in issue_changes}),
             })
-            
-            return True, len(result.get('changes', []))
-        
-        # 3. Пока KODA не подключен — просто возвращаем результат
-        # Позже здесь будет вызов KODA для сложных случаев
-        
-        return False, 0
+
+        return (bool(issue_changes) or result.get('modified', False),
+                len(issue_changes) + len(det_changes))
     
     def copy_directory_structure(self, source_dir: Path, results_dir: Path, log_callback=None):
         """Копирование структуры каталогов и файлов (кроме .plp)"""
@@ -1310,6 +1544,26 @@ class PLPlusFixer:
         files_modified = 0
         files_unchanged = 0
         total_files = len(issues_by_file)
+
+        # DS_053: verification-сканер (тот же конфиг/правила, что и основной)
+        # для повторного скана исправленных файлов.
+        try:
+            self._verify_scanner = PLPlusScanner(
+                scanner.config,
+                scanner.selected_rules,
+                scanner.rubricator_prompts,
+                scanner.plpcheck_categories,
+            )
+        except Exception as e:
+            logger.warning(f"[FIXER] Не удалось создать verification-сканер: {e}")
+            self._verify_scanner = None
+        # Сброс сводной статистики верификации и данных лога.
+        self.verify_stats = {
+            'total_files': total_files, 'total_fixes': 0,
+            'fixed': 0, 'needs_manual': 0, 'needs_ai_fix': 0,
+            'by_rule': {}, 'top_rules': [],
+        }
+        self.scan_log_data = []
         
         # Копируем структуру каталогов при пустом шаблоне
         if should_copy_structure:
@@ -1493,7 +1747,39 @@ class PLPlusFixer:
             
             # Исправляем файл (results_path уже содержит оригинал)
             was_modified, fix_count = self.fix_file(results_path, issues)
-            
+
+            # DS_053: верификация повторным сканом + сбор данных для лога.
+            verify = self._verify_file(results_path, issues)
+            self.verify_stats['fixed'] += verify['fixed']
+            self.verify_stats['needs_manual'] += verify['needs_manual']
+            self.verify_stats['needs_ai_fix'] += verify['needs_ai_fix']
+            for code, cnt in verify['by_rule'].items():
+                self.verify_stats['by_rule'][code] = self.verify_stats['by_rule'].get(code, 0) + cnt
+            self.verify_stats['total_fixes'] += fix_count
+
+            # Исправления «было/стало» текущего файла (из fixed_issues).
+            line_logs = [
+                {'line_number': fx['line_num'], 'rule_code': fx['issue_type'],
+                 'bucket': fx.get('bucket', ''), 'kind': fx.get('kind', ''),
+                 'before': fx['original_code'], 'after': fx['fixed_code']}
+                for fx in self.fixed_issues if fx['file'] == str(results_path)
+            ]
+            self.scan_log_data.append({
+                'file': str(results_path),
+                'plan': sorted({it.issue_type for it in issues}),
+                'line_logs': line_logs,
+                'stats': dict(verify['by_rule']),
+                'remaining_by_rule': dict(verify['remaining_by_rule']),
+                'fixed': verify['fixed'],
+                'needs_manual': verify['needs_manual'],
+                'needs_ai_fix': verify['needs_ai_fix'],
+            })
+
+            if log_callback:
+                log_callback(f"    Верификация: fixed={verify['fixed']}, "
+                             f"needs_manual={verify['needs_manual']}, "
+                             f"needs_ai_fix={verify['needs_ai_fix']}")
+
             if was_modified:
                 files_modified += 1
                 
@@ -1576,11 +1862,132 @@ class PLPlusFixer:
             print(sep)
         
         return files_modified
-    
+
+    def save_scan_log(self, logs_dir: Path, source_name: str,
+                      timestamp: Optional[str] = None) -> Optional[Path]:
+        """Запись лога сканирования/фиксации scan_VVxVVx_<source>_<timestamp>.md.
+
+        VVxVVx — подпись флагов (V — выбран, x — нет) в порядке FLAG_ORDER.
+        Для каждого файла: PLAN (коды правил), блоки «было/стало» с кодом
+        правила (КР) и номером строки, статистика fixed/needs_manual/
+        needs_ai_fix и остаток по правилам. В конце — сводка.
+        """
+        if timestamp is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        try:
+            logs_dir = Path(logs_dir)
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            fname = self.rule_engine.log_name(source_name, timestamp, self.flags)
+            log_path = logs_dir / fname
+            # Гарантируем существование каталога именно для финального пути
+            # (robustness на случай иного каталога в log_path).
+            os.makedirs(os.path.dirname(str(log_path)), exist_ok=True)
+        except Exception as e:
+            logger.warning(f"[FIXER] Не удалось сформировать путь лога: {e}")
+            return None
+
+        vs = self.verify_stats
+
+        lines: List[str] = []
+        lines.append(f"Отчёт сканирования: {fname}")
+        lines.append("")
+        lines.append("Активные рубрикаторы и флаги:")
+        lines.append(f"  Рубрикаторы: 4.RUBRICATOR_PROMPT v5.json, "
+                     f"5.RUBRICATOR_PARSER_SQL v5.json ({getattr(self.rule_engine, 'version', 'N/A')})")
+        lines.append("")
+        # DS_053_Уточнение_5 (задача B): блок флагов с расшифровкой.
+        lines.extend(_fix_flags_block(self.flags, indent='  '))
+        lines.append("")
+        lines.append(f"**Дата**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append(f"**Источник**: {source_name}")
+        lines.append("")
+
+        # Сводная статистика.
+        lines.append("Сводная статистика:")
+        lines.append("")
+        lines.append(f"  Всего файлов: {vs.get('total_files', len(self.scan_log_data))}")
+        lines.append(f"  Всего исправлений: {vs.get('total_fixes', 0)}")
+        lines.append(f"  Подтверждено исправлено (повторный скан): {vs.get('fixed', 0)}")
+        lines.append(f"  needs_manual: {vs.get('needs_manual', 0)}")
+        lines.append(f"  needs_ai_fix: {vs.get('needs_ai_fix', 0)}")
+        top = sorted(vs.get('by_rule', {}).items(), key=lambda x: -x[1])[:5]
+        if top:
+            lines.append("  Топ-5 правил: " + ", ".join(f"{c} ({n})" for c, n in top))
+        lines.append("")
+
+        # DS_053_Уточнение_2 (задача D): МД — максимальная длина кода правила
+        # среди правил текущего прогона (все КР, попавшие в line_logs).
+        # Используется для выравнивания колонок «>» и нового кода (Схема A).
+        all_codes = [ll.get('rule_code', '')
+                     for fd in self.scan_log_data for ll in fd.get('line_logs', [])]
+        md = max((len(c) for c in all_codes), default=0)
+        before_dots = '.' * (md + 1)
+
+        # Детализация по файлам.
+        lines.append("## Файлы")
+        lines.append("")
+        for fd in self.scan_log_data:
+            fname_disp = Path(fd['file']).name
+            lines.append(f"### {fname_disp}")
+            lines.append("")
+            plan = fd.get('plan', [])
+            lines.append(f"**PLAN**: {', '.join(f'`{c}`' for c in plan) if plan else '—'}")
+            lines.append("")
+            # Устойчивая сортировка по номеру строки (порядок правил внутри
+            # строки сохраняется).
+            line_logs = sorted(fd.get('line_logs', []), key=lambda x: x['line_number'])
+            if line_logs:
+                # Группировка по номеру строки; блоки НЕ разделять пустыми
+                # строками (Схема A). Одна строка «до» (исходник) + по одной
+                # строке «после» на каждое правило строки.
+                i = 0
+                while i < len(line_logs):
+                    ln = line_logs[i]['line_number']
+                    group = []
+                    while i < len(line_logs) and line_logs[i]['line_number'] == ln:
+                        group.append(line_logs[i])
+                        i += 1
+                    lines.append(f"Строка {ln}:")
+                    first_before = (group[0].get('before', '') or '').rstrip()
+                    lines.append(f"{before_dots}> {first_before}")
+                    for ll in group:
+                        after = (ll.get('after', '') or '').rstrip()
+                        tag = f"<{ll['rule_code']}>".ljust(md + 2)
+                        lines.append(f"{tag} {after}")
+                lines.append("")
+            else:
+                lines.append("_Детерминированных исправлений по строкам нет._")
+                lines.append("")
+            stats = fd.get('stats', {})
+            lines.append("Статистика по файлу:")
+            for code, cnt in sorted(stats.items(), key=lambda x: (-x[1], x[0])):
+                if cnt:
+                    lines.append(f"  {code}: {cnt}")
+            lines.append(f"  needs_ai_fix: {fd.get('needs_ai_fix', 0)}")
+            lines.append(f"  needs_manual: {fd.get('needs_manual', 0)}")
+            lines.append("")
+            rem = fd.get('remaining_by_rule', {})
+            if rem:
+                lines.append("**Остаток по правилам (не исправлено)**:")
+                lines.append("")
+                for code, cnt in sorted(rem.items(), key=lambda x: (-x[1], x[0])):
+                    lines.append(f"- `{code}`: {cnt}")
+                lines.append("")
+
+        try:
+            text = '\r\n'.join(lines) + '\r\n'
+            with open(log_path, 'w', encoding='utf-8', newline='') as f:
+                f.write(text)
+            return log_path
+        except Exception as e:
+            logger.warning(f"[FIXER] Не удалось записать лог {log_path}: {e}")
+            return None
+
     def save_log(self, log_path: Path):
         """Сохранение лога изменений"""
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Группировка исправлений по файлам и типам
         by_file = {}
         for fix in self.fixed_issues:
@@ -1847,3 +2254,191 @@ def generate_changelog(issues: List, changes: List[dict], filename: str = '') ->
 
 if __name__ == '__main__':
     main()
+
+
+# ============================================================
+# DS_053_Уточнение_3 (задача A): лог scan_VVxVVx_* при «Сканировать»
+# ============================================================
+
+def get_backup_fix_codes() -> List[str]:
+    """Коды backup-правил (без инстанцирования фиксерa)."""
+    try:
+        return list(PLPlusFixer._get_default_fixes(None).keys())
+    except Exception:
+        return []
+
+
+def save_scan_only_log(logs_dir: Path, source_name: str, flags: Dict[str, bool],
+                       scanner: 'PLPlusScanner', config: Dict,
+                       timestamp: Optional[str] = None) -> Optional[Path]:
+    """DS_053_Уточнение_4 (задача A): лог scan_VVxVVx_<source>_<ts>.md при
+    «Сканировать» — ПРОГНОЗ исправлений (симуляция конвейера без записи).
+
+    - issues сканера прогоняются через тот же детерминированный конвейер,
+      что при фиксе (_apply_issue_fixes: RuleEngine regex+hybrid → backup
+      FIXES), в памяти (dry-run): исходный файл НЕ изменяется;
+    - лог: заголовок (рубрикаторы, флаги, дата, источник) + режим
+      «прогноз исправлений, без записи» + PLAN (сработавшие КР-коды) +
+      блок «Прогноз:» с парами «> было / <КР> станет» по Схеме A
+      (DS_053_Уточнение_2, задача D) + статистика по сработавшим правилам;
+    - если ни один флаг не активен: заголовок + пометка «флаги не выбраны»,
+      имя файла — scan_xxxxxx_... (все флаги = x).
+
+    Args:
+        logs_dir: каталог логов (F:\TO_DBI\logs).
+        source_name: имя источника (каталог сканирования).
+        flags: текущие 6 флагов.
+        scanner: сканер с результатами (issues) сканирования.
+        config: конфиг (как у сканера; нужен для инстанса фиксерa).
+    """
+    eng = get_rule_engine()
+    if timestamp is None:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    try:
+        logs_dir = Path(logs_dir)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        fname = eng.log_name(source_name, timestamp, flags)
+        log_path = logs_dir / fname
+        os.makedirs(os.path.dirname(str(log_path)), exist_ok=True)
+    except Exception as e:
+        logger.warning(f"[FIXER] Не удалось сформировать путь scan-only лога: {e}")
+        return None
+
+    any_flag = eng.any_replacement_flag(flags)
+    lines: List[str] = []
+    lines.append(f"Отчёт сканирования: {fname}")
+    lines.append("")
+    lines.append("Активные рубрикаторы и флаги:")
+    lines.append(f"  Рубрикаторы: 4.RUBRICATOR_PROMPT v5.json, "
+                 f"5.RUBRICATOR_PARSER_SQL v5.json ({getattr(eng, 'version', 'N/A')})")
+    lines.append("")
+    # DS_053_Уточнение_5 (задача B): блок флагов с расшифровкой.
+    lines.extend(_fix_flags_block(flags, indent='  '))
+    lines.append("")
+    lines.append(f"**Дата**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"**Источник**: {source_name}")
+    lines.append("")
+    lines.append("Режим: прогноз исправлений, без записи")
+    lines.append("")
+
+    if not any_flag:
+        # Ни один флаг не активен: пустой лог с пометкой.
+        lines.append("Флаги не выбраны.")
+        lines.append("")
+    else:
+        # --- Симуляция конвейера (dry-run, без записи в файлы) ---
+        sim_fixer = PLPlusFixer(config, 'scan_forecast')
+        sim_fixer.flags = dict(flags)
+        issues_by_file = scanner.get_issues_by_file()
+        source_dir_str = str(config.get('paths', {}).get('source_dir', '') or '')
+        sim_files: List[Dict] = []
+        skipped: List[str] = []  # диагностика пропусков (DS_053_Уточнение_5)
+        for file_path_str, issues in issues_by_file.items():
+            if not issues:
+                continue
+            fp = Path(file_path_str)
+            if not fp.exists():
+                # Устойчивый резолвинг (DS_053_Уточнение_5, задача A):
+                # путь из issues может не существовать в контексте АРМ
+                # (другой диск/регистр/относительный путь). Пробуем варианты.
+                candidates = [
+                    fp.resolve() if fp.is_absolute() else None,
+                    Path(source_dir_str) / fp if source_dir_str else None,
+                    Path(source_dir_str) / fp.name if source_dir_str else None,
+                ]
+                found = None
+                for cand in candidates:
+                    try:
+                        if cand and cand.exists():
+                            found = cand
+                            break
+                    except OSError:
+                        continue
+                if not found and source_dir_str:
+                    # Поиск по имени файла в source_dir (один уровень рекурсии
+                    # допустим: набор файлов небольшой).
+                    try:
+                        matches = list(Path(source_dir_str).rglob(fp.name))
+                        if matches:
+                            found = matches[0]
+                    except OSError:
+                        pass
+                if not found:
+                    skipped.append(f"{file_path_str}: файл не найден ({len(issues)} issues)")
+                    continue
+                fp = found
+            try:
+                text, enc = read_file_with_encoding(fp)
+            except Exception as e:
+                skipped.append(f"{fp}: ошибка чтения ({e})")
+                continue
+            file_lines = (text or '').splitlines(keepends=True)
+            # dry-run: изменения только в памяти (copy of lines), файл не
+            # перезаписывается — прогноз не трогает исходник.
+            _, changes = sim_fixer._apply_issue_fixes(
+                list(file_lines), issues, dry_run=True)
+            sim_files.append({'file': str(fp), 'changes': changes})
+            # Прогноз не пишет статистику в общий state фиксерa —
+            # собираем локально.
+
+        if skipped:
+            lines.append("_Пропущенные файлы (диагностика):_")
+            lines.append("")
+            for s in skipped:
+                lines.append(f"  - {s}")
+            lines.append("")
+
+        # Сводка по всем файлам.
+        all_changes = [ch for sf in sim_files for ch in sf['changes']]
+        plan_codes = sorted({ch['rule_code'] for ch in all_changes})
+        lines.append(f"PLAN: {', '.join(plan_codes) if plan_codes else '—'}")
+        lines.append("")
+        lines.append(f"Правил в PLAN: {len(plan_codes)}")
+        lines.append("")
+        lines.append(f"Спрогнозировано исправлений: {len(all_changes)}")
+        lines.append("")
+
+        # МД — максимальная длина кода правила среди сработавших (Схема A).
+        md = max((len(ch['rule_code']) for ch in all_changes), default=0)
+        before_dots = '.' * (md + 1)
+
+        for sf in sim_files:
+            changes = sf['changes']
+            if not changes:
+                continue
+            lines.append(f"### {Path(sf['file']).name}")
+            lines.append("")
+            lines.append("Прогноз:")
+            # Устойчивая группировка по номеру строки (Схема A).
+            i = 0
+            while i < len(changes):
+                ln = changes[i]['line_number']
+                group = []
+                while i < len(changes) and changes[i]['line_number'] == ln:
+                    group.append(changes[i])
+                    i += 1
+                lines.append(f"Строка {ln}:")
+                first_before = (group[0].get('before', '') or '').rstrip()
+                lines.append(f"{before_dots}> {first_before}")
+                for ch in group:
+                    after = (ch.get('after', '') or '').rstrip()
+                    tag = f"<{ch['rule_code']}>".ljust(md + 2)
+                    lines.append(f"{tag} {after}")
+            # Статистика по файлу — по сработавшим правилам.
+            stats: Dict[str, int] = {}
+            for ch in changes:
+                stats[ch['rule_code']] = stats.get(ch['rule_code'], 0) + 1
+            lines.append("")
+            lines.append("Статистика по файлу:")
+            for code, cnt in sorted(stats.items(), key=lambda x: (-x[1], x[0])):
+                lines.append(f"  {code}: {cnt}")
+            lines.append("")
+
+    try:
+        text = '\r\n'.join(lines) + '\r\n'
+        with open(log_path, 'w', encoding='utf-8', newline='') as f:
+            f.write(text)
+        return log_path
+    except Exception as e:
+        logger.warning(f"[FIXER] Не удалось записать scan-only лог {log_path}: {e}")
+        return None

@@ -484,6 +484,38 @@ class DBIMigrationApp:
         
         # Привязка изменения preserve_structure к доступности archive
         self.preserve_structure_var.trace_add('write', lambda *args: self._update_archive_state())
+
+        # DS 053: флаги детерминированного фикса (6 чекбоксов).
+        # Порядок и подписи соответствуют rule_engine.FLAG_ORDER.
+        flags_frame = ttk.LabelFrame(options_frame, text="Флаги детерминированного фикса (DS_053)", padding="5")
+        flags_frame.grid(row=5, column=0, columnspan=5, sticky=tk.W, pady=(6, 0))
+        # DS_053_Уточнение_3 (задача C): подпись из трёх строк (точный текст).
+        _cap = ttk.Frame(flags_frame)
+        _cap.grid(row=0, column=0, columnspan=6, sticky=tk.W)
+        for _i, _line in enumerate([
+            "Имя дополнительного лога: scan_VVxVVx (V — флаг выбран, x — нет)",
+            "Формируется при сканировании и исправлении.",
+            "При отсутствии флагов — пустой, с пометкой «флаги не выбраны».",
+        ]):
+            ttk.Label(_cap, text=_line,
+                      font=('Segoe UI', 8, 'italic'), foreground='#666666').grid(
+                row=_i, column=0, sticky=tk.W)
+        self.var_fix_flags = {}
+        _flag_defs = [
+            ('regex', 'regex (чистые regex-правила)', True),
+            ('hybrid', 'hybrid (полудетерм. с algorithmic_hint)', True),
+            ('ai_fallback', 'ai_fallback (помечать needs_ai_fix)', False),
+            ('ignore', 'ignore (не автофиксить, только лог)', False),
+            ('backup', 'backup (резервные regex-правила)', False),
+            ('other', 'other (hybrid без algorithmic_hint)', False),
+        ]
+        for _i, (_name, _text, _default) in enumerate(_flag_defs):
+            _var = tk.BooleanVar(value=_default)
+            self.var_fix_flags[_name] = _var
+            # DS_053_Уточнение_2 (задача C): автосохранение при изменении флага.
+            _var.trace_add('write', lambda *a: self._autosave_fix_flags())
+            ttk.Checkbutton(flags_frame, text=_text, variable=_var).grid(
+                row=1 + _i // 3, column=_i % 3, sticky=tk.W, padx=6, pady=1)
         
         # Панель управления
         control_frame = ttk.Frame(scrollable_frame, padding="5")
@@ -1649,8 +1681,45 @@ class DBIMigrationApp:
         self.log("Журнал скопирован в буфер обмена", 'info')
         messagebox.showinfo("Копирование", "Журнал скопирован в буфер обмена")
     
+    def _current_fix_flags(self) -> dict:
+        """DS_053_Уточнение_2: текущее состояние 6 флагов детерминированного
+        фикса в каноническом порядке. Используется для передачи в сканер
+        (заголовок отчётов) и фиксер. Если чекбоксы ещё не созданы — дефолт."""
+        defaults = {'regex': True, 'hybrid': True, 'ai_fallback': False,
+                    'ignore': False, 'backup': False, 'other': False}
+        vars_ = getattr(self, 'var_fix_flags', None)
+        if not vars_:
+            return defaults
+        return {name: bool(var.get()) for name, var in vars_.items()}
+
+    def _autosave_fix_flags(self):
+        """DS_053_Уточнение_2 (задача C): автосохранение состояния 6 флагов в
+        settings.json (read-modify-write только ключа 'fix_flags'). Не писать
+        во время загрузки настроек и до инициализации чекбоксов."""
+        if getattr(self, '_loading_settings', False):
+            return
+        if not getattr(self, 'var_fix_flags', None):
+            return
+        try:
+            settings_path = Path(__file__).parent / 'settings.json'
+            settings = {}
+            if settings_path.exists():
+                try:
+                    with open(settings_path, 'r', encoding='utf-8') as f:
+                        settings = json.load(f)
+                except Exception:
+                    settings = {}
+            settings['fix_flags'] = self._current_fix_flags()
+            with open(settings_path, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Не удалось автосохранить флаги DS_053: {e}")
+
     def load_settings(self):
         """Загрузка настроек из файла"""
+        # DS_053_Уточнение_2 (задача C): блокируем автосохранение на время
+        # восстановления флагов (var.set() вызвал бы trace_add → запись).
+        self._loading_settings = True
         settings_path = Path(__file__).parent / 'settings.json'
         if settings_path.exists():
             try:
@@ -1697,6 +1766,19 @@ class DBIMigrationApp:
                         self.var_plpcheck_all.set(all(var.get() for var in self.var_plpcheck_categories.values()))
                         self._on_plpcheck_toggle()
                         self.log(f"Восстановлены категории PlpCheck: {', '.join(saved_categories)}", 'info')
+
+                    # DS_053_Уточнение_2 (задача C): восстановление 6 флагов
+                    # детерминированного фикса. Если ключа нет — первый
+                    # запуск: остаются дефолты чекбоксов (regex+hybrid).
+                    if getattr(self, 'var_fix_flags', None):
+                        saved_flags = settings.get('fix_flags', None)
+                        if saved_flags is not None:
+                            for name, var in self.var_fix_flags.items():
+                                var.set(bool(saved_flags.get(name, var.get())))
+                            self.log(
+                                "Восстановлены флаги DS_053: " +
+                                ', '.join(f"{n}={'V' if v.get() else 'x'}"
+                                          for n, v in self.var_fix_flags.items()), 'info')
                         
                 self.log("Настройки загружены", 'info')
                 
@@ -1714,6 +1796,8 @@ class DBIMigrationApp:
             self._saved_rules = []
             # Обновить состояние кнопок
             self._update_buttons_state()
+        # DS_053_Уточнение_2 (задача C): разблокировать автосохранение флагов.
+        self._loading_settings = False
     
     def save_settings(self):
         """Сохранение настроек в файл"""
@@ -1737,6 +1821,9 @@ class DBIMigrationApp:
             settings['plpcheck_categories'] = [
                 code for code, var in self.var_plpcheck_categories.items() if var.get()
             ]
+        # DS_053_Уточнение_2 (задача C): сохранение 6 флагов детерминированного фикса
+        if getattr(self, 'var_fix_flags', None):
+            settings['fix_flags'] = self._current_fix_flags()
         try:
             with open(settings_path, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, ensure_ascii=False, indent=2)
@@ -2132,7 +2219,8 @@ class DBIMigrationApp:
             from analyzer.scanner import PLPlusScanner
             scanner = PLPlusScanner(config, selected_rules, self.rubricator_prompts,
                                     plpcheck_categories=getattr(self, 'plpcheck_categories_filter', []),
-                                    abort_callback=self._abort_requested)  # DS 038
+                                    abort_callback=self._abort_requested,  # DS 038
+                                    fix_flags=self._current_fix_flags())  # DS_053_Уточнение_2 (задача A)
             
             # Логирование вызова Парсера SQL
             self.root.after(0, lambda: self.log("\n[ПАРСЕР SQL] Начало сканирования и анализа...", 'highlight'))
@@ -2183,6 +2271,16 @@ class DBIMigrationApp:
             html_report_path = Path(config['paths']['logs_dir']) / f'plpcheck_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.html'
             scanner.generate_report(html_report_path)
             
+            # DS_053_Уточнение_4 (задача A): дополнительный лог scan_VVxVVx_*
+            # при «Сканировать» — ПРОГНОЗ исправлений (симуляция конвейера
+            # без записи: пары «> было / <КР> станет» по Схеме A). Без флагов —
+            # пустой лог с пометкой «флаги не выбраны» (имя scan_xxxxxx_*).
+            from fixer.code_fixer import save_scan_only_log
+            _flags = self._current_fix_flags()
+            _scan_log_path = save_scan_only_log(
+                Path(config['paths']['logs_dir']), source_name, _flags,
+                scanner, config)
+            
             self.root.after(0, lambda: self.log(f"\n[2/3] Результаты сканирования:", 'info'))
             self.root.after(0, lambda: self.log(f"  Найдено *.plp файлов: {scan_results.get('files_scanned', 0)}", 'info'))
             self.root.after(0, lambda: self.log(f"  Проблемных конструкций: {scan_results.get('total_issues', 0)}", 'info'))
@@ -2192,6 +2290,9 @@ class DBIMigrationApp:
                 self.root.after(0, lambda t=issue_type, c=count: self.log(f"  {t}: {c}", 'info'))
             
             self.root.after(0, lambda: self.log(f"\nОтчёт сохранён: {output_path}", 'info'))
+            # DS_053_Уточнение_3 (задача A): уведомление о доп. логе.
+            if _scan_log_path:
+                self.root.after(0, lambda p=_scan_log_path: self.log(f"Дополнительный лог сохранён: {p}", 'info'))
             
             # DS 042: различаем завершённое и прерванное сканирование.
             # ВАЖНО: scan_aborted ещё не сброшен (сброс — в finally через
@@ -2232,11 +2333,14 @@ class DBIMigrationApp:
             }
             
             # DS 040: окно результата — обычное или «прервано на xxx.xx %»
+            # DS_053_Уточнение_5 (задача C): показываются все три лога.
             self.root.after(0, 
                 lambda: self._show_scan_result_dialog(
                     files_count=scan_results.get('files_scanned', 0),
                     issues_count=scan_results.get('total_issues', 0),
-                    report_path=output_path)
+                    report_path=output_path,
+                    forecast_path=_scan_log_path,
+                    html_report_path=html_report_path)
             )
             
         except Exception as e:
@@ -2250,9 +2354,15 @@ class DBIMigrationApp:
             # DS 038: сброс флагов прерывания и деактивация кнопки
             self.root.after(0, self._finish_abortable_operation)
     
-    def _show_scan_result_dialog(self, files_count, issues_count, report_path):
+    def _show_scan_result_dialog(self, files_count, issues_count, report_path,
+                                 forecast_path=None, html_report_path=None):
         """DS 040: окно результата сканирования (обычное или прерванное).
-        Нативный messagebox не поддерживает смену фона — используется tk.Toplevel."""
+        Нативный messagebox не поддерживает смену фона — используется tk.Toplevel.
+
+        DS_053_Уточнение_5 (задача C): показываются все три лога —
+        Основной (scan_report_*), Прогноз (scan_VVxVVx_*), PlpCheck
+        (plpcheck_report_*.html). Если лог не сформирован — пометка
+        «не сформирован»."""
         is_aborted = self.abort_percent is not None
 
         # DS 040: расчёт процента прерывания
@@ -2290,7 +2400,11 @@ class DBIMigrationApp:
         body_text = (
             f"Найдено *.plp файлов: {files_count}\n"
             f"Проблемных конструкций: {issues_count}\n"
-            f"Отчёт: {report_path}"
+            "\n"
+            "Отчёты:\n"
+            f"  Основной:  {report_path}\n"
+            f"  Прогноз:   {forecast_path if forecast_path else 'не сформирован'}\n"
+            f"  PlpCheck:  {html_report_path if html_report_path else 'не сформирован'}"
         )
         if is_aborted:
             body_text += f"\n\n⚠ Прервано пользователем на {abort_percent:.2f} %"
@@ -2563,7 +2677,8 @@ class DBIMigrationApp:
             from analyzer.scanner import PLPlusScanner
             scanner = PLPlusScanner(config, selected_rules, self.rubricator_prompts,
                                     plpcheck_categories=getattr(self, 'plpcheck_categories_filter', []),
-                                    abort_callback=self._abort_requested)  # DS 038
+                                    abort_callback=self._abort_requested,  # DS 038
+                                    fix_flags=self._current_fix_flags())  # DS_053_Уточнение_2 (задача A)
             
             # Callback для вывода в журнал
             def scan_log(message, level='info'):
@@ -2598,6 +2713,13 @@ class DBIMigrationApp:
             iteration = datetime.now().strftime("%Y%m%d_%H%M%S")
             source_name = source_dir.name
             fixer = PLPlusFixer(config, iteration, clean_output=self.clean_output_var.get())
+
+            # DS 053: передача флагов детерминированного фикса в фиксер.
+            try:
+                fixer.flags = self._current_fix_flags()
+            except Exception as e:
+                self.root.after(0, lambda e=e: self.log(f"  [!] Не удалось применить флаги DS_053: {e}", 'warning'))
+
             
             self._progress_update(50)
             
@@ -2627,6 +2749,18 @@ class DBIMigrationApp:
             self.root.after(0, lambda: self.log("\n[3/5] Сохранение лога...", 'info'))
             log_path = Path(config['paths']['logs_dir']) / f'fix_log_{source_name}_{iteration}.md'
             fixer.save_log(log_path)
+
+            # DS 053: лог сканирования/фиксации scan_VVxVVx_<source>_<ts>.md.
+            try:
+                scan_log_path = fixer.save_scan_log(Path(config['paths']['logs_dir']), source_name)
+                if scan_log_path:
+                    _slp = str(scan_log_path)
+                    if len(_slp) >= 2 and _slp[1] == ':':
+                        _slp = _slp[0].upper() + _slp[1:]
+                    self.root.after(0, lambda p=_slp: self.log(f"  Лог флагов (scan_VVxVVx): {p}", 'info'))
+            except Exception as e:
+                self.root.after(0, lambda e=e: self.log(f"  [!] Ошибка лога scan_*: {e}", 'warning'))
+
             
             self._progress_update(90)
             

@@ -264,6 +264,181 @@ def apply_fix(line: str, rule_code: str) -> Optional[str]:
     return None
 
 
+def _pattern_bucket(pattern_def: Dict[str, Any]) -> str:
+    """Корзина правила для паттерна по флагам DS_053.
+
+    regex   -> transform_type == 'regex' с реальным transform
+    hybrid  -> transform_type == 'hybrid' с algorithmic_hint и реальным transform
+    other   -> transform_type == 'hybrid' без algorithmic_hint (с transform)
+    ignore  -> паттерн без реального transform (только fallback-инструкция) —
+               не подлежит автофиксу, только уведомление (лог).
+    """
+    tt = pattern_def.get('transform_type', 'regex')
+    if not pattern_def.get('transform'):
+        return 'ignore'
+    if tt == 'hybrid':
+        return 'hybrid' if pattern_def.get('algorithmic_hint') else 'other'
+    return 'regex'
+
+
+def apply_fix_ex(line: str, rule_code: str,
+                 allowed_buckets: Optional[set] = None) -> Optional[Any]:
+    """Детерминированное исправление строки с деталями (DS_053).
+
+    Отличается от apply_fix:
+      * фильтрацией паттернов по активным корзинам (allowed_buckets);
+      * возвратом кортежа (result, bucket, kind) вместо просто строки.
+
+    Args:
+        line: Исходная строка кода.
+        rule_code: Код правила.
+        allowed_buckets: Набор корзин {'regex','hybrid','other'} или None (все).
+
+    Returns:
+        None, если исправление не применимо; иначе кортеж
+        (result, bucket, kind), где kind в {'transform','instruction'}.
+    """
+    if not line or not rule_code:
+        return None
+
+    line_stripped = line.strip()
+    rule = find_rule(rule_code)
+    if not rule:
+        return None
+
+    patterns = rule.get('patterns', [])
+    if not patterns:
+        return None
+
+    for pattern_def in patterns:
+        bucket = _pattern_bucket(pattern_def)
+        if allowed_buckets is not None and bucket not in allowed_buckets:
+            continue
+
+        pattern_name = pattern_def.get('name', 'unknown')
+        regex = pattern_def.get('regex', '')
+        transform_type = pattern_def.get('transform_type', 'regex')
+        transform = pattern_def.get('transform', '')
+        fallback_instruction = pattern_def.get('fallback_instruction', '')
+
+        if not regex:
+            continue
+
+        try:
+            match = re.search(regex, line_stripped, re.IGNORECASE)
+            if not match:
+                continue
+
+            # Паттерн без реального transform (гибрид только-инструкция) —
+            # автофикс невозможен, код не меняем (уведомление идёт в лог).
+            if not transform:
+                continue
+
+            # Маппинг именованных групп (как в apply_fix)
+            named_mapping = {}
+            groups = match.groups()
+            if len(groups) >= 4:
+                named_mapping['left_table'] = groups[0]
+                named_mapping['left_column'] = groups[1]
+                named_mapping['right_table'] = groups[2]
+                named_mapping['right_column'] = groups[3]
+            if len(groups) >= 4 and 'plplus' in pattern_name.lower():
+                named_mapping['left_table'] = groups[0]
+                named_mapping['left_column'] = groups[1]
+                named_mapping['right_alias'] = groups[2]
+                named_mapping['right_table'] = groups[2]
+                named_mapping['right_column'] = groups[3]
+            if len(groups) >= 3 and 'collection' in pattern_name.lower():
+                named_mapping['left_table'] = groups[0]
+                named_mapping['left_column'] = groups[1]
+                named_mapping['collection_alias'] = groups[2]
+                named_mapping['alias'] = groups[2]
+                named_mapping['table'] = groups[2]
+            if len(groups) >= 1 and 'rownum' in pattern_name.lower():
+                named_mapping['limit'] = groups[0]
+            # rownum_between: группы (offset, limit); transform содержит
+            # {offset-1} (арифметика) и {limit}.
+            if 'between' in pattern_name.lower() and len(groups) >= 2:
+                named_mapping['offset'] = groups[0]
+                named_mapping['limit'] = groups[1]
+            if len(groups) >= 1 and 'date' in pattern_name.lower():
+                named_mapping['var_name'] = groups[0]
+                named_mapping['param_name'] = groups[0]
+                named_mapping['var'] = groups[0]
+                named_mapping['param'] = groups[0]
+            if len(groups) >= 3 and 'subtract' in pattern_name.lower():
+                named_mapping['left'] = groups[0]
+                named_mapping['right'] = groups[1]
+                named_mapping['value'] = groups[2]
+            if len(groups) >= 6 and 'decode' in pattern_name.lower():
+                named_mapping['expr'] = groups[0]
+                named_mapping['v1'] = groups[1]
+                named_mapping['r1'] = groups[2]
+                named_mapping['v2'] = groups[3]
+                named_mapping['r2'] = groups[4]
+                named_mapping['default'] = groups[5]
+            if len(groups) >= 2 and ('number' in pattern_name.lower() or 'cast' in rule_code.lower()):
+                named_mapping['left'] = groups[0]
+                named_mapping['right'] = groups[1]
+            if len(groups) >= 2 and 'id_size' in pattern_name.lower():
+                named_mapping['var'] = groups[0]
+                named_mapping['type'] = groups[1]
+
+            # Универсальные плейсхолдеры из групп по позиции (если ещё не заданы).
+            if '{var}' in transform and 'var' not in named_mapping and len(groups) >= 1:
+                named_mapping['var'] = groups[0]
+            if '{type}' in transform and 'type' not in named_mapping and len(groups) >= 2:
+                named_mapping['type'] = groups[1]
+            if '{param}' in transform and 'param' not in named_mapping and len(groups) >= 1:
+                named_mapping['param'] = groups[0]
+
+            replace_scope = pattern_def.get('replace_scope', 'full')
+
+            if replace_scope == 'match':
+                def _repl(m):
+                    current_mapping = dict(named_mapping)
+                    g = m.groups()
+                    if len(g) >= 1 and 'date' in pattern_name.lower():
+                        current_mapping['var_name'] = g[0]
+                        current_mapping['param_name'] = g[0]
+                    return apply_transform(m, transform, current_mapping)
+                result = re.sub(regex, _repl, line_stripped, flags=re.IGNORECASE)
+                if result != line_stripped:
+                    return result, bucket, 'transform'
+                continue
+
+            # Трансформация — подстрочная: подставляем заполненный шаблон
+            # в область совпадения, сохраняя остальное содержимое строки
+            # (WHERE/if/; /комментарий). Так же работает ветка scope=='match'.
+            sub = apply_transform(match, transform, named_mapping)
+
+            # Арифметический плейсхолдер {offset-1}: вычисляем числовую
+            # разность, если offset числовой (rownum_between).
+            if '{offset-1}' in sub:
+                off = named_mapping.get('offset')
+                if off is not None and off.strip().isdigit():
+                    sub = sub.replace('{offset-1}', str(max(0, int(off) - 1)))
+
+            if '{' in sub and '}' in sub:
+                # Плейсхолдеры не заполнены — детерминированный фикс невозможен.
+                continue
+
+            start, end = match.span()
+            result = line_stripped[:start] + sub + line_stripped[end:]
+
+            if result != line_stripped:
+                return result, bucket, 'transform'
+
+        except re.error as e:
+            logger.error(f"[PARSER] apply_fix_ex ошибка regex {pattern_name}: {e}")
+            continue
+        except Exception as e:
+            logger.error(f"[PARSER] apply_fix_ex ошибка паттерна {pattern_name}: {e}")
+            continue
+
+    return None
+
+
 def fix_line_with_fallback(line: str, rule_code: str) -> str:
     """
     Исправляет строку с использованием парсера и fallback-инструкций.

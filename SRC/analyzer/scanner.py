@@ -448,13 +448,16 @@ class PLPlusScanner:
     }
     
     def __init__(self, config: dict, selected_rules: List[str] = None, rubricator_prompts=None,
-                 plpcheck_categories: List[str] = None, abort_callback=None):
+                 plpcheck_categories: List[str] = None, abort_callback=None, fix_flags: Dict[str, bool] = None):
         self.config = config
         self.selected_rules = selected_rules or []
         # DS 036: выбранные категории PlpCheck (7 категорий + OTHER)
         self.plpcheck_categories = plpcheck_categories or []
         # DS 038: callback прерывания — возвращает True, если пользователь нажал «Прервать»
         self.abort_callback = abort_callback
+        # DS_053_Уточнение_2 (задача A): флаги детерминированного фикса для
+        # отображения в заголовке всех отчётов. None — дефолт (regex+hybrid).
+        self.fix_flags = fix_flags
         # DS 040: процент выполнения при прерывании
         # None — если не прервано; иначе float (0.0–100.0)
         self.abort_percent = None
@@ -1793,6 +1796,7 @@ class PLPlusScanner:
         # DS 037 (ЗАДАЧА 6): ни один рубрикатор не выбран
         if not selected_lower:
             lines.append("  (ни один рубрикатор не выбран)")
+            lines.extend(self._generate_fix_flags_lines())  # DS_053_Уточнение_2 (задача A)
             return lines
 
         # (ключ, отображаемое имя, префиксы кодов правил)
@@ -1823,6 +1827,42 @@ class PLPlusScanner:
                         prefix = '└' if idx == total - 1 else '├'
                         lines.append(f"    {prefix} {cat_code:<26}: {cat_status}")
 
+        # DS_053_Уточнение_2 (задача A): 6 флагов замены в каноне — во всех отчётах.
+        lines.extend(self._generate_fix_flags_lines())
+        return lines
+
+    # DS_053_Уточнение_5 (задача B): расшифровки флагов — точно как на форме GUI.
+    FIX_FLAG_DESCRIPTIONS = {
+        'regex': 'чистые regex-правила',
+        'hybrid': 'полудетерм. с algorithmic_hint',
+        'ai_fallback': 'помечать needs_ai_fix',
+        'ignore': 'не автофиксить, только лог',
+        'backup': 'резервные regex-правила',
+        'other': 'hybrid без algorithmic_hint',
+    }
+
+    def _generate_fix_flags_lines(self) -> List[str]:
+        """DS_053_Уточнение_2 (задача A): блок «Флаги замены» по канону.
+
+        Порядок и имена — по канону DS_053 (regex, hybrid, ai_fallback,
+        ignore, backup, other). Значения V/x берутся из self.fix_flags;
+        если флаги не переданы — дефолт: regex+hybrid включены, остальные
+        выключены (совпадает с дефолтом GUI первого запуска).
+
+        DS_053_Уточнение_5 (задача B): каждый флаг снабжён расшифровкой
+        (текст — как подписи чекбоксов на форме GUI); выравнивание по «—».
+        """
+        canon = ['regex', 'hybrid', 'ai_fallback', 'ignore', 'backup', 'other']
+        defaults = {'regex': True, 'hybrid': True}
+        flags = self.fix_flags if isinstance(self.fix_flags, dict) else {}
+        # Ширина колонки «имя: V» — для выравнивания тире.
+        width = max(len(f"{n}: {'V'}") for n in canon)
+        lines = ["  Флаги замены:"]
+        for name in canon:
+            on = flags.get(name, defaults.get(name, False))
+            left = f"{name}: {'V' if on else 'x'}"
+            desc = self.FIX_FLAG_DESCRIPTIONS.get(name, '')
+            lines.append(f"    {left:<{width}} — {desc}")
         return lines
 
     def _normalize_check_name(self, issue_type: str) -> str:

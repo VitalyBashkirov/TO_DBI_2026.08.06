@@ -10,6 +10,9 @@ venv/
 .vscode/
 .idea/
 
+# App state (user settings, flags)
+SRC/settings.json
+
 # Exchange and log
 EXCHANGE/bot.log
 EXCHANGE/INBOX/
@@ -62,4 +65,5 @@ SRC/AI_DOCS/
 
 # Presentations and prompts (binaries)
 ПРОМТы/
-Презентация/
+Презентация/temp_fix/synthetic*.plp
+EXCHANGE/Для нового чата.txt

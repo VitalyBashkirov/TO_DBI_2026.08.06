@@ -520,9 +520,40 @@ class DBIMigrationApp:
             ttk.Checkbutton(flags_frame, text=_text, variable=_var).grid(
                 row=1 + _i // 3, column=_i % 3, sticky=tk.W, padx=6, pady=1)
         
-        # Панель управления
-        control_frame = ttk.Frame(scrollable_frame, padding="5")
-        control_frame.pack(fill=tk.X)
+        # Панель управления (DS_054_Уточнение, задача B): оборачиваем в
+        # горизонтально-прокручиваемый канвас — если кнопки не влезают в ширину
+        # окна, все они достижимы горизонтальным скроллом. Приложение на Tkinter
+        # (не PyQt/PySide), QScrollArea неприменим, а нативного wrap/flow-менеджера
+        # в Tkinter нет — выбран Вариант A (скролл; Tkinter-аналог QScrollArea).
+        self.btn_bar_canvas = tk.Canvas(scrollable_frame, height=44, highlightthickness=0)
+        _btn_bar_scrollx = ttk.Scrollbar(scrollable_frame, orient=tk.HORIZONTAL,
+                                         command=self.btn_bar_canvas.xview)
+        self.btn_bar_canvas.configure(xscrollcommand=_btn_bar_scrollx.set)
+        control_frame = ttk.Frame(self.btn_bar_canvas, padding="5")
+        self.control_frame = control_frame
+        self.btn_bar_canvas.create_window((0, 0), window=control_frame, anchor="nw")
+
+        def _sync_btn_bar(*_a):
+            # scrollregion по содержимому + авто-высота канваса под строку кнопок.
+            try:
+                self.btn_bar_canvas.configure(scrollregion=self.btn_bar_canvas.bbox("all"))
+                h = control_frame.winfo_reqheight()
+                if h:
+                    self.btn_bar_canvas.configure(height=h)
+            except Exception:
+                pass
+
+        control_frame.bind("<Configure>", _sync_btn_bar)
+
+        # Колесо мыши (со Shift) над панелью — горизонтальная прокрутка.
+        def _btn_wheel(event):
+            step = -1 if getattr(event, 'delta', 0) > 0 else 1
+            self.btn_bar_canvas.xview_scroll(step, "units")
+            return "break"
+        self.btn_bar_canvas.bind("<Shift-MouseWheel>", _btn_wheel)
+
+        _btn_bar_scrollx.pack(side=tk.BOTTOM, fill=tk.X)
+        self.btn_bar_canvas.pack(fill=tk.X)
         
         self.btn_scan = ttk.Button(control_frame, text="Сканировать", command=self.start_scan, width=20)
         self.btn_scan.pack(side=tk.LEFT, padx=3)
@@ -533,6 +564,17 @@ class DBIMigrationApp:
         
         self.btn_fix = ttk.Button(control_frame, text="Исправить код", command=self.start_fix, width=20, style='Fix.TButton')
         self.btn_fix.pack(side=tk.LEFT, padx=3)
+        
+        # DS 054 / DS_054_Уточнение (задача A): «В AI» / «От AI» — сразу после
+        # «Исправить код» (обработка needs_ai_fix / needs_manual). Обработчики и
+        # логика активации из DS_054 сохранены.
+        self.btn_to_ai = ttk.Button(control_frame, text="В AI", command=self.send_to_ai, width=10)
+        self.btn_to_ai.pack(side=tk.LEFT, padx=3)
+        self.btn_to_ai.state(['disabled'])
+        
+        self.btn_from_ai = ttk.Button(control_frame, text="От AI", command=self.receive_from_ai, width=10)
+        self.btn_from_ai.pack(side=tk.LEFT, padx=3)
+        # «От AI» доступна всегда: файлы-ответы можно положить в AI_OUT вручную.
         
         self.btn_rubricator = ttk.Button(control_frame, text="Открыть рубрикатор", command=self.open_rubricator, width=25)
         self.btn_rubricator.pack(side=tk.LEFT, padx=3)
@@ -551,16 +593,6 @@ class DBIMigrationApp:
         self.btn_receive_koda = ttk.Button(control_frame, text="Получить ответ", command=self.receive_from_koda, width=20)
         self.btn_receive_koda.pack(side=tk.LEFT, padx=3)
         self.btn_receive_koda.state(['disabled'])
-        
-        # DS 054: файловый обмен с AI (AI-fallback). Кнопки активны после
-        # сканирования/исправления (когда есть scan_results).
-        self.btn_to_ai = ttk.Button(control_frame, text="В AI", command=self.send_to_ai, width=10)
-        self.btn_to_ai.pack(side=tk.LEFT, padx=3)
-        self.btn_to_ai.state(['disabled'])
-        
-        self.btn_from_ai = ttk.Button(control_frame, text="От AI", command=self.receive_from_ai, width=10)
-        self.btn_from_ai.pack(side=tk.LEFT, padx=3)
-        # «От AI» доступна всегда: файлы-ответы можно положить в AI_OUT вручную.
         
         # DS 010: кнопка просмотра истории изменений РК
         self.btn_result_history = ttk.Button(control_frame, text="История РК", command=self.show_result_dir_history, width=15)

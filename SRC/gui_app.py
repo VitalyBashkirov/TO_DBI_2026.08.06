@@ -107,6 +107,9 @@ class DBIMigrationApp:
         # Ссылка на кнопки для управления доступностью
         self.btn_scan = None
         self.btn_fix = None
+        # DS 054: кнопки файлового обмена с AI
+        self.btn_to_ai = None
+        self.btn_from_ai = None
         
         # DS 038 (Проблема A): флаги управления прерыванием
         self.scan_running = False       # True, пока идёт сканирование/исправление/генерация
@@ -548,6 +551,16 @@ class DBIMigrationApp:
         self.btn_receive_koda = ttk.Button(control_frame, text="Получить ответ", command=self.receive_from_koda, width=20)
         self.btn_receive_koda.pack(side=tk.LEFT, padx=3)
         self.btn_receive_koda.state(['disabled'])
+        
+        # DS 054: файловый обмен с AI (AI-fallback). Кнопки активны после
+        # сканирования/исправления (когда есть scan_results).
+        self.btn_to_ai = ttk.Button(control_frame, text="В AI", command=self.send_to_ai, width=10)
+        self.btn_to_ai.pack(side=tk.LEFT, padx=3)
+        self.btn_to_ai.state(['disabled'])
+        
+        self.btn_from_ai = ttk.Button(control_frame, text="От AI", command=self.receive_from_ai, width=10)
+        self.btn_from_ai.pack(side=tk.LEFT, padx=3)
+        # «От AI» доступна всегда: файлы-ответы можно положить в AI_OUT вручную.
         
         # DS 010: кнопка просмотра истории изменений РК
         self.btn_result_history = ttk.Button(control_frame, text="История РК", command=self.show_result_dir_history, width=15)
@@ -1247,6 +1260,13 @@ class DBIMigrationApp:
         # Кнопки Koda - активны после сканирования
         self.btn_send_koda.state(['!disabled' if show_sql_enabled else 'disabled'])
         self.btn_receive_koda.state(['!disabled' if show_sql_enabled else 'disabled'])
+
+        # DS 054: «В AI» активна после сканирования (есть проблемы для запроса).
+        # «От AI» доступна всегда — файлы-ответы кладутся в AI_OUT вручную.
+        if getattr(self, 'btn_to_ai', None) is not None:
+            self.btn_to_ai.state(['!disabled' if show_sql_enabled else 'disabled'])
+        if getattr(self, 'btn_from_ai', None) is not None:
+            self.btn_from_ai.state(['!disabled'])
     
 # Кнопка "Архивировать" - активируется при установленном флаге "Сохранить структуру"
         archive_enabled = False
@@ -3944,6 +3964,122 @@ class DBIMigrationApp:
         except Exception as e:
             self.log(f"Ошибка получения ответа: {e}", 'error')
             messagebox.showerror("Ошибка", f"Не удалось получить ответ:\n{e}")
+    
+    # ------------------------------------------------------------------
+    # DS 054: файловый обмен с AI (AI-fallback)
+    # ------------------------------------------------------------------
+    def _ai_rubricators(self) -> List[str]:
+        """Список активных рубрикаторов для шапки AI-запроса."""
+        names = []
+        try:
+            for code, var in self.selected_rules.items():
+                try:
+                    if var.get():
+                        names.append(code)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return names
+
+    def _ai_severity(self, issue_type: str) -> str:
+        """Уровень WARNING/ERROR по коду правила (через сканер из scan_results)."""
+        scanner = None
+        if self.scan_results:
+            scanner = self.scan_results.get('scanner')
+        if scanner is not None and hasattr(scanner, '_get_severity_level'):
+            try:
+                return scanner._get_severity_level(issue_type)
+            except Exception:
+                return 'WARNING'
+        return 'WARNING'
+
+    def send_to_ai(self):
+        """DS 054: сформировать файл-запрос для AI в EXCHANGE\AI_IN."""
+        if not self.scan_results:
+            messagebox.showwarning("Предупреждение", "Сначала выполните сканирование!")
+            return
+        issues = self.scan_results.get('issues', [])
+        if not issues:
+            messagebox.showinfo("Нет проблем", "Проблемных конструкций не найдено")
+            return
+        try:
+            import ai_exchange
+            ai_exchange.ensure_dirs()
+            flags = self._current_fix_flags()
+            rubs = self._ai_rubricators()
+            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+            # Группируем проблемы по файлам-источникам.
+            by_file = {}
+            for issue in issues:
+                by_file.setdefault(issue.file_path, []).append(issue)
+
+            self._log_separator("ФОРМИРОВАНИЕ AI-ЗАПРОСОВ (DS 054)")
+            written = []
+            for file_path, file_issues in sorted(by_file.items()):
+                if not file_path or not Path(file_path).exists():
+                    self.log(f"  [!] Пропуск (файл не найден): {file_path}", 'warning')
+                    continue
+                req = ai_exchange.write_request(
+                    Path(file_path), file_issues, flags, rubs,
+                    severity_fn=self._ai_severity, timestamp=ts)
+                written.append(req)
+                self.log(f"  AI-запрос: {req.name} ({len(file_issues)} проблем)", 'success')
+
+            self.log(f"Сформировано AI-запросов: {len(written)} → EXCHANGE\AI_IN", 'highlight')
+            self.log("Отправьте файл(ы) в AI, затем положите ответ "
+                     "AI_RESPONSE_<source>_<ts>.md в EXCHANGE\AI_OUT и нажмите «От AI».", 'info')
+            # «От AI» доступна для получения ответа.
+            if getattr(self, 'btn_from_ai', None) is not None:
+                self.btn_from_ai.state(['!disabled'])
+            ai_in = Path(__file__).parent.parent / 'EXCHANGE' / 'AI_IN'
+            messagebox.showinfo(
+                "AI-запрос сформирован",
+                f"Файлов-запросов: {len(written)}\n\nКаталог: {ai_in}\n\n"
+                "Отправьте их в AI и верните ответы в EXCHANGE\AI_OUT.")
+        except Exception as e:
+            self.log(f"Ошибка формирования AI-запроса: {e}", 'error')
+            messagebox.showerror("Ошибка", f"Не удалось сформировать AI-запрос:\n{e}")
+
+    def receive_from_ai(self):
+        """DS 054: обработать файлы-ответы из EXCHANGE\AI_OUT."""
+        try:
+            import ai_exchange
+            dirs = ai_exchange.ensure_dirs()
+            out_dir = dirs['AI_OUT']
+            files = sorted(list(out_dir.glob(ai_exchange.RESPONSE_PREFIX + '*.md')) +
+                           list(out_dir.glob(ai_exchange.RESPONSE_PREFIX + '*.json')))
+            if not files:
+                messagebox.showinfo("Нет ответов",
+                                    f"В каталоге нет файлов-ответов:\n{out_dir}")
+                return
+
+            self._log_separator("ОБРАБОТКА AI-ОТВЕТОВ (DS 054)")
+            self.log(f"Найдено ответов: {len(files)}", 'info')
+            results = ai_exchange.process_all_responses(backup=True)
+            for line in ai_exchange.summarize(results):
+                self.log(line, 'info')
+
+            # Дублируем сводку в Журнал изменений (КР).
+            try:
+                summary_text = "\n".join(ai_exchange.summarize(results))
+                self.changelog_text.configure(state='normal')
+                self.changelog_text.insert(tk.END,
+                    f"\n\n=== AI-ответы ({datetime.now():%Y-%m-%d %H:%M:%S}) ===\n"
+                    f"{summary_text}\n")
+                self.changelog_text.configure(state='disabled')
+            except Exception:
+                pass
+
+            total_ok = sum(1 for r in results if r.get('status') == 'ok')
+            messagebox.showinfo(
+                "AI-ответы обработаны",
+                f"Обработано файлов: {total_ok} из {len(results)}\n\n"
+                "См. Журнал выполнения и Журнал изменений.")
+        except Exception as e:
+            self.log(f"Ошибка обработки AI-ответов: {e}", 'error')
+            messagebox.showerror("Ошибка", f"Не удалось обработать AI-ответы:\n{e}")
     
     def _save_changelog_to_disk(self, changelog_text: str, source_file: str = ''):
         """Сохранение журнала на диск"""

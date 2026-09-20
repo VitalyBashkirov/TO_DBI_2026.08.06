@@ -3,6 +3,13 @@ from typing import Optional, List, Dict, Tuple
 import re
 from pathlib import Path
 
+# DS_056A: единый хелпер лексического разбора
+from analyzer.lexer_state import (
+    LexerState,
+    advance_lexer_state,
+    is_line_fully_in_comment_or_string,
+)
+
 
 @dataclass
 class VariableDeclaration:
@@ -318,8 +325,11 @@ class DeterministicFixer:
     def _rename_variable(self, code: str, old_name: str, new_name: str) -> Tuple[str, int]:
         lines = code.split('\n')
         count = 0
+        state = LexerState()  # DS_056A: лексическое состояние переносим между строками
         for i, line in enumerate(lines):
-            if self._is_in_comment_or_string(line):
+            in_cmt = is_line_fully_in_comment_or_string(line, state)
+            advance_lexer_state(line, state)  # ровно один раз на строку
+            if in_cmt:
                 continue
             new_line = re.sub(r'\b' + re.escape(old_name) + r'\b', new_name, line)
             if new_line != line:
@@ -328,14 +338,13 @@ class DeterministicFixer:
         return '\n'.join(lines), count
     
     def _is_in_comment_or_string(self, line: str) -> bool:
-        stripped = line.strip()
-        if stripped.startswith('--'):
-            return True
-        if stripped.startswith('/*') or stripped.endswith('*/'):
-            return True
-        if re.match(r"^'.*'$", stripped):
-            return True
-        return False
+        """
+        DS_056A: делегирование в единый хелпер (обёртка «строка целиком»).
+        Используется как совместимый без-стейтовый вызов (без переноса состояния
+        между строками). Для итераций по строкам см. _rename_variable /
+        _is_variable_used — там состояние ведётся явно через LexerState.
+        """
+        return is_line_fully_in_comment_or_string(line, LexerState())
     
     def _remove_unused(self, code: str, variables: List[VariableDeclaration], rename_map: Dict[str, str]) -> Tuple[str, List]:
         lines = code.split('\n')
@@ -369,10 +378,13 @@ class DeterministicFixer:
     
     def _is_variable_used(self, code: str, var_name: str, decl_line: int) -> bool:
         lines = code.split('\n')
+        state = LexerState()  # DS_056A: переносим лексическое состояние между строками
         for i, line in enumerate(lines):
+            in_cmt = is_line_fully_in_comment_or_string(line, state)
+            advance_lexer_state(line, state)  # ровно один раз на строку
             if i + 1 == decl_line:
                 continue
             if re.search(r'\b' + re.escape(var_name) + r'\b', line):
-                if not self._is_in_comment_or_string(line):
+                if not in_cmt:
                     return True
         return False

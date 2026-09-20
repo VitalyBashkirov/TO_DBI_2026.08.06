@@ -55,13 +55,43 @@ class RuleEngine:
     # ------------------------------------------------------------------
     # Загрузка / классификация
     # ------------------------------------------------------------------
+    def _resolve_code(self, rule_code: str) -> str:
+        """DS_059: маппинг кодов сканера на коды PARSER_SQL.
+
+        Сканер PlpCheck выдаёт ``plpcheck.<NAME>``, а PARSER_SQL содержит
+        ``PlpCheck.<CAT>.<NAME>.п.<N>``. Возвращаем найденный код PARSER_SQL
+        (первое совпадение; NAME уникальны), иначе исходный rule_code.
+        """
+        if not rule_code or not rule_code.lower().startswith('plpcheck.'):
+            return rule_code
+        name = rule_code.split('.', 1)[1].strip()
+        if not name:
+            return rule_code
+        name_lower = name.lower()
+        for code in self._rules:
+            if not code.startswith('PlpCheck.'):
+                continue
+            parts = code.split('.')
+            # Формат: PlpCheck.<CAT>.<NAME>.п.<N>[.<N>]
+            if len(parts) >= 4 and parts[2].lower() == name_lower \
+                    and parts[3].lower().startswith('п'):
+                return code
+        return rule_code
+
     def has_rule(self, rule_code: str) -> bool:
-        """Есть ли правило с детерминированным исправлением в PARSER_SQL."""
-        return rule_code in self._rules
+        """Есть ли правило с детерминированным исправлением в PARSER_SQL.
+
+        DS_059: учитывает маппинг plpcheck.<NAME> -> PlpCheck.*.<NAME>.п.*
+        """
+        return self._resolve_code(rule_code) in self._rules
+
+    def get_rule(self, rule_code: str) -> Optional[Dict[str, Any]]:
+        """DS_059: правило PARSER_SQL по коду (с учётом маппинга plpcheck.*)."""
+        return self._rules.get(self._resolve_code(rule_code))
 
     def rule_buckets(self, rule_code: str) -> Set[str]:
         """Множество корзин (regex/hybrid/other), к которым относится правило."""
-        rule = self._rules.get(rule_code)
+        rule = self.get_rule(rule_code)
         buckets: Set[str] = set()
         if not rule:
             return buckets
@@ -104,7 +134,19 @@ class RuleEngine:
         allowed = self.enabled_transform_buckets(flags)
         if not allowed:
             return None
-        return apply_fix_ex(line, rule_code, allowed_buckets=allowed)
+        # DS_059: маппинг plpcheck.<NAME> -> PlpCheck.*.<NAME>.п.*
+        resolved = self._resolve_code(rule_code)
+        res = apply_fix_ex(line, resolved, allowed_buckets=allowed)
+        # DS_059_Уточнение_E: разделение bad_prefix/missing_prefix. Сканерные
+        # issues plpcheck.BAD_PREFIX покрывают и простое отсутствие префикса
+        # (зона missing_prefix_* правила PREFIX_TYPE_IN_VAR_NAME.п.4.4), поэтому
+        # если плохие префиксы не сматчились — пробуем missing-паттерны вторым
+        # шагом (регресс DS_059_Уточнение_D: Dp -> v_Dp, Cnt -> n_Cnt).
+        if res is None and resolved == 'PlpCheck.STYLE.BAD_PREFIX.п.4.3':
+            res = apply_fix_ex(
+                line, 'PlpCheck.STYLE.PREFIX_TYPE_IN_VAR_NAME.п.4.4',
+                allowed_buckets=allowed)
+        return res
 
     # ------------------------------------------------------------------
     # Формирование имени лога по флагам

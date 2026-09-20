@@ -139,9 +139,12 @@ def apply_fix(line: str, rule_code: str) -> Optional[str]:
         if not regex:
             continue
         
+        # DS_059_E: opt-out от форсированного IGNORECASE по маркеру (?-i).
+        regex, regex_flags = _regex_flags(regex)
+
         try:
             # Ищем совпадение
-            match = re.search(regex, line_stripped, re.IGNORECASE)
+            match = re.search(regex, line_stripped, regex_flags)
             
             if match:
                 logger.debug(f"[PARSER] Применён паттерн '{pattern_name}' для {rule_code}")
@@ -221,7 +224,7 @@ def apply_fix(line: str, rule_code: str) -> Optional[str]:
                                 current_mapping['var_name'] = g[0]
                                 current_mapping['param_name'] = g[0]
                             return apply_transform(m, transform, current_mapping)
-                        result = re.sub(regex, _repl, line_stripped, flags=re.IGNORECASE)
+                        result = re.sub(regex, _repl, line_stripped, flags=regex_flags)
                         logger.debug(f"  Стало: {result}")
                         if result != line_stripped:
                             return result
@@ -262,6 +265,21 @@ def apply_fix(line: str, rule_code: str) -> Optional[str]:
     # Если ни один паттерн не сработал
     logger.debug(f"[PARSER] Ни один паттерн не совпал для {rule_code}")
     return None
+
+
+# DS_059_E: маркер (?-i) в начале regex — явный opt-out от форсированного
+# re.IGNORECASE в apply_fix/apply_fix_ex. Регистронезависимые фрагменты таких
+# паттернов обёрнуты в скап-группу (?i:...). Нужен, потому что глобальный (?i)
+# конфликтует с регистрозависимым lookahead (?!v[A-Z]|...) — без opt-out он
+# блокировал бы и Dp/name (нарушение тестов DS_059_E №3/№6).
+_CASE_SENSITIVE_OPTOUT = '(?-i)'
+
+
+def _regex_flags(regex: str):
+    """Снять маркер (?-i) и вернуть (regex_без_маркера, флаги re)."""
+    if regex.startswith(_CASE_SENSITIVE_OPTOUT):
+        return regex[len(_CASE_SENSITIVE_OPTOUT):], 0
+    return regex, re.IGNORECASE
 
 
 def _pattern_bucket(pattern_def: Dict[str, Any]) -> str:
@@ -324,8 +342,11 @@ def apply_fix_ex(line: str, rule_code: str,
         if not regex:
             continue
 
+        # DS_059_E: opt-out от форсированного IGNORECASE по маркеру (?-i).
+        regex, regex_flags = _regex_flags(regex)
+
         try:
-            match = re.search(regex, line_stripped, re.IGNORECASE)
+            match = re.search(regex, line_stripped, regex_flags)
             if not match:
                 continue
 
@@ -402,7 +423,7 @@ def apply_fix_ex(line: str, rule_code: str,
                         current_mapping['var_name'] = g[0]
                         current_mapping['param_name'] = g[0]
                     return apply_transform(m, transform, current_mapping)
-                result = re.sub(regex, _repl, line_stripped, flags=re.IGNORECASE)
+                result = re.sub(regex, _repl, line_stripped, flags=regex_flags)
                 if result != line_stripped:
                     return result, bucket, 'transform'
                 continue

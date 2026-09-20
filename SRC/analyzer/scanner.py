@@ -18,6 +18,14 @@ except ImportError:
     PLPlusAIAnalyzer = None
     AIAnalysisResult = None
 
+# DS_056A: единый хелпер лексического разбора
+from analyzer.lexer_state import (
+    LexerState,
+    is_in_comment_or_string,
+    advance_lexer_state,
+    is_line_fully_in_comment_or_string,
+)
+
 # ============================================================
 # DS 042 (Приложение Б): константа отладки уровня модуля.
 # True — включить отладочные принты [DS_042-DEBUG]; False — отключить.
@@ -446,7 +454,16 @@ class PLPlusScanner:
         'тклоик20240828.VARCHAR_SIZE.стр.4',  # VARCHAR2/STRING без размера
         'тклоик20240828.NO_INTEGER_FOR_ID.стр.4' # INTEGER для ID
     }
-    
+
+    # DS_056A: совместимый алиас для lexer_state.in_block_comment
+    @property
+    def in_block_comment(self):
+        return self.lexer_state.in_block_comment
+
+    @in_block_comment.setter
+    def in_block_comment(self, val):
+        self.lexer_state.in_block_comment = val
+
     def __init__(self, config: dict, selected_rules: List[str] = None, rubricator_prompts=None,
                  plpcheck_categories: List[str] = None, abort_callback=None, fix_flags: Dict[str, bool] = None):
         self.config = config
@@ -463,7 +480,7 @@ class PLPlusScanner:
         self.abort_percent = None
         self.issues: List[Issue] = []
         self.stats: Dict[str, int] = {}
-        self.in_block_comment = False
+        self.lexer_state = LexerState()
         self.lines = []  # для многострочного анализа
         self.file_path = None
         self.ai_results: List[AIAnalysisResult] = []  # Результаты AI-анализа
@@ -487,57 +504,18 @@ class PLPlusScanner:
         return False
     
     def _is_in_comment_or_string(self, line: str, match_start: int, match_end: int) -> bool:
-        """Проверка, находится ли найденное совпадение в комментарии или строковом литерале."""
-        if self._is_hint_comment(line, match_start):
-            return False
-        
-        stripped = line.lstrip()
-        if stripped.startswith('--'):
-            return True
-        
-        line_before_match = line[:match_start]
-        if '--' in line_before_match:
-            comment_pos = line_before_match.rfind('--')
-            before_comment = line[:comment_pos]
-            if before_comment.count("'") % 2 == 0:
-                return True
-        
-        single_quotes_before = line[:match_start].count("'")
-        if single_quotes_before % 2 == 1:
-            return True
-        
-        opens_before = line[:match_start].count('/*')
-        closes_before = line[:match_start].count('*/')
-        
-        if opens_before > closes_before:
-            return True
-        
-        if self.in_block_comment:
-            if closes_before > opens_before:
-                self.in_block_comment = False
-            else:
-                return True
-        
-        return False
-    
+        """
+        Проверка, находится ли найденное совпадение в комментарии или строковом литерале.
+
+        DS_056A: делегирует в единый хелпер analyzer.lexer_state.
+        НЕ мутирует состояние — читает self.lexer_state (состояние НАЧАЛА строки).
+        Состояние переноса обновляет advance_lexer_state (один раз на строку).
+        """
+        return is_in_comment_or_string(line, match_start, match_end, self.lexer_state)
+
     def _update_block_comment_state(self, line: str):
-        """Обновление состояния блочного комментария"""
-        opens = line.count('/*')
-        closes = line.count('*/')
-        
-        if self.in_block_comment:
-            if closes > 0:
-                first_close = line.find('*/')
-                last_open_before_close = line[:first_close].rfind('/*')
-                if last_open_before_close == -1:
-                    remaining = line[first_close + 2:]
-                    if '/*' in remaining:
-                        self.in_block_comment = True
-                    else:
-                        self.in_block_comment = False
-        else:
-            if opens > closes:
-                self.in_block_comment = True
+        """Обновление состояния лексического разбора по итогам строки."""
+        advance_lexer_state(line, self.lexer_state)
     
     def _find_code_positions(self, line: str, pattern: str, flags: int = 0) -> List[Tuple[int, int, str]]:
         """Найти все позиции паттерна в коде, игнорируя комментарии и строки."""
@@ -1177,7 +1155,7 @@ class PLPlusScanner:
     def scan_file(self, file_path: Path, log_callback=None) -> List[Issue]:
         """Сканирование одного файла"""
         issues = []
-        self.in_block_comment = False
+        self.lexer_state = LexerState()  # DS_056A: сброс лексического состояния на новый файл
         self.file_path = file_path
         
         # DS 023: отладочный вывод
@@ -1212,12 +1190,14 @@ class PLPlusScanner:
             for line_num, line in enumerate(self.lines, 1):
                 original_line = line
                 stripped = original_line.strip()
-                
-                self._update_block_comment_state(line)
-                
+
+                # DS_056A: лексическое состояние читается на НАЧАЛЕ строки.
+                # advance_lexer_state вызывается РОВНО ОДИН РАЗ в конце итерации.
+
                 if stripped.startswith('--'):
+                    advance_lexer_state(line, self.lexer_state)
                     continue
-                
+
                 issues_found_on_line = 0
                 
                 for issue_type, pattern_data in self.PATTERNS.items():
@@ -1290,7 +1270,10 @@ class PLPlusScanner:
                 
                 if log_callback and issues_found_on_line > 0:
                     log_callback(f"  [ПАРСЕР SQL] Строка {line_num}: найдено {issues_found_on_line} проблем(ы)", 'info')
-            
+
+                # DS_056A: ровно один раз на строку — после всех is_in_comment_or_string.
+                advance_lexer_state(line, self.lexer_state)
+
             # ========== МНОГОСТРОЧНЫЙ ПОИСК ==========
             if log_callback:
                 log_callback(f"\n  [МНОГОСТРОЧНЫЙ АНАЛИЗ] Проверка сложных правил...", 'info')
@@ -1938,9 +1921,12 @@ class PLPlusScanner:
                 section = issue.section
             else:
                 _, _, section = self._parse_class_and_method(fp, line_number=issue.line_number)
-            # PLAN
-            plan = self._generate_plan(issue.issue_type, issue.description)
+            # PLAN (DS_059: формат <CHECK> — <действие>)
+            plan = self._generate_plan(issue.issue_type, issue.description,
+                                       check_name=check_name)
             
+            # ERROR (DS_059_Уточнение_A): <описание>: "<исходный_фрагмент>"
+            error_text = self._error_with_fragment(issue)
             rows.append({
                 'class': class_name,
                 'method': method_name,
@@ -1949,7 +1935,7 @@ class PLPlusScanner:
                 'check': check_name,
                 'level': level,
                 'type': issue_type_ru,
-                'error': issue.description,
+                'error': error_text,
                 'plan': plan,
                 'file': fp,
             })
@@ -2164,53 +2150,219 @@ class PLPlusScanner:
         
         print(f"HTML-отчёт сохранён: {output_path}")
     
-    def _generate_plan(self, issue_type: str, description: str = '') -> str:
-        """Генерация текста ПЛАНА на основе типа правила (DS 028)."""
+    # DS_059: глаголы действия (Приложение A задания)
+    _ACTION_VERBS = (
+        # Категория 1 — прямое действие
+        'переименовать', 'переименуйте', 'удалить', 'удалите', 'добавить',
+        'добавьте', 'заменить', 'замените', 'исправить', 'исправьте',
+        'вынести', 'вынесите', 'преобразовать', 'преобразуйте', 'исключить',
+        'исключите', 'убрать', 'уберите',
+        # Категория 2 — стилевое / синтаксическое
+        'привести', 'приведите', 'оформить', 'оформите', 'переписать',
+        'перепишите', 'переделать', 'переделайте', 'изменить', 'измените',
+        # Категория 3 — проверка / контроль
+        'проверить', 'проверьте', 'проконтролировать', 'проконтролируйте',
+        'убедиться', 'убедитесь',
+        # Категория 4 — указание / вынесение
+        'указать', 'укажите', 'выделить', 'выделите', 'объявить', 'объявите',
+        # Категория 5 — удаление / обнуление
+        'снять', 'снимите', 'обнулить', 'обнулите', 'очистить', 'очистите',
+        # Категория 6 — отказ / замена
+        'отказаться', 'откажитесь', 'заместить', 'заместите',
+        # Категория 7 — улучшение / оптимизация
+        'оптимизировать', 'оптимизируйте', 'упростить', 'упростите',
+        'сократить', 'сократите',
+    )
+
+    # DS_059: ложные глаголы — исключения (Приложение B задания)
+    _FALSE_ACTION_PREFIXES = (
+        'наименование', 'имя', 'название', 'идентификатор', 'код',
+        'объявление', 'описание', 'проверка', 'использование', 'обращение',
+        'сравнение', 'присвоение', 'передача', 'вызов', 'определение',
+        'тип', 'значение', 'ссылка', 'свойство', 'параметр',
+        'не корректный', 'не корректное', 'не корректная',
+        'некорректный', 'некорректное', 'некорректная',
+        'отсутствует', 'отсутствие', 'не найден', 'не найдено',
+        'запрещено', 'запрещён', 'запрещена', 'недопустимо', 'недопустимый',
+        'ошибка', 'предупреждение', 'внимание',
+    )
+
+    def _error_is_action(self, error_text: str) -> Optional[str]:
+        """DS_059: является ли ERROR действием (Приложения A/B задания).
+
+        1. Начинается с глагола действия -> вернуть ERROR как действие.
+        2. Начинается с заглавной, глагол в первых 3 словах, длина < 200,
+           не из списка исключений -> действие.
+        Иначе — None.
+        """
+        text = (error_text or '').strip()
+        if not text:
+            return None
+        low = text.lower()
+        # Приложение B: исключения имеют приоритет — не действие
+        for pref in self._FALSE_ACTION_PREFIXES:
+            if low.startswith(pref):
+                return None
+        # Приоритет 1: начинается с глагола действия
+        for verb in self._ACTION_VERBS:
+            if low.startswith(verb + ' ') or low == verb:
+                return text
+        # Приоритет 2: заглавная + глагол в первых 3 словах + длина < 200
+        if text[0].isupper() and len(text) < 200:
+            words = low.split()[:3]
+            for w in words:
+                w_clean = w.strip('.,;:!?()«»"\'')
+                if w_clean in self._ACTION_VERBS:
+                    return text
+        return None
+
+    def _transform_action(self, issue_type: str) -> Optional[str]:
+        """DS_059 (приоритет 3): действие из PARSER_SQL —
+        "Заменить <example_in> на <example_out>" (или transform)."""
+        try:
+            from rule_engine import get_rule_engine
+            eng = get_rule_engine()
+            rule = eng.get_rule(issue_type)
+            if not rule:
+                return None
+            for pt in rule.get('patterns', []):
+                ex_in = (pt.get('example_in') or '').strip()
+                ex_out = (pt.get('example_out') or '').strip()
+                if ex_in and ex_out:
+                    return f'Заменить {ex_in} на {ex_out}'
+                transform = (pt.get('transform') or '').strip()
+                if transform and ex_out:
+                    return f'Заменить на {transform}'
+            return None
+        except Exception:
+            return None
+
+    # DS_059_Уточнение_A: тип-ключевые слова PlpCheck-объявлений
+    _PLP_TYPE_KEYWORDS = r'(?:boolean|varchar2|string|number|integer|date)'
+
+    def _extract_error_fragment(self, issue) -> Optional[str]:
+        """DS_059_Уточнение_A: исходный проблемный фрагмент для колонки ERROR.
+
+        Приоритет источников: правило-специфичное извлечение из
+        issue.original_code / issue.description; фолбэк — исходная строка
+        (сжатые пробелы, обрезка до 50 символов). Если фрагмент недоступен —
+        None (в ERROR ничего не добавляется, не выдумываем).
+        """
+        itl = (issue.issue_type or '').lower()
+        oc = (issue.original_code or '').strip()
+        desc = (issue.description or '').strip()
+
+        def _identifiers(text):
+            return re.findall(r'\b[A-Za-z_]\w*\b', text or '')
+
+        if 'bad_prefix' in itl:
+            # Имя без корректного префикса v_/p_ в объявлении/параметре
+            for m in re.finditer(rf'(\w+)\s+{self._PLP_TYPE_KEYWORDS}\b',
+                                 oc, re.IGNORECASE):
+                name = m.group(1)
+                if not name.lower().startswith(('v_', 'p_')):
+                    return name
+            ids = _identifiers(oc)
+            if ids:
+                return ids[0]
+        elif 'not_mentioned' in itl:
+            m = re.search(r'(?:Переменная|Функция)\s+(\w+)', desc)
+            if m:
+                return m.group(1)
+        elif 'prefix_type_in_var_name' in itl:
+            m = re.search(rf'(\w+)\s+{self._PLP_TYPE_KEYWORDS}\b', oc,
+                          re.IGNORECASE)
+            if m:
+                return m.group(1)
+            ids = _identifiers(oc)
+            if ids:
+                return ids[0]
+        elif 'wrong_method_syntax' in itl:
+            m = re.search(r'\[(\w+)\]\.(\w+)\s*\(', oc)
+            if m:
+                return f'[{m.group(1)}].{m.group(2)}'
+        elif 'code_in_comment' in itl:
+            frag = oc.lstrip('-').strip()
+            if frag.startswith('/*'):
+                frag = frag[2:].strip()
+            if frag:
+                return frag[:50] + ('…' if len(frag) > 50 else '')
+
+        # Универсальный фолбэк: исходная строка (до 50 символов)
+        if oc:
+            frag = re.sub(r'\s+', ' ', oc)
+            return frag[:50] + ('…' if len(frag) > 50 else '')
+        return None
+
+    def _error_with_fragment(self, issue) -> str:
+        """DS_059_Уточнение_A: ERROR = '<описание>: "<исходный_фрагмент>"'.
+
+        PLAN не меняется (остаётся действием). Если фрагмент недоступен —
+        возвращается только описание.
+        """
+        desc = (issue.description or '').strip().rstrip(':')
+        frag = self._extract_error_fragment(issue)
+        if frag:
+            return f'{desc}: "{frag}"'
+        return desc
+
+    def _generate_plan(self, issue_type: str, description: str = '',
+                       check_name: str = None) -> str:
+        """Генерация текста ПЛАНА на основе типа правила.
+
+        DS_059: унификация — приоритеты источника действия:
+        спец-ветки PlpCheck (извлечение из description) -> ERROR как действие
+        (Приложения A/B) -> transform+example_out из PARSER_SQL -> фолбэк
+        «Исправить по описанию». Формат: <CHECK> — <действие>.
+        """
         issue_type_lower = issue_type.lower()
+
+        # Спец-ветки PlpCheck (извлечение действия из description) — сохранены
+        special = None
         if 'bad_prefix' in issue_type_lower:
             import re
             match = re.search(r'переименуйте в ["\']([^"\']+)["\']', description, re.IGNORECASE)
             if match:
-                return f'Переименовать в "{match.group(1)}"'
-            return 'Переименовать в корректный префикс'
-        
-        if 'not_mentioned' in issue_type_lower:
-            return 'Удалить объявление'
-        
-        if 'code_in_comment' in issue_type_lower:
-            return 'Удалить закомментированный код'
-        
-        if 'wrong_method_syntax' in issue_type_lower:
-            return 'Исправить синтаксис'
-        
-        if 'prefix_type_in_var_name' in issue_type_lower:
-            return 'Добавить префикс типа'
-        
-        if 'syntax_error' in issue_type_lower:
-            return 'Исправить синтаксическую ошибку'
-        
-        if 'pure_sql_dblink' in issue_type_lower:
-            return 'Заменить на прикладную таблицу'
-        
-        if 'pure_udf' in issue_type_lower or 'udf' in issue_type_lower:
-            return 'Вынести UDF в процедурный код'
-        
-        if 'outer_join' in issue_type_lower:
-            return 'Заменить на ANSI JOIN'
-        
-        if 'rownum' in issue_type_lower:
-            return 'Заменить на FETCH'
-        
-        if 'direct_comparison' in issue_type_lower:
-            return 'Исправить сравнение с NULL'
-        
-        if 'update_delete_by_subquery' in issue_type_lower:
-            return 'Заменить на прикладную таблицу'
-        
-        if 'connectby2with' in issue_type_lower:
-            return 'Заменить на CONNECT BY PRIOR'
-        
-        return 'Исправить по описанию'
+                special = f'Переименовать в "{match.group(1)}"'
+            else:
+                special = 'Переименовать в корректный префикс'
+        elif 'not_mentioned' in issue_type_lower:
+            special = 'Удалить объявление'
+        elif 'code_in_comment' in issue_type_lower:
+            special = 'Удалить закомментированный код'
+        elif 'wrong_method_syntax' in issue_type_lower:
+            special = 'Исправить синтаксис'
+        elif 'prefix_type_in_var_name' in issue_type_lower:
+            special = 'Добавить префикс типа'
+        elif 'syntax_error' in issue_type_lower:
+            special = 'Исправить синтаксическую ошибку'
+        elif 'pure_sql_dblink' in issue_type_lower:
+            special = 'Заменить на прикладную таблицу'
+        elif 'pure_udf' in issue_type_lower or 'udf' in issue_type_lower:
+            special = 'Вынести UDF в процедурный код'
+        elif 'outer_join' in issue_type_lower:
+            special = 'Заменить на ANSI JOIN'
+        elif 'rownum' in issue_type_lower:
+            special = 'Заменить на FETCH'
+        elif 'direct_comparison' in issue_type_lower:
+            special = 'Исправить сравнение с NULL'
+        elif 'update_delete_by_subquery' in issue_type_lower:
+            special = 'Заменить на прикладную таблицу'
+        elif 'connectby2with' in issue_type_lower:
+            special = 'Заменить на CONNECT BY PRIOR'
+
+        # Универсальные приоритеты DS_059
+        action = special
+        if action is None:
+            action = self._error_is_action(description)
+        if action is None:
+            action = self._transform_action(issue_type)
+        if action is None:
+            action = 'Исправить по описанию'
+
+        # Формат: <CHECK> — <действие>
+        check = check_name if check_name else issue_type
+        return f'{check} — {action}'
     
     def _apply_fix(self, issue_type: str, original_code: str, description: str = '') -> str:
         """Применение исправления к строке кода (DS 028)."""

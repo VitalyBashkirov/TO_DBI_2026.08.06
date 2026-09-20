@@ -46,6 +46,69 @@ MAX_LOG_SIZE_MB = 2  # Максимальный размер логов в МБ 
 # DS 037: константа перенесена в scanner.py (Вариант A) — доступна и сканеру, и GUI
 from analyzer.scanner import PLPCHECK_CATEGORIES
 
+# DS_058+DS_057: тултипы для кнопок и чекбоксов GUI
+RUBRICATOR_TOOLTIPS = {
+    'v53': "Правила рубрикатора v5.3.0 (332 правила + 75 правил парсера).",
+    'тдс20240828': "Правила из тдс20240828.Требования для совместимости кода с DBI.",
+    'тклоик20240828': "Правила из тклоик20240828.Требования к локальным объектам и к коду.",
+    'PlpCheck': "Правила из rule-description.html (PlpCheck 2.5.2).",
+}
+
+# DS_058+DS_057: маппинг код файла рубрикатора -> префикс rule_code
+RUBRICATOR_PREFIXES = {
+    'v53': 'v53.',
+    'тдс20240828': 'тдс20240828.',
+    'тклоик20240828': 'тклоик20240828.',
+    'PlpCheck': 'plpcheck.',
+}
+
+
+class Tooltip:
+    """DS_058+DS_057: простой тултип для Tkinter-виджетов."""
+
+    def __init__(self, widget, text, delay=500):
+        self.widget = widget
+        self.text = text
+        self.delay = delay
+        self._id = None
+        self._tip = None
+        widget.bind('<Enter>', self._schedule)
+        widget.bind('<Leave>', self._hide)
+        widget.bind('<ButtonPress>', self._hide)
+
+    def _schedule(self, _event=None):
+        self._cancel()
+        self._id = self.widget.after(self.delay, self._show)
+
+    def _cancel(self):
+        if self._id is not None:
+            try:
+                self.widget.after_cancel(self._id)
+            except Exception:
+                pass
+            self._id = None
+
+    def _show(self):
+        if self._tip is not None or not self.text:
+            return
+        x = self.widget.winfo_rootx() + 10
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
+        self._tip = tk.Toplevel(self.widget)
+        self._tip.wm_overrideredirect(True)
+        self._tip.wm_geometry(f'+{x}+{y}')
+        label = tk.Label(self._tip, text=self.text, background='#FFFFE0',
+                         relief=tk.SOLID, borderwidth=1, justify=tk.LEFT,
+                         font=('Segoe UI', 9), wraplength=480)
+        label.pack()
+
+    def _hide(self, _event=None):
+        self._cancel()
+        if self._tip is not None:
+            try:
+                self._tip.destroy()
+            except Exception:
+                pass
+            self._tip = None
 
 
 class DBIMigrationApp:
@@ -67,6 +130,16 @@ class DBIMigrationApp:
         
 # Состояние рубрикатора
         self.rubricator_loaded = False
+        # DS_058+DS_057: состояние отдельных правил (rule_code -> BooleanVar)
+        self._rubricator_rule_vars = {}
+        # item_id родителя -> код файла рубрикатора
+        self._rubricator_parent_items = {}
+        # item_id дочернего -> rule_code
+        self._rule_item_map = {}
+        # код файла -> список rule_code (порядок из рубрикатора)
+        self._rubricator_rules_by_file = {}
+        # Тултипы дерева правил (item_id -> Tooltip-like текст)
+        self._tree_tooltips = {}
         self.rubricator_dir = Path(__file__).parent.parent / 'DATA' / 'Рубрикатор v5'
         self.rubricator_files = {}  # Код файла: Полное имя из 1.RUBRICATOR_FILES v5.md
         
@@ -305,13 +378,17 @@ class DBIMigrationApp:
         ttk.Label(paths_frame, text="Исходный каталог:").grid(row=0, column=0, sticky=tk.W, padx=(0,1))
         self.source_entry = ttk.Entry(paths_frame, textvariable=self.source_dir_var, width=50, style='Valid.TEntry')
         self.source_entry.grid(row=0, column=1, padx=0, sticky=tk.EW)
-        ttk.Button(paths_frame, text="...", command=self.browse_source, width=3).grid(row=0, column=2, padx=(0,2))
-        
+        self.btn_browse_source = ttk.Button(paths_frame, text="...", command=self.browse_source, width=3)
+        self.btn_browse_source.grid(row=0, column=2, padx=(0,2))
+        Tooltip(self.btn_browse_source, "Выбрать исходный каталог с PLPlus-файлами.")
+
         # Строка 0: Каталог результатов
         ttk.Label(paths_frame, text="Каталог результатов:").grid(row=0, column=3, sticky=tk.W, padx=(2,1))
         self.result_entry = ttk.Entry(paths_frame, textvariable=self.result_dir_var, width=50, style='Valid.TEntry')
         self.result_entry.grid(row=0, column=4, padx=0, sticky=tk.EW)
-        ttk.Button(paths_frame, text="...", command=self.browse_result, width=3).grid(row=0, column=5, padx=(0,0))
+        self.btn_browse_result = ttk.Button(paths_frame, text="...", command=self.browse_result, width=3)
+        self.btn_browse_result.grid(row=0, column=5, padx=(0,0))
+        Tooltip(self.btn_browse_result, "Выбрать каталог для сохранения результатов.")
         
         # Стили цветовой индикации полей ИК/РК (DS 008)
         entry_style = ttk.Style()
@@ -345,22 +422,25 @@ class DBIMigrationApp:
         tree_scroll_y = ttk.Scrollbar(rules_frame, orient=tk.VERTICAL)
         tree_scroll_x = ttk.Scrollbar(rules_frame, orient=tk.HORIZONTAL)
         
-        self.rules_tree = ttk.Treeview(rules_frame, 
-                                       yscrollcommand=tree_scroll_y.set, 
+        self.rules_tree = ttk.Treeview(rules_frame,
+                                       yscrollcommand=tree_scroll_y.set,
                                        xscrollcommand=tree_scroll_x.set,
-                                       show='headings',
+                                       show='tree headings',
                                        height=4)
-        
+
         tree_scroll_y.config(command=self.rules_tree.yview)
         tree_scroll_x.config(command=self.rules_tree.xview)
-        
-        # Настройка колонок: Выбрано | Код файла | Полное имя файла
+
+        # Настройка колонок: Рубрикатор/правило | Выбрано | Код | Название
+        # DS_058+DS_057: колонка #0 (tree) — родительские чекбоксы рубрикаторов
+        self.rules_tree.column('#0', width=180, minwidth=140, stretch=False)
         self.rules_tree['columns'] = ('selected', 'code', 'name')
         self.rules_tree.column('selected', width=60, minwidth=60, anchor=tk.CENTER)
         self.rules_tree.column('code', width=110, minwidth=110, anchor=tk.W)
         self.rules_tree.column('name', width=750, minwidth=400, anchor=tk.W)
-        
+
         # Заголовки
+        self.rules_tree.heading('#0', text='Рубрикатор', anchor=tk.W)
         self.rules_tree.heading('selected', text='Выбрано', anchor=tk.CENTER)
         self.rules_tree.heading('code', text='Код файла', anchor=tk.W)
         self.rules_tree.heading('name', text='Полное имя файла', anchor=tk.W)
@@ -620,8 +700,10 @@ class DBIMigrationApp:
         journal_buttons = ttk.Frame(journal_frame)
         journal_buttons.pack(side=tk.BOTTOM, fill=tk.X, pady=(3, 0))
         
-        ttk.Button(journal_buttons, text="Очистить журнал", command=self.clear_log).pack(side=tk.LEFT, padx=3)
-        ttk.Button(journal_buttons, text="Копировать в буфер", command=self.copy_log).pack(side=tk.LEFT, padx=3)
+        self.btn_clear_log = ttk.Button(journal_buttons, text="Очистить журнал", command=self.clear_log)
+        self.btn_clear_log.pack(side=tk.LEFT, padx=3)
+        self.btn_copy_log = ttk.Button(journal_buttons, text="Копировать в буфер", command=self.copy_log)
+        self.btn_copy_log.pack(side=tk.LEFT, padx=3)
         
         # DS 039: кнопка "Прервать" — полностью стандартный вид (без красного фона)
         self.btn_abort = tk.Button(
@@ -698,9 +780,14 @@ class DBIMigrationApp:
         changelog_buttons = ttk.Frame(self.changelog_frame)
         changelog_buttons.pack(fill=tk.X, pady=(5, 0))
         
-        ttk.Button(changelog_buttons, text="Очистить журнал", command=self.clear_changelog).pack(side=tk.LEFT, padx=3)
-        ttk.Button(changelog_buttons, text="Сохранить журнал в файл", command=self.save_changelog_to_file).pack(side=tk.LEFT, padx=3)
-        
+        self.btn_clear_changelog = ttk.Button(changelog_buttons, text="Очистить журнал", command=self.clear_changelog)
+        self.btn_clear_changelog.pack(side=tk.LEFT, padx=3)
+        self.btn_save_changelog = ttk.Button(changelog_buttons, text="Сохранить журнал в файл", command=self.save_changelog_to_file)
+        self.btn_save_changelog.pack(side=tk.LEFT, padx=3)
+
+        # DS_058+DS_057: тултипы для кнопок GUI
+        self._apply_button_tooltips()
+
         # Логируем загруженные файлы рубрикатора (после создания log_text)
         if self.rubricator_files:
             for code, name in self.rubricator_files.items():
@@ -711,6 +798,41 @@ class DBIMigrationApp:
         self.logs_deep_dir.mkdir(parents=True, exist_ok=True)
         self.current_log_file = None
     
+    def _apply_button_tooltips(self):
+        """DS_058+DS_057: тултипы для всех кнопок GUI (1–2 предложения)."""
+        tooltips = [
+            (self.btn_scan, "Запустить сканирование исходных PLPlus-файлов "
+                            "по выбранным рубрикаторам."),
+            (self.btn_fix, "Автоматически исправить найденные проблемы "
+                           "(детерминированный фикс + AI-fallback)."),
+            (self.btn_to_ai, "Сформировать файл-запрос для AI "
+                             "(проблемы, требующие AI-анализа)."),
+            (self.btn_from_ai, "Загрузить и применить ответы AI из каталога AI_OUT."),
+            (self.btn_rubricator, "Показать перечень файлов рубрикатора и "
+                                  "текущий выбор правил."),
+            (self.btn_test_gen, "Сгенерировать тестовые .plp-файлы "
+                                "для выбранных правил."),
+            (self.btn_show_sql, "Показать SQL-команды для ручного исправления "
+                                "найденных проблем."),
+            (self.btn_send_koda, "Сформировать задание для Koda "
+                                 "(файловый обмен через EXCHANGE)."),
+            (self.btn_receive_koda, "Загрузить результат выполнения задания "
+                                    "от Koda."),
+            (self.btn_result_history, "Просмотр истории изменений "
+                                      "каталога результатов (РК)."),
+            (self.btn_abort, "Прервать текущую операцию "
+                             "(сканирование/исправление/генерацию)."),
+            (getattr(self, 'btn_clear_log', None), "Очистить журнал выполнения."),
+            (getattr(self, 'btn_copy_log', None), "Копировать содержимое журнала "
+                                                  "в буфер обмена."),
+            (getattr(self, 'btn_clear_changelog', None), "Очистить журнал изменений."),
+            (getattr(self, 'btn_save_changelog', None), "Сохранить журнал изменений "
+                                                        "в файл."),
+        ]
+        for widget, text in tooltips:
+            if widget is not None:
+                Tooltip(widget, text)
+
     def _check_log_size(self):
         """Проверка размера каталогов с логами и предложение очистки при превышении лимита"""
         log_dirs = [
@@ -791,34 +913,185 @@ class DBIMigrationApp:
             print(f"Ошибка загрузки рубрикатора: {e}")
     
     def _populate_rules_tree(self):
-        """Заполнение Treeview правилами"""
+        """Заполнение Treeview правилами (DS_058+DS_057: 4 родительских
+        чекбокса рубрикаторов + дочерние чекбоксы конкретных правил)"""
         # Очищаем дерево
         for item in self.rules_tree.get_children():
             self.rules_tree.delete(item)
-        
-        # Загружаем коды файлов из 1.RUBRICATOR_FILES v5.md
+        self._rubricator_rule_vars = {}
+        self._rubricator_parent_items = {}
+        self._rule_item_map = {}
+        self._rubricator_rules_by_file = {}
+        self._tree_tooltips = {}
+
+        # Загружаем расширенный рубрикатор (нужен для списка rule_code)
+        self._load_rubricator_prompts()
+
+        # Список всех правил (rule_code + описание)
+        all_rules = []
+        if self.rubricator_prompts and self.rubricator_prompts.loaded:
+            all_rules = self.rubricator_prompts.get_all_rules()
+
+        # DS_058+DS_057: инициализация состояния правил из settings.json
+        # (при отсутствии ключа — из 1.RUBRICATOR_FILES v5.md, вариант C)
+        rule_states = self._init_rubricator_rule_states([r['code'] for r in all_rules])
+
+        # Группировка правил по рубрикаторам (по префиксу rule_code)
+        for r in all_rules:
+            for file_code, prefix in RUBRICATOR_PREFIXES.items():
+                if r['code'].startswith(prefix):
+                    self._rubricator_rules_by_file.setdefault(file_code, []).append(r['code'])
+                    break
+
+        # Строим дерево: родитель — рубрикатор, дети — конкретные правила
         for code, name in self.rubricator_files.items():
-            # По умолчанию включаем правило, если признак '+' (или признак неизвестен)
-            signs = getattr(self, '_rubricator_file_signs', {})
-            enabled = signs.get(code, True)
+            rule_codes = self._rubricator_rules_by_file.get(code, [])
+            # Состояние файла: включён, если включено хотя бы одно его правило
+            enabled = any(rule_states.get(rc, False) for rc in rule_codes)
             var = tk.BooleanVar(value=enabled)
             self.selected_rules[code] = var
-            
-            # Вставляем в дерево
-            item_id = self.rules_tree.insert('', tk.END, 
-                                            values=('✓' if enabled else '✗', code, name))
-            self.rule_checkboxes[code] = (item_id, var)
-            
+
+            # Родительский элемент (рубрикатор)
+            parent_id = self.rules_tree.insert(
+                '', tk.END, text=code, open=False,
+                values=('✓' if enabled else '✗', code, name))
+            self.rule_checkboxes[code] = (parent_id, var)
+            self._rubricator_parent_items[parent_id] = code
+            self._tree_tooltips[parent_id] = RUBRICATOR_TOOLTIPS.get(
+                code, f"Рубрикатор {code}")
+
+            # Дочерние элементы (конкретные правила)
+            for rc in rule_codes:
+                rule = self.rubricator_prompts.get_rule(rc) or {}
+                desc = rule.get('short_description', rc)
+                rule_enabled = bool(rule_states.get(rc, False))
+                rule_var = tk.BooleanVar(value=rule_enabled)
+                self._rubricator_rule_vars[rc] = rule_var
+                child_id = self.rules_tree.insert(
+                    parent_id, tk.END, text='•',
+                    values=('✓' if rule_enabled else '✗', rc, desc))
+                self._rule_item_map[child_id] = rc
+                self._tree_tooltips[child_id] = f"{rc}\n{desc}"
+
             # Синхронизация флага PlpCheck с признаком из рубрикатора
             if code == 'PlpCheck':
                 self.plpcheck_enabled_var.set(enabled)
-        
-        # Загрузка нового рубрикатора 4.RUBRICATOR_PROMPT v5.json
-        self._load_rubricator_prompts()
-        
+
         # Обработчик клика для переключения чекбокса
         self.rules_tree.bind('<Button-1>', self._on_rule_click)
+        # DS_058+DS_057: тултипы при наведении на строки дерева
+        self.rules_tree.bind('<Motion>', self._on_tree_motion)
+        self.rules_tree.bind('<Leave>', lambda e: self._hide_tree_tooltip())
         self._update_buttons_state()
+
+    def _on_tree_motion(self, event):
+        """DS_058+DS_057: тултип для строки дерева правил (код + описание)."""
+        item = self.rules_tree.identify_row(event.y)
+        if not item or item not in self._tree_tooltips:
+            self._hide_tree_tooltip()
+            return
+        text = self._tree_tooltips[item]
+        if self._tree_tooltip_text == text:
+            return
+        self._hide_tree_tooltip()
+        x = self.rules_tree.winfo_rootx() + event.x + 12
+        y = self.rules_tree.winfo_rooty() + event.y + 14
+        tip = tk.Toplevel(self.rules_tree)
+        tip.wm_overrideredirect(True)
+        tip.wm_geometry(f'+{x}+{y}')
+        tk.Label(tip, text=text, background='#FFFFE0', relief=tk.SOLID,
+                 borderwidth=1, justify=tk.LEFT, font=('Segoe UI', 9),
+                 wraplength=480).pack()
+        self._tree_tooltip = tip
+        self._tree_tooltip_text = text
+
+    def _hide_tree_tooltip(self):
+        tip = getattr(self, '_tree_tooltip', None)
+        if tip is not None:
+            try:
+                tip.destroy()
+            except Exception:
+                pass
+            self._tree_tooltip = None
+        self._tree_tooltip_text = None
+
+    def _settings_path(self) -> Path:
+        return Path(__file__).parent / 'settings.json'
+
+    def _read_settings_json(self) -> dict:
+        try:
+            p = self._settings_path()
+            if p.exists():
+                with open(p, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return {}
+
+    def _write_settings_json(self, settings: dict):
+        with open(self._settings_path(), 'w', encoding='utf-8') as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+
+    def _init_rubricator_rule_states(self, all_rule_codes) -> dict:
+        """DS_058+DS_057 (вариант C + дополнение): состояние правил.
+
+        - Ключа rubricator_selected_rules нет — инициализация из
+          1.RUBRICATOR_FILES v5.md (+ -> true, прочее -> false) и сохранение
+          в settings.json.
+        - Ключ есть — использовать только его; отсутствующие правила
+          (новые) добавить со значением false и сохранить (если были
+          добавления). 1.RUBRICATOR_FILES v5.md только читается.
+        """
+        settings = self._read_settings_json()
+        saved = settings.get('rubricator_selected_rules')
+
+        if saved is None:
+            # Первый запуск: признаки из 1.RUBRICATOR_FILES v5.md
+            signs = getattr(self, '_rubricator_file_signs', {})
+            states = {}
+            for rc in all_rule_codes:
+                prefix = None
+                for file_code, p in RUBRICATOR_PREFIXES.items():
+                    if rc.startswith(p):
+                        prefix = file_code
+                        break
+                states[rc] = bool(signs.get(prefix, False)) if prefix else False
+            settings['rubricator_selected_rules'] = states
+            try:
+                self._write_settings_json(settings)
+            except Exception as e:
+                print(f"Не удалось сохранить rubricator_selected_rules: {e}")
+            return states
+
+        # Ключ есть: дополнить новыми правилами (false), существующие не трогать
+        states = {k: bool(v) for k, v in saved.items()}
+        added = False
+        for rc in all_rule_codes:
+            if rc not in states:
+                states[rc] = False
+                added = True
+        if added:
+            settings['rubricator_selected_rules'] = states
+            try:
+                self._write_settings_json(settings)
+            except Exception as e:
+                print(f"Не удалось дополнить rubricator_selected_rules: {e}")
+        return states
+
+    def _update_rubricator_parent_state(self, file_code):
+        """Пересчёт состояния родительского чекбокса по дочерним правилам."""
+        if file_code not in self.rule_checkboxes:
+            return
+        parent_id, var = self.rule_checkboxes[file_code]
+        rule_codes = self._rubricator_rules_by_file.get(file_code, [])
+        enabled = any(self._rubricator_rule_vars[rc].get()
+                      for rc in rule_codes if rc in self._rubricator_rule_vars)
+        if var.get() != enabled:
+            var.set(enabled)
+        all_on = all(self._rubricator_rule_vars[rc].get()
+                     for rc in rule_codes if rc in self._rubricator_rule_vars)
+        sign = '✓' if all_on else ('◐' if enabled else '✗')
+        self.rules_tree.set(parent_id, 'selected', sign)
     
     def _load_rubricator_prompts(self):
         """Загрузка расширенного рубрикатора 4.RUBRICATOR_PROMPT v5.json"""
@@ -836,37 +1109,76 @@ class DBIMigrationApp:
             self.log(f"Ошибка загрузки расширенного рубрикатора: {e}", 'error')
     
     def _on_rule_click(self, event):
-        """Обработка клика по правилу"""
+        """Обработка клика по правилу (DS_058+DS_057: родитель — групповое
+        включение/выключение рубрикатора, дочерний — отдельное правило)"""
         item = self.rules_tree.identify_row(event.y)
         column = self.rules_tree.identify_column(event.x)
-        
-# Колонка "Выбрано" (индекс 1)
-        if column == '#1':
-            for code, (item_id, var) in self.rule_checkboxes.items():
-                if item_id == item:
-                    var.set(not var.get())
-                    self.rules_tree.set(item, 'selected', '✓' if var.get() else '✗')
-                    self.rules_changed = True  # Флаг изменения выбора
-                    # Сброс индикатора
-                    self._reset_progress()
-                    self.log(f"Правило {code}: {'включено' if var.get() else 'выключено'}", 'debug')
-                    # Синхронизация флага PlpCheck при клике на чекбокс в дереве
-                    if code == 'PlpCheck':
-                        self.plpcheck_enabled_var.set(var.get())
-                    # Обновляем доступность кнопок
-                    self._update_buttons_state()
-                    break
-    
+
+        # Колонка "Выбрано" (индекс 1)
+        if column != '#1':
+            return
+
+        # Клик по родительскому чекбоксу рубрикатора
+        if item in self._rubricator_parent_items:
+            file_code = self._rubricator_parent_items[item]
+            rule_codes = self._rubricator_rules_by_file.get(file_code, [])
+            existing = [rc for rc in rule_codes if rc in self._rubricator_rule_vars]
+            if not existing:
+                return
+            # Все включены -> выключить все; иначе -> включить все
+            new_state = not all(self._rubricator_rule_vars[rc].get() for rc in existing)
+            for rc in existing:
+                self._rubricator_rule_vars[rc].set(new_state)
+                for child_id, mapped_rc in self._rule_item_map.items():
+                    if mapped_rc == rc:
+                        self.rules_tree.set(child_id, 'selected',
+                                            '✓' if new_state else '✗')
+            self._update_rubricator_parent_state(file_code)
+            self.rules_changed = True
+            self._reset_progress()
+            self.log(f"Рубрикатор {file_code}: "
+                     f"{'все правила включены' if new_state else 'все правила выключены'}",
+                     'debug')
+            if file_code == 'PlpCheck':
+                self.plpcheck_enabled_var.set(new_state)
+            self._update_buttons_state()
+            return
+
+        # Клик по дочернему чекбоксу конкретного правила
+        rc = self._rule_item_map.get(item)
+        if rc is None:
+            return
+        var = self._rubricator_rule_vars[rc]
+        var.set(not var.get())
+        self.rules_tree.set(item, 'selected', '✓' if var.get() else '✗')
+        self.rules_changed = True
+        self._reset_progress()
+        self.log(f"Правило {rc}: {'включено' if var.get() else 'выключено'}", 'debug')
+        # Обновляем родительский чекбокс (файл включён, если хоть одно правило вкл.)
+        for file_code, prefix in RUBRICATOR_PREFIXES.items():
+            if rc.startswith(prefix):
+                self._update_rubricator_parent_state(file_code)
+                if file_code == 'PlpCheck':
+                    self.plpcheck_enabled_var.set(
+                        self.rule_checkboxes['PlpCheck'][1].get())
+                break
+        # Обновляем доступность кнопок
+        self._update_buttons_state()
+
     def _sync_plpcheck_checkbox(self):
-        """Синхронизация флага PlpCheck с чекбоксом в дереве правил"""
-        if 'PlpCheck' in self.rule_checkboxes:
-            item_id, var = self.rule_checkboxes['PlpCheck']
-            new_state = self.plpcheck_enabled_var.get()
-            if var.get() != new_state:
-                var.set(new_state)
-                self.rules_tree.set(item_id, 'selected', '✓' if new_state else '✗')
-                self.rules_changed = True
-                self._reset_progress()
+        """Синхронизация флага PlpCheck с чекбоксами правил plpcheck.* в дереве"""
+        rule_codes = self._rubricator_rules_by_file.get('PlpCheck', [])
+        new_state = self.plpcheck_enabled_var.get()
+        for rc in rule_codes:
+            if rc in self._rubricator_rule_vars:
+                self._rubricator_rule_vars[rc].set(new_state)
+        for child_id, mapped_rc in self._rule_item_map.items():
+            if mapped_rc.startswith('plpcheck.'):
+                self.rules_tree.set(child_id, 'selected',
+                                    '✓' if new_state else '✗')
+        self._update_rubricator_parent_state('PlpCheck')
+        self.rules_changed = True
+        self._reset_progress()
     
     def on_abort_click(self):
         """DS 038 (Проблема A): обработчик кнопки «Прервать» — установить флаг прерывания.
@@ -1786,7 +2098,9 @@ class DBIMigrationApp:
                     self.preserve_structure_var.set(settings.get('preserve_structure', True))
                     self.clean_output_var.set(settings.get('clean_output', False))
                     
-                    # Состояние чекбоксов рубрикатора загружается из 1.RUBRICATOR_FILES v5.md — отдельно
+                    # DS_058+DS_057: состояние чекбоксов рубрикатора хранится в
+                    # settings.json -> rubricator_selected_rules (инициализируется
+                    # в _populate_rules_tree / _init_rubricator_rule_states)
                     self._saved_rules = []
                         
                     # Загрузка настройки максимального размера логов
@@ -1855,7 +2169,6 @@ class DBIMigrationApp:
         """Сохранение настроек в файл"""
         settings_path = Path(__file__).parent / 'settings.json'
         
-        # Сохраняем только базовые настройки (без selected_rules — они в 1.RUBRICATOR_FILES v5.md)
         settings = {
             'source_dir': self.source_dir_var.get(),
             'result_dir': self.result_dir_var.get(),
@@ -1868,6 +2181,11 @@ class DBIMigrationApp:
             'max_log_size_mb': MAX_LOG_SIZE_MB,
             'selected_priorities': list(getattr(self, '_selected_priorities', []))
         }
+        # DS_058+DS_057: состояние чекбоксов рубрикатора — в settings.json
+        if self._rubricator_rule_vars:
+            settings['rubricator_selected_rules'] = {
+                rc: bool(var.get()) for rc, var in self._rubricator_rule_vars.items()
+            }
         # DS 036: сохранение выбранных категорий PlpCheck
         if hasattr(self, 'var_plpcheck_categories'):
             settings['plpcheck_categories'] = [
@@ -1883,64 +2201,23 @@ class DBIMigrationApp:
         except Exception as e:
             self.log(f"Ошибка сохранения настроек: {e}", 'error')
         
-        # Сохраняем состояние чекбоксов рубрикатора в 1.RUBRICATOR_FILES v5.md
+        # DS_058+DS_057: сохраняем состояние чекбоксов рубрикатора
+        # в settings.json (1.RUBRICATOR_FILES v5.md больше не изменяется)
         self._save_rubricator_state()
     
     def _save_rubricator_state(self):
-        """Сохранение состояния чекбоксов рубрикатора в 1.RUBRICATOR_FILES v5.md
-        
-        Читает файл, обновляет признак +/− для каждой строки по состоянию чекбокса,
-        перезаписывает файл.
-        """
+        """DS_058+DS_057: сохранение состояния чекбоксов рубрикатора в
+        settings.json -> rubricator_selected_rules (read-modify-write).
+        Файл 1.RUBRICATOR_FILES v5.md не изменяется."""
         try:
-            file_path = self.rubricator_dir / '1.RUBRICATOR_FILES v5.md'
-            if not file_path.exists():
-                return
-            
-            with open(file_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            
-            # Собираем коды из чекбоксов
-            checkbox_codes = set(self.rule_checkboxes.keys())
-            
-            # Обновляем строки таблицы
-            new_lines = []
-            for line in lines:
-                stripped = line.strip()
-                # Пропускаем заголовки
-                if stripped.startswith('#') or stripped.startswith('|---') or not stripped:
-                    new_lines.append(line)
-                    continue
-                
-                # Пропускаем строку заголовка таблицы
-                if 'Код файла' in stripped:
-                    new_lines.append(line)
-                    continue
-                
-                # Проверяем, табличная ли строка
-                if stripped.startswith('|') and '|' in stripped[1:]:
-                    parts = [p.strip() for p in stripped.split('|')]
-                    # Формат: ['', 'N', '+/−', 'Код файла', 'Полное имя файла']
-                    # parts[0]='', parts[1]='1', parts[2]='+', parts[3]='v50', parts[4]='...'
-                    if len(parts) >= 5:
-                        code = parts[3].strip()
-                        if code in checkbox_codes:
-                            # Определяем новый признак
-                            var = self.rule_checkboxes[code][1]
-                            new_sign = '+' if var.get() else '−'
-                            # Восстанавливаем строку: |N|знак|код|имя
-                            new_line = f"|{parts[1]}|{new_sign}|{code}|{parts[4]}"
-                            for extra in parts[5:]:
-                                new_line += f"|{extra}"
-                            new_lines.append(new_line + '\n')
-                            continue
-                
-                new_lines.append(line)
-            
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.writelines(new_lines)
-            
-            self.log("Состояние рубрикатора сохранено в 1.RUBRICATOR_FILES v5.md", 'success')
+            settings = self._read_settings_json()
+            # Идемпотентно: актуальное состояние всех правил из GUI
+            states = {rc: bool(var.get())
+                      for rc, var in self._rubricator_rule_vars.items()}
+            settings['rubricator_selected_rules'] = states
+            self._write_settings_json(settings)
+            self.log("Состояние рубрикатора сохранено в settings.json "
+                     "(rubricator_selected_rules)", 'success')
         except Exception as e:
             self.log(f"Ошибка сохранения состояния рубрикатора: {e}", 'error')
     

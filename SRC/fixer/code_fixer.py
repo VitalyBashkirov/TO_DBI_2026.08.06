@@ -17,6 +17,8 @@ from fixer.markdown_rubricator_loader_v3 import MarkdownRubricatorLoaderV3
 from analyzer.sql_parser import apply_fix as sql_apply_fix
 from fixer.variable_parser import DeterministicFixer, VariableParser
 from rule_engine import get_rule_engine, FLAG_ORDER
+# DS_056A: единый хелпер лексического разбора
+from analyzer.lexer_state import LexerState, is_in_comment_or_string, advance_lexer_state
 
 # DS_053_Уточнение_5 (задача B): расшифровки флагов — точно как на форме GUI
 # (gui_app.py, подписи чекбоксов блока «Флаги детерминированного фикса»).
@@ -441,7 +443,16 @@ def _process_function_body(lines: List[str], start_line: int, param_names: List[
 
 class PLPlusFixer:
     """Исправлятель проблемных конструкций PLPlus"""
-    
+
+    # DS_056A: совместимый алиас для lexer_state.in_block_comment
+    @property
+    def in_block_comment(self):
+        return self.lexer_state.in_block_comment
+
+    @in_block_comment.setter
+    def in_block_comment(self, val):
+        self.lexer_state.in_block_comment = val
+
     def __init__(self, config: dict, iteration: str = 'v0001', use_rubricator: bool = True, clean_output: bool = False):
         self.config = config
         self.iteration = iteration
@@ -450,7 +461,7 @@ class PLPlusFixer:
         self.fixed_issues: List[dict] = []  # Детали всех исправлений
         self.rubricator: Optional[MarkdownRubricatorLoaderV3] = None
         self.fix_descriptions = {}  # Краткие описания из рубрикатора
-        self.in_block_comment = False  # Состояние: внутри многострочного комментария /* */
+        self.lexer_state = LexerState()  # DS_056A: единое лексическое состояние
         self.skipped_in_comment = 0  # Счётчик пропущенных из-за комментариев
         self.skipped_in_string = 0  # Счётчик пропущенных из-за строк
         self.skipped_details = []  # Детали пропущенных исправлений для подробного лога
@@ -990,119 +1001,23 @@ class PLPlusFixer:
     def _is_in_comment_or_string(self, line: str, match_start: int, match_end: int) -> bool:
         """
         Проверка, находится ли найденное совпадение в комментарии или строковом литерале.
-        
-        Варианты, которые нужно игнорировать:
-        1. -- DateTimeEnd:=sysdate;         (строка полностью комментарий)
-        2. tmp := 'DateTimeEnd:=sysdate';   (внутри строкового литерала)
-        3. tmp := 'DateTimeEnd:=sysdate     (внутри многострочного строкового литерала)
-        4. /** / DateTimeEnd:=sysdate; /**/ (внутри /* */)
-        5. /* DateTimeEnd:=sysdate; */      (внутри /* */)
-        6. /*                             (многострочный комментарий)
-           DateTimeEnd:=sysdate;
-           */
-        
-        Вариант для исправления:
-        8. DateTimeEnd:=sysdate;            (реальный код)
+
+        DS_056A: делегирует в единый хелпер analyzer.lexer_state.
+        НЕ мутирует self.lexer_state — читает состояние НАЧАЛА строки.
+        Состояние переноса обновляет advance_lexer_state (один раз на строку,
+        см. _apply_issue_fixes).
+
+        Для строк с &debug(...) включается debug_mode: литералы внутри такой
+        строки считаются кодом (сохраняется прежнее поведение _update_renamed_vars).
         """
-        # Проверка 1: Строка начинается с комментария -- (и не внутри строки)
-        stripped = line.lstrip()
-        if stripped.startswith('--'):
-            # Проверяем, не внутри ли строки этот комментарий
-            leading_ws_len = len(line) - len(stripped)
-            before_comment = line[:leading_ws_len]
-            if before_comment.count("'") % 2 == 0:
-                return True  # Это комментарий
-        
-        # Проверка 2: Находим позицию совпадения относительно начала строки
-        # Проверяем, есть ли перед совпадением '--' (однострочный комментарий)
-        line_before_match = line[:match_start]
-        
-        # Если перед совпадением есть '--' и нет конца строки после него
-        if '--' in line_before_match:
-            comment_pos = line_before_match.rfind('--')
-            # Проверяем, не внутри ли строки этот комментарий
-            before_comment = line[:comment_pos]
-            single_quotes = before_comment.count("'")
-            # Если нечётное количество кавычек, значит '--' внутри строки
-            if single_quotes % 2 == 0:
-                return True  # Это комментарий
-        
-        # Проверка 3: Находимся ли внутри строкового литерала '...'
-        # Считаем одинарные кавычки до позиции совпадения
-        single_quotes_before = line[:match_start].count("'")
-        if single_quotes_before % 2 == 1:
-            return True  # Внутри строкового литерала
-        
-        # Проверка 4: Находимся ли внутри блочного комментария /* */
-        # Используем состояние self.in_block_comment для многострочных комментариев
-        before_match = line[:match_start]
-        after_match = line[match_end:]
-        
-        # Считаем открывающие и закрывающие блочные комментарии до позиции совпадения
-        opens_before = before_match.count('/*')
-        closes_before = before_match.count('*/')
-        
-        # Если мы уже в блочном комментарии с предыдущей строки
-        if self.in_block_comment:
-            # Если есть закрывающий */ до позиции совпадения, выходим из комментария
-            if closes_before > 0:
-                # Проверяем, закрывает ли этот */ открывающий /* с этой строки
-                first_close = before_match.find('*/')
-                last_open_before_close = before_match[:first_close].rfind('/*')
-                if last_open_before_close == -1:
-                    # Этот */ закрывает комментарий с предыдущей строки
-                    # Теперь проверяем, нет ли нового /* после */
-                    remaining = before_match[first_close + 2:]
-                    if '/*' not in remaining:
-                        return False  # Выходим из блочного комментария
-                    # Есть новый /*, снова в комментарии
-            return True  # Всё ещё в блочном комментарии
-        
-        # Не в блочном комментарии с предыдущей строки
-        # Проверяем, есть ли открывающий /* без закрывающего */ до позиции совпадения
-        if opens_before > closes_before:
-            # Есть открывающий /* без закрывающего */ до этой позиции
-            # Проверяем, есть ли закрывающий */ после совпадения на этой строке
-            total_closes = line.count('*/')
-            if total_closes <= closes_before:
-                # Нет закрывающего */ после совпадения на этой строке
-                self.in_block_comment = True  # Запоминаем состояние
-                return True  # Внутри блочного комментария
-        
-        return False
-    
+        debug_mode = '&debug' in line
+        return is_in_comment_or_string(
+            line, match_start, match_end, self.lexer_state, debug_mode=debug_mode
+        )
+
     def _update_block_comment_state(self, line: str):
-        """Обновление состояния блочного комментария после обработки строки"""
-        opens = line.count('/*')
-        closes = line.count('*/')
-        
-        if self.in_block_comment:
-            # Если в комментарии, закрывающий */ уменьшает счётчик
-            if closes > 0:
-                # Проверяем, закрывает ли */ открывающий /* с этой же строки
-                # Ищем первый */ и последний /* перед ним
-                first_close = line.find('*/')
-                last_open_before_close = line[:first_close].rfind('/*')
-                
-                if last_open_before_close != -1:
-                    # /* и */ на одной строке, это не закрывает внешний комментарий
-                    # Проверяем оставшуюся часть строки
-                    remaining = line[first_close + 2:]
-                    if '*/' in remaining:
-                        # Есть ещё закрывающий, уменьшаем
-                        self.in_block_comment = False
-                else:
-                    # */ закрывает комментарий с предыдущей строки
-                    # Проверяем, есть ли новый /* после */
-                    remaining = line[first_close + 2:]
-                    if '/*' in remaining:
-                        self.in_block_comment = True  # Новый комментарий начался
-                    else:
-                        self.in_block_comment = False  # Вышли из комментария
-        else:
-            # Если не в комментарии, открывающий /* без закрывающего начинает комментарий
-            if opens > closes:
-                self.in_block_comment = True
+        """Обновление лексического состояния после обработки строки (1 раз на строку)."""
+        advance_lexer_state(line, self.lexer_state)
     
     def _find_code_positions(self, line: str, pattern: str, flags: int = 0) -> List[Tuple[int, int, str]]:
         """
@@ -1318,51 +1233,58 @@ class PLPlusFixer:
         new_lines = list(lines)
         changes: List[dict] = []
 
-        for line_number in sorted(by_line):
-            idx = line_number - 1
-            if idx < 0 or idx >= len(new_lines):
-                continue
-            raw = new_lines[idx]
-            # Разделяем перевод строки, отступ и тело.
-            # Важно: сначала отделяем trailing '\n', затем lstrip только тела
-            # (иначе для строки '	\n' lstrip() съест и '\n', и перевод
-            # задвоится при сборке).
-            trailing = '\n' if raw.endswith('\n') else ''
-            core = raw[:-1] if trailing else raw
-            body = core.lstrip()
-            leading_ws = core[:len(core) - len(body)]
+        # DS_056A: лексическое состояние переносим между строками в исходном
+        # порядке. advance_lexer_state — ровно один раз на строку (в конце итерации),
+        # после всех is_in_comment_or_string для этой строки (вызываются внутри
+        # применения фиксов через _find_code_positions).
+        self.lexer_state = LexerState()
+        for idx in range(len(new_lines)):
+            line_number = idx + 1
+            if line_number in by_line:
+                raw = new_lines[idx]
+                # Разделяем перевод строки, отступ и тело.
+                # Важно: сначала отделяем trailing '\n', затем lstrip только тела
+                # (иначе для строки '	\n' lstrip() съест и '\n', и перевод
+                # задвоится при сборке).
+                trailing = '\n' if raw.endswith('\n') else ''
+                core = raw[:-1] if trailing else raw
+                body = core.lstrip()
+                leading_ws = core[:len(core) - len(body)]
 
-            current = body
-            for issue in by_line[line_number]:
-                code = issue.issue_type
-                fixed = None
-                bucket = None
-                kind = None
+                current = body
+                for issue in by_line[line_number]:
+                    code = issue.issue_type
+                    fixed = None
+                    bucket = None
+                    kind = None
 
-                # a. sql_parser / RuleEngine (regex + hybrid + other)
-                if self.rule_engine.has_rule(code) and self.rule_engine.rule_enabled(code, self.flags):
-                    res = self.rule_engine.apply_fix(current, code, self.flags)
-                    if res:
-                        fixed, bucket, kind = res
+                    # a. sql_parser / RuleEngine (regex + hybrid + other)
+                    if self.rule_engine.has_rule(code) and self.rule_engine.rule_enabled(code, self.flags):
+                        res = self.rule_engine.apply_fix(current, code, self.flags)
+                        if res:
+                            fixed, bucket, kind = res
 
-                # b. backup self.FIXES
-                if fixed is None and self.flags.get('backup', False):
-                    b = self._apply_backup_fix(current, code)
-                    if b:
-                        fixed, bucket, kind = b, 'backup', 'transform'
+                    # b. backup self.FIXES
+                    if fixed is None and self.flags.get('backup', False):
+                        b = self._apply_backup_fix(current, code)
+                        if b:
+                            fixed, bucket, kind = b, 'backup', 'transform'
 
-                if fixed is not None and fixed != current:
-                    changes.append({
-                        'line_number': line_number,
-                        'rule_code': code,
-                        'bucket': bucket,
-                        'kind': kind,
-                        'before': current,
-                        'after': fixed,
-                    })
-                    current = fixed
+                    if fixed is not None and fixed != current:
+                        changes.append({
+                            'line_number': line_number,
+                            'rule_code': code,
+                            'bucket': bucket,
+                            'kind': kind,
+                            'before': current,
+                            'after': fixed,
+                        })
+                        current = fixed
 
-            new_lines[idx] = leading_ws + current + trailing
+                new_lines[idx] = leading_ws + current + trailing
+
+            # Ровно один раз на строку — состояние считаем по ИСХОДНОЙ строке.
+            advance_lexer_state(lines[idx], self.lexer_state)
 
         return new_lines, changes
 
@@ -2308,17 +2230,25 @@ def save_scan_only_log(logs_dir: Path, source_name: str, flags: Dict[str, bool],
     lines: List[str] = []
     lines.append(f"Отчёт сканирования: {fname}")
     lines.append("")
-    lines.append("Активные рубрикаторы и флаги:")
-    lines.append(f"  Рубрикаторы: 4.RUBRICATOR_PROMPT v5.json, "
-                 f"5.RUBRICATOR_PARSER_SQL v5.json ({getattr(eng, 'version', 'N/A')})")
-    lines.append("")
-    # DS_053_Уточнение_5 (задача B): блок флагов с расшифровкой.
-    lines.extend(_fix_flags_block(flags, indent='  '))
+    # DS_059_Уточнение_B: блок «Активные рубрикаторы и флаги» — точно как в
+    # scan_report_*: переиспользуем _generate_active_rubricators_lines
+    # сканера (рубрикаторы ВКЛ/ВЫКЛ + подкатегории PlpCheck + флаги с
+    # расшифровками). Фолбэк — прежний заголовок с именами файлов.
+    try:
+        lines.extend(scanner._generate_active_rubricators_lines())
+    except Exception as e:
+        logger.warning(f"[FIXER] Блок рубрикаторов из сканера недоступен: {e}")
+        lines.append("Активные рубрикаторы и флаги:")
+        lines.append(f"  Рубрикаторы: 4.RUBRICATOR_PROMPT v5.json, "
+                     f"5.RUBRICATOR_PARSER_SQL v5.json ({getattr(eng, 'version', 'N/A')})")
+        lines.append("")
+        # DS_053_Уточнение_5 (задача B): блок флагов с расшифровкой.
+        lines.extend(_fix_flags_block(flags, indent='  '))
     lines.append("")
     lines.append(f"**Дата**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"**Источник**: {source_name}")
     lines.append("")
-    lines.append("Режим: прогноз исправлений, без записи")
+    lines.append("Режим: сканирование (прогноз исправлений, без записи)")
     lines.append("")
 
     if not any_flag:
@@ -2395,8 +2325,19 @@ def save_scan_only_log(logs_dir: Path, source_name: str, flags: Dict[str, bool],
         lines.append("")
         lines.append(f"Правил в PLAN: {len(plan_codes)}")
         lines.append("")
-        lines.append(f"Спрогнозировано исправлений: {len(all_changes)}")
-        lines.append("")
+
+        # DS_059_Уточнение_D: пояснение о правилах в ignore — найдены
+        # сканером, но не автофиксятся конвейером (нет детерминированного
+        # transform в PARSER_SQL либо корзина ignore).
+        all_issue_codes = {it.issue_type for iss in issues_by_file.values()
+                           for it in iss}
+        ignored_codes = sorted(c for c in all_issue_codes
+                               if c not in set(plan_codes))
+        if ignored_codes:
+            lines.append(f"Правил в ignore (не автофиксятся): {len(ignored_codes)}")
+            for c in ignored_codes:
+                lines.append(f"  {c}")
+            lines.append("")
 
         # МД — максимальная длина кода правила среди сработавших (Схема A).
         md = max((len(ch['rule_code']) for ch in all_changes), default=0)

@@ -1008,10 +1008,20 @@
           "regex": "([A-Z][A-Z0-9_#]+)\\.([a-z][a-zA-Z0-9_#]+)\\s*\\(",
           "description": "Вызов метода через точку без ::[]",
           "transform_type": "regex",
-          "transform": "::[{class}].[{method}](",
+          "transform": "::[{1}].[{2}](",
           "note": "Заменить CLASS.method на ::[CLASS].[method]",
           "example_in": "CLIENT.get_name(",
           "example_out": "::[CLIENT].[get_name]("
+        },
+        {
+          "name": "wrong_method_syntax_bracket",
+          "regex": "\\[(\\w+)\\]\\.(\\w+)\\s*\\(",
+          "description": "Вызов метода в форме [CLASS].method без полного пути ::[CLASS].[method]",
+          "transform_type": "regex",
+          "transform": "::[{1}].[{2}](",
+          "note": "Заменить [CLASS].method на ::[CLASS].[method]",
+          "example_in": "x := [STR].Set_Par(p1);",
+          "example_out": "x := ::[STR].[Set_Par](p1);"
         }
       ]
     },
@@ -1104,14 +1114,48 @@
       "priority": 2,
       "patterns": [
         {
-          "name": "bad_prefix_var",
-          "regex": "\\b(bad|badprefix|tmp|temp|var|data|info|z_|x_)(\\w+)\\s+(varchar2|string|number|date|boolean|ref|rowtype)\\s*[;(]",
-          "description": "Некорректный префикс переменной",
-          "transform_type": "hybrid",
-          "algorithmic_hint": "Определить тип переменной и заменить недопустимый префикс на v_, n_, d_ и т.д.",
-          "fallback_instruction": "-- ВАЖНО: заменить префикс '{bad_prefix}' на корректный (v_ для varchar2/string, n_ для number, d_ для date)",
+          "name": "bad_prefix_varchar2",
+          "regex": "(?i)\\b(?:bad|badprefix|tmp|temp|var|data|info|z|x)_(\\w+)(?!\\s+(?:in|out)\\b)\\s+(varchar2|string)(\\s*\\(\\s*\\d+\\s*\\))?",
+          "description": "Переменная varchar2/string с недопустимым префиксом",
+          "transform_type": "regex",
+          "transform": "v_{1} {2}{3}",
+          "note": "DS_059_E: только плохие префиксы (bad_, badprefix_, tmp_, temp_, var_, data_, info_, z_, x_); отсутствие префикса — зона missing_prefix_* (PlpCheck.STYLE.PREFIX_TYPE_IN_VAR_NAME.п.4.4).",
+          "fallback_instruction": "-- ВАЖНО: заменить плохой префикс на v_ (varchar2/string)",
           "example_in": "bad_var varchar2(100);",
-          "example_out": "v_bad_var varchar2(100);"
+          "example_out": "v_var varchar2(100);"
+        },
+        {
+          "name": "bad_prefix_number",
+          "regex": "(?i)\\b(?:bad|badprefix|tmp|temp|var|data|info|z|x)_(\\w+)(?!\\s+(?:in|out)\\b)\\s+number\\b",
+          "description": "Переменная number с недопустимым префиксом",
+          "transform_type": "regex",
+          "transform": "n_{1} number",
+          "note": "DS_059_E: только плохие префиксы (bad_, badprefix_, tmp_, temp_, var_, data_, info_, z_, x_); отсутствие префикса — зона missing_prefix_* (PlpCheck.STYLE.PREFIX_TYPE_IN_VAR_NAME.п.4.4).",
+          "fallback_instruction": "-- ВАЖНО: заменить плохой префикс на n_ (number)",
+          "example_in": "tmp_Cnt number;",
+          "example_out": "n_Cnt number;"
+        },
+        {
+          "name": "bad_prefix_date",
+          "regex": "(?i)\\b(?:bad|badprefix|tmp|temp|var|data|info|z|x)_(\\w+)(?!\\s+(?:in|out)\\b)\\s+date\\b",
+          "description": "Переменная date с недопустимым префиксом",
+          "transform_type": "regex",
+          "transform": "d_{1} date",
+          "note": "DS_059_E: только плохие префиксы (bad_, badprefix_, tmp_, temp_, var_, data_, info_, z_, x_); отсутствие префикса — зона missing_prefix_* (PlpCheck.STYLE.PREFIX_TYPE_IN_VAR_NAME.п.4.4).",
+          "fallback_instruction": "-- ВАЖНО: заменить плохой префикс на d_ (date)",
+          "example_in": "tmp_Birth date;",
+          "example_out": "d_Birth date;"
+        },
+        {
+          "name": "bad_prefix_boolean",
+          "regex": "(?i)\\b(?:bad|badprefix|tmp|temp|var|data|info|z|x)_(\\w+)(?!\\s+(?:in|out)\\b)\\s+boolean\\b",
+          "description": "Переменная boolean с недопустимым префиксом",
+          "transform_type": "regex",
+          "transform": "b_{1} boolean",
+          "note": "DS_059_E: только плохие префиксы (bad_, badprefix_, tmp_, temp_, var_, data_, info_, z_, x_); отсутствие префикса — зона missing_prefix_* (PlpCheck.STYLE.PREFIX_TYPE_IN_VAR_NAME.п.4.4).",
+          "fallback_instruction": "-- ВАЖНО: заменить плохой префикс на b_ (boolean)",
+          "example_in": "tmp_Flag boolean;",
+          "example_out": "b_Flag boolean;"
         }
       ]
     },
@@ -1121,31 +1165,31 @@
       "patterns": [
         {
           "name": "missing_prefix_number",
-          "regex": "\\b(?!v_|n_|d_|b_|lr_|lrec_|tb_)(\\w+)\\s+number\\s*[;(]",
+          "regex": "(?-i)\\b(?!(?i:v_|n_|d_|b_|lr_|lrec_|tb_|cur_|gcur_|ret_|cn_|gcn_|p_))(?!v[A-Z]|p[A-Z]|n[A-Z]|d[A-Z]|b[A-Z])(?!(?i:return\\b|function\\b|procedure\\b|begin\\b|end\\b|else\\b|elsif\\b|then\\b|is\\b|and\\b|or\\b|null\\b|select\\b|from\\b|where\\b|case\\b|when\\b|if\\b|loop\\b|into\\b|values\\b|set\\b|default\\b|constant\\b|exception\\b|others\\b|while\\b|for\\b|declare\\b|exists\\b|table\\b|index\\b|by\\b|as\\b|in\\b|on\\b|using\\b|with\\b|insert\\b|update\\b|delete\\b|having\\b|group\\b|order\\b|asc\\b|desc\\b|between\\b|like\\b|distinct\\b|count\\b|sum\\b|max\\b|min\\b|nvl\\b|sysdate\\b|dual\\b|raise\\b|commit\\b|rollback\\b|savepoint\\b|pragma\\b|override\\b|static\\b|virtual\\b|public\\b|private\\b|execute\\b|validate\\b|ref\\b|rowtype\\b|cursor\\b|open\\b|close\\b|fetch\\b))(?!(?i:in|out)\\b)(\\w+)(?!\\s+(?i:in|out)\b)\\s+(?i:number)\\b",
           "description": "Переменная number без префикса n_",
           "transform_type": "regex",
-          "transform": "n_{var_name} number",
-          "note": "Добавить префикс n_ для number",
+          "transform": "n_{1} number",
+          "note": "DS_059_E: отсутствие корректного префикса; (?i)-lookahead по префиксам/ключевым, camelCase (v[A-Z] и т.п.) не матчится, параметры in/out исключены.",
           "example_in": "id number;",
           "example_out": "n_id number;"
         },
         {
           "name": "missing_prefix_varchar2",
-          "regex": "\\b(?!v_|n_|d_|b_|lr_|lrec_|tb_)(\\w+)\\s+(varchar2|string)\\s*[;(]",
+          "regex": "(?-i)\\b(?!(?i:v_|n_|d_|b_|lr_|lrec_|tb_|cur_|gcur_|ret_|cn_|gcn_|p_))(?!v[A-Z]|p[A-Z]|n[A-Z]|d[A-Z]|b[A-Z])(?!(?i:return\\b|function\\b|procedure\\b|begin\\b|end\\b|else\\b|elsif\\b|then\\b|is\\b|and\\b|or\\b|null\\b|select\\b|from\\b|where\\b|case\\b|when\\b|if\\b|loop\\b|into\\b|values\\b|set\\b|default\\b|constant\\b|exception\\b|others\\b|while\\b|for\\b|declare\\b|exists\\b|table\\b|index\\b|by\\b|as\\b|in\\b|on\\b|using\\b|with\\b|insert\\b|update\\b|delete\\b|having\\b|group\\b|order\\b|asc\\b|desc\\b|between\\b|like\\b|distinct\\b|count\\b|sum\\b|max\\b|min\\b|nvl\\b|sysdate\\b|dual\\b|raise\\b|commit\\b|rollback\\b|savepoint\\b|pragma\\b|override\\b|static\\b|virtual\\b|public\\b|private\\b|execute\\b|validate\\b|ref\\b|rowtype\\b|cursor\\b|open\\b|close\\b|fetch\\b))(?!(?i:in|out)\\b)(\\w+)(?!\\s+(?i:in|out)\b)\\s+(?i:(varchar2|string))(\\s*\\(\\s*\\d+\\s*\\))?",
           "description": "Переменная varchar2/string без префикса v_",
           "transform_type": "regex",
-          "transform": "v_{var_name} varchar2",
-          "note": "Добавить префикс v_ для varchar2/string",
+          "transform": "v_{1} {2}{3}",
+          "note": "DS_059_E: отсутствие корректного префикса; (?i)-lookahead по префиксам/ключевым, camelCase (v[A-Z] и т.п.) не матчится, параметры in/out исключены.",
           "example_in": "name varchar2(100);",
           "example_out": "v_name varchar2(100);"
         },
         {
           "name": "missing_prefix_date",
-          "regex": "\\b(?!v_|n_|d_|b_|lr_|lrec_|tb_)(\\w+)\\s+date\\s*[;(]",
+          "regex": "(?-i)\\b(?!(?i:v_|n_|d_|b_|lr_|lrec_|tb_|cur_|gcur_|ret_|cn_|gcn_|p_))(?!v[A-Z]|p[A-Z]|n[A-Z]|d[A-Z]|b[A-Z])(?!(?i:return\\b|function\\b|procedure\\b|begin\\b|end\\b|else\\b|elsif\\b|then\\b|is\\b|and\\b|or\\b|null\\b|select\\b|from\\b|where\\b|case\\b|when\\b|if\\b|loop\\b|into\\b|values\\b|set\\b|default\\b|constant\\b|exception\\b|others\\b|while\\b|for\\b|declare\\b|exists\\b|table\\b|index\\b|by\\b|as\\b|in\\b|on\\b|using\\b|with\\b|insert\\b|update\\b|delete\\b|having\\b|group\\b|order\\b|asc\\b|desc\\b|between\\b|like\\b|distinct\\b|count\\b|sum\\b|max\\b|min\\b|nvl\\b|sysdate\\b|dual\\b|raise\\b|commit\\b|rollback\\b|savepoint\\b|pragma\\b|override\\b|static\\b|virtual\\b|public\\b|private\\b|execute\\b|validate\\b|ref\\b|rowtype\\b|cursor\\b|open\\b|close\\b|fetch\\b))(?!(?i:in|out)\\b)(\\w+)(?!\\s+(?i:in|out)\b)\\s+(?i:date)\\b",
           "description": "Переменная date без префикса d_",
           "transform_type": "regex",
-          "transform": "d_{var_name} date_time",
-          "note": "Добавить префикс d_ для date, заменить на date_time",
+          "transform": "d_{1} date_time",
+          "note": "DS_059_E: отсутствие корректного префикса; (?i)-lookahead по префиксам/ключевым, camelCase (v[A-Z] и т.п.) не матчится, параметры in/out исключены.",
           "example_in": "birth_date date;",
           "example_out": "d_birth_date date_time;"
         }
@@ -1173,13 +1217,14 @@
       "patterns": [
         {
           "name": "code_in_comment",
-          "regex": "/\\*[^*]*\\*+[^*/]*\\*/|--.*\\b(if|then|else|end|if|return|:=|select|from|where)\\b",
+          "regex": "/\\*[^*]*\\*+[^*/]*\\*/|--.*\\b(if|then|else|end|return|select|from|where)\\b.*",
           "description": "Закомментированный код",
-          "transform_type": "hybrid",
-          "algorithmic_hint": "Проанализировать содержимое комментария: если содержит PL/SQL конструкции — удалить",
+          "transform_type": "ignore",
+          "algorithmic_hint": "Проанализировать содержимое комментария: если содержит PL/SQL конструкции — удалить вручную",
           "fallback_instruction": "-- ВАЖНО: удалить закомментированный код. Если важно для понимания, оставить краткое пояснение.",
           "example_in": "/* old implementation: if v_temp > 0 then v_temp := v_temp * 2; end if; */",
-          "example_out": "-- удалено"
+          "example_out": "-- (удалено)",
+          "note": "Удаление закомментированного кода — только вручную (риск удалить осмысленный текст). DS_059_E."
         }
       ]
     },

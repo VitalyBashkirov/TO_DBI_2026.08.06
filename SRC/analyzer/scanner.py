@@ -435,6 +435,9 @@ class Issue:
     tags: List[str] = None
     # DS 032: секция кода (PRIVATE/EXECUTE/...) для ЦФТ-формата отчёта
     section: str = ''
+    # DS_064_Уточнение_A: фрагмент совпадения (ERROR) — чтобы два РАЗНЫХ
+    # спецсимвола на одной строке не схлопывались при дедупликации
+    match_fragment: str = ''
     
     def __post_init__(self):
         if self.tags is None:
@@ -479,6 +482,8 @@ class PLPlusScanner:
         # None — если не прервано; иначе float (0.0–100.0)
         self.abort_percent = None
         self.issues: List[Issue] = []
+        # DS_064_Уточнение_A (B1): счётчик issues до дедупликации (по всем файлам)
+        self.issues_before_dedup: int = 0
         self.stats: Dict[str, int] = {}
         self.lexer_state = LexerState()
         self.lines = []  # для многострочного анализа
@@ -1251,7 +1256,8 @@ class PLPlusScanner:
                             rubricator_full_description=full_description,
                             rubricator_example_code=example_code,
                             rubricator_example_fixed=example_fixed,
-                            tags=tags
+                            tags=tags,
+                            match_fragment=(matched_text or '')[:200]
                         )
                         issues.append(issue)
                         issues_found_on_line += 1
@@ -1542,8 +1548,26 @@ class PLPlusScanner:
             if log_callback:
                 log_callback(f"  Ошибка: {e}", 'error')
         
-        self.issues.extend(issues)
-        return issues
+        # DS_064_Уточнение_A: дедупликация идентичных issues — одна запись на
+        # (file, line, issue_type, description, match_fragment). Правило
+        # SPEC_CHARS.п.2.10 может давать десятки идентичных совпадений на одной
+        # строке (каждый спецсимвол). match_fragment (ERROR-фрагмент) в ключе —
+        # чтобы два РАЗНЫХ совпадения на одной строке с одинаковым description
+        # не схлопывались (original_code — вся строка и потому одинаков).
+        deduped_issues = []
+        seen_keys = set()
+        for issue in issues:
+            key = (issue.file_path, issue.line_number, issue.issue_type,
+                   issue.description, issue.match_fragment)
+            if key not in seen_keys:
+                seen_keys.add(key)
+                deduped_issues.append(issue)
+
+        # DS_064_Уточнение_A (B1): счётчик «до дедупа» — для честной метрики
+        # «Всего issues (с дублями)» в отчётах GUI.
+        self.issues_before_dedup += len(issues)
+        self.issues.extend(deduped_issues)
+        return deduped_issues
     
     def scan_directory(self, log_callback=None) -> Dict[str, int]:
         """Сканирование всех .plp файлов"""
@@ -1646,6 +1670,9 @@ class PLPlusScanner:
             log_callback('ИТОГОВАЯ СТАТИСТИКА ПО ВИДАМ КОДОВ ПРАВИЛ', 'info')
             log_callback(sep, 'info')
             log_callback(f'Всего файлов просканировано:    {files_scanned}', 'info')
+            # DS_064_Уточнение_A (B1): оба счётчика — до и после дедупликации
+            if self.issues_before_dedup != total_issues:
+                log_callback(f'Всего issues (с дублями):       {self.issues_before_dedup}', 'info')
             log_callback(f'Всего проблем найдено:         {total_issues}', 'info')
             log_callback(f'Всего видов кодов правил:      {total_rules}', 'info')
             if ai_count > 0:

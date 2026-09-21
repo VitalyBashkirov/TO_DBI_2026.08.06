@@ -2714,6 +2714,7 @@ class DBIMigrationApp:
             self.scan_results = {
                 'scanner': scanner,
                 'issues': scanner.issues,
+                'issues_before_dedup': scanner.issues_before_dedup,
                 'stats': scan_results
             }
             
@@ -3185,6 +3186,7 @@ class DBIMigrationApp:
             self.scan_results = {
                 'scanner': scanner,
                 'issues': scanner.issues,
+                'issues_before_dedup': scanner.issues_before_dedup,
                 'stats': scan_results
             }
             
@@ -3906,7 +3908,15 @@ class DBIMigrationApp:
             lines = []
             lines.append("-- ФАЙЛ: SQL конструкции для ручного исправления")
             lines.append(f"-- Дата генерации: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            lines.append(f"-- Всего проблем: {len(issues)}")
+            # DS_064_Уточнение_A (B1): «до дедупа» — из поля сканера, «уникальных» —
+            # по дедуплицированному списку issues.
+            before = self.scan_results.get('issues_before_dedup')
+            if before is not None and before != len(issues):
+                lines.append(f"-- Всего issues (с дублями): {before}")
+            lines.append(f"-- Всего проблем (после дедупа): {len(issues)}")
+            # уникальные по (file, line, check)
+            unique_keys = {(iss.file_path, iss.line_number, iss.issue_type) for iss in issues}
+            lines.append(f"-- Уникальных (file,line,check): {len(unique_keys)}")
             lines.append(f"-- Файлов: {len(by_file)}")
             lines.append("")
             lines.append("-- ВАЖНО: Этот файл содержит список всех найденных проблемных конструкций.")
@@ -3964,7 +3974,14 @@ class DBIMigrationApp:
                 sql_file_str = sql_file_str[0].upper() + sql_file_str[1:]
             
             self.log(f"Файл создан: {sql_file_str}", 'success')
-            self.log(f"Всего проблем: {len(issues)}", 'info')
+            # DS_064_Уточнение_A (B1): «до дедупа» — из поля сканера, «уникальных» —
+            # по дедуплицированному списку issues.
+            before = self.scan_results.get('issues_before_dedup')
+            if before is not None and before != len(issues):
+                self.log(f"Всего issues (с дублями): {before}", 'info')
+            self.log(f"Всего проблем (после дедупа): {len(issues)}", 'info')
+            unique_keys = {(iss.file_path, iss.line_number, iss.issue_type) for iss in issues}
+            self.log(f"Уникальных (file,line,check): {len(unique_keys)}", 'info')
             self.log(f"Всего файлов: {len(by_file)}", 'info')
             
             # Открываем файл в системе

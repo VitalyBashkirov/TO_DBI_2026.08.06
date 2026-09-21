@@ -245,9 +245,9 @@ PLPCHECK_RULE_TO_CATEGORY: Dict[str, str] = {
     'plpcheck.METH_PARAM_AND_VAR_NAMES': 'STYLE.PREFIXES',
     'plpcheck.METH_PARAM_AND_VAR_FULL_NAMES': 'STYLE.PREFIXES',
     'plpcheck.USES_RIP_OBJECT': 'STYLE.PREFIXES',
-    'plpcheck.CODE_IN_COMMENT': 'STYLE.PREFIXES',
+    'plpcheck.CODE_IN_COMMENT': 'OTHER',
     'plpcheck.NOT_MENTIONED': 'STYLE.PREFIXES',
-    'plpcheck.WRONG_METHOD_SYNTAX': 'STYLE.PREFIXES',
+    'plpcheck.WRONG_METHOD_SYNTAX': 'STYLE.SYNTAX',
     'plpcheck.WRONG_ATTR_SYNTAX': 'STYLE.PREFIXES',
     'plpcheck.WRONG_CLASS_SYNTAX': 'STYLE.PREFIXES',
     'plpcheck.WRONG_REF_SYNTAX': 'STYLE.PREFIXES',
@@ -412,10 +412,14 @@ PLPCHECK_CATEGORIES: List[Tuple[str, str, str]] = [
     ('SQL.CHECKS',                'Проверки чистого SQL',            ''),
     ('WEB.ADAPTATION',            'Адаптация под Веб-Навигатор',     ''),
     ('STYLE.PREFIXES',            'Префиксы и оформление',
-        'bad_prefix, not_mentioned, wrong_method_syntax, code_in_comment'),
+        'bad_prefix, not_mentioned'),
     ('STYLE.PREFIX_COMBINATION',  'Комбинированные префиксы',
         'prefix_type_in_var_name'),
-    ('OTHER',                     'Прочие PlpCheck-правила',          ''),
+    # DS_065 (§4.3): code_in_comment и wrong_method_syntax — не префиксы;
+    # code_in_comment -> OTHER (PlpCheck.OTHER), wrong_method_syntax -> STYLE
+    ('STYLE.SYNTAX',              'Синтаксис методов', 'wrong_method_syntax'),
+    ('OTHER',                     'Прочие PlpCheck-правила',
+        'code_in_comment'),
 ]
 
 
@@ -2245,7 +2249,12 @@ class PLPlusScanner:
 
     def _transform_action(self, issue_type: str) -> Optional[str]:
         """DS_059 (приоритет 3): действие из PARSER_SQL —
-        "Заменить <example_in> на <example_out>" (или transform)."""
+        "Заменить <example_in> на <example_out>" (или transform).
+
+        DS_065 (§4.1): из PLAN УДАЛЁН — example_out подставлялся дословно во
+        все строки (дубликат). Метод сохранён для совместимости (не вызывается
+        из _generate_plan).
+        """
         try:
             from rule_engine import get_rule_engine
             eng = get_rule_engine()
@@ -2378,12 +2387,14 @@ class PLPlusScanner:
         elif 'connectby2with' in issue_type_lower:
             special = 'Заменить на CONNECT BY PRIOR'
 
-        # Универсальные приоритеты DS_059
+        # Универсальные приоритеты DS_059 / DS_065 (§4.1):
+        # 1) спец-ветки PlpCheck; 2) ERROR-действие;
+        # 3) transform+example_out из PARSER_SQL УДАЛЕНЫ из PLAN (DS_065) —
+        #    example_out подставлялся дословно во все строки (дубликат);
+        # 4) фолбэк — «Исправить по описанию».
         action = special
         if action is None:
             action = self._error_is_action(description)
-        if action is None:
-            action = self._transform_action(issue_type)
         if action is None:
             action = 'Исправить по описанию'
 

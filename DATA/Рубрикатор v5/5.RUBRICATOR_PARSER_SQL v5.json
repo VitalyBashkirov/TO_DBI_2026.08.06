@@ -701,11 +701,12 @@
       "patterns": [
         {
           "name": "special_chars_in_name",
-          "regex": "class\\s+[A-Z0-9_]*[^A-Z0-9_#][A-Z0-9_#]*|@name\\s*\\([^)]*[^а-яА-Яa-zA-Z0-9_\\s#\\.\\(\\)\\-][^)]*\\)",
-          "description": "Спецсимволы в именах",
+          "regex": "(?:\\b(class|view|method|library|interface|enum)\\s+[\\w#]*[^A-Z0-9_#\\s][\\w#]*)|(?:@(name|tag)\\s*\\(\\s*'[^']*[^a-zA-Zа-яА-Я0-9_ '#][^']*')",
+          "description": "Спецсимволы в именах (class/view/method/... и @name/@tag)",
           "transform_type": "hybrid",
-          "algorithmic_hint": "Заменить спецсимволы на допустимые (буквы, цифры, подчеркивание, #)",
+          "algorithmic_hint": "Заменить спецсимволы в имени на допустимые (буквы, цифры, подчеркивание, #)",
           "fallback_instruction": "-- ВАЖНО: запрещены спецсимволы в именах. Используйте только буквы, цифры, подчеркивание и #.",
+          "note": "DS_065 (§4.2): regex сужен до ИМЁН (объявления class/view/method/library/interface/enum и литералы @name/@tag) — старый regex [^A-Z0-9_#] матчил каждый спецсимвол (--, :=, ;, (), /, *) и давал ложные срабатывания.",
           "example_in": "class TEST-TBP { @name('attr!') ATTR [STRING]; }",
           "example_out": "class TEST_TBP { @name('attr') ATTR [STRING]; }"
         }

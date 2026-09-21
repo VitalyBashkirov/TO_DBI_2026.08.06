@@ -1167,9 +1167,8 @@
           "name": "missing_prefix_number",
           "regex": "(?-i)\\b(?!(?i:v_|n_|d_|b_|lr_|lrec_|tb_|cur_|gcur_|ret_|cn_|gcn_|p_))(?!v[A-Z]|p[A-Z]|n[A-Z]|d[A-Z]|b[A-Z])(?!(?i:return\\b|function\\b|procedure\\b|begin\\b|end\\b|else\\b|elsif\\b|then\\b|is\\b|and\\b|or\\b|null\\b|select\\b|from\\b|where\\b|case\\b|when\\b|if\\b|loop\\b|into\\b|values\\b|set\\b|default\\b|constant\\b|exception\\b|others\\b|while\\b|for\\b|declare\\b|exists\\b|table\\b|index\\b|by\\b|as\\b|in\\b|on\\b|using\\b|with\\b|insert\\b|update\\b|delete\\b|having\\b|group\\b|order\\b|asc\\b|desc\\b|between\\b|like\\b|distinct\\b|count\\b|sum\\b|max\\b|min\\b|nvl\\b|sysdate\\b|dual\\b|raise\\b|commit\\b|rollback\\b|savepoint\\b|pragma\\b|override\\b|static\\b|virtual\\b|public\\b|private\\b|execute\\b|validate\\b|ref\\b|rowtype\\b|cursor\\b|open\\b|close\\b|fetch\\b))(?!(?i:in|out)\\b)(\\w+)(?!\\s+(?i:in|out)\b)\\s+(?i:number)\\b",
           "description": "Переменная number без префикса n_",
-          "transform_type": "regex",
-          "transform": "n_{1} number",
-          "note": "DS_059_E: отсутствие корректного префикса; (?i)-lookahead по префиксам/ключевым, camelCase (v[A-Z] и т.п.) не матчится, параметры in/out исключены.",
+          "transform_type": "ignore",
+          "note": "DS_059_F (вариант A): автофикс отключён — regex переименовывает только объявление, ссылки в теле метода остаются старыми (несогласованный код). Переименование — вручную везде либо контекстный фиксер (DeterministicFixer).",
           "example_in": "id number;",
           "example_out": "n_id number;"
         },
@@ -1177,9 +1176,8 @@
           "name": "missing_prefix_varchar2",
           "regex": "(?-i)\\b(?!(?i:v_|n_|d_|b_|lr_|lrec_|tb_|cur_|gcur_|ret_|cn_|gcn_|p_))(?!v[A-Z]|p[A-Z]|n[A-Z]|d[A-Z]|b[A-Z])(?!(?i:return\\b|function\\b|procedure\\b|begin\\b|end\\b|else\\b|elsif\\b|then\\b|is\\b|and\\b|or\\b|null\\b|select\\b|from\\b|where\\b|case\\b|when\\b|if\\b|loop\\b|into\\b|values\\b|set\\b|default\\b|constant\\b|exception\\b|others\\b|while\\b|for\\b|declare\\b|exists\\b|table\\b|index\\b|by\\b|as\\b|in\\b|on\\b|using\\b|with\\b|insert\\b|update\\b|delete\\b|having\\b|group\\b|order\\b|asc\\b|desc\\b|between\\b|like\\b|distinct\\b|count\\b|sum\\b|max\\b|min\\b|nvl\\b|sysdate\\b|dual\\b|raise\\b|commit\\b|rollback\\b|savepoint\\b|pragma\\b|override\\b|static\\b|virtual\\b|public\\b|private\\b|execute\\b|validate\\b|ref\\b|rowtype\\b|cursor\\b|open\\b|close\\b|fetch\\b))(?!(?i:in|out)\\b)(\\w+)(?!\\s+(?i:in|out)\b)\\s+(?i:(varchar2|string))(\\s*\\(\\s*\\d+\\s*\\))?",
           "description": "Переменная varchar2/string без префикса v_",
-          "transform_type": "regex",
-          "transform": "v_{1} {2}{3}",
-          "note": "DS_059_E: отсутствие корректного префикса; (?i)-lookahead по префиксам/ключевым, camelCase (v[A-Z] и т.п.) не матчится, параметры in/out исключены.",
+          "transform_type": "ignore",
+          "note": "DS_059_F (вариант A): автофикс отключён — regex переименовывает только объявление, ссылки в теле метода остаются старыми (несогласованный код). Переименование — вручную везде либо контекстный фиксер (DeterministicFixer).",
           "example_in": "name varchar2(100);",
           "example_out": "v_name varchar2(100);"
         },
@@ -1187,9 +1185,8 @@
           "name": "missing_prefix_date",
           "regex": "(?-i)\\b(?!(?i:v_|n_|d_|b_|lr_|lrec_|tb_|cur_|gcur_|ret_|cn_|gcn_|p_))(?!v[A-Z]|p[A-Z]|n[A-Z]|d[A-Z]|b[A-Z])(?!(?i:return\\b|function\\b|procedure\\b|begin\\b|end\\b|else\\b|elsif\\b|then\\b|is\\b|and\\b|or\\b|null\\b|select\\b|from\\b|where\\b|case\\b|when\\b|if\\b|loop\\b|into\\b|values\\b|set\\b|default\\b|constant\\b|exception\\b|others\\b|while\\b|for\\b|declare\\b|exists\\b|table\\b|index\\b|by\\b|as\\b|in\\b|on\\b|using\\b|with\\b|insert\\b|update\\b|delete\\b|having\\b|group\\b|order\\b|asc\\b|desc\\b|between\\b|like\\b|distinct\\b|count\\b|sum\\b|max\\b|min\\b|nvl\\b|sysdate\\b|dual\\b|raise\\b|commit\\b|rollback\\b|savepoint\\b|pragma\\b|override\\b|static\\b|virtual\\b|public\\b|private\\b|execute\\b|validate\\b|ref\\b|rowtype\\b|cursor\\b|open\\b|close\\b|fetch\\b))(?!(?i:in|out)\\b)(\\w+)(?!\\s+(?i:in|out)\b)\\s+(?i:date)\\b",
           "description": "Переменная date без префикса d_",
-          "transform_type": "regex",
-          "transform": "d_{1} date_time",
-          "note": "DS_059_E: отсутствие корректного префикса; (?i)-lookahead по префиксам/ключевым, camelCase (v[A-Z] и т.п.) не матчится, параметры in/out исключены.",
+          "transform_type": "ignore",
+          "note": "DS_059_F (вариант A): автофикс отключён — regex переименовывает только объявление, ссылки в теле метода остаются старыми (несогласованный код). Переименование — вручную везде либо контекстный фиксер (DeterministicFixer).",
           "example_in": "birth_date date;",
           "example_out": "d_birth_date date_time;"
         }

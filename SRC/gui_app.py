@@ -654,7 +654,9 @@ class DBIMigrationApp:
         
         self.btn_from_ai = ttk.Button(control_frame, text="От AI", command=self.receive_from_ai, width=10)
         self.btn_from_ai.pack(side=tk.LEFT, padx=3)
-        # «От AI» доступна всегда: файлы-ответы можно положить в AI_OUT вручную.
+        # DS_054_Уточнение_C: «От AI» активна только при наличии файлов-ответов
+        # в EXCHANGE\AI_OUT (обновление — _update_ai_button_state, таймер 5 сек).
+        self.btn_from_ai.state(['disabled'])
         
         self.btn_rubricator = ttk.Button(control_frame, text="Открыть рубрикатор", command=self.open_rubricator, width=25)
         self.btn_rubricator.pack(side=tk.LEFT, padx=3)
@@ -788,6 +790,9 @@ class DBIMigrationApp:
         # DS_058+DS_057: тултипы для кнопок GUI
         self._apply_button_tooltips()
 
+        # DS_054_Уточнение_C: таймер проверки AI_OUT (5 сек) — кнопка «От AI».
+        self.root.after(5000, self._poll_ai_out)
+
         # Логируем загруженные файлы рубрикатора (после создания log_text)
         if self.rubricator_files:
             for code, name in self.rubricator_files.items():
@@ -805,9 +810,8 @@ class DBIMigrationApp:
                             "по выбранным рубрикаторам."),
             (self.btn_fix, "Автоматически исправить найденные проблемы "
                            "(детерминированный фикс + AI-fallback)."),
-            (self.btn_to_ai, "Сформировать файл-запрос для AI "
-                             "(проблемы, требующие AI-анализа)."),
-            (self.btn_from_ai, "Загрузить и применить ответы AI из каталога AI_OUT."),
+        (self.btn_to_ai, "Сформировать файл-запрос для AI "
+                         "(проблемы, требующие AI-анализа)."),
             (self.btn_rubricator, "Показать перечень файлов рубрикатора и "
                                   "текущий выбор правил."),
             (self.btn_test_gen, "Сгенерировать тестовые .plp-файлы "
@@ -832,6 +836,58 @@ class DBIMigrationApp:
         for widget, text in tooltips:
             if widget is not None:
                 Tooltip(widget, text)
+        # DS_054_Уточнение_C: тултип «От AI» — динамический (сохраняем ссылку,
+        # текст обновляется в _update_ai_button_state по наличию файлов в AI_OUT).
+        self._tooltip_from_ai = Tooltip(
+            self.btn_from_ai,
+            "Загрузить и применить ответы AI из каталога AI_OUT.")
+        self._update_ai_button_state()
+
+    # ------------------------------------------------------------------
+    # DS_054_Уточнение_C: состояние кнопки «От AI» по содержимому AI_OUT
+    # ------------------------------------------------------------------
+    def _ai_out_files(self) -> list:
+        """Файлы-ответы AI (AI_RESPONSE_*.md/json) в EXCHANGE\AI_OUT."""
+        try:
+            out_dir = Path(__file__).parent.parent / 'EXCHANGE' / 'AI_OUT'
+            if not out_dir.exists():
+                return []
+            return sorted(list(out_dir.glob('AI_RESPONSE_*.md')) +
+                          list(out_dir.glob('AI_RESPONSE_*.json')))
+        except Exception:
+            return []
+
+    def _update_ai_button_state(self):
+        """«От AI» disabled при пустом AI_OUT, normal — при наличии ответов.
+
+        Тултип: «В AI_OUT нет файлов» / «Забрать ответы из AI_OUT (N файлов)».
+        """
+        btn = getattr(self, 'btn_from_ai', None)
+        if btn is None:
+            return
+        files = self._ai_out_files()
+        if files:
+            btn.state(['!disabled'])
+            tip = f"Забрать ответы из AI_OUT ({len(files)} файл(ов))."
+        else:
+            btn.state(['disabled'])
+            tip = "В AI_OUT нет файлов"
+        tooltip = getattr(self, '_tooltip_from_ai', None)
+        if tooltip is not None:
+            tooltip.text = tip
+
+    def _poll_ai_out(self):
+        """Таймер (5 сек): периодическая проверка AI_OUT (DS_054_Уточнение_C)."""
+        try:
+            if not self.root.winfo_exists():
+                return
+            self._update_ai_button_state()
+        except Exception:
+            return
+        try:
+            self.root.after(5000, self._poll_ai_out)
+        except Exception:
+            pass
 
     def _check_log_size(self):
         """Проверка размера каталогов с логами и предложение очистки при превышении лимита"""
@@ -1606,11 +1662,11 @@ class DBIMigrationApp:
         self.btn_receive_koda.state(['!disabled' if show_sql_enabled else 'disabled'])
 
         # DS 054: «В AI» активна после сканирования (есть проблемы для запроса).
-        # «От AI» доступна всегда — файлы-ответы кладутся в AI_OUT вручную.
+        # DS_054_Уточнение_C: «От AI» — по наличию файлов-ответов в AI_OUT
+        # (не включаем безусловно; обновление — _update_ai_button_state).
         if getattr(self, 'btn_to_ai', None) is not None:
             self.btn_to_ai.state(['!disabled' if show_sql_enabled else 'disabled'])
-        if getattr(self, 'btn_from_ai', None) is not None:
-            self.btn_from_ai.state(['!disabled'])
+        self._update_ai_button_state()
     
 # Кнопка "Архивировать" - активируется при установленном флаге "Сохранить структуру"
         archive_enabled = False
@@ -4339,9 +4395,9 @@ class DBIMigrationApp:
             self.log(f"Сформировано AI-запросов: {len(written)} → EXCHANGE\AI_IN", 'highlight')
             self.log("Отправьте файл(ы) в AI, затем положите ответ "
                      "AI_RESPONSE_<source>_<ts>.md в EXCHANGE\AI_OUT и нажмите «От AI».", 'info')
-            # «От AI» доступна для получения ответа.
-            if getattr(self, 'btn_from_ai', None) is not None:
-                self.btn_from_ai.state(['!disabled'])
+            # DS_054_Уточнение_C: «От AI» включается только при наличии
+            # файлов-ответов в AI_OUT (перепроверка после отправки).
+            self._update_ai_button_state()
             ai_in = Path(__file__).parent.parent / 'EXCHANGE' / 'AI_IN'
             messagebox.showinfo(
                 "AI-запрос сформирован",
@@ -4389,6 +4445,13 @@ class DBIMigrationApp:
         except Exception as e:
             self.log(f"Ошибка обработки AI-ответов: {e}", 'error')
             messagebox.showerror("Ошибка", f"Не удалось обработать AI-ответы:\n{e}")
+        finally:
+            # DS_054_Уточнение_C: после обработки перепроверяем AI_OUT —
+            # если файлы обработаны (архивированы), кнопка выключается.
+            try:
+                self._update_ai_button_state()
+            except Exception:
+                pass
     
     def _save_changelog_to_disk(self, changelog_text: str, source_file: str = ''):
         """Сохранение журнала на диск"""

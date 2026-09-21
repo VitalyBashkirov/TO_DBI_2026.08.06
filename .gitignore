@@ -1,4 +1,4 @@
-# Python
+а# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -65,5 +65,8 @@ SRC/AI_DOCS/
 
 # Presentations and prompts (binaries)
 ПРОМТы/
-Презентация/temp_fix/synthetic*.plp
+Презентация/
+temp_fix/
+synthetic*.plp
 EXCHANGE/Для нового чата.txt
+

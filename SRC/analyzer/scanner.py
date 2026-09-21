@@ -943,10 +943,13 @@ class PLPlusScanner:
         
         return f'{base}{letter}{self._plp_capitalize(var_name)}'
     
-    def _check_plp_bad_prefix(self, lines: List[str]) -> List[Tuple[int, str, str]]:
+    def _check_plp_bad_prefix(self, lines: List[str]) -> List[Tuple[int, str, str, str]]:
         """DS 032: bad_prefix — некорректные префиксы переменных и параметров (PRIVATE-секция).
         
-        Возвращает список (line_num, message, original_line).
+        Возвращает список (line_num, message, original_line, var_name).
+        Дефект 2 (DS_066 §3.2): var_name — имя конкретного issue, чтобы
+        match_fragment не брал первое совпадение regex в строке (на строке
+        с тремя параметрами v1/v2/v3 все три issue получали фрагмент "v1").
         """
         issues = []
         sections = self._plp_parse_sections(lines)
@@ -977,7 +980,7 @@ class PLPlusScanner:
                     if not p_name.lower().startswith(expected):
                         new_name = self._plp_suggest_var_name(p_name, p_type, is_param=True)
                         msg = f'Не корректный префикс, пожалуйста переименуйте в "{new_name}"'
-                        issues.append((i, msg, stripped))
+                        issues.append((i, msg, stripped, p_name))
                 continue
         
         # Объявления переменных PRIVATE-секции
@@ -993,26 +996,55 @@ class PLPlusScanner:
             if not ok:
                 new_name = self._plp_suggest_var_name(var_name, type_str)
                 msg = f'Не корректный префикс, пожалуйста переименуйте в "{new_name}"'
-                issues.append((line_num, msg, lines[line_num - 1].strip()))
+                issues.append((line_num, msg, lines[line_num - 1].strip(), var_name))
         
         return issues
     
-    def _check_plp_prefix_type_in_var_name(self, lines: List[str]) -> List[Tuple[int, str, str]]:
+    def _check_plp_prefix_type_in_var_name(self, lines: List[str]) -> List[Tuple[int, str, str, str]]:
         """DS 032: prefix_type_in_var_name — имя не содержит префикс типа (EXECUTE-секция).
-        
-        Возвращает список (line_num, message, original_line).
+
+        Дефект 6 (DS_066 §3.6): локальные переменные с префиксом `P_` — ошибка
+        программиста: `P_` — признак параметра. Правило ЗАМЕНЯЕТ `P_` на `v_`
+        с добавлением префикса типа: P_PARAM ref -> v_rParam,
+        P_FILE_XML [STRING_1000] -> v_sFile_Xml.
+        Остальные имена (vDateRep, lvRepPeriod) сохраняются как есть, добавляется
+        только базовый префикс v_: vDateRep -> v_vDateRep, lvRepPeriod -> v_lvRepPeriod.
+
+        Возвращает список (line_num, message, original_line, var_name).
         """
         issues = []
         for line_num, var_name, type_str, is_exec in self._plp_iter_declarations(lines):
             if not is_exec:
                 continue
             letter = self._plp_type_letter(type_str)
-            if letter and not var_name.lower().startswith(letter):
-                new_name = f'{letter}{self._plp_capitalize(var_name)}'
+            is_p_local = var_name.upper().startswith('P_')
+            if is_p_local or (letter and not var_name.lower().startswith(letter)):
+                new_name = self._plp_suggest_execute_var_name(var_name, type_str)
                 msg = (f'Наименование переменной не содержит префикс типа, '
                        f'пожалуйста переименуйте в "{new_name}"')
-                issues.append((line_num, msg, lines[line_num - 1].strip()))
+                issues.append((line_num, msg, lines[line_num - 1].strip(), var_name))
         return issues
+
+    def _plp_suggest_execute_var_name(self, var_name: str, type_str: str) -> str:
+        """DS_066 (дефект 6): корректное имя локальной переменной EXECUTE-секции.
+
+        Формат: v_<буква типа><Имя> (разделитель `_` между префиксом и именем).
+        - `P_*`: P_ заменяется на v_ + буква типа + CamelCase остаток
+          (P_PARAM ref -> v_rParam, P_FILE_XML [STRING_1000] -> v_sFile_Xml);
+        - прочие имена сохраняются, добавляется только v_
+          (vDateRep -> v_vDateRep, lvRepPeriod -> v_lvRepPeriod).
+        """
+        letter = self._plp_type_letter(type_str)
+        if var_name.upper().startswith('P_'):
+            rest = var_name[2:]
+            # CamelCase по сегментам: FILE_XML -> File_Xml, PARAM -> Param
+            rest_cc = '_'.join(seg[:1].upper() + seg[1:].lower()
+                               for seg in rest.split('_') if seg)
+            if not letter:
+                return 'v_' + rest_cc
+            return f'v_{letter}{rest_cc}'
+        # vDateRep / lvRepPeriod и т.п. — имя сохраняется целиком (v_vDateRep)
+        return 'v_' + var_name
     
     def _check_plp_not_mentioned(self, lines: List[str]) -> List[Tuple[int, str, str]]:
         """DS 032: not_mentioned — неиспользуемые объявления переменных и функций.
@@ -1404,7 +1436,7 @@ class PLPlusScanner:
             if self._is_rule_selected('plpcheck.BAD_PREFIX'):
                 bp_issues = self._check_plp_bad_prefix(self.lines)
                 print(f"[DEBUG-DS033] _check_plp_bad_prefix нашел: {len(bp_issues)}")
-                for line_num, message, bad_code in bp_issues:
+                for line_num, message, bad_code, var_name in bp_issues:
                     issue = Issue(
                         file_path=str(file_path.resolve()),
                         line_number=line_num,
@@ -1415,7 +1447,8 @@ class PLPlusScanner:
                         rubricator_code='plpcheck.BAD_PREFIX',
                         rubricator_full_description='Проверка префиксов: v,t,gt,cur,gcur,ret,p,cn,gcn',
                         tags=['prefix', 'naming', 'style'],
-                        section=file_section_map.get(line_num, 'PRIVATE')
+                        section=file_section_map.get(line_num, 'PRIVATE'),
+                        match_fragment=var_name
                     )
                     issues.append(issue)
                     if log_callback:
@@ -1446,7 +1479,7 @@ class PLPlusScanner:
             if self._is_rule_selected('plpcheck.PREFIX_TYPE_IN_VAR_NAME'):
                 pt_issues = self._check_plp_prefix_type_in_var_name(self.lines)
                 print(f"[DEBUG-DS033] _check_plp_prefix_type_in_var_name нашел: {len(pt_issues)}")
-                for line_num, message, bad_code in pt_issues:
+                for line_num, message, bad_code, var_name in pt_issues:
                     issue = Issue(
                         file_path=str(file_path.resolve()),
                         line_number=line_num,
@@ -1457,7 +1490,8 @@ class PLPlusScanner:
                         rubricator_code='plpcheck.PREFIX_TYPE_IN_VAR_NAME',
                         rubricator_full_description='Наименование переменной должно содержать префикс типа',
                         tags=['variable', 'prefix', 'type'],
-                        section=file_section_map.get(line_num, 'EXECUTE')
+                        section=file_section_map.get(line_num, 'EXECUTE'),
+                        match_fragment=var_name
                     )
                     issues.append(issue)
                     if log_callback:
@@ -2001,11 +2035,7 @@ class PLPlusScanner:
             # при завершении — привычное «Всего».
             total_word = "Обработано" if self.abort_percent is not None else "Всего"
             f.write(f"{total_word} проблем: {len(self.issues)}\n")
-            # DS 033: «Уникальных» считается группировкой по (LINE, CHECK) —
-            # как в эталонном логе ЦФТ-PlpCheck (два bad_prefix на строке 17
-            # схлопываются в одну уникальную позицию)
-            unique_line_check = len(set((r['file'], r['line'], r['check']) for r in rows))
-            f.write(f"Уникальных проблем: {unique_line_check}\n")
+            # Дефект 5 (DS_066 §3.5): счётчик «Уникальных проблем» удалён
             f.write(f"{total_word} файлов: {len(meta_cache)}\n")
             # DS 043: упрощённая строка прерывания (без HTML-тегов, без эмодзи)
             if self.abort_percent is not None:
@@ -2292,6 +2322,10 @@ class PLPlusScanner:
             return re.findall(r'\b[A-Za-z_]\w*\b', text or '')
 
         if 'bad_prefix' in itl:
+            # Дефект 2 (DS_066 §3.2): приоритет — match_fragment конкретного
+            # issue (имя переменной/параметра из проверки), иначе regex-фолбэк.
+            if getattr(issue, 'match_fragment', ''):
+                return issue.match_fragment
             # Имя без корректного префикса v_/p_ в объявлении/параметре
             for m in re.finditer(rf'(\w+)\s+{self._PLP_TYPE_KEYWORDS}\b',
                                  oc, re.IGNORECASE):
@@ -2306,6 +2340,9 @@ class PLPlusScanner:
             if m:
                 return m.group(1)
         elif 'prefix_type_in_var_name' in itl:
+            # Дефект 2 (DS_066 §3.2): приоритет — match_fragment конкретного issue
+            if getattr(issue, 'match_fragment', ''):
+                return issue.match_fragment
             m = re.search(rf'(\w+)\s+{self._PLP_TYPE_KEYWORDS}\b', oc,
                           re.IGNORECASE)
             if m:
@@ -2318,9 +2355,10 @@ class PLPlusScanner:
             if m:
                 return f'[{m.group(1)}].{m.group(2)}'
         elif 'code_in_comment' in itl:
-            frag = oc.lstrip('-').strip()
-            if frag.startswith('/*'):
-                frag = frag[2:].strip()
+            # Дефект 2 (DS_066 §3.2): маркер комментария сохраняется в фрагменте
+            # всегда (в т.ч. спецслучай «/** /» — ERROR = «...: "/** /"»).
+            # Оператор `--` не отбрасывается, `/*` — тоже.
+            frag = oc
             if frag:
                 return frag[:50] + ('…' if len(frag) > 50 else '')
 
@@ -2349,14 +2387,13 @@ class PLPlusScanner:
         DS_059: унификация — приоритеты источника действия:
         спец-ветки PlpCheck (извлечение из description) -> ERROR как действие
         (Приложения A/B) -> transform+example_out из PARSER_SQL -> фолбэк
-        «Исправить по описанию». Формат: <CHECK> — <действие>.
+        «Исправить по описанию». Формат: > <действие> (DS_066, без <CHECK> —).
         """
         issue_type_lower = issue_type.lower()
 
         # Спец-ветки PlpCheck (извлечение действия из description) — сохранены
         special = None
         if 'bad_prefix' in issue_type_lower:
-            import re
             match = re.search(r'переименуйте в ["\']([^"\']+)["\']', description, re.IGNORECASE)
             if match:
                 special = f'Переименовать в "{match.group(1)}"'
@@ -2369,7 +2406,9 @@ class PLPlusScanner:
         elif 'wrong_method_syntax' in issue_type_lower:
             special = 'Исправить синтаксис'
         elif 'prefix_type_in_var_name' in issue_type_lower:
-            special = 'Добавить префикс типа'
+            # DS_066: если в description есть целевое имя — показываем его
+            match = re.search(r'переименуйте в ["\']([^"\']+)["\']', description, re.IGNORECASE)
+            special = f'Переименовать в "{match.group(1)}"' if match else 'Добавить префикс типа'
         elif 'syntax_error' in issue_type_lower:
             special = 'Исправить синтаксическую ошибку'
         elif 'pure_sql_dblink' in issue_type_lower:
@@ -2398,9 +2437,10 @@ class PLPlusScanner:
         if action is None:
             action = 'Исправить по описанию'
 
-        # Формат: <CHECK> — <действие>
-        check = check_name if check_name else issue_type
-        return f'{check} — {action}'
+        # Дефект 1 (DS_066 §3): формат PLAN — «> <действие>», без «<CHECK> — ».
+        # check_name сохраняется в сигнатуре (вызывающий код передаёт), но не
+        # используется в тексте PLAN.
+        return f'> {action}'
     
     def _apply_fix(self, issue_type: str, original_code: str, description: str = '') -> str:
         """Применение исправления к строке кода (DS 028)."""
@@ -2456,8 +2496,14 @@ class PLPlusScanner:
         start_line = issue.line_number
         end_line = issue.line_number
         
-        # Применяем исправление к оригинальному коду (передаём description для bad_prefix)
-        corrected_code = self._apply_fix(issue.issue_type, issue.original_code, issue.description)
+        # Применяем исправление к оригинальному коду (передаём description для bad_prefix).
+        # Дефект 3 (DS_066 §3): regex-исправления (.sql) НЕ применяются к .plp —
+        # PlpCheck-дефекты (issue_type с «plpcheck.») исправляются только вручную
+        # по ПЛАНУ. Иначе _apply_fix дословно подставлял example_out (n_id).
+        if issue.issue_type.lower().startswith('plpcheck.'):
+            corrected_code = issue.original_code
+        else:
+            corrected_code = self._apply_fix(issue.issue_type, issue.original_code, issue.description)
         
         corrected_lines = [(start_line, issue.original_code)]
         new_lines = [(end_line, corrected_code)] if corrected_code != issue.original_code else []

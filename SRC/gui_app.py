@@ -3914,9 +3914,7 @@ class DBIMigrationApp:
             if before is not None and before != len(issues):
                 lines.append(f"-- Всего issues (с дублями): {before}")
             lines.append(f"-- Всего проблем (после дедупа): {len(issues)}")
-            # уникальные по (file, line, check)
-            unique_keys = {(iss.file_path, iss.line_number, iss.issue_type) for iss in issues}
-            lines.append(f"-- Уникальных (file,line,check): {len(unique_keys)}")
+            # Дефект 5 (DS_066 §3.5): счётчик «Уникальных (file,line,check)» удалён
             lines.append(f"-- Файлов: {len(by_file)}")
             lines.append("")
             lines.append("-- ВАЖНО: Этот файл содержит список всех найденных проблемных конструкций.")
@@ -3980,8 +3978,7 @@ class DBIMigrationApp:
             if before is not None and before != len(issues):
                 self.log(f"Всего issues (с дублями): {before}", 'info')
             self.log(f"Всего проблем (после дедупа): {len(issues)}", 'info')
-            unique_keys = {(iss.file_path, iss.line_number, iss.issue_type) for iss in issues}
-            self.log(f"Уникальных (file,line,check): {len(unique_keys)}", 'info')
+            # Дефект 5 (DS_066 §3.5): счётчик «Уникальных (file,line,check)» удалён
             self.log(f"Всего файлов: {len(by_file)}", 'info')
             
             # Открываем файл в системе

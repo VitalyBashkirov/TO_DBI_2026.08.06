@@ -1186,6 +1186,15 @@
           "note": "DS_059_F (вариант A): автофикс отключён — regex переименовывает только объявление, ссылки в теле метода остаются старыми (несогласованный код). Переименование — вручную везде либо контекстный фиксер (DeterministicFixer).",
           "example_in": "birth_date date;",
           "example_out": "d_birth_date date_time;"
+        },
+        {
+          "name": "p_local_prefix",
+          "regex": "(?i)^\\s*P_(\\w+)\\s+((?:ref\\s*)?\\[[\\w\\d_]+\\]|(?:integer|number|string|varchar2|date|boolean|timestamp))\\b",
+          "description": "Локальная переменная с префиксом параметра P_ (ошибка программиста)",
+          "transform_type": "ignore",
+          "note": "DS_066 (дефект 6): P_ — признак параметра; локальная переменная с P_ переименовывается в v_<буква типа><Имя> (P_PARAM ref -> v_rParam, P_FILE_XML [STRING_1000] -> v_sFile_Xml). Реализовано многострочной проверкой сканера (_check_plp_prefix_type_in_var_name); автофикс отключён (multi-line rename).",
+          "example_in": "P_PARAM ref [REPS_PARAMS];",
+          "example_out": "v_rParam ref [REPS_PARAMS];"
         }
       ]
     },
@@ -1218,7 +1227,7 @@
           "fallback_instruction": "-- ВАЖНО: удалить закомментированный код. Если важно для понимания, оставить краткое пояснение.",
           "example_in": "/* old implementation: if v_temp > 0 then v_temp := v_temp * 2; end if; */",
           "example_out": "-- (удалено)",
-          "note": "Удаление закомментированного кода — только вручную (риск удалить осмысленный текст). DS_059_E."
+          "note": "Удаление закомментированного кода — только вручную (риск удалить осмысленный текст). DS_059_E. DS_066 (дефект 3): матч и match_fragment включают маркеры комментария (-- , /* , */), regex уже матчит строку от маркера: \"--.*\" / \"/*...*/\"."
         }
       ]
     },

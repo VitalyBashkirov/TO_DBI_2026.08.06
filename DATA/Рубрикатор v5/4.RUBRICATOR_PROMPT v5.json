@@ -5996,7 +5996,8 @@
     "comment",
     "code",
     "style"
-   ]
+   ],
+   "description": "DS_066: матч и match_fragment включают маркеры комментария (-- , /* , */)."
   },
   "plpcheck.COLUMNS_LIMIT_EXCEEDED": {
    "code": "plpcheck.COLUMNS_LIMIT_EXCEEDED",
@@ -8557,7 +8558,7 @@
     "for_search": [
      {
       "pattern": "\\b(v_|p_)\\w+",
-      "description": "Переменные и параметры"
+      "description": "Переменные и параметры (локальные P_* — ошибка: P_ заменяется на v_ + префикс типа, DS_066)"
      }
     ],
     "for_ignore": [
@@ -8578,7 +8579,8 @@
     "variable",
     "prefix",
     "type"
-   ]
+   ],
+   "description": "DS_066: локальные P_* → v_<тип><Имя> (P_PARAM ref → v_rParam)."
   },
   "plpcheck.PURE_SQL_CONNECTBY2WITH": {
    "code": "plpcheck.PURE_SQL_CONNECTBY2WITH",

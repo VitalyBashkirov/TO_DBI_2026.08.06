@@ -2321,9 +2321,42 @@ def save_scan_only_log(logs_dir: Path, source_name: str, flags: Dict[str, bool],
         # Сводка по всем файлам.
         all_changes = [ch for sf in sim_files for ch in sf['changes']]
         plan_codes = sorted({ch['rule_code'] for ch in all_changes})
-        lines.append(f"PLAN: {', '.join(plan_codes) if plan_codes else '—'}")
+
+        # Дефект 4 (DS_066 §3.4, вариант A): PLAN = ВСЕ issues из scan_report_*.
+        # DS_067 §3: колонка LINE — ПЕРВАЯ, сортировка по LINE. DS_067_Уточнение_A
+        # §3.3: внутри одного LINE — порядок по № из scan_report_* (= порядок
+        # обнаружения в scanner.issues; стабильная сортировка сохраняет его).
+        # Пометка [auto] — правило сработало в dry-run конвейера, [ignore] —
+        # найдено сканером, но не автофиксится.
+        plan_codes_set = set(plan_codes)
+        seen_keys = set()
+        dedup_issues = []
+        for iss in scanner.issues:
+            key = (iss.file_path, iss.line_number, iss.issue_type, iss.description)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            dedup_issues.append(iss)
+        plan_rows = []
+        # DS_067_Уточнение_B: порядок внутри LINE — по № из scan_report_*,
+        # т.е. по ключу сортировки отчёта сканера (scanner.generate_report):
+        # (line, not_mentioned первым, алфавит check) — см. scanner.py:2008.
+        def _plan_sort_key(iss):
+            nm_first = 0 if iss.issue_type.lower().endswith('not_mentioned') else 1
+            return (iss.line_number, nm_first, iss.issue_type)
+        for iss in sorted(dedup_issues, key=_plan_sort_key):
+            try:
+                action = scanner._generate_plan(iss.issue_type, iss.description)
+            except Exception:
+                action = 'Исправить по описанию'
+            tag = '[auto]' if iss.issue_type in plan_codes_set else '[ignore]'
+            # DS_067: LINE первой колонкой; действие уже со стрелкой «> »
+            plan_rows.append(f"{iss.line_number} {tag} {action}")
+        lines.append("PLAN:")
+        lines.append("LINE AUTO ДЕЙСТВИЕ")
+        lines.extend(plan_rows)
         lines.append("")
-        lines.append(f"Правил в PLAN: {len(plan_codes)}")
+        lines.append(f"Правил в PLAN: {len(plan_rows)}")
         lines.append("")
 
         # DS_059_Уточнение_D: пояснение о правилах в ignore — найдены
@@ -2339,41 +2372,148 @@ def save_scan_only_log(logs_dir: Path, source_name: str, flags: Dict[str, bool],
                 lines.append(f"  {c}")
             lines.append("")
 
-        # МД — максимальная длина кода правила среди сработавших (Схема A).
-        md = max((len(ch['rule_code']) for ch in all_changes), default=0)
-        before_dots = '.' * (md + 1)
+        # DS_067 §4: «Прогноз» — ВСЕ строки-мишени из scan_report_* (по LINE),
+        # цепочка правил на строку. Итоговый текст: auto — из dry-run changes;
+        # not_mentioned / code_in_comment — «(удалить строку)» (заглушка §5.2,
+        # диапазона в Issue нет), цепочка обрывается; переименования — замена
+        # match_fragment на новое имя из действия PLAN; иначе — заглушка AI
+        # (§5.1, needs_ai_fix в Issue нет).
+        # МКР = max(len(код)) + 1 — по кодам правил файла (формат B, §4.4).
+        dedup_by_file: Dict[str, List] = {}
+        for iss in dedup_issues:
+            dedup_by_file.setdefault(iss.file_path, []).append(iss)
 
         for sf in sim_files:
-            changes = sf['changes']
-            if not changes:
+            fpath = sf['file']
+            f_issues = dedup_by_file.get(fpath) or dedup_by_file.get(
+                str(Path(fpath).resolve()), [])
+            if not f_issues:
+                # Устойчивый резолвинг: сравнение по имени файла (DS_053_Уточнение_5)
+                fname = Path(fpath).name
+                for k, v in dedup_by_file.items():
+                    if Path(k).name == fname:
+                        f_issues = v
+                        break
+            if not f_issues:
                 continue
-            lines.append(f"### {Path(sf['file']).name}")
+            # Полный текст строк файла (для строки 1 блока).
+            try:
+                ftext, _ = read_file_with_encoding(Path(fpath))
+                f_lines = (ftext or '').splitlines()
+            except Exception:
+                f_lines = []
+            # Очередь dry-run изменений по (line, code) — по порядку.
+            changes_q: Dict[Tuple[int, str], List[Dict]] = {}
+            for ch in sf['changes']:
+                changes_q.setdefault((ch['line_number'], ch['rule_code']),
+                                     []).append(ch)
+
+            lines.append(f"### {Path(fpath).name}")
             lines.append("")
             lines.append("Прогноз:")
-            # Устойчивая группировка по номеру строки (Схема A).
-            i = 0
-            while i < len(changes):
-                ln = changes[i]['line_number']
-                group = []
-                while i < len(changes) and changes[i]['line_number'] == ln:
-                    group.append(changes[i])
-                    i += 1
+            # МКР по кодам правил файла (все issues, формат B — полный код).
+            mkr = max((len(i.issue_type) for i in f_issues), default=0) + 1
+            # Группировка по LINE (одна строка = один блок, §4.3 п.2). Внутри
+            # LINE — порядок по № из scan_report_* (§3.2: ключ сортировки
+            # отчёта сканера — not_mentioned первым, затем алфавит check).
+            by_line: Dict[int, List] = {}
+            for iss in sorted(f_issues, key=_plan_sort_key):
+                by_line.setdefault(iss.line_number, []).append(iss)
+            for ln in sorted(by_line):
+                group = by_line[ln]
+
+                def _is_delete(iss, action=None):
+                    """DS_067_Уточнение_A §3.1: issue с действием удаления."""
+                    itl = iss.issue_type.lower()
+                    if 'not_mentioned' in itl or 'code_in_comment' in itl:
+                        return True
+                    act = action
+                    if act is None:
+                        try:
+                            act = scanner._generate_plan(iss.issue_type,
+                                                         iss.description)
+                        except Exception:
+                            act = ''
+                    return 'удалить' in act.lower()
+
+                # §3.1: приоритет удаления — если среди issues строки есть
+                # удаление, выводим ТОЛЬКО его (первое по №); переименования в
+                # удаляемой строке не имеют смысла.
+                delete_idx = None
+                for di, d_iss in enumerate(group):
+                    if _is_delete(d_iss):
+                        delete_idx = di
+                        break
+                if delete_idx is not None:
+                    group = [group[delete_idx]]
+
+                # Строка 1 блока: полный текст строки (без обрезки, §4.3 п.5).
+                src_text = (f_lines[ln - 1].strip() if ln - 1 < len(f_lines)
+                            else (group[0].original_code or '').strip())
                 lines.append(f"Строка {ln}:")
-                first_before = (group[0].get('before', '') or '').rstrip()
-                lines.append(f"{before_dots}> {first_before}")
-                for ch in group:
-                    after = (ch.get('after', '') or '').rstrip()
-                    tag = f"<{ch['rule_code']}>".ljust(md + 2)
-                    lines.append(f"{tag} {after}")
-            # Статистика по файлу — по сработавшим правилам.
-            stats: Dict[str, int] = {}
-            for ch in changes:
-                stats[ch['rule_code']] = stats.get(ch['rule_code'], 0) + 1
-            lines.append("")
+                lines.append(f"{'.' * mkr}> {src_text}")
+                # Цепочка правил (по порядку из scan_report_*).
+                current = src_text
+                for iss in group:
+                    code = iss.issue_type
+                    # a. dry-run change (auto) — итоговый текст после конвейера.
+                    q = changes_q.get((ln, code))
+                    after = None
+                    if q:
+                        after = (q.pop(0).get('after') or '').strip()
+                    if after is not None:
+                        current = after
+                        result_text = after
+                    else:
+                        itl = code.lower()
+                        try:
+                            action = scanner._generate_plan(code, iss.description)
+                        except Exception:
+                            action = ''
+                        # b. удаление — заглушка диапазона (§5.2) + обрыв цепочки.
+                        if _is_delete(iss, action):
+                            # §3.4: not_mentioned → «(удалить объявление)»,
+                            # code_in_comment → «(удалить строку)».
+                            result_text = ('(удалить объявление)'
+                                           if 'not_mentioned' in itl
+                                           else '(удалить строку)')
+                        else:
+                            # c. переименование: замена match_fragment на новое имя.
+                            m = re.search(r'Переименовать в ["\']([^"\']+)["\']',
+                                          action)
+                            old = getattr(iss, 'match_fragment', '') or ''
+                            if m and old:
+                                new_text = re.sub(
+                                    rf'\b{re.escape(old)}\b', m.group(1),
+                                    current, count=1)
+                                if new_text != current:
+                                    current = new_text
+                                    result_text = new_text
+                                else:
+                                    result_text = (
+                                        '[AI] Требуется AI-анализ: <не реализовано>')
+                            else:
+                                # d. заглушка AI (§5.1).
+                                result_text = ('[AI] Требуется AI-анализ: '
+                                               '<не реализовано>')
+                    # Строка N: <[код][пробелы]> [пробел]<итоговый текст> (§4.2).
+                    pad = max(mkr - 1 - len(code), 0)
+                    lines.append(f"<{code}{' ' * pad}> {result_text}")
+                lines.append("")  # пустая строка между блоками (§4.3 п.6)
+            # Статистика по файлу: ВСЕ коды issues, убывание, при равенстве —
+            # алфавит (§4.5).
+            f_stats: Dict[str, int] = {}
+            for iss in f_issues:
+                f_stats[iss.issue_type] = f_stats.get(iss.issue_type, 0) + 1
             lines.append("Статистика по файлу:")
-            for code, cnt in sorted(stats.items(), key=lambda x: (-x[1], x[0])):
+            for code, cnt in sorted(f_stats.items(), key=lambda x: (-x[1], x[0])):
                 lines.append(f"  {code}: {cnt}")
             lines.append("")
+
+        # Итоговая статистика (§4.5): по всем файлам сканирования.
+        lines.append(f"Всего проблем: {len(dedup_issues)}")
+        lines.append(f"Всего файлов: {len([sf for sf in sim_files if sf['changes']]) or len(sim_files)}")
+        lines.append("")
 
     try:
         text = '\r\n'.join(lines) + '\r\n'

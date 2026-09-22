@@ -2474,9 +2474,18 @@ def save_scan_only_log(logs_dir: Path, source_name: str, flags: Dict[str, bool],
                         if _is_delete(iss, action):
                             # §3.4: not_mentioned → «(удалить объявление)»,
                             # code_in_comment → «(удалить строку)».
-                            result_text = ('(удалить объявление)'
-                                           if 'not_mentioned' in itl
-                                           else '(удалить строку)')
+                            if 'not_mentioned' in itl:
+                                result_text = '(удалить объявление)'
+                            else:
+                                # DS_069 §3.3: многострочный блок /* ... */ —
+                                # «(удалить диапазон строк N–M)»; иначе строка.
+                                if (iss.issue_type.lower().endswith('code_in_comment')
+                                        and getattr(iss, 'block_end', 0)
+                                        > getattr(iss, 'block_start', 0)):
+                                    result_text = (f'(удалить диапазон строк '
+                                                   f'{iss.block_start}–{iss.block_end})')
+                                else:
+                                    result_text = '(удалить строку)'
                         else:
                             # c. переименование: замена match_fragment на новое имя.
                             m = re.search(r'Переименовать в ["\']([^"\']+)["\']',

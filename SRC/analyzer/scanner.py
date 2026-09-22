@@ -442,6 +442,10 @@ class Issue:
     # DS_064_Уточнение_A: фрагмент совпадения (ERROR) — чтобы два РАЗНЫХ
     # спецсимвола на одной строке не схлопывались при дедупликации
     match_fragment: str = ''
+    # DS_069: диапазон блока /* ... */ для code_in_comment.
+    # 0 = диапазон не задан (не code_in_comment или однострочный/--).
+    block_start: int = 0
+    block_end: int = 0
     
     def __post_init__(self):
         if self.tags is None:
@@ -1127,7 +1131,7 @@ class PLPlusScanner:
             return True
         return False
     
-    def _check_plp_code_in_comment(self, lines: List[str]) -> List[Tuple[int, str, str]]:
+    def _check_plp_code_in_comment(self, lines: List[str]) -> List[Tuple[int, str, str, int, int]]:
         """DS 032: code_in_comment — закомментированный код.
         
         Однострочные '--' комментарии: репортится первая строка каждой группы
@@ -1135,7 +1139,10 @@ class PLPlusScanner:
         Блочные '/* ... */' комментарии: репортится строка открытия, если
         внутри блока есть признаки кода.
         
-        Возвращает список (line_num, message, original_line).
+        DS_069: возвращает 6-ки (line_num, message, original_line,
+        block_start, block_end): block_start = opener, block_end = строка
+        закрывающего '*/' (или последняя строка файла при незакрытом блоке —
+        DS_069 §3.4). Для '--' и однострочных блоков block_start=block_end=0.
         """
         issues = []
         
@@ -1143,7 +1150,7 @@ class PLPlusScanner:
         in_block = False
         opener_line = None
         block_content = []
-        block_issues = []  # (line_num, original_line)
+        block_issues = []  # (line_num, original_line, block_start, block_end)
         for i, line in enumerate(lines, 1):
             j = 0
             while j < len(line):
@@ -1166,9 +1173,20 @@ class PLPlusScanner:
                         in_block = False
                         if opener_line is not None:
                             if self._plp_has_code_signs(' '.join(block_content)):
-                                block_issues.append((opener_line, 'Удалите закомментированный код',
-                                                     lines[opener_line - 1].strip()))
+                                # DS_069: block_end = строка закрывающего */
+                                block_issues.append((opener_line,
+                                                     'Удалите закомментированный код',
+                                                     lines[opener_line - 1].strip(),
+                                                     opener_line, i))
                             opener_line = None
+        # DS_069 §3.4: незакрытый блок (/* без */ до EOF) — репортим с
+        # block_end = последняя строка файла.
+        if in_block and opener_line is not None:
+            if self._plp_has_code_signs(' '.join(block_content)):
+                block_issues.append((opener_line,
+                                     'Удалите закомментированный код',
+                                     lines[opener_line - 1].strip(),
+                                     opener_line, len(lines)))
         
         # --- Однострочные '--' комментарии: группы подряд идущих ---
         group_first = None
@@ -1183,12 +1201,12 @@ class PLPlusScanner:
             else:
                 if prev_had_code and group_first is not None:
                     issues.append((group_first, 'Удалите закомментированный код',
-                                   lines[group_first - 1].strip()))
+                                   lines[group_first - 1].strip(), 0, 0))
                 prev_had_code = False
                 group_first = None
         if prev_had_code and group_first is not None:
             issues.append((group_first, 'Удалите закомментированный код',
-                           lines[group_first - 1].strip()))
+                           lines[group_first - 1].strip(), 0, 0))
         
         issues.extend(block_issues)
         return issues
@@ -1522,7 +1540,7 @@ class PLPlusScanner:
             if self._is_rule_selected('plpcheck.CODE_IN_COMMENT'):
                 cc_issues = self._check_plp_code_in_comment(self.lines)
                 print(f"[DEBUG-DS033] _check_plp_code_in_comment нашел: {len(cc_issues)}")
-                for line_num, message, bad_code in cc_issues:
+                for line_num, message, bad_code, b_start, b_end in cc_issues:
                     issue = Issue(
                         file_path=str(file_path.resolve()),
                         line_number=line_num,
@@ -1533,6 +1551,9 @@ class PLPlusScanner:
                         rubricator_code='plpcheck.CODE_IN_COMMENT',
                         rubricator_full_description='Закомментированный код считается плохим тоном и запрещен в многих регламентах.',
                         tags=['comment', 'code', 'style'],
+                        # DS_069: диапазон блока /* ... */ (0 = не блок)
+                        block_start=b_start,
+                        block_end=b_end,
                         section=file_section_map.get(line_num, 'EXECUTE')
                     )
                     issues.append(issue)

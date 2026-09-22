@@ -2,7 +2,7 @@
 
 **Назначение:** факты, которые используются в нескольких DS. Ссылаться вместо повторения в каждой задаче.
 
-**Версия:** 2.0 от 21.09.2026 (после DS_063, DS_064_Уточнение_A, DS_065, DS_066).
+**Версия:** 2.1 от 21.09.2026 (после DS_063, DS_064_Уточнение_A, DS_065, DS_066, DS_067 + Уточнения_A/B).
 
 ---
 
@@ -43,6 +43,7 @@
 | `DATA\CFT Platform IDE Documentation\rule-description.html` | PlpCheck 2.5.2 | — |
 
 **Примечание (21.09.2026):**
+
 - `4.RUBRICATOR_PROMPT v5.json` — **источник** regex-паттернов **для сканера** (309 паттернов). `5.RUBRICATOR_PARSER_SQL v5.json` — **источник** трансформаций (`transform`). Правки regex **должны** вноситься **в оба** файла (DS_065).
 - После `DS_059_Уточнение_D/E` в `5.RUBRICATOR_PARSER_SQL v5.json` **добавлены** паттерны: `bad_prefix_varchar2`, `bad_prefix_number`, `bad_prefix_date`, `bad_prefix_boolean`; `wrong_method_syntax_bracket`.
 - После `DS_065` — regex `SPEC_CHARS` **сужен** в **обоих** файлах.
@@ -102,149 +103,139 @@
     "plpcheck.CODE_IN_COMMENT": false
   }
 }
-```
+Формат: словарь {"<rule_code>": true|false}.
 
-- Формат: словарь `{"<rule_code>": true|false}`.
-- Идемпотентен.
-- Начальное состояние (нет ключа): прочитать `1.RUBRICATOR_FILES v5.md`, сохранить в `settings.json` (вариант C).
-- Новые правила: дополнять со значением `false`, сохраняя существующие.
+Идемпотентен.
 
----
+Начальное состояние (нет ключа): прочитать 1.RUBRICATOR_FILES v5.md, сохранить в settings.json (вариант C).
 
-## 4. Соглашения по коду
+Новые правила: дополнять со значением false, сохраняя существующие.
 
-- Python — UTF-8 без BOM.
-- OUTBOX — CRLF.
-- `bot.log` — UTF-8 без BOM, формат `[ДД.ММ.ГГГГ ЧЧ:ММ:СС] DS XXX: <итог>`.
-- Стиль логов и отчётов — русский, формальный.
+4. Соглашения по коду
+Python — UTF-8 без BOM.
 
----
+OUTBOX — CRLF.
 
-## 5. История ключевых решений
+bot.log — UTF-8 без BOM, формат [ДД.ММ.ГГГГ ЧЧ:ММ:СС] DS XXX: <итог>.
 
-| Дата | Решение | Обоснование |
-|------|---------|-------------|
-| 19.09.2026 | DS_056B отменён | Вендорского эталона нет, все источники проверены |
-| 19.09.2026 | DS_056A — разделение `is_in_comment_or_string` / `advance_lexer_state` | Многократный вызов для одной строки требует чистоты функции |
-| 19.09.2026 | DS_058+DS_057 объединены | Одна область кода (`gui_app.py`) |
-| 19.09.2026 | `1.RUBRICATOR_FILES v5.md` — read-only для GUI | Баг `−`→`+`; состояние в `settings.json` |
-| 19.09.2026 | Бот `exchange_bot.py` отключён. Перенос файлов — вручную (DS_049). | Бот не запущен (нет процесса, автозапуска). KODA работает без него. Раздел DS_048 удалён из `AGENTS.md`. |
-| 20.09.2026 | DS_059 — маппинг кодов PlpCheck (`rule_engine.py:_resolve_code`) | Сканер: `plpcheck.<NAME>`; PARSER_SQL: `PlpCheck.<CAT>.<NAME>.п.<N>`; 33/33 NAME уникальны |
-| 20.09.2026 | DS_059_Уточнение_A — формат `ERROR` в `scan_report_*` | `<описание>: "<исходный_фрагмент>"`, обрезка 50 символов + `…` |
-| 20.09.2026 | DS_059_Уточнение_B — заголовок `scan_VVxVVx_*` | Переиспользование `_generate_active_rubricators_lines()` из сканера |
-| 20.09.2026 | DS_059_Уточнение_D — восстановление формата `scan_VVxVVx_*` | `Режим: сканирование (...)`, PLAN, блок «Прогноз:», статистика, блок «Правил в ignore» |
-| 20.09.2026 | DS_059_Уточнение_E — безопасные правки | `code_in_comment` → `ignore`; `bad_prefix_*` разделены; `vDateRep` — не автофиксится; lookahead `(?i)` + исключение параметров `in/out` |
-| 20.09.2026 | DS_054_Уточнение_C — кнопка «От AI» disabled при пустом `AI_OUT` | Таймер 5 сек; тултип динамический |
-| 20.09.2026 | DS_059_Уточнение_F — `PREFIX_TYPE_IN_VAR_NAME` → `ignore` | Multi-line rename риск; параметры не автофиксятся |
-| 20.09.2026 | DS_062 (разведка) — 89.6% дублей даёт `SPEC_CHARS` | regex `[^A-Z0-9_#]` матчит каждый спецсимвол |
-| 21.09.2026 | DS_063 — `bad_prefix_*` → `ignore` | Multi-line rename риск; `missing_prefix_*` уже `ignore` с DS_059_F |
-| 21.09.2026 | DS_064 — дедупликация issues в `scanner.py` | 634 → 67 уникальных (SPEC_CHARS 89.6%) |
-| 21.09.2026 | DS_064_Уточнение_A — ключ дедупа: `(file, line, issue_type, description, match_fragment)` | `original_code` = вся строка, не ERROR-фрагмент; поле `match_fragment` |
-| 21.09.2026 | DS_065 — PLAN без `example_out`, `SPEC_CHARS` сужен, категории PlpCheck | SPEC: 350 → 2, ложных 207 → 0; `STYLE.SYNTAX` — новая категория; `code_in_comment` → `OTHER` |
-| 21.09.2026 | DS_066 — PLAN `> <действие>`, соответствие PLAN между отчётами (вариант A), маркеры комментариев в ERROR, `P_*` локальные → `v_<тип><CamelCase>`, счётчик «Уникальных» удалён | Унификация отчётов, корректность `match_fragment`, семантика `P_` |
+Стиль логов и отчётов — русский, формальный.
 
----
+5. История ключевых решений
+Дата	Решение	Обоснование
+19.09.2026	DS_056B отменён	Вендорского эталона нет, все источники проверены
+19.09.2026	DS_056A — разделение is_in_comment_or_string / advance_lexer_state	Многократный вызов для одной строки требует чистоты функции
+19.09.2026	DS_058+DS_057 объединены	Одна область кода (gui_app.py)
+19.09.2026	1.RUBRICATOR_FILES v5.md — read-only для GUI	Баг −→+; состояние в settings.json
+19.09.2026	Бот exchange_bot.py отключён. Перенос файлов — вручную (DS_049).	Бот не запущен (нет процесса, автозапуска). KODA работает без него. Раздел DS_048 удалён из AGENTS.md.
+20.09.2026	DS_059 — маппинг кодов PlpCheck (rule_engine.py:_resolve_code)	Сканер: plpcheck.<NAME>; PARSER_SQL: PlpCheck.<CAT>.<NAME>.п.<N>; 33/33 NAME уникальны
+20.09.2026	DS_059_Уточнение_A — формат ERROR в scan_report_*	<описание>: "<исходный_фрагмент>", обрезка 50 символов + …
+20.09.2026	DS_059_Уточнение_B — заголовок scan_VVxVVx_*	Переиспользование _generate_active_rubricators_lines() из сканера
+20.09.2026	DS_059_Уточнение_D — восстановление формата scan_VVxVVx_*	Режим: сканирование (...), PLAN, блок «Прогноз:», статистика, блок «Правил в ignore»
+20.09.2026	DS_059_Уточнение_E — безопасные правки	code_in_comment → ignore; bad_prefix_* разделены; vDateRep — не автофиксится; lookahead (?i) + исключение параметров in/out
+20.09.2026	DS_054_Уточнение_C — кнопка «От AI» disabled при пустом AI_OUT	Таймер 5 сек; тултип динамический
+20.09.2026	DS_059_Уточнение_F — PREFIX_TYPE_IN_VAR_NAME → ignore	Multi-line rename риск; параметры не автофиксятся
+20.09.2026	DS_062 (разведка) — 89.6% дублей даёт SPEC_CHARS	regex [^A-Z0-9_#] матчит каждый спецсимвол
+21.09.2026	DS_063 — bad_prefix_* → ignore	Multi-line rename риск; missing_prefix_* уже ignore с DS_059_F
+21.09.2026	DS_064 — дедупликация issues в scanner.py	634 → 67 уникальных (SPEC_CHARS 89.6%)
+21.09.2026	DS_064_Уточнение_A — ключ дедупа: (file, line, issue_type, description, match_fragment)	original_code = вся строка, не ERROR-фрагмент; поле match_fragment
+21.09.2026	DS_065 — PLAN без example_out, SPEC_CHARS сужен, категории PlpCheck	SPEC: 350 → 2, ложных 207 → 0; STYLE.SYNTAX — новая категория; code_in_comment → OTHER
+21.09.2026	DS_066 — PLAN > <действие>, соответствие PLAN между отчётами (вариант A), маркеры комментариев в ERROR, P_* локальные → v_<тип><CamelCase>, счётчик «Уникальных» удалён	Унификация отчётов, корректность match_fragment, семантика P_
+21.09.2026	DS_067 — формат scan_VVxVVx_*: PLAN с колонкой LINE, «Прогноз» по всем строкам-мишеням, цепочка правил, единая позиция >, МКР = max(len(код_правила)) + 1	Унификация формата, читаемость, соответствие scan_report_*
+21.09.2026	DS_067_Уточнение_A — приоритет удаления (одна delete-issue на строку), not_mentioned → (удалить объявление), обрыв цепочки удалён как отдельный механизм	Устранение дублей, согласование с scan_report_*
+21.09.2026	DS_067_Уточнение_B — сортировка PLAN и цепочки внутри LINE по ключу scan_report_*: (line, not_mentioned первым, алфавит check)	Симметрия PLAN ↔ Прогноз ↔ scan_report_*
+6. Маппинг кодов PlpCheck
+6.1. Проблема
+Сканер выдаёт краткие коды (plpcheck.BAD_PREFIX).
+PARSER_SQL хранит полные коды (PlpCheck.STYLE.BAD_PREFIX.п.4.3).
+Несовпадение → has_rule() = False → фикс не срабатывает → PLAN пуст.
 
-## 6. Маппинг кодов PlpCheck
+6.2. Решение
+SRC\rule_engine.py:_resolve_code — маппинг:
 
-### 6.1. Проблема
-
-Сканер выдаёт **краткие** коды (`plpcheck.BAD_PREFIX`).
-PARSER_SQL хранит **полные** коды (`PlpCheck.STYLE.BAD_PREFIX.п.4.3`).
-**Несовпадение** → `has_rule()` = False → фикс не срабатывает → PLAN пуст.
-
-### 6.2. Решение
-
-`SRC\rule_engine.py:_resolve_code` — маппинг:
-
-```
+text
 plpcheck.<NAME>  →  PlpCheck.<CAT>.<NAME>.п.<N>
-```
-
-Применён в: `has_rule`, `get_rule`, `rule_buckets`, `apply_fix`.
+Применён в: has_rule, get_rule, rule_buckets, apply_fix.
 33/33 NAME уникальны.
 
-### 6.3. Фолбэк `BAD_PREFIX → PREFIX_TYPE`
+6.3. Фолбэк BAD_PREFIX → PREFIX_TYPE
+Сканер выдаёт один код bad_prefix — покрывает и «плохой префикс», и «отсутствие префикса».
+PARSER_SQL — два правила: bad_prefix_* и missing_prefix_*.
 
-Сканер выдаёт **один** код `bad_prefix` — покрывает **и** «плохой префикс», **и** «отсутствие префикса».
-PARSER_SQL — **два** правила: `bad_prefix_*` и `missing_prefix_*`.
+Фолбэк: если bad_prefix не найден в bad_prefix_* — искать в missing_prefix_* / PREFIX_TYPE_*.
 
-**Фолбэк:** если `bad_prefix` не найден в `bad_prefix_*` — искать в `missing_prefix_*` / `PREFIX_TYPE_*`.
+6.4. Категория ignore в PlpCheck
+20 из 33 PlpCheck-правил в PARSER_SQL — transform_type: "ignore".
+Правила ignore не автофиксятся → не попадают в scan_VVxVVx_* (в блок PLAN).
+Это норма (по семантике DS_053).
 
-### 6.4. Категория `ignore` в PlpCheck
+После DS_066: блок PLAN в scan_VVxVVx_* содержит все issues (вариант A), с пометкой [auto] / [ignore].
 
-**20 из 33** PlpCheck-правил в PARSER_SQL — `transform_type: "ignore"`.
-Правила `ignore` **не автофиксятся** → **не попадают** в `scan_VVxVVx_*` (в блок PLAN).
-Это **норма** (по семантике DS_053).
+После DS_067: PLAN с колонкой LINE; сортировка внутри LINE — по ключу scan_report_* (not_mentioned первым, алфавит check); в «Прогнозе» — все строки-мишени с цепочкой правил и единой позицией >.
 
-**После DS_066:** блок PLAN в `scan_VVxVVx_*` содержит **все** issues (вариант A), с пометкой `[auto]` / `[ignore]`.
+7. Особенности регулярных выражений
+7.1. Глобальный IGNORECASE в sql_parser.py
+SRC\analyzer\sql_parser.py использует re.IGNORECASE глобально для всех паттернов.
 
----
+7.2. Маркер (?-i) — локальное отключение
+Для регистрозависимых паттернов (например, camelCase-lookahead (?!v[A-Z]|...) — для vDateRep) — используется маркер (?-i).
+Поддержка — в sql_parser.py (DS_059_Уточнение_E).
 
-## 7. Особенности регулярных выражений
+7.3. Регистронезависимый lookahead
+Для исключений ((?!v_|p_|n_|...)) — используется (?i:...) — регистронезависимая группа.
+Позволяет P_PARAM, V_Date не матчить префиксы v_/p_.
 
-### 7.1. Глобальный `IGNORECASE` в `sql_parser.py`
+7.4. Два источника паттернов
+4.RUBRICATOR_PROMPT v5.json — источник regex-паттернов для сканера (309 паттернов).
 
-`SRC\analyzer\sql_parser.py` использует `re.IGNORECASE` **глобально** для всех паттернов.
+5.RUBRICATOR_PARSER_SQL v5.json — источник трансформаций (transform).
 
-### 7.2. Маркер `(?-i)` — локальное отключение
+При правке regex — оба файла должны быть синхронизированы (DS_065).
 
-Для **регистрозависимых** паттернов (например, camelCase-lookahead `(?!v[A-Z]|...)` — для `vDateRep`) — используется маркер **`(?-i)`**.
-**Поддержка** — в `sql_parser.py` (DS_059_Уточнение_E).
+8. Форматы логов
+8.1. scan_report_* — табличный
+Колонки: № CLASS_ID SHORT_NAME SECTION LINE CHECK LEVEL TYPE ERROR PLAN.
 
-### 7.3. Регистронезависимый lookahead
+Формат ERROR: <описание проблемы>: "<исходный_фрагмент>" — исходный фрагмент в кавычках, обрезка до 50 символов + ….
 
-Для **исключений** (`(?!v_|p_|n_|...)`) — используется **`(?i:...)`** — регистронезависимая группа.
-Позволяет `P_PARAM`, `V_Date` **не матчить** префиксы `v_`/`p_`.
+Маркеры комментариев сохраняются в match_fragment для code_in_comment (--, /*, */, /**/) — DS_066.
 
-### 7.4. Два источника паттернов
+Формат PLAN: > <действие> (стрелка, без CHECK). example_out не используется (DS_065).
 
-- `4.RUBRICATOR_PROMPT v5.json` — **источник** regex-паттернов **для сканера** (309 паттернов).
-- `5.RUBRICATOR_PARSER_SQL v5.json` — **источник** трансформаций (`transform`).
+Пример (после DS_066):
 
-**При правке regex** — **оба** файла **должны** быть **синхронизированы** (DS_065).
-
----
-
-## 8. Форматы логов
-
-### 8.1. `scan_report_*` — табличный
-
-Колонки: `№ CLASS_ID SHORT_NAME SECTION LINE CHECK LEVEL TYPE ERROR PLAN`.
-
-**Формат `ERROR`:** `<описание проблемы>: "<исходный_фрагмент>"` — **исходный** фрагмент в кавычках, обрезка до **50 символов** + `…`.
-
-**Маркеры комментариев** сохраняются в `match_fragment` для `code_in_comment` (`--`, `/*`, `*/`, `/**/`) — DS_066.
-
-**Формат `PLAN`:** `> <действие>` (стрелка, без `CHECK`). `example_out` **не используется** (DS_065).
-
-**Пример (после DS_066):**
-```
+text
 23  code_in_comment  WARNING  STYLE  Удалите закомментированный код: "--if lrecBrInfo.f_BIC ..."  > Удалить закомментированный код
-```
+Строка «Уникальных проблем» удалена из scan_report_* (DS_066). Остаётся «Всего проблем: N».
 
-**Строка «Уникальных проблем» удалена** из `scan_report_*` (DS_066). Остаётся «Всего проблем: N».
+Ключ сортировки (scanner.generate_report, scanner.py:2008): (line, not_mentioned первым, алфавит check). Используется в save_scan_only_log для PLAN и цепочки (DS_067_B).
 
-### 8.2. `scan_VVxVVx_*` — прогноз исправлений
+8.2. scan_VVxVVx_* — прогноз исправлений
+Формат — эталон из DS_053_Уточнение_4, обновлён в DS_066 и DS_067:
 
-Формат — **эталон** из `DS_053_Уточнение_4`, обновлён в DS_066:
-
-```
+text
 Режим: сканирование (прогноз исправлений, без записи)
 
 PLAN:
-  [auto]   > <действие-1>
-  [ignore] > <действие-2>
-  ...
+LINE AUTO ДЕЙСТВИЕ
+3 [ignore] > Удалить объявление
+3 [ignore] > Переименовать в "v_dp"
+4 [ignore] > Переименовать в "v_fmt24"
+...
 
 Правил в PLAN: N
 
 Прогноз:
-Строка 32:
-..........................> <было>
-<КР-код-1>   <стало>
-Строка 33:
-...
+Строка 7:
+.................................> P_PARAM ref [REPS_PARAMS];
+<plpcheck.PREFIX_TYPE_IN_VAR_NAME> v_rParam ref [REPS_PARAMS];
+
+Строка 11:
+.................................> P_PARAM := [str].get_str_par(P_ADDS, 'P_PARAM');
+<plpcheck.WRONG_METHOD_SYNTAX    > P_PARAM := ::[str].[get_str_par](P_ADDS, 'P_PARAM');
+
+Строка 12:
+.................................> --if lrecBrInfo.f_BIC is not null then null;
+<plpcheck.CODE_IN_COMMENT        > (удалить строку)
 
 Статистика по файлу:
   <КР-код-1>: N
@@ -253,67 +244,82 @@ PLAN:
 Правил в ignore (не автофиксятся): N
   <КР-код-3>
   ...
-```
 
-**Ключевое (DS_066):** PLAN = **все** issues (вариант A), с пометкой `[auto]` / `[ignore]`. Ранее PLAN содержал только автофиксимые.
+Всего проблем: N
+Всего файлов: M
+Ключевое (DS_066): PLAN = все issues (вариант A), с пометкой [auto] / [ignore].
 
-### 8.3. `plpcheck_report_*.html`
+Ключевое (DS_067):
 
+PLAN: заголовок LINE AUTO ДЕЙСТВИЕ, каждая строка {line} {[auto]|[ignore]} > <действие>; сортировка по ключу scan_report_*.
+
+«Прогноз»: все строки-мишени (не только dry-run changes); цепочка по всем issues строки; единая позиция >; МКР = max(len(код_правила)) + 1 по кодам всех issues файла (формат B — полный plpcheck.NAME).
+
+Приоритет удаления (DS_067_A): при наличии delete-issue (not_mentioned / code_in_comment / действие «удалить» из _generate_plan) на строке выводится только она (первая по №); остальные issues строки скрыты.
+
+Отсечение цепочки после (удалить строку) — как отдельный механизм удалён (заменён приоритетом удаления).
+
+Итоговый текст: not_mentioned → (удалить объявление); code_in_comment → (удалить строку).
+
+Сортировка внутри LINE: (line, not_mentioned первым, алфавит check) — ключ scanner.generate_report.
+
+8.3. plpcheck_report_*.html
 HTML-отчёт PlpCheck 2.5.2.
 
+9. Открытые замечания
+9.1. Multi-line rename — ЗАКРЫТО
+PREFIX_TYPE_IN_VAR_NAME → ignore (DS_059_Уточнение_F).
+
+bad_prefix_* → ignore (DS_063).
+
+missing_prefix_* → ignore (DS_059_Уточнение_F).
+
+9.2. Различение «параметр / переменная» — ЗАКРЫТО
+Частично решено в E (lookahead in/out).
+
+Полностью — в F (параметры не автофиксятся).
+
+Уточнение DS_066: P_ в локальных переменных — ошибка программиста; prefix_type_in_var_name заменяет P_ на v_<тип><CamelCase>.
+
+9.3. SPEC_CHARS — ЗАКРЫТО (DS_065)
+Regex сужен до имён: \b(class|view|method|library|interface|enum)\s+... и @(name|tag)\s*\(....
+
+SPEC: 350 → 2 на REPS_EXP_115_1.plp; ложных 207 → 0.
+
+9.4. Формат PLAN и соответствие отчётов — ЗАКРЫТО (DS_066, DS_067)
+scan_report_*: > <действие>.
+
+scan_VVxVVx_*: PLAN = все issues с [auto]/[ignore]; колонка LINE; сортировка по ключу scan_report_*.
+
+Счётчик «Уникальных» удалён.
+
+9.5. Заглушки DS_067 — ЧАСТИЧНО ЗАКРЫТО (DS_068, DS_069)
+
+AI-пометка: needs_ai_fix в Issue отсутствует → выводится заглушка [AI] Требуется AI-анализ: <не реализовано> для правил без детерминированного итогового текста (пример: GLOBAL_VAR). Решение DS_068 §6.3: оставить как есть (needs_ai_fix — агрегат _verify_file, не атрибут проблемы).
+
+Диапазон удаления — ЗАКРЫТО (DS_069): поля block_start/block_end добавлены в Issue (0 = не блок). _check_plp_code_in_comment возвращает 6-ки; block_end = строка закрывающего */ или EOF при незакрытом блоке (DS_069 §3.4 — незакрытый блок теперь репортится). В save_scan_only_log: block_end > block_start → (удалить диапазон строк N–M), иначе (удалить строку). Для -- и однострочных блоков — block_start=block_end=0 → (удалить строку).
+
+10. prefix_type_in_var_name — алгоритм (DS_066)
+10.1. Правило
+PlpCheck.STYLE.PREFIX_TYPE_IN_VAR_NAME.п.4.4 — transform_type: "ignore" (DS_059_Уточнение_F). Автофикс отключён, issue попадает в scan_report_*.
+
+10.2. Формат переименования
+v_<тип><CamelCase> (разделитель _).
+
+Исходный префикс	Судьба	Пример
+P_ (в локальной переменной)	Заменяется на v_ (признак параметра в локальной — ошибка)	P_PARAM ref [REPS_PARAMS] → v_rParam
+v, lv, dp, fmt, lr, lrec	Сохраняется как часть имени	vDateRep varchar2(10) → v_vDateRep
+10.3. Таблица соответствия (тип → префикс)
+Тип PL/SQL	Префикс	Пример
+ref	r	P_PARAM ref [REPS_PARAMS] → v_rParam
+varchar2 / varchar	v	vDateRep varchar2(10) → v_vDateRep
+[STRING_*]	s	P_FILE_XML [STRING_1000] → v_sFile_Xml
+10.4. Отличие от bad_prefix
+bad_prefix (DS_063) — формат без _: v_iDp, v_sFmt, v_rBranch.
+prefix_type_in_var_name — формат с _: v_rParam, v_sFile_Xml.
+
+Решение DS_066: форматы не унифицируются — это разные правила с разной семантикой.
+
+text
+
 ---
-
-## 9. Открытые замечания
-
-_На 21.09.2026 — **открытых замечаний нет**._
-
-### 9.1. Multi-line rename — **ЗАКРЫТО**
-- `PREFIX_TYPE_IN_VAR_NAME` → `ignore` (DS_059_Уточнение_F).
-- `bad_prefix_*` → `ignore` (DS_063).
-- `missing_prefix_*` → `ignore` (DS_059_Уточнение_F).
-
-### 9.2. Различение «параметр / переменная» — **ЗАКРЫТО**
-- Частично решено в E (lookahead `in/out`).
-- Полностью — в F (параметры не автофиксятся).
-- **Уточнение DS_066:** `P_` в локальных переменных — ошибка программиста; `prefix_type_in_var_name` заменяет `P_` на `v_<тип><CamelCase>`.
-
-### 9.3. `SPEC_CHARS` — **ЗАКРЫТО** (DS_065)
-- Regex сужен до имён: `\b(class|view|method|library|interface|enum)\s+...` и `@(name|tag)\s*\(...`.
-- SPEC: 350 → 2 на `REPS_EXP_115_1.plp`; ложных 207 → 0.
-
-### 9.4. Формат PLAN и соответствие отчётов — **ЗАКРЫТО** (DS_066)
-- `scan_report_*`: `> <действие>`.
-- `scan_VVxVVx_*`: PLAN = все issues с `[auto]`/`[ignore]`.
-- Счётчик «Уникальных» удалён.
-
----
-
-## 10. `prefix_type_in_var_name` — алгоритм (DS_066)
-
-### 10.1. Правило
-
-`PlpCheck.STYLE.PREFIX_TYPE_IN_VAR_NAME.п.4.4` — `transform_type: "ignore"` (DS_059_Уточнение_F). Автофикс отключён, issue попадает в `scan_report_*`.
-
-### 10.2. Формат переименования
-
-`v_<тип><CamelCase>` (разделитель `_`).
-
-| Исходный префикс | Судьба | Пример |
-|-----------------|--------|--------|
-| `P_` (в локальной переменной) | **Заменяется** на `v_` (признак параметра в локальной — ошибка) | `P_PARAM ref [REPS_PARAMS]` → `v_rParam` |
-| `v`, `lv`, `dp`, `fmt`, `lr`, `lrec` | **Сохраняется** как часть имени | `vDateRep varchar2(10)` → `v_vDateRep` |
-
-### 10.3. Таблица соответствия (тип → префикс)
-
-| Тип PL/SQL | Префикс | Пример |
-|-----------|---------|--------|
-| `ref` | `r` | `P_PARAM ref [REPS_PARAMS]` → `v_rParam` |
-| `varchar2` / `varchar` | `v` | `vDateRep varchar2(10)` → `v_vDateRep` |
-| `[STRING_*]` | `s` | `P_FILE_XML [STRING_1000]` → `v_sFile_Xml` |
-
-### 10.4. Отличие от `bad_prefix`
-
-`bad_prefix` (DS_063) — формат **без `_`**: `v_iDp`, `v_sFmt`, `v_rBranch`.
-`prefix_type_in_var_name` — формат **с `_`**: `v_rParam`, `v_sFile_Xml`.
-
-**Решение DS_066:** форматы не унифицируются — это **разные правила** с разной семантикой.

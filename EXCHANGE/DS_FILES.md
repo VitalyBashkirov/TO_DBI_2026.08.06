@@ -2,7 +2,7 @@
 
 **Назначение:** адреса файлов и функций для ссылок в DS. Заменяет повтор адресов в каждой задаче.
 
-**Версия:** 1.2 от 21.09.2026 (после DS_063, DS_064_Уточнение_A, DS_065, DS_066).
+**Версия:** 1.3 от 21.09.2026 (после DS_063, DS_064_Уточнение_A, DS_065, DS_066, DS_067 + Уточнения_A/B).
 
 ---
 
@@ -24,7 +24,7 @@
 
 | Файл | Функция | Строки | Назначение |
 |------|---------|--------|-----------|
-| `scanner.py` | `Issue` (dataclass) | — | Поля: `line`, `issue_type`, `description`, `match_fragment: str = ''` (DS_064_Уточнение_A), `original_code` (вся строка). |
+| `scanner.py` | `Issue` (dataclass) | — | Поля: `line`, `issue_type`, `description`, `match_fragment: str = ''` (DS_064_Уточнение_A), `block_start: int = 0`, `block_end: int = 0` (DS_069; 0 = не блок `/* ... */`), `original_code` (вся строка). |
 | `scanner.py` | `PLPlusScanner._is_in_comment_or_string` | 489 | Фильтрация regex-совпадений. |
 | `scanner.py` | `_find_code_positions` | 551 | Вызов `_is_in_comment_or_string`. |
 | `scanner.py` | `scan_file` | — | Основной цикл сканирования; заполняет `match_fragment` из конкретного issue (DS_066); дедуп по ключу `(file, line, issue_type, description, match_fragment)`; `self.issues_before_dedup += len(issues)`. |
@@ -33,10 +33,10 @@
 | `scanner.py` | `_plp_suggest_execute_var_name` | — | Генерация нового имени: `P_` → `v_`, тип → префикс, CamelCase по сегментам (DS_066). |
 | `scanner.py` | `_plp_type_letter` | — | Таблица `PLP_TYPE_LETTERS` (ref→r, [STRING_*]→s) — существующая. |
 | `scanner.py` | `_extract_error_fragment` | — | Формирование `match_fragment`; для `code_in_comment` — маркеры (`--`, `/**/`) сохраняются (DS_066). |
-| `scanner.py` | `_check_plp_code_in_comment` | — | Трекер блоков: открывает `/*`, закрывает `*/`. |
-| `scanner.py` | `_generate_plan` | — | Формирование PLAN. Формат `> <действие>` (DS_066). Приоритет-3 (`example_out`) **удалён** (DS_065). Исправлен `UnboundLocalError` (локальный `import re`) — DS_066. |
+| `scanner.py` | `_check_plp_code_in_comment` | — | Трекер блоков: открывает `/*`, закрывает `*/`. **DS_069:** возвращает 6-ки `(line, msg, orig, block_start, block_end)`; `block_end` = строка `*/` или EOF при незакрытом блоке (незакрытый блок репортится). Для `--` и однострочных блоков — `block_start=block_end=0`. |
+| `scanner.py` | `_generate_plan` | — | Формирование PLAN. Формат `> <действие>` (DS_066). Приоритет-3 (`example_out`) **удалён** (DS_065). Исправлен `UnboundLocalError` (локальный `import re`) — DS_066. **DS_067:** ключ сортировки отчёта (`generate_report`, scanner.py:2008) используется в `save_scan_only_log` для PLAN и цепочки. |
 | `scanner.py` | `_transform_action` | — | Сохранён для совместимости, **не вызывается** (DS_065). |
-| `scanner.py` | `generate_report` | — | Строка «Уникальных проблем» **удалена** (DS_066). |
+| `scanner.py` | `generate_report` | 2008 | Строка «Уникальных проблем» **удалена** (DS_066). **Ключ сортировки:** `(line, not_mentioned первым, алфавит check)` — используется `save_scan_only_log` (DS_067_B). |
 | `scanner.py` | `scan_directory` | — | Итоговая статистика: строка «Всего issues (с дублями)» при `before != after` (DS_064_Уточнение_A). |
 | `scanner.py` | `PLPCHECK_RULE_TO_CATEGORY` | — | Маппинг: `plpcheck.CODE_IN_COMMENT` → `OTHER`; `plpcheck.WRONG_METHOD_SYNTAX` → `STYLE.SYNTAX` (DS_065). |
 | `scanner.py` | `PLPCHECK_CATEGORIES` | — | Категории GUI. Из `STYLE.PREFIXES` убраны `wrong_method_syntax`, `code_in_comment`; добавлена `STYLE.SYNTAX`; `code_in_comment` → `OTHER` (DS_065). |
@@ -58,9 +58,10 @@
 | `code_fixer.py` | `PLPlusFixer._is_in_comment_or_string` | 990 | Основная реализация. |
 | `code_fixer.py` | `_find_code_positions` | 1114 | Вызов `_is_in_comment_or_string`. |
 | `code_fixer.py` | `_update_renamed_vars` | 755–762 | Спец-обработка `&debug`. |
-| `code_fixer.py` | `_apply_issue_fixes` | — | Основной цикл фиксера. |
+| `code_fixer.py` | `_apply_issue_fixes` | — | Основной цикл фиксера. Сухой прогон даёт `changes` `{line_number, rule_code, before, after}` (DS_067 §7). |
 | `code_fixer.py` | `_validate_fix` | 876–879 | Спец-обработка `&debug`. |
-| `code_fixer.py` | `save_scan_only_log` | ~2193 | Лог `scan_VVxVVx_*`. **DS_066:** PLAN = все issues (вариант A) с `[auto]`/`[ignore]`; заголовок через `_generate_active_rubricators_lines` (DS_059_Уточнение_B/D). **DS_067 (план):** PLAN с колонкой `LINE`, «Прогноз» — цепочка правил, выравнивание по `>`, статистика по файлу + итоговая. |
+| `code_fixer.py` | `_is_delete` | — | Хелпер: issue с действием удаления (`not_mentioned` / `code_in_comment` / действие «удалить» из `_generate_plan`) — DS_067_A. |
+| `code_fixer.py` | `save_scan_only_log` | ~2193 | Лог `scan_VVxVVx_*`. **DS_066:** PLAN = все issues (вариант A) с `[auto]`/`[ignore]`; заголовок через `_generate_active_rubricators_lines` (DS_059_Уточнение_B/D). **DS_067:** PLAN с колонкой `LINE` (заголовок `LINE AUTO ДЕЙСТВИЕ`); «Прогноз» — все строки-мишени, цепочка правил, единая позиция `>`, МКР = `max(len(код_правила)) + 1` по всем issues файла; итоговый текст: `not_mentioned` → `(удалить объявление)`, `code_in_comment` → `(удалить строку)`. **DS_067_A:** приоритет удаления (`_is_delete`), обрыв цепочки удалён как отдельный механизм. **DS_067_B:** сортировка PLAN и цепочки внутри LINE по ключу `scan_report_*`. |
 
 ---
 
@@ -144,3 +145,9 @@
 | 21.09.2026 | `_plp_suggest_execute_var_name` — новая функция (`P_`→`v_`, тип→префикс, CamelCase) | DS_066 |
 | 21.09.2026 | `_extract_error_fragment`: маркеры `code_in_comment` сохраняются | DS_066 |
 | 21.09.2026 | `PREFIX_TYPE_IN_VAR_NAME`: паттерн `p_local_prefix` в PARSER_SQL | DS_066 |
+| 21.09.2026 | `save_scan_only_log`: PLAN с колонкой `LINE` (заголовок `LINE AUTO ДЕЙСТВИЕ`) | DS_067 |
+| 21.09.2026 | `save_scan_only_log`: «Прогноз» — все строки-мишени, цепочка, единая позиция `>`, МКР = max(len)+1 | DS_067 |
+| 21.09.2026 | `save_scan_only_log`: приоритет удаления, `_is_delete`, `not_mentioned` → `(удалить объявление)`, обрыв цепочки удалён | DS_067_A |
+| 21.09.2026 | `save_scan_only_log`: сортировка PLAN и цепочки по ключу `scan_report_*` | DS_067_B |
+| 21.09.2026 | `generate_report` (`scanner.py:2008`): ключ сортировки используется `save_scan_only_log` | DS_067_B |
+| 22.09.2026 | `Issue.block_start/block_end`; `_check_plp_code_in_comment` — 6-ки, незакрытый блок репортится (block_end=EOF); `save_scan_only_log` — `(удалить диапазон строк N–M)` | DS_069 |

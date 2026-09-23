@@ -2,7 +2,7 @@
 
 **Назначение:** факты, которые используются в нескольких DS. Ссылаться вместо повторения в каждой задаче.
 
-**Версия:** 2.1 от 21.09.2026 (после DS_063, DS_064_Уточнение_A, DS_065, DS_066, DS_067 + Уточнения_A/B).
+**Версия:** 2.3 от 23.09.2026 (после DS_063, DS_064_Уточнение_A, DS_065, DS_066, DS_067 + Уточнения_A/B, DS_072a + Уточнения_A/B, DS_072b + Уточнение_A).
 
 ---
 
@@ -38,7 +38,7 @@
 | Файл | Назначение | Правил |
 |------|-----------|--------|
 | `DATA\Рубрикатор v5\4.RUBRICATOR_PROMPT v5.json` | Правила проверок v5.3.0 **+ источник 309 regex-паттернов сканера** | 332 |
-| `DATA\Рубрикатор v5\5.RUBRICATOR_PARSER_SQL v5.json` | Парсер (трансформации `transform`) | 75 |
+| `DATA\Рубрикатор v5\5.RUBRICATOR_PARSER_SQL v5.json` | Парсер (трансформации `transform`) | 85 |
 | `DATA\Рубрикатор v5\1.RUBRICATOR_FILES v5.md` | Список правил с признаками | — |
 | `DATA\CFT Platform IDE Documentation\rule-description.html` | PlpCheck 2.5.2 | — |
 
@@ -48,6 +48,11 @@
 - После `DS_059_Уточнение_D/E` в `5.RUBRICATOR_PARSER_SQL v5.json` **добавлены** паттерны: `bad_prefix_varchar2`, `bad_prefix_number`, `bad_prefix_date`, `bad_prefix_boolean`; `wrong_method_syntax_bracket`.
 - После `DS_065` — regex `SPEC_CHARS` **сужен** в **обоих** файлах.
 - После `DS_066` — в `5.RUBRICATOR_PARSER_SQL v5.json` добавлен паттерн `p_local_prefix` в `PlpCheck.STYLE.PREFIX_TYPE_IN_VAR_NAME.п.4.4`; в **обоих** файлах уточнены `note` для `PREFIX_TYPE_IN_VAR_NAME` и `CODE_IN_COMMENT`.
+- После `DS_072a` — в `5.RUBRICATOR_PARSER_SQL v5.json` добавлены **11 правил** `PlpCheck.DBI.<NAME>.п.1` (группа A из DS_071: CALL_STACK_ANALYSIS, DIRECT_COMPARISON_WITH_NULL, DYNAMIC_PLP, FUNCTION_BREAK_INDEX, MAX_SIZE_ID, NVL_IN_SELECT, PARALLEL_EXECUTION, PLATFORM_INTEGER_MISMATCH, REF_NONTABLE, SUBOPTIMAL_EXPLICIT_DB_ROUNDRTIP, SYSTEM_VIEWS) — паттерны `regex` с `transform` + 2 AI-фолбэк-паттерна (`max_size_id_other`, `platform_integer_mismatch_other`, bucket `ignore`); в `4.RUBRICATOR_PROMPT v5.json` синхронно обновлены `fix_instruction` для 11 NAME.
+- После `DS_072a_Уточнение_A` — правило `PlpCheck.DBI.DYNAMIC_PLP.п.1` **удалено** из `5.RUBRICATOR_PARSER_SQL v5.json` (обобщение `rownum < N -> fetch N-1` синтаксически ломало SQL: `where fetch 1 into`). `DYNAMIC_PLP` возвращён в **детекторы** (вариант B, категория E DS_071 §7.3). Итого группа A: **10** правил с transform.
+- После `DS_072a_Уточнение_B` — AI-фолбэк для `MAX_SIZE_ID` / `PLATFORM_INTEGER_MISMATCH` зафиксирован как **`transform_type: "ignore"`** (паттерны `max_size_id_other`, `platform_integer_mismatch_other`). Причина: `rule_engine._pattern_bucket` **не поддерживает `hybrid`** без реального `transform` (паттерн без transform -> всегда `ignore`). Попадание в AI-очередь — через **`needs_ai_fix`** (DS_054, флаг `ai_fallback`, `_verify_file`). `hybrid` как отдельная корзина не реализован (перенесено в DS_073+).
+- После `DS_072b` — в `5.RUBRICATOR_PARSER_SQL v5.json` добавлены **5 правил** `PlpCheck.DBI.<NAME>.п.1` (группа B из DS_071 §7.3): **3 transform** (`transform_type: "regex"`, `replace_scope: "match"`) — `INSERT_WITH_ID`, `REFERENCED_TO_OBJECT`, `SELECTLOCKWAIT`; **2 ignore-детектора** — `ALIAS_COLUMN_VIEW`, `MULTIPLE_MODIFIERS` (требуют метаданных/типа, regex не даёт однозначной замены → исправление вручную, обоснование в отчёте §8). В `4.RUBRICATOR_PROMPT v5.json` синхронно (DS_065) обновлены `fix_instruction` для 5 NAME. Итого PARSER_SQL: **90** правил.
+- После `DS_072b_Уточнение_A` — исправлен **`example_out`** метаданных `PlpCheck.DBI.INSERT_WITH_ID.п.1` в `5.RUBRICATOR_PARSER_SQL v5.json`: было ошибочное `txt_job_ref := insert into ...` (присваивание `:=` + `insert` — не PL/SQL), стало `insert into ... return t into txt_job_ref;` (без `X := `). **Сам `transform` менять не потребовалось**: `replace_scope: "match"` + regex `(\w+)\s*:=\s*::\[(\w+)\]%insert\((\w+),\s*\3%id\)` матчат **всю** конструкцию `obj := ::[TBP]%insert(obj, obj%id)` и заменяют её целиком (Вариант B брифа). Движок `apply_fix_ex` не поддерживает `replace_scope: "line"` (Вариант A): `apply_transform` использует плейсхолдеры `{1}/{2}`, спец-значения `"line"` нет (любое ≠ `"match"` → подстрочная замена первого span). `fix_instruction` в `4.RUBRICATOR_PROMPT v5.json` уже корректен (цель без `:=`) — синхронизация подтверждена, не изменён.
 
 Число правил в файле — **условное** (отражает базовую версию до правок).
 

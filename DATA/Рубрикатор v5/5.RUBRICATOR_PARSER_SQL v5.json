@@ -27,9 +27,9 @@
     "rules.{n}.patterns.{m}.example_in": "Пример входного кода",
     "rules.{n}.patterns.{m}.example_out": "Пример выходного кода"
   },
-  "last_updated": "2026-08-20",
+  "last_updated": "2026-09-23",
   "hybrid_mode": true,
-  "total_rules": 87,
+  "total_rules": 90,
   "based_on": "Рекомендации по адаптации кода на PLPlus для работы с DBI приложением v53.docx, Требования для совместимости кода с DBI.txt, Требования к локальным объектам и к коду - Дополнительные регламенты разработчика - Confluence.txt, PlpCheck rule-description",
   "synced_with": "4.RUBRICATOR_PROMPTS.json v5.3.0",
   "rules": [
@@ -1616,6 +1616,332 @@
           "fallback_instruction": "-- ВАЖНО: XMLType запрещен в SQL. Используйте ::[RUNTIME].[XML_DB] в процедурном коде.",
           "example_in": "XMLType(a1.[DATA]).extract('/Answer/LegalImpossibility')",
           "example_out": "::[RUNTIME].[XML_DB].extract(...)"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.CALL_STACK_ANALYSIS.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "call_stack_no_param",
+          "regex": "\\butils\\.call_stack\\b(?!\\s*\\()",
+          "description": "DS_072a: call_stack без параметра -> call_stack(32000)",
+          "transform_type": "regex",
+          "note": "DS_072a: call_stack без параметра -> call_stack(32000)",
+          "example_in": "if instr(utils.call_stack, 'X') < 1 then",
+          "example_out": "if instr(utils.call_stack(32000), 'X') < 1 then",
+          "transform": "utils.call_stack(32000)",
+          "replace_scope": "match"
+        },
+        {
+          "name": "error_stack_no_param",
+          "regex": "\\butils\\.error_stack\\b(?!\\s*\\()",
+          "description": "DS_072a: error_stack без параметра -> error_stack(true, 32000)",
+          "transform_type": "regex",
+          "note": "DS_072a: error_stack без параметра -> error_stack(true, 32000)",
+          "example_in": "if utils.error_stack like '%X%' then",
+          "example_out": "if utils.error_stack(true, 32000) like '%X%' then",
+          "transform": "utils.error_stack(true, 32000)",
+          "replace_scope": "match"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.DIRECT_COMPARISON_WITH_NULL.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "direct_eq_empty_string",
+          "regex": "(\\w+(?:\\.\\w+)*)\\s*=\\s*''",
+          "description": "DS_072a: x = '' -> x is null (в PL+ пустая строка = NULL)",
+          "transform_type": "regex",
+          "note": "DS_072a: x = '' -> x is null (в PL+ пустая строка = NULL)",
+          "example_in": "if s = '' then",
+          "example_out": "if s is null then",
+          "transform": "{1} is null",
+          "replace_scope": "match"
+        },
+        {
+          "name": "direct_neq_empty_string",
+          "regex": "(\\w+(?:\\.\\w+)*)\\s*(?:!=|<>)\\s*''",
+          "description": "DS_072a: x != '' / x <> '' -> x is not null",
+          "transform_type": "regex",
+          "note": "DS_072a: x != '' / x <> '' -> x is not null",
+          "example_in": "if s != '' then",
+          "example_out": "if s is not null then",
+          "transform": "{1} is not null",
+          "replace_scope": "match"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.FUNCTION_BREAK_INDEX.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "function_break_index_substr",
+          "regex": "substr\\(\\s*(\\w+)\\s*,\\s*1\\s*,\\s*(\\d+)\\s*\\)\\s*=\\s*'([^']*)'",
+          "description": "DS_072a: substr(col,1,n)='v' -> col like 'v%' (функция не ломает индекс)",
+          "transform_type": "regex",
+          "note": "DS_072a: substr(col,1,n)='v' -> col like 'v%' (функция не ломает индекс)",
+          "example_in": "where substr(C_MAIN_V_ID,1,5) = '40817'",
+          "example_out": "where C_MAIN_V_ID like '40817%'",
+          "transform": "{1} like '{3}%'",
+          "replace_scope": "match"
+        },
+        {
+          "name": "function_break_index_substr_rev",
+          "regex": "'([^']*)'\\s*=\\s*substr\\(\\s*(\\w+)\\s*,\\s*1\\s*,\\s*(\\d+)\\s*\\)",
+          "description": "DS_072a: 'v' = substr(col,1,n) -> col like 'v%'",
+          "transform_type": "regex",
+          "note": "DS_072a: 'v' = substr(col,1,n) -> col like 'v%'",
+          "example_in": "where '40817' = substr(C_MAIN_V_ID,1,5)",
+          "example_out": "where C_MAIN_V_ID like '40817%'",
+          "transform": "{2} like '{1}%'",
+          "replace_scope": "match"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.MAX_SIZE_ID.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "max_size_id_num",
+          "regex": "(\\w+)\\s+\\[NUM\\d+\\]\\s*(:=\\s*\\w+%id)",
+          "description": "DS_072a: idobj [NUM*] := ref%id -> idobj number (тип под %id)",
+          "transform_type": "regex",
+          "note": "DS_072a: idobj [NUM*] := ref%id -> idobj number (тип под %id)",
+          "example_in": "idobj [NUM10] := ref%id;",
+          "example_out": "idobj number := ref%id;",
+          "transform": "{1} number {2}",
+          "replace_scope": "match"
+        },
+        {
+          "name": "max_size_id_other",
+          "regex": "(\\w+)\\s+\\[(?:NUM\\d+|STRING_\\d+)\\]\\s*:=\\s*\\w+%id",
+          "description": "DS_072a (AI-фолбэк): размерность типа под %id не всегда очевидна",
+          "transform_type": "ignore",
+          "note": "DS_072a_Уточнение_B: AI-фолбэк через needs_ai_fix (DS_054); hybrid не поддерживается _pattern_bucket (нет transform -> ignore).",
+          "example_in": "idobj [STRING_4000] := ref%id;",
+          "example_out": "idobj number := ref%id;",
+          "algorithmic_hint": "Проверить размерность: [NUM*] -> number; [STRING_*] и прочие — AI-анализ размерности под %id",
+          "fallback_instruction": "-- ВАЖНО: заменить тип под %id на достаточную размерность (обычно number)"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.NVL_IN_SELECT.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "nvl_in_select",
+          "regex": "nvl\\((?=[^,]*,\\s*(?:[\\w.:\\[\\]]+\\s*\\(|\\(\\s*select))",
+          "description": "DS_072a: nvl(a, f()/подзапрос) -> coalesce(...) (второй аргумент — функция/подзапрос)",
+          "transform_type": "regex",
+          "note": "DS_072a: nvl(a, f()/подзапрос) -> coalesce(...) (второй аргумент — функция/подзапрос)",
+          "example_in": "nvl(a, f())",
+          "example_out": "coalesce(a, f())",
+          "transform": "coalesce(",
+          "replace_scope": "match"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.PARALLEL_EXECUTION.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "parallel_execution_hint",
+          "regex": "pragma\\s+hint\\s*\\(\\s*'PARALLEL\\s*\\(\\d+\\)'\\s*\\)\\s*;?",
+          "description": "DS_072a: pragma hint('PARALLEL (N)') — удалить (хинт запрещен)",
+          "transform_type": "regex",
+          "note": "DS_072a: pragma hint('PARALLEL (N)') — удалить (хинт запрещен)",
+          "example_in": "pragma hint('PARALLEL (8)');",
+          "example_out": " ",
+          "transform": " ",
+          "replace_scope": "match"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.PLATFORM_INTEGER_MISMATCH.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "platform_integer_mismatch_api",
+          "regex": "(\\w+)\\s+integer\\s*;\\s*\\1\\s*:=\\s*(executor\\.lock_open|rtl\\.userid|sys_context\\(\\s*'IBS_SYSTEM'\\s*,\\s*'ID'\\s*\\))",
+          "description": "DS_072a: integer -> number при присваивании из API ТЯ (ORA-01426)",
+          "transform_type": "regex",
+          "note": "DS_072a: integer -> number при присваивании из API ТЯ (ORA-01426)",
+          "example_in": "sl integer; sl := executor.lock_open;",
+          "example_out": "sl number; sl := executor.lock_open;",
+          "transform": "{1} number; {1} := {2}",
+          "replace_scope": "match"
+        },
+        {
+          "name": "platform_integer_mismatch_other",
+          "regex": "(\\w+)\\s+integer\\b",
+          "description": "DS_072a (AI-фолбэк): не каждое integer -> number",
+          "transform_type": "ignore",
+          "note": "DS_072a_Уточнение_B: AI-фолбэк через needs_ai_fix (DS_054); hybrid не поддерживается _pattern_bucket (нет transform -> ignore).",
+          "example_in": "n integer; n := f();",
+          "example_out": "n number; n := f();",
+          "algorithmic_hint": "Если переменная integer получает значение из API ТЯ (executor.lock_open, rtl.userid, sys_context('IBS_SYSTEM','ID')) — заменить на number; иначе — AI-анализ переполнения",
+          "fallback_instruction": "-- ВАЖНО: проверить ORA-01426: заменить integer на number при присваивании из API ТЯ"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.REF_NONTABLE.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "ref_nontable_class",
+          "regex": "\\bref\\s+\\[(SUMMA|REQ_CLIENT)\\]",
+          "description": "DS_072a: ref [X] -> [X] для классов без экземпляров (SUMMA, REQ_CLIENT)",
+          "transform_type": "regex",
+          "note": "DS_072a: ref [X] -> [X] для классов без экземпляров (SUMMA, REQ_CLIENT)",
+          "example_in": "vSumma ref [SUMMA];",
+          "example_out": "vSumma [SUMMA];",
+          "transform": "[{1}]",
+          "replace_scope": "match"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.SUBOPTIMAL_EXPLICIT_DB_ROUNDRTIP.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "suboptimal_dbms_transaction_commit",
+          "regex": "\\bdbms_transaction\\.commit\\b",
+          "description": "DS_072a: dbms_transaction.commit -> commit",
+          "transform_type": "regex",
+          "note": "DS_072a: dbms_transaction.commit -> commit",
+          "example_in": "dbms_transaction.commit;",
+          "example_out": "commit;",
+          "transform": "commit",
+          "replace_scope": "match"
+        },
+        {
+          "name": "suboptimal_dbms_utility_backtrace",
+          "regex": "\\bdbms_utility\\.format_error_backtrace\\b",
+          "description": "DS_072a: dbms_utility.format_error_backtrace -> ::[RUNTIME].[UTILS].error_stack(false)",
+          "transform_type": "regex",
+          "note": "DS_072a: dbms_utility.format_error_backtrace -> ::[RUNTIME].[UTILS].error_stack(false)",
+          "example_in": "vErr := dbms_utility.format_error_backtrace;",
+          "example_out": "vErr := ::[RUNTIME].[UTILS].error_stack(false);",
+          "transform": "::[RUNTIME].[UTILS].error_stack(false)",
+          "replace_scope": "match"
+        },
+        {
+          "name": "suboptimal_dbms_lock_sleep",
+          "regex": "\\bdbms_lock\\.sleep\\b",
+          "description": "DS_072a: dbms_lock.sleep -> ::[RUNTIME].[UTILS].sleep",
+          "transform_type": "regex",
+          "note": "DS_072a: dbms_lock.sleep -> ::[RUNTIME].[UTILS].sleep",
+          "example_in": "dbms_lock.sleep(5);",
+          "example_out": "::[RUNTIME].[UTILS].sleep(5);",
+          "transform": "::[RUNTIME].[UTILS].sleep",
+          "replace_scope": "match"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.SYSTEM_VIEWS.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "system_views_gv_session",
+          "regex": "\\bgv\\$session\\b",
+          "description": "DS_072a: gv$session -> VW_DB_SESSION (v$session_longops разрешен — не трогать)",
+          "transform_type": "regex",
+          "note": "DS_072a: gv$session -> VW_DB_SESSION (v$session_longops разрешен — не трогать)",
+          "example_in": "in gv$session%rowtype",
+          "example_out": "in VW_DB_SESSION%rowtype",
+          "transform": "VW_DB_SESSION",
+          "replace_scope": "match"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.INSERT_WITH_ID.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "insert_with_id_return_into",
+          "regex": "(\\w+)\\s*:=\\s*::\\[(\\w+)\\]%insert\\((\\w+),\\s*\\3%id\\)",
+          "description": "DS_072b: obj := ::[TBP]%insert(obj, obj%id) -> insert into ... return t into obj (только 2 параметра, второй — obj%id)",
+          "transform_type": "regex",
+          "transform": "insert into ::[{2}] t(t%id = {3}%id, t%rowtype = {3}%rowtype) return t into {1}",
+          "replace_scope": "match",
+          "note": "DS_072b_Уточнение_A: replace_scope \"match\" матчит всю конструкцию obj := ::[TBP]%insert(obj, obj%id) и заменяет её целиком -> insert into ... return t into obj (без \"obj := \"). example_out исправлен на фактический вывод движка (был ошибочный с присваиванием).",
+          "example_in": "txt_job_ref := ::[TEXT_JOBS]%insert(txt_job, txt_job%id);",
+          "example_out": "insert into ::[TEXT_JOBS] t(t%id = txt_job%id, t%rowtype = txt_job%rowtype) return t into txt_job_ref;"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.REFERENCED_TO_OBJECT.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "referenced_to_object_cast",
+          "regex": "(\\w+)\\.\\[(\\w+?)_REF\\]\\s*:\\s*(\\w+_REF)\\b",
+          "description": "DS_072b: x.[BASE_REF] : COL_REF -> cast_to(::[REFERENCE], x.[BASE_CLASS]||':'||x.[BASE_REF]) : COL_REF (в пределах строки; наличие [BASE_CLASS] в схеме проверяется вручную)",
+          "transform_type": "regex",
+          "transform": "cast_to(::[REFERENCE], {1}.[{2}_CLASS]||':'||{1}.[{2}_REF]) : {3}",
+          "replace_scope": "match",
+          "note": "DS_072b: x.[BASE_REF] : COL_REF -> cast_to(::[REFERENCE], x.[BASE_CLASS]||':'||x.[BASE_REF]) : COL_REF (в пределах строки; наличие [BASE_CLASS] в схеме проверяется вручную)",
+          "example_in": "select x(x.[OBJ_REF] : C_OBJ_REF) in ::[TBP]",
+          "example_out": "select x(cast_to(::[REFERENCE], x.[OBJ_CLASS]||':'||x.[OBJ_REF]) : C_OBJ_REF) in ::[TBP]"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.SELECTLOCKWAIT.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "select_lock_wait_to_one_by_one",
+          "regex": "lock\\s+wait\\s+\\d+",
+          "description": "DS_072b: lock wait N -> lock one by one (в PG нет wait)",
+          "transform_type": "regex",
+          "transform": "lock one by one",
+          "replace_scope": "match",
+          "note": "DS_072b: lock wait N -> lock one by one (в PG нет wait)",
+          "example_in": "select x(x.[ID] : ID) in ::[MAIN_DOCUM] lock wait 5",
+          "example_out": "select x(x.[ID] : ID) in ::[MAIN_DOCUM] lock one by one"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.ALIAS_COLUMN_VIEW.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "alias_column_view_detector",
+          "regex": "view\\s+\\w+\\s*\\{[^}]*select[^}]*\\}",
+          "description": "DS_072b: ignore (детектор) — алиас колонки требует метаданных (имя колонки неизвестно regex-у), исправление вручную",
+          "transform_type": "ignore",
+          "note": "DS_072b: ignore (детектор) — алиас колонки требует метаданных (имя колонки неизвестно regex-у), исправление вручную",
+          "algorithmic_hint": "Добавить AS <имя> каждой колонке SELECT в view X { select ... }"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.MULTIPLE_MODIFIERS.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "multiple_modifiers_detector",
+          "regex": "%parent%",
+          "description": "DS_072b: ignore (детектор) — %parent%state требует типа %parent, regex не даёт однозначной замены, исправление вручную",
+          "transform_type": "ignore",
+          "note": "DS_072b: ignore (детектор) — %parent%state требует типа %parent, regex не даёт однозначной замены, исправление вручную",
+          "algorithmic_hint": "Заменить на промежуточную переменную или %parent(::[TYPE])%state"
         }
       ]
     }

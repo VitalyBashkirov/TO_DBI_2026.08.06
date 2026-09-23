@@ -2,7 +2,7 @@
 
 **Назначение:** адреса файлов и функций для ссылок в DS. Заменяет повтор адресов в каждой задаче.
 
-**Версия:** 1.3 от 21.09.2026 (после DS_063, DS_064_Уточнение_A, DS_065, DS_066, DS_067 + Уточнения_A/B).
+**Версия:** 1.5 от 23.09.2026 (после DS_063, DS_064_Уточнение_A, DS_065, DS_066, DS_067 + Уточнения_A/B, DS_072a + Уточнения_A/B, DS_072b + Уточнение_A).
 
 ---
 
@@ -58,6 +58,7 @@
 | `code_fixer.py` | `PLPlusFixer._is_in_comment_or_string` | 990 | Основная реализация. |
 | `code_fixer.py` | `_find_code_positions` | 1114 | Вызов `_is_in_comment_or_string`. |
 | `code_fixer.py` | `_update_renamed_vars` | 755–762 | Спец-обработка `&debug`. |
+| `code_fixer.py` | `PLPlusFixer._verify_file` | ~1291 | Верификация повторным сканом (DS_053): остаток issue + флаг `ai_fallback` -> `needs_ai_fix` (DS_054). AI-фолбэк `MAX_SIZE_ID` / `PLATFORM_INTEGER_MISMATCH` работает через неё; корзина `ignore` (не `hybrid` — `_pattern_bucket` без `transform` -> `ignore`, DS_072a_Уточнение_B). |
 | `code_fixer.py` | `_apply_issue_fixes` | — | Основной цикл фиксера. Сухой прогон даёт `changes` `{line_number, rule_code, before, after}` (DS_067 §7). |
 | `code_fixer.py` | `_validate_fix` | 876–879 | Спец-обработка `&debug`. |
 | `code_fixer.py` | `_is_delete` | — | Хелпер: issue с действием удаления (`not_mentioned` / `code_in_comment` / действие «удалить» из `_generate_plan`) — DS_067_A. |
@@ -90,7 +91,7 @@
 | Файл | Назначение |
 |------|-----------|
 | `Рубрикатор v5\4.RUBRICATOR_PROMPT v5.json` | 332 правила; **источник regex-паттернов сканера** (309 паттернов). Правки regex — синхронно с `5.RUBRICATOR_PARSER_SQL v5.json` (DS_065). Описания `PREFIX_TYPE_IN_VAR_NAME` и `CODE_IN_COMMENT` дополнены (DS_066). |
-| `Рубрикатор v5\5.RUBRICATOR_PARSER_SQL v5.json` | 75 правил парсера; **источник трансформаций (`transform`)**. Правки regex — синхронно с `4.RUBRICATOR_PROMPT v5.json` (DS_065). DS_066: добавлен паттерн `p_local_prefix` в `PREFIX_TYPE_IN_VAR_NAME`. |
+| `Рубрикатор v5\5.RUBRICATOR_PARSER_SQL v5.json` | 90 правил парсера; **источник трансформаций (`transform`)**. Правки regex — синхронно с `4.RUBRICATOR_PROMPT v5.json` (DS_065). DS_066: добавлен паттерн `p_local_prefix` в `PREFIX_TYPE_IN_VAR_NAME`. DS_072a: добавлены 11 правил `PlpCheck.DBI.<NAME>.п.1` (группа A из DS_071). DS_072a_Уточнение_A: `DYNAMIC_PLP.п.1` удалён (детектор, вариант B) → 10 правил группы A. DS_072b: добавлены 5 правил группы B — 3 transform (`INSERT_WITH_ID`, `REFERENCED_TO_OBJECT`, `SELECTLOCKWAIT`, `replace_scope: "match"`) + 2 ignore (`ALIAS_COLUMN_VIEW`, `MULTIPLE_MODIFIERS`). DS_072b_Уточнение_A: `example_out` `INSERT_WITH_ID` исправлен на `insert into ... return t into obj_ref;` (без `X := `); transform не менялся (Вариант B: regex матчит всю конструкцию). |
 | `Рубрикатор v5\1.RUBRICATOR_FILES v5.md` | Список правил (read-only для GUI). |
 | `CFT Platform IDE Documentation\rule-description.html` | PlpCheck 2.5.2. |
 
@@ -100,6 +101,8 @@
 |---------|-----------|----------|
 | `PlpCheck.STYLE.BAD_PREFIX.п.4.3` (`bad_prefix_varchar2`, `bad_prefix_number`, `bad_prefix_date`, `bad_prefix_boolean`) | `transform_type: "ignore"` | DS_063 |
 | `PlpCheck.STYLE.PREFIX_TYPE_IN_VAR_NAME.п.4.4` (`missing_prefix_*`, `p_local_prefix`) | `transform_type: "ignore"` | DS_059_Уточнение_F, DS_066 |
+| `PlpCheck.DBI.<NAME>.п.1` × 10 (группа A: CALL_STACK_ANALYSIS, DIRECT_COMPARISON_WITH_NULL, FUNCTION_BREAK_INDEX, MAX_SIZE_ID, NVL_IN_SELECT, PARALLEL_EXECUTION, PLATFORM_INTEGER_MISMATCH, REF_NONTABLE, SUBOPTIMAL_EXPLICIT_DB_ROUNDRTIP, SYSTEM_VIEWS) | `transform_type: "regex"`; AI-фолбэк-паттерны `max_size_id_other` / `platform_integer_mismatch_other` — `"ignore"` (DS_072a_Уточнение_B) | DS_072a, DS_072a_Уточнение_B |
+| `PlpCheck.DBI.DYNAMIC_PLP.п.1` | **удалён** из PARSER_SQL (обобщение ломало SQL) — детектор | DS_072a_Уточнение_A |
 | `v53.STOR.SPEC_CHARS.п.2.10` | regex сужен до имён (`\b(class\|view\|...)\s+...`, `@(name\|tag)\s*\(...`) | DS_065 (в **обоих** JSON) |
 
 ---
@@ -151,3 +154,8 @@
 | 21.09.2026 | `save_scan_only_log`: сортировка PLAN и цепочки по ключу `scan_report_*` | DS_067_B |
 | 21.09.2026 | `generate_report` (`scanner.py:2008`): ключ сортировки используется `save_scan_only_log` | DS_067_B |
 | 22.09.2026 | `Issue.block_start/block_end`; `_check_plp_code_in_comment` — 6-ки, незакрытый блок репортится (block_end=EOF); `save_scan_only_log` — `(удалить диапазон строк N–M)` | DS_069 |
+| 23.09.2026 | PARSER_SQL: +11 правил `PlpCheck.DBI.<NAME>.п.1` (группа A DS_071, transform `regex`); PROMPT: `fix_instruction` для 11 NAME синхронно | DS_072a |
+| 23.09.2026 | PARSER_SQL: `PlpCheck.DBI.DYNAMIC_PLP.п.1` удалён (86→85), PROMPT: `fix_instruction` DYNAMIC_PLP = детектор (структурный перенос fetch, вручную) | DS_072a_Уточнение_A |
+| 23.09.2026 | PARSER_SQL: AI-фолбэк-паттерны `max_size_id_other` / `platform_integer_mismatch_other` — `transform_type: "ignore"` (вместо `hybrid`); PROMPT: `fix_instruction` = `needs_ai_fix`; `rule_engine.py` не тронут | DS_072a_Уточнение_B |
+| 23.09.2026 | PARSER_SQL: +5 правил группы B — 3 transform (`INSERT_WITH_ID`, `REFERENCED_TO_OBJECT`, `SELECTLOCKWAIT`, `replace_scope: "match"`) + 2 ignore (`ALIAS_COLUMN_VIEW`, `MULTIPLE_MODIFIERS`) (86→90); PROMPT: `fix_instruction` для 5 NAME синхронно | DS_072b |
+| 23.09.2026 | PARSER_SQL: `example_out` `INSERT_WITH_ID` исправлен (`txt_job_ref := insert into ...` → `insert into ... return t into txt_job_ref;`); transform не менялся (Вариант B: `replace_scope: "match"` матчит всю конструкцию); PROMPT `fix_instruction` уже корректен — проверен, не изменён | DS_072b_Уточнение_A |

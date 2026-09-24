@@ -2,7 +2,7 @@
 
 **Назначение:** адреса файлов и функций для ссылок в DS. Заменяет повтор адресов в каждой задаче.
 
-**Версия:** 1.5 от 23.09.2026 (после DS_063, DS_064_Уточнение_A, DS_065, DS_066, DS_067 + Уточнения_A/B, DS_072a + Уточнения_A/B, DS_072b + Уточнение_A).
+**Версия:** 1.9 от 23.09.2026 (после DS_063–DS_067 + Уточнения, DS_072a–DS_072e, DS_073).
 
 ---
 
@@ -45,6 +45,9 @@
 | `lexer_state.py` | `advance_lexer_state` | — | Единственная точка мутации. |
 | `lexer_state.py` | `is_line_fully_in_comment_or_string` | — | Обёртка для VariableParser. |
 | `sql_parser.py` | — | — | Глобальный `re.IGNORECASE`; поддержка маркеров `(?-i)` и `(?i:...)` (DS_059_Уточнение_E). |
+| `sql_parser.py` | `apply_fix_multiline` | — | Многострочные transform (`replace_scope: "multiline"`, DS_072c): re.DOTALL+re.MULTILINE, плейсхолдеры `{N}` через `apply_transform`, count=1. Построчный `apply_fix_ex` multiline-паттерны пропускает (не ломать построчный путь). |
+| `rule_engine.py` | `RuleEngine.apply_fix_multiline` | — | Обёртка над `sql_parser.apply_fix_multiline` с маппингом `plpcheck.<NAME>` (DS_059) и фильтром флагов. |
+| `code_fixer.py` | `PLPlusFixer._apply_issue_fixes` | ~1210 | DS_073: первым проходом — multiline-правила (`replace_scope: "multiline"`, окно `Issue.block_start/block_end` / весь файл, Вариант C), затем построчный `apply_fix` (multiline-issues исключены — идемпотентность §3.5). |
 
 ---
 
@@ -91,7 +94,7 @@
 | Файл | Назначение |
 |------|-----------|
 | `Рубрикатор v5\4.RUBRICATOR_PROMPT v5.json` | 332 правила; **источник regex-паттернов сканера** (309 паттернов). Правки regex — синхронно с `5.RUBRICATOR_PARSER_SQL v5.json` (DS_065). Описания `PREFIX_TYPE_IN_VAR_NAME` и `CODE_IN_COMMENT` дополнены (DS_066). |
-| `Рубрикатор v5\5.RUBRICATOR_PARSER_SQL v5.json` | 90 правил парсера; **источник трансформаций (`transform`)**. Правки regex — синхронно с `4.RUBRICATOR_PROMPT v5.json` (DS_065). DS_066: добавлен паттерн `p_local_prefix` в `PREFIX_TYPE_IN_VAR_NAME`. DS_072a: добавлены 11 правил `PlpCheck.DBI.<NAME>.п.1` (группа A из DS_071). DS_072a_Уточнение_A: `DYNAMIC_PLP.п.1` удалён (детектор, вариант B) → 10 правил группы A. DS_072b: добавлены 5 правил группы B — 3 transform (`INSERT_WITH_ID`, `REFERENCED_TO_OBJECT`, `SELECTLOCKWAIT`, `replace_scope: "match"`) + 2 ignore (`ALIAS_COLUMN_VIEW`, `MULTIPLE_MODIFIERS`). DS_072b_Уточнение_A: `example_out` `INSERT_WITH_ID` исправлен на `insert into ... return t into obj_ref;` (без `X := `); transform не менялся (Вариант B: regex матчит всю конструкцию). |
+| `Рубрикатор v5\5.RUBRICATOR_PARSER_SQL v5.json` | 148 правил парсера; **источник трансформаций (`transform`)**. Правки regex — синхронно с `4.RUBRICATOR_PROMPT v5.json` (DS_065). DS_066: добавлен паттерн `p_local_prefix` в `PREFIX_TYPE_IN_VAR_NAME`. DS_072a: добавлены 11 правил `PlpCheck.DBI.<NAME>.п.1` (группа A из DS_071). DS_072a_Уточнение_A: `DYNAMIC_PLP.п.1` удалён (детектор, вариант B) → 10 правил группы A. DS_072b: добавлены 5 правил группы B — 3 transform (`INSERT_WITH_ID`, `REFERENCED_TO_OBJECT`, `SELECTLOCKWAIT`, `replace_scope: "match"`) + 2 ignore (`ALIAS_COLUMN_VIEW`, `MULTIPLE_MODIFIERS`). DS_072b_Уточнение_A: `example_out` `INSERT_WITH_ID` исправлен на `insert into ... return t into obj_ref;` (без `X := `); transform не менялся (Вариант B: regex матчит всю конструкцию). DS_072c_Реализация: +19 правил группы C — 4 multiline-transform (`NOT_CLOSED_CURSOR`, `NOT_CLOSED_FILE`, `NOT_HANDLED_CURSOR_EXCEPTIONS`, `OBLIGATORY_IN_OTHERS`, `replace_scope: "multiline"`) + 15 ignore (C1-fallback `OUTER_JOIN`, C2-структурные ×3, C3-AI ×6, C4 ×5). |
 | `Рубрикатор v5\1.RUBRICATOR_FILES v5.md` | Список правил (read-only для GUI). |
 | `CFT Platform IDE Documentation\rule-description.html` | PlpCheck 2.5.2. |
 
@@ -159,3 +162,9 @@
 | 23.09.2026 | PARSER_SQL: AI-фолбэк-паттерны `max_size_id_other` / `platform_integer_mismatch_other` — `transform_type: "ignore"` (вместо `hybrid`); PROMPT: `fix_instruction` = `needs_ai_fix`; `rule_engine.py` не тронут | DS_072a_Уточнение_B |
 | 23.09.2026 | PARSER_SQL: +5 правил группы B — 3 transform (`INSERT_WITH_ID`, `REFERENCED_TO_OBJECT`, `SELECTLOCKWAIT`, `replace_scope: "match"`) + 2 ignore (`ALIAS_COLUMN_VIEW`, `MULTIPLE_MODIFIERS`) (86→90); PROMPT: `fix_instruction` для 5 NAME синхронно | DS_072b |
 | 23.09.2026 | PARSER_SQL: `example_out` `INSERT_WITH_ID` исправлен (`txt_job_ref := insert into ...` → `insert into ... return t into txt_job_ref;`); transform не менялся (Вариант B: `replace_scope: "match"` матчит всю конструкцию); PROMPT `fix_instruction` уже корректен — проверен, не изменён | DS_072b_Уточнение_A |
+| 23.09.2026 | `sql_parser.py`: `apply_fix_multiline` (replace_scope "multiline", DOTALL+MULTILINE, плейсхолдеры {N}); `apply_fix_ex` пропускает multiline построчно; `rule_engine.py`: обёртка `RuleEngine.apply_fix_multiline` | DS_072c_Реализация |
+| 23.09.2026 | PARSER_SQL: +19 правил группы C (90→109): 4 multiline-transform + 15 ignore (C1-fallback `OUTER_JOIN` — `{object_type}` неизвестен; C2-структурные ×3; C3-AI ×6 — needs_ai_fix DS_054; C4 ×5); PROMPT: `fix_instruction` для 19 NAME синхронно | DS_072c_Реализация |
+| 23.09.2026 | `AGENTS.md` раздел «Логирование»: правило — `bot.log` только `EXCHANGE\bot.log`, создание в других каталогах (`SRC\bot.log` и пр.) запрещено | DS_072c_Реализация |
+| 23.09.2026 | `code_fixer.py:_apply_issue_fixes`: интеграция `apply_fix_multiline` — первым проходом (до построчного `apply_fix`), окно Вариант C (`block_start/block_end` / весь файл), идемпотентность (правило исключается из построчного прохода). Заработали 4 multiline-правила C2 в прод-фиксе | DS_073 |
+| 23.09.2026 | PARSER_SQL: +15 правил группы D (109→124): 3 transform (`MATCHING_TYPES`, `SIZE_RESTRICTION`, `INDEX_LENGTH`, `replace_scope: "match"`) + 12 ignore (fallback брифа: `CONTROLTABLECOLUMNSTYPE`, `HINT_INDEX_ORDER_BY`, `INVALID_INIT`, D3 ×3, D4 ×6); PROMPT: `fix_instruction` для 15 NAME синхронно; SRC не тронут | DS_072d_Реализация |
+| 23.09.2026 | PARSER_SQL: +24 правила группы E (124→148) — все `transform_type: "ignore"`-детекторы (regex из PROMPT `for_search`), note по категориям брифа §4.2; PROMPT: `fix_instruction` для 24 NAME синхронно. PlpCheck-аудит DS_071 завершён: 74/74 NAME — 20 transform + 54 ignore/AI | DS_072e_Реализация |

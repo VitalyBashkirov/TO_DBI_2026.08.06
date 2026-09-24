@@ -333,6 +333,11 @@ def apply_fix_ex(line: str, rule_code: str,
         if allowed_buckets is not None and bucket not in allowed_buckets:
             continue
 
+        # DS_072c: multiline-паттерны построчным вызовом не применяются —
+        # только через apply_fix_multiline (полный текст файла/блока).
+        if pattern_def.get('replace_scope') == 'multiline':
+            continue
+
         pattern_name = pattern_def.get('name', 'unknown')
         regex = pattern_def.get('regex', '')
         transform_type = pattern_def.get('transform_type', 'regex')
@@ -457,6 +462,59 @@ def apply_fix_ex(line: str, rule_code: str,
             logger.error(f"[PARSER] apply_fix_ex ошибка паттерна {pattern_name}: {e}")
             continue
 
+    return None
+
+
+def apply_fix_multiline(text: str, rule_code: str,
+                        allowed_buckets: Optional[set] = None) -> Optional[Any]:
+    """Многострочное исправление блока/файла (DS_072c, replace_scope: "multiline").
+
+    Применяет transform к многострочному фрагменту (блок begin..end, view и т.п.):
+      * regex компилируется с re.DOTALL | re.MULTILINE;
+      * transform подставляет плейсхолдеры {1}/{2}/... (apply_transform);
+      * context_before / context_after (опционально) ограничивают окно матча —
+        сколько строк до/после совпадения захватывает regex-якорь (в transform
+        не участвуют, служат описанием окна для автора правила).
+
+    Returns:
+        None, если не применимо; иначе (result, bucket, kind).
+    """
+    if not text or not rule_code:
+        return None
+    rule = find_rule(rule_code)
+    if not rule:
+        return None
+    for pattern_def in rule.get('patterns', []):
+        bucket = _pattern_bucket(pattern_def)
+        if allowed_buckets is not None and bucket not in allowed_buckets:
+            continue
+        if pattern_def.get('replace_scope') != 'multiline':
+            continue
+        pattern_name = pattern_def.get('name', 'unknown')
+        regex = pattern_def.get('regex', '')
+        transform = pattern_def.get('transform', '')
+        if not regex or not transform:
+            continue
+        regex, regex_flags = _regex_flags(regex)
+        try:
+            flags = regex_flags | re.DOTALL | re.MULTILINE
+            match = re.search(regex, text, flags)
+            if not match:
+                continue
+            sub = apply_transform(match, transform, {})
+            if '{' in sub and '}' in sub:
+                # Незаполненные плейсхолдеры — детерминированный фикс невозможен.
+                continue
+            result = re.sub(regex, lambda m: apply_transform(m, transform, {}),
+                            text, count=1, flags=flags)
+            if result != text:
+                return result, bucket, 'transform'
+        except re.error as e:
+            logger.error(f"[PARSER] apply_fix_multiline ошибка regex {pattern_name}: {e}")
+            continue
+        except Exception as e:
+            logger.error(f"[PARSER] apply_fix_multiline ошибка паттерна {pattern_name}: {e}")
+            continue
     return None
 
 

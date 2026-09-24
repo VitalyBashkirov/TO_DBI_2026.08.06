@@ -1233,6 +1233,68 @@ class PLPlusFixer:
         new_lines = list(lines)
         changes: List[dict] = []
 
+        # DS_073: multiline-правила (replace_scope: "multiline", DS_072c) —
+        # применяются ПЕРВЫМИ, до построчного прохода (бриф §3.4: иначе
+        # построчный apply_fix может «испортить» строку до multiline).
+        # Вариант C: окно — Issue.block_start/block_end (DS_069), fallback —
+        # весь файл. После успешной multiline-замены issue помечается
+        # обработанной (идемпотентность, §3.5) и исключается из построчного
+        # прохода (by_line).
+        handled_multiline: set = set()
+
+        def _rule_has_multiline(code: str) -> bool:
+            rule = self.rule_engine.get_rule(code)
+            if not rule:
+                return False
+            return any(pt.get('replace_scope') == 'multiline'
+                       for pt in rule.get('patterns', []))
+
+        for issue in issues:
+            code = issue.issue_type
+            if code in handled_multiline:
+                continue
+            if not _rule_has_multiline(code):
+                continue
+            if not (self.rule_engine.has_rule(code)
+                    and self.rule_engine.rule_enabled(code, self.flags)):
+                continue
+            # Окно (Вариант C): block_start/block_end, иначе весь файл.
+            b_start = getattr(issue, 'block_start', 0) or 0
+            b_end = getattr(issue, 'block_end', 0) or 0
+            if b_start > 0 and b_end >= b_start:
+                start_idx = max(0, b_start - 1)
+                end_idx = min(len(new_lines), b_end)
+            else:
+                start_idx, end_idx = 0, len(new_lines)
+            block_text = ''.join(new_lines[start_idx:end_idx])
+            res = self.rule_engine.apply_fix_multiline(
+                text=block_text, rule_code=code, flags=self.flags)
+            if res:
+                new_text, bucket, kind = res
+                if new_text != block_text:
+                    new_block_lines = new_text.splitlines(keepends=True)
+                    # Выравниваем длину окна (замена может добавить строки).
+                    new_lines[start_idx:end_idx] = new_block_lines
+                    changes.append({
+                        'line_number': issue.line_number,
+                        'rule_code': code,
+                        'bucket': bucket,
+                        'kind': kind,
+                        'before': block_text,
+                        'after': new_text,
+                    })
+                    # Идемпотентность: правило обработано (все его issues
+                    # исключаются из построчного прохода ниже).
+                    handled_multiline.add(code)
+                    break  # окно/нумерация строк изменилась — пересобираем
+
+        # Построчный проход: multiline-issues исключены (обработаны выше).
+        by_line = {}
+        for issue in issues:
+            if issue.issue_type in handled_multiline:
+                continue
+            by_line.setdefault(issue.line_number, []).append(issue)
+
         # DS_056A: лексическое состояние переносим между строками в исходном
         # порядке. advance_lexer_state — ровно один раз на строку (в конце итерации),
         # после всех is_in_comment_or_string для этой строки (вызываются внутри

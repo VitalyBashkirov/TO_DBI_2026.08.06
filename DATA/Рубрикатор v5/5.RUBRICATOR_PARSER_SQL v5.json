@@ -29,7 +29,7 @@
   },
   "last_updated": "2026-09-23",
   "hybrid_mode": true,
-  "total_rules": 90,
+  "total_rules": 148,
   "based_on": "Рекомендации по адаптации кода на PLPlus для работы с DBI приложением v53.docx, Требования для совместимости кода с DBI.txt, Требования к локальным объектам и к коду - Дополнительные регламенты разработчика - Confluence.txt, PlpCheck rule-description",
   "synced_with": "4.RUBRICATOR_PROMPTS.json v5.3.0",
   "rules": [
@@ -1942,6 +1942,780 @@
           "transform_type": "ignore",
           "note": "DS_072b: ignore (детектор) — %parent%state требует типа %parent, regex не даёт однозначной замены, исправление вручную",
           "algorithmic_hint": "Заменить на промежуточную переменную или %parent(::[TYPE])%state"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.OUTER_JOIN.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "outer_join_true_true",
+          "regex": "\\(\\s*true\\s*\\)\\s*=|\\w+\\.\\[[A-Z_]+\\]\\s*=\\s*\\(\\s*true\\s*\\)",
+          "description": "DS_072c C1: (true) в where — внешнее соединение (тип объекта из контекста)",
+          "transform_type": "ignore",
+          "note": "DS_072c C1: fallback по брифу §3.1 — тип объекта ({object_type}) движку неоткуда взять, детерминированная замена невозможна -> ignore-детектор. Замена (scalar subquery) — вручную/AI."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.NOT_CLOSED_CURSOR.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "not_closed_cursor_close",
+          "regex": "(\\w+)\\.open\\s*;([^;]*;\\s*)?(.*?\\bbegin\\b)(.*?)(\\bend\\s*;)",
+          "description": "DS_072c C2: вставка <cur>.close() перед end; блока (окно open..begin..end)",
+          "transform_type": "regex",
+          "note": "DS_072c C2 multiline: окно open..begin..end; вставка {1}.close() перед end; первый (ленивый) блок; вызов — apply_fix_multiline (построчно не применяется).",
+          "transform": "{1}.open;{2}{3}{4}{1}.close(); {5}",
+          "replace_scope": "multiline"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.NOT_CLOSED_FILE.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "not_closed_file_close",
+          "regex": "(\\w+)(\\s*:=\\s*[^\\n]*f_open[^\\n]*;)(.*?\\bbegin\\b)(.*?)(\\bend\\s*;)",
+          "description": "DS_072c C2: вставка stdio.f_close(<var>) перед end; блока",
+          "transform_type": "regex",
+          "note": "DS_072c C2 multiline: окно f_open..begin..end; вставка stdio.f_close({1}) перед end; вызов — apply_fix_multiline.",
+          "transform": "{1}{2}{3}{4}stdio.f_close({1});{5}",
+          "replace_scope": "multiline"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.NOT_HANDLED_CURSOR_EXCEPTIONS.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "not_handled_cursor_close_body",
+          "regex": "(\\w+)\\.open\\s*;(.*?\\bbegin\\b)(.*?)(\\bexception\\b)(.*?)(\\bend\\s*;)",
+          "description": "DS_072c C2: close в exception есть, в теле нет — вставить в тело перед exception",
+          "transform_type": "regex",
+          "note": "DS_072c C2 multiline: вставка {1}.close() в тело перед блоком exception (окно open..begin..exception..end); вызов — apply_fix_multiline.",
+          "transform": "{1}.open;{2}{3}{1}.close(); {4}{5}{6}",
+          "replace_scope": "multiline"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.OBLIGATORY_IN_OTHERS.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "obligatory_in_others_sp",
+          "regex": "(\\bbegin\\b)(?!\\s*&sp)(.*?)(\\bexception\\s+when\\s+others\\b)",
+          "description": "DS_072c C2: begin перед exception when others без &sp(SET) — вставить &sp(SET)",
+          "transform_type": "regex",
+          "note": "DS_072c C2 multiline: вставка &sp(SET) сразу после begin (если &sp уже есть — не матчится, негативный lookahead); вызов — apply_fix_multiline.",
+          "transform": "{1} &sp(SET);{2}{3}",
+          "replace_scope": "multiline"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.ACCESS_STATIC.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "access_static_detector",
+          "regex": "::\\[SYSTEM\\]|\\[STATIC_ATTR\\]",
+          "description": "DS_072c: детектор ACCESS_STATIC (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "AI-фолбэк через needs_ai_fix (DS_054); hybrid не поддерживается _pattern_bucket (DS_072a_Уточнение_B)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.DEREFERENCE_IN_LOOP.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "dereference_in_loop_detector",
+          "regex": "loop.*\\.[A-Z_]+",
+          "description": "DS_072c: детектор DEREFERENCE_IN_LOOP (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "AI-фолбэк через needs_ai_fix (DS_054); hybrid не поддерживается _pattern_bucket (DS_072a_Уточнение_B)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.MANY_SUB_TRANSACTIONS.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "many_sub_transactions_detector",
+          "regex": "&sp\\(|savepoint",
+          "description": "DS_072c: детектор MANY_SUB_TRANSACTIONS (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "AI-фолбэк через needs_ai_fix (DS_054); hybrid не поддерживается _pattern_bucket (DS_072a_Уточнение_B)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.NESTED_TABLE.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "nested_table_detector",
+          "regex": "varray.*of\\s+record|table\\s+of\\s+record",
+          "description": "DS_072c: детектор NESTED_TABLE (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "AI-фолбэк через needs_ai_fix (DS_054); hybrid не поддерживается _pattern_bucket (DS_072a_Уточнение_B)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.SUBOPTIMAL_QUERY_WROWNUM.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "suboptimal_query_wrownum_detector",
+          "regex": "for\\s*\\(.*select.*\\)\\s+loop.*\\bexit\\b",
+          "description": "DS_072c: детектор SUBOPTIMAL_QUERY_WROWNUM (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "AI-фолбэк через needs_ai_fix (DS_054); hybrid не поддерживается _pattern_bucket (DS_072a_Уточнение_B)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.UDF.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "udf_detector",
+          "regex": "select.*\\w+\\s*\\(.*\\).*in",
+          "description": "DS_072c: детектор UDF (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "AI-фолбэк через needs_ai_fix (DS_054); hybrid не поддерживается _pattern_bucket (DS_072a_Уточнение_B)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.SUBOPTIMAL_UNSELECTED_COL_USAGE.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "suboptimal_unselected_col_usage_detector",
+          "regex": "\\.[A-Z_]+\\.[A-Z_]+",
+          "description": "DS_072c: детектор SUBOPTIMAL_UNSELECTED_COL_USAGE (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072c C4: детектор без автофикса."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.FETCH_OVER_SUBQUERY.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "fetch_over_subquery_detector",
+          "regex": "select.*in\\s*\\([^)]*\\)\\s*fetch",
+          "description": "DS_072c: детектор FETCH_OVER_SUBQUERY (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072c C4: детектор без автофикса."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.CRIT_EXT_IN_OLD_FORMAT.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "crit_ext_in_old_format_detector",
+          "regex": "view\\s+\\w+_EXT\\s+instead\\s+of\\s+\\w+\\s*\\{[^}]*type\\s+main\\s+is\\s+select",
+          "description": "DS_072c: детектор CRIT_EXT_IN_OLD_FORMAT (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072c C4: детектор без автофикса."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.CONCAT_CONTROL.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "concat_control_detector",
+          "regex": "dbms_lob\\.(writeappend|write|append)|\\|\\||concat",
+          "description": "DS_072c: детектор CONCAT_CONTROL (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072c C4: детектор без автофикса."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.CONV_STREAM_CHECKS.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "conv_stream_checks_detector",
+          "regex": "static\\s+method\\s+\\w+\\s+is\\s+\\w+\\s*\\([^)]*\\)\\s+is",
+          "description": "DS_072c: детектор CONV_STREAM_CHECKS (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072c C4: детектор без автофикса."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.NOT_CLASS_REF_TABLE_PARAM.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "not_class_ref_table_param_detector",
+          "regex": "table\\s+of\\s+(ref|number|string)",
+          "description": "DS_072c: детектор NOT_CLASS_REF_TABLE_PARAM (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072c C4: детектор без автофикса."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.ROWTYPE_DECLARED_PUBLIC.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "rowtype_declared_public_detector",
+          "regex": "public.*%rowtype",
+          "description": "DS_072c: детектор ROWTYPE_DECLARED_PUBLIC (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072c C4: детектор без автофикса."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.USE_LOCAL_OBJECT_IN_EXTENSION.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "use_local_object_in_extension_detector",
+          "regex": "@target\\(united:=true\\)",
+          "description": "DS_072c: детектор USE_LOCAL_OBJECT_IN_EXTENSION (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072c C4: детектор без автофикса."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.MATCHING_TYPES.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "matching_types_varchar2_number",
+          "regex": "(\\w+)\\s+varchar2\\(\\d+\\)\\s*:=\\s*'(\\d+)'",
+          "description": "DS_072d D1: varchar2 := 'число' -> number := число (словарная замена)",
+          "transform_type": "regex",
+          "transform": "{1} number := {2}",
+          "replace_scope": "match",
+          "note": "DS_072d D1: литерал-число в varchar2 -> number; иные случаи несоответствия типов — вне словаря, ignore (вручную/AI).",
+          "example_in": "doc1 varchar2(10) := '12345';",
+          "example_out": "doc1 number := 12345;"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.SIZE_RESTRICTION.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "size_restriction_zero_null",
+          "regex": "%size\\s*\\(\\s*(0|null)\\s*\\)\\s*([<>=!]+)\\s*(0|1)",
+          "description": "DS_072d D2: %size(0|null) OP 0|1 -> %size(1) OP N",
+          "transform_type": "regex",
+          "transform": "%size(1) {2} {3}",
+          "replace_scope": "match",
+          "note": "DS_072d D2: замена size-модификатора при сравнении с 0/1 (по html PlpCheck); нестандартный оператор — не матчится (ignore).",
+          "example_in": "p(3)%SiZe(null) < 1",
+          "example_out": "p(3)%size(1) < 1"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.INDEX_LENGTH.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "index_length_string_200",
+          "regex": "(\\w+);\\s*--\\s*STRING_\\d{4,}",
+          "description": "DS_072d D2: -- STRING_NNNN (1000+) -> -- STRING_200",
+          "transform_type": "regex",
+          "transform": "{1}; -- STRING_200",
+          "replace_scope": "match",
+          "note": "DS_072d D2: размер полей индекса >2704 байт недопустим (html PlpCheck); STRING_1000..9999 -> STRING_200; иные размеры — вручную.",
+          "example_in": "UNIQUE_ID; -- STRING_4000",
+          "example_out": "UNIQUE_ID; -- STRING_200"
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.CONTROLTABLECOLUMNSTYPE.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "controltablecolumnstype_detector",
+          "regex": "\\[CALC_TUN_NESTED\\]|\\[METACLASS\\]|\\[METHOD\\]|\\[STATES\\]|\\[OBJECT\\]|\\[CLASS_ATTRIBUTES\\]|\\[METHOD_CONTROLS\\]|\\[INTERVAL\\]",
+          "description": "DS_072d D1: детектор CONTROLTABLECOLUMNSTYPE (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "Тип колонки ТБП -> допустимый тип: имя subtype семантично (модель). DS_072d D1: автофикс НЕ реализован — детектор (fallback), замена вручную."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.HINT_INDEX_ORDER_BY.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "hint_index_order_by_detector",
+          "regex": "pragma\\s+hint\\s*\\(.*index",
+          "description": "DS_072d D2: детектор HINT_INDEX_ORDER_BY (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "Хинт индекса требует order by: колонки order by — из аргумента хинта (парсинг + модель). DS_072d D2: автофикс НЕ реализован — детектор (fallback)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.INVALID_INIT.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "invalid_init_detector",
+          "regex": "%init\\s*\\(",
+          "description": "DS_072d D2: детектор INVALID_INIT (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "%init с 1 параметром недопустим (0 или 2): целевая форма неясна (второй параметр — семантика). DS_072d D2: автофикс НЕ реализован — детектор (fallback)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.VERIFY_TYPE_IN_WITH.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "verify_type_in_with_detector",
+          "regex": "with\\s+recursive",
+          "description": "DS_072d D3: детектор VERIFY_TYPE_IN_WITH (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "Переопределение размерности строкового в CTE: целевой тип — из модели. DS_072d D3: автофикс НЕ реализован — детектор (fallback, движок multiline готов DS_073)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.WITHRECURSIVEMODEL.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "withrecursivemodel_detector",
+          "regex": "with\\s+recursive",
+          "description": "DS_072d D3: детектор WITHRECURSIVEMODEL (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "Иерархия по таблицам технического ядра запрещена: замена — рефакторинг модели. DS_072d D3: автофикс НЕ реализован — детектор (вендор good-пример пуст)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.PARTITION_ALL.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "partition_all_detector",
+          "regex": "select.*from.*Z#",
+          "description": "DS_072d D3: детектор PARTITION_ALL (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "Ключ секционирования в селектах: ключ — из модели данных. DS_072d D3: автофикс НЕ реализован — детектор (fallback)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.COLUMNS_LIMIT_EXCEEDED.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "columns_limit_exceeded_detector",
+          "regex": "select.*in ::\\[\\w+\\]",
+          "description": "DS_072d D4-AI: детектор COLUMNS_LIMIT_EXCEEDED (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "Количество колонок ТБП — модель данных (вендор good пуст). AI-фолбэк через needs_ai_fix (DS_054); hybrid не поддерживается _pattern_bucket (DS_072a_Уточнение_B)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.DEREFERENCING_TO_OUT_PARAM.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "dereferencing_to_out_param_detector",
+          "regex": "out.*\\.[A-Z_]+",
+          "description": "DS_072d D4-AI: детектор DEREFERENCING_TO_OUT_PARAM (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "Разыменование в out-параметр — сигнатуры функций (вендор good пуст). AI-фолбэк через needs_ai_fix (DS_054)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.FUNC_ATTR_DEREFERENCE.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "func_attr_dereference_detector",
+          "regex": "\\.[A-Z_]+\\.[A-Z_]+",
+          "description": "DS_072d D4-AI: детектор FUNC_ATTR_DEREFERENCE (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "Функциональный реквизит не последний в цепочке — семантика зависимостей (вендор good пуст). AI-фолбэк через needs_ai_fix (DS_054)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.INDEX_CAN_USE_BETTER.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "index_can_use_better_detector",
+          "regex": "where\\s+\\w+\\s*=\\s*\\w+",
+          "description": "DS_072d D4: детектор INDEX_CAN_USE_BETTER (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "Использование части составного индекса — план запроса/оптимизация. DS_072d D4: детектор без автофикса."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.ANALYTIC_AND_FETCH_BAD_USE.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "analytic_and_fetch_bad_use_detector",
+          "regex": "fetch\\s+first|exists\\s*\\(.*analytic\\(",
+          "description": "DS_072d D4-AI: детектор ANALYTIC_AND_FETCH_BAD_USE (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "Аналитика + fetch/exists — переписывание запроса (структурная семантика). AI-фолбэк через needs_ai_fix (DS_054)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.COMPILE_MISSING_COND.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "compile_missing_cond_detector",
+          "regex": "::\\[\\w+\\]\\s*\\([^)]*\\)",
+          "description": "DS_072d D4-AI: детектор COMPILE_MISSING_COND (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "Условие поиска на этапе компиляции — данные для условия семантичны. AI-фолбэк через needs_ai_fix (DS_054)."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.CARTESIAN_JOIN.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "cartesian_join_detector",
+          "regex": "from\\s+\\w+\\s*,\\s*\\w+",
+          "description": "DS_072e: детектор CARTESIAN_JOIN (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. детектор плана; требует explain в БД."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.FULL_INDEX_SCAN.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "full_index_scan_detector",
+          "regex": "FULL\\s+INDEX\\s+SCAN",
+          "description": "DS_072e: детектор FULL_INDEX_SCAN (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. детектор плана; требует explain в БД."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.FULL_TABLE_SCAN.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "full_table_scan_detector",
+          "regex": "FULL\\s+TABLE\\s+SCAN",
+          "description": "DS_072e: детектор FULL_TABLE_SCAN (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. детектор плана; требует explain в БД."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.COND_COMPILE_COMMENT.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "cond_compile_comment_detector",
+          "regex": "#if\\s+|#elsif\\s+",
+          "description": "DS_072e: детектор COND_COMPILE_COMMENT (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. условная компиляция — review вручную."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.USER_IF_DEF.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "user_if_def_detector",
+          "regex": "pragma\\s+if_def|--#if",
+          "description": "DS_072e: детектор USER_IF_DEF (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. условная компиляция — review вручную."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.INSERT_PLSQL.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "insert_plsql_detector",
+          "regex": "--\\s*begin\\s+pl/sql|--\\s*begin\\s+sql",
+          "description": "DS_072e: детектор INSERT_PLSQL (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. запрещено в DBI — ручной перенос."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.INTERVAL_NOT_SELECT.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "interval_not_select_detector",
+          "regex": "interval\\s*\\(",
+          "description": "DS_072e: детектор INTERVAL_NOT_SELECT (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. запрещено в DBI — ручной перенос."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.ROWID.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "rowid_detector",
+          "regex": "%rowid|%orascn",
+          "description": "DS_072e: детектор ROWID (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. запрещено в DBI — ручной перенос."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.ROWIDIDENTIFIEDTABLE.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "rowididentifiedtable_detector",
+          "regex": "identified\\s+by\\s+rowid",
+          "description": "DS_072e: детектор ROWIDIDENTIFIEDTABLE (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. запрещено в DBI — ручной перенос."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.USESQLCODE.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "usesqlcode_detector",
+          "regex": "sqlcode",
+          "description": "DS_072e: детектор USESQLCODE (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. запрещено в DBI — ручной перенос."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.MACROEXECUTEPROCESS.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "macroexecuteprocess_detector",
+          "regex": "#define.*\\{.*(process|execute).*\\}",
+          "description": "DS_072e: детектор MACROEXECUTEPROCESS (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. макросы EXECUTE/PROCESS — запрет в DBI."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.MACROEXECUTEPROCESS_COMMENT.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "macroexecuteprocess_comment_detector",
+          "regex": "--#define\\s+\\w+\\s+\\{.*(process|execute).*\\}",
+          "description": "DS_072e: детектор MACROEXECUTEPROCESS_COMMENT (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. макросы EXECUTE/PROCESS — запрет в DBI."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.MACRO_CALL_EXECUTEPROCESS.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "macro_call_executeprocess_detector",
+          "regex": "&\\w+\\(",
+          "description": "DS_072e: детектор MACRO_CALL_EXECUTEPROCESS (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. макросы EXECUTE/PROCESS — запрет в DBI."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.SAVEPOINT_ROLLBACK_MACRO_PARAM_LENGTH.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "savepoint_rollback_macro_param_length_detector",
+          "regex": "&sp\\([^)]+\\)|&rb\\([^)]+\\)",
+          "description": "DS_072e: детектор SAVEPOINT_ROLLBACK_MACRO_PARAM_LENGTH (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. длина savepoint — review."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.SAVEPOINT_ROLLBACK_NAME_LENGTH.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "savepoint_rollback_name_length_detector",
+          "regex": "savepoint\\s+\\w+|rollback\\s+to\\s+\\w+",
+          "description": "DS_072e: детектор SAVEPOINT_ROLLBACK_NAME_LENGTH (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. длина savepoint — review."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.NATIVE_ID_OBJ_IDENTIFIER.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "native_id_obj_identifier_detector",
+          "regex": "ref\\s*\\[METHOD\\]|ref\\s*\\[CRITERIA\\]",
+          "description": "DS_072e: детектор NATIVE_ID_OBJ_IDENTIFIER (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. NATIVE_ID — ручной перенос."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.SQL_FUNCTION_UNSUPPORTED.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "sql_function_unsupported_detector",
+          "regex": "regexp_replace|next_day|to_date",
+          "description": "DS_072e: детектор SQL_FUNCTION_UNSUPPORTED (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. SQL-функция не поддержана — замены по требованию."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.RESTRICTIONS_ON_IGNITE_FUNCTIONS.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "restrictions_on_ignite_functions_detector",
+          "regex": "to_number|convert|initcap|months_between|last_day|ratio_to_report|regexp_count|regexp_instr|regexp_substr|analytic|translate",
+          "description": "DS_072e: детектор RESTRICTIONS_ON_IGNITE_FUNCTIONS (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. SQL-функция не поддержана — замены по требованию."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.REGEXP_DIFF_IN_JAVA.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "regexp_diff_in_java_detector",
+          "regex": "regexp_(replace|like|instr|substr|count)",
+          "description": "DS_072e: детектор REGEXP_DIFF_IN_JAVA (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. различие Java/PLSQL — нет механической замены."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.UDF_IN_FILTER_FORMULA.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "udf_in_filter_formula_detector",
+          "regex": "filter\\s*=\\s*.*[A-Z_]+",
+          "description": "DS_072e: детектор UDF_IN_FILTER_FORMULA (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. UDF в формуле — ручная правка."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.EMPTY_STRING_IN_CURSOR.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "empty_string_in_cursor_detector",
+          "regex": "select.*''\\s*:",
+          "description": "DS_072e: детектор EMPTY_STRING_IN_CURSOR (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. детектор без автофикса."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.FORM_TRANSACT_CONTROL.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "form_transact_control_detector",
+          "regex": "<ControlTransaction>true</ControlTransaction>",
+          "description": "DS_072e: детектор FORM_TRANSACT_CONTROL (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. детектор без автофикса."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.RESTRICT_REFERENCES_BAD_USE.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "restrict_references_bad_use_detector",
+          "regex": "pragma\\s+restrict_references",
+          "description": "DS_072e: детектор RESTRICT_REFERENCES_BAD_USE (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. детектор без автофикса."
+        }
+      ]
+    },
+    {
+      "rule_code": "PlpCheck.DBI.SELECTANALYTICARGUMENT.п.1",
+      "priority": 1,
+      "patterns": [
+        {
+          "name": "selectanalyticargument_detector",
+          "regex": "analytic\\s*\\([^,]*,\\s*'(keep|within\\s+group|ignore\\s+nulls|respect\\s+nulls|from\\s+first|from\\s+last)",
+          "description": "DS_072e: детектор SELECTANALYTICARGUMENT (поиск — PROMPT for_search)",
+          "transform_type": "ignore",
+          "note": "DS_072e: группа E (нет замены) — детектор без автофикса. детектор без автофикса."
         }
       ]
     }

@@ -30,6 +30,7 @@ from analyzer.sql_parser import (  # noqa: E402
     load_config,
     find_rule,
     apply_fix_ex,
+    apply_fix_multiline,
     _pattern_bucket,
 )
 
@@ -147,6 +148,24 @@ class RuleEngine:
                 line, 'PlpCheck.STYLE.PREFIX_TYPE_IN_VAR_NAME.п.4.4',
                 allowed_buckets=allowed)
         return res
+
+    def apply_fix_multiline(self, text: str, rule_code: str,
+                            flags: Dict[str, bool]) -> Optional[Tuple[str, str, str]]:
+        """Многострочное исправление блока/файла (DS_072c, replace_scope: "multiline").
+
+        Args:
+            text: Многострочный фрагмент (блок begin..end, view и т.п.).
+            rule_code: Код правила (с маппингом plpcheck.<NAME>, DS_059).
+            flags: Флаги-чекбоксы.
+
+        Returns:
+            None, если не применимо; иначе (result, bucket, kind).
+        """
+        allowed = self.enabled_transform_buckets(flags)
+        if not allowed:
+            return None
+        resolved = self._resolve_code(rule_code)
+        return apply_fix_multiline(text, resolved, allowed_buckets=allowed)
 
     # ------------------------------------------------------------------
     # Формирование имени лога по флагам

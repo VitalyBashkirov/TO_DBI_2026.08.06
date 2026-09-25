@@ -2254,7 +2254,9 @@ def get_backup_fix_codes() -> List[str]:
 
 def save_scan_only_log(logs_dir: Path, source_name: str, flags: Dict[str, bool],
                        scanner: 'PLPlusScanner', config: Dict,
-                       timestamp: Optional[str] = None) -> Optional[Path]:
+                       timestamp: Optional[str] = None,
+                       log_level: str = 'Минимальный',
+                       report_stats_min_files: int = 10) -> Optional[Path]:
     """DS_053_Уточнение_4 (задача A): лог scan_VVxVVx_<source>_<ts>.md при
     «Сканировать» — ПРОГНОЗ исправлений (симуляция конвейера без записи).
 
@@ -2582,8 +2584,23 @@ def save_scan_only_log(logs_dir: Path, source_name: str, flags: Dict[str, bool],
             lines.append("")
 
         # Итоговая статистика (§4.5): по всем файлам сканирования.
+        # DS_075 §3.1: счётчики режимов (scan-only: Исправлено=0, forecast —
+        # число dry-run изменений, В AI — дедуп-issues минус forecast).
+        _forecast = len(all_changes)
+        _ai = max(0, len(dedup_issues) - _forecast)
         lines.append(f"Всего проблем: {len(dedup_issues)}")
+        lines.append(f"Прогноз исправлений: {_forecast}")
+        lines.append("Исправлено: 0")
+        lines.append(f"В AI: {_ai}")
         lines.append(f"Всего файлов: {len([sf for sf in sim_files if sf['changes']]) or len(sim_files)}")
+        lines.append("")
+        # DS_075 §3.2: топ-файлы (2 лидера) при «Подробный» + файлов >= порог.
+        try:
+            _top = scanner._top_files_lines(log_level, report_stats_min_files)
+            if _top:
+                lines.extend(_top)
+        except Exception as e:
+            logger.warning(f"[FIXER] Топ-файлы в scan-only логе недоступны: {e}")
         lines.append("")
 
     try:

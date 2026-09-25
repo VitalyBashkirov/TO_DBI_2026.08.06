@@ -124,6 +124,8 @@ class DBIMigrationApp:
         self.result_dir_var = tk.StringVar()
         self.file_pattern_var = tk.StringVar(value="**/*.plp")
         self.log_level_var = tk.StringVar(value="Минимальный")
+        # DS_075: минимальный размер выборки для top-файлов (порог «достаточности»)
+        self.report_stats_min_files_var = tk.StringVar(value="10")
         self.only_modified_var = tk.BooleanVar(value=True)
         self.preserve_structure_var = tk.BooleanVar(value=True)
         self.scan_recursive_var = tk.BooleanVar(value=True)
@@ -470,6 +472,9 @@ class DBIMigrationApp:
         ttk.Combobox(options_frame, textvariable=self.log_level_var, 
                     values=["Минимальный", "Подробный"], 
                     state="readonly", width=15).grid(row=0, column=3, sticky=tk.W)
+        # DS_075 §3.2: порог вывода топ-файлов (при «Подробный»).
+        ttk.Label(options_frame, text="Топ-файлов, мин. файлов:").grid(row=0, column=4, sticky=tk.W, padx=(15,3))
+        ttk.Entry(options_frame, textvariable=self.report_stats_min_files_var, width=5).grid(row=0, column=5, sticky=tk.W)
         
 # Чекбокс для режима вывода при исправлении
         self.fix_only_found_var = tk.BooleanVar(value=False)
@@ -2149,6 +2154,8 @@ class DBIMigrationApp:
                     self.result_dir_var.set(settings.get('result_dir', ''))
                     self.file_pattern_var.set(settings.get('file_pattern', '**/*.plp'))
                     self.log_level_var.set(settings.get('log_level', 'Минимальный'))
+                    # DS_075 §3.2: порог вывода топ-файлов.
+                    self.report_stats_min_files_var.set(str(settings.get('report_stats_min_files', 10)))
                     self.scan_recursive_var.set(settings.get('recursive', True))
                     self.only_modified_var.set(settings.get('only_modified', True))
                     self.preserve_structure_var.set(settings.get('preserve_structure', True))
@@ -2230,6 +2237,7 @@ class DBIMigrationApp:
             'result_dir': self.result_dir_var.get(),
             'file_pattern': self.file_pattern_var.get(),
             'log_level': self.log_level_var.get(),
+            'report_stats_min_files': int(self.report_stats_min_files_var.get() or 10),
             'recursive': self.scan_recursive_var.get(),
             'only_modified': self.only_modified_var.get(),
             'preserve_structure': self.preserve_structure_var.get(),
@@ -2649,8 +2657,15 @@ class DBIMigrationApp:
             
             # Генерация отчёта
             source_name = Path(self.source_dir_var.get()).name
+            # DS_075 §3.2: порог вывода топ-файлов + уровень логирования.
+            _log_level = self.log_level_var.get()
+            try:
+                _min_files = int(self.report_stats_min_files_var.get() or 10)
+            except (ValueError, TypeError):
+                _min_files = 10
             output_path = Path(config['paths']['logs_dir']) / f'scan_report_{source_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.md'
-            scanner.generate_report(output_path)
+            scanner.generate_report(output_path, mode='scan', fixed_count=0,
+                                    log_level=_log_level, report_stats_min_files=_min_files)
             
             # DS 025: дополнительно HTML-отчёт в формате дистрибутивного PlpCheck
             html_report_path = Path(config['paths']['logs_dir']) / f'plpcheck_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.html'
@@ -2664,7 +2679,7 @@ class DBIMigrationApp:
             _flags = self._current_fix_flags()
             _scan_log_path = save_scan_only_log(
                 Path(config['paths']['logs_dir']), source_name, _flags,
-                scanner, config)
+                scanner, config, log_level=_log_level, report_stats_min_files=_min_files)
             
             self.root.after(0, lambda: self.log(f"\n[2/3] Результаты сканирования:", 'info'))
             self.root.after(0, lambda: self.log(f"  Найдено *.plp файлов: {scan_results.get('files_scanned', 0)}", 'info'))

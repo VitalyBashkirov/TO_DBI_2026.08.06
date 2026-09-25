@@ -1948,7 +1948,9 @@ class PLPlusScanner:
             name = name[len('plpcheck.'):]
         return name.lower()
 
-    def generate_report(self, output_path: Path):
+    def generate_report(self, output_path: Path, mode: str = 'scan',
+                        fixed_count: int = 0, log_level: str = 'Минимальный',
+                        report_stats_min_files: int = 10):
         """Генерация отчёта. DS 025: если расширение .html - генерируется HTML-таблица
         в формате дистрибутивного PlpCheck-отчёта.
         DS 032: Markdown-отчёт синхронизирован с эталонным логом ЦФТ-PlpCheck:
@@ -2056,15 +2058,135 @@ class PLPlusScanner:
             # при завершении — привычное «Всего».
             total_word = "Обработано" if self.abort_percent is not None else "Всего"
             f.write(f"{total_word} проблем: {len(self.issues)}\n")
+            # DS_075 §3.1: счётчики режимов (Прогноз исправлений / Исправлено /
+            # В AI) — три строки всегда; для «Сканировать» fixed_count=0.
+            forecast, ai_count = self._forecast_and_ai_counts()
+            f.write(f"Прогноз исправлений: {forecast}\n")
+            f.write(f"Исправлено: {fixed_count}\n")
+            f.write(f"В AI: {ai_count}\n")
             # Дефект 5 (DS_066 §3.5): счётчик «Уникальных проблем» удалён
             f.write(f"{total_word} файлов: {len(meta_cache)}\n")
+            # DS_075 §3.2: топ-файлы (2 лидера) при «Подробный» + файлов >= порог.
+            for _tl in self._top_files_lines(log_level, report_stats_min_files):
+                f.write(_tl + "\n")
             # DS 043: упрощённая строка прерывания (без HTML-тегов, без эмодзи)
             if self.abort_percent is not None:
                 f.write("\n")
                 f.write(f"ПРЕРВАНО НА {self.abort_percent:.2f} %\n")
         
         print(f"Отчёт сохранён: {output_path}")
-    
+
+    def _dedup_issues(self) -> List['Issue']:
+        """DS_075: дедупликация issues по ключу (файл, строка, тип, описание)
+        — тот же ключ, что в generate_report и save_scan_only_log (DS 030)."""
+        seen = set()
+        dedup: List[Issue] = []
+        for iss in self.issues:
+            key = (iss.file_path, iss.line_number, iss.issue_type, iss.description)
+            if key in seen:
+                continue
+            seen.add(key)
+            dedup.append(iss)
+        return dedup
+
+    def _forecast_and_ai_counts(self) -> Tuple[int, int]:
+        """DS_075 §3.1: прогноз исправлений (dry-run детерминированного
+        конвейера) и число issues, не автофиксящихся (кандидаты в AI).
+
+        Реализация без тяжёлых зависимостей: ленивый импорт фиксера
+        (цикличности нет — code_fixer импортирует scanner, а не наоборот).
+        - forecast — число реально применённых в dry-run изменений
+          (бакеты regex/hybrid/backup при активных флагах);
+        - ai — дедуп-issues минус forecast (то, что конвейер не закрыл:
+          ignore / нет детерминированного transform → needs_ai_fix, DS_068).
+        При недоступности фиксера/движка — (0, len(dedup)) консервативно.
+        """
+        dedup = self._dedup_issues()
+        flags = self.fix_flags if isinstance(self.fix_flags, dict) else {}
+        try:
+            from fixer.code_fixer import PLPlusFixer, get_rule_engine
+        except Exception:
+            return 0, len(dedup)
+        try:
+            if not get_rule_engine().any_replacement_flag(flags):
+                return 0, len(dedup)
+            sim = PLPlusFixer(self.config, 'scan_forecast')
+            sim.flags = dict(flags)
+        except Exception:
+            return 0, len(dedup)
+        by_file: Dict[str, List[Issue]] = {}
+        for iss in dedup:
+            by_file.setdefault(iss.file_path, []).append(iss)
+        forecast = 0
+        for fp_str, issues in by_file.items():
+            fp = Path(fp_str)
+            if not fp.exists():
+                continue
+            try:
+                text, _enc = read_file_with_encoding(fp)
+                _, changes = sim._apply_issue_fixes(
+                    list((text or '').splitlines(keepends=True)), issues,
+                    dry_run=True)
+                forecast += len(changes)
+            except Exception:
+                continue
+        ai_count = max(0, len(dedup) - forecast)
+        return forecast, ai_count
+
+    def _top_files_lines(self, log_level: str, min_files: int) -> List[str]:
+        """DS_075 §3.2: топ-2 файла — лидер по числу проблем и лидер по
+        разнообразию (числу уникальных issue_type). Выводится только при
+        log_level == 'Подробный' и числе файлов с проблемами >= min_files.
+        Если один файл лидирует по обоим — один блок (по разнообразию).
+        Формат статистики — как в scan_VVVVVV_*: '<issue_type>: N' (полное имя).
+        """
+        if (log_level or '').strip() != 'Подробный':
+            return []
+        by_file: Dict[str, List[Issue]] = {}
+        for iss in self.issues:
+            by_file.setdefault(iss.file_path, []).append(iss)
+        if len(by_file) < max(1, int(min_files or 0)):
+            return []
+        try:
+            from collections import Counter
+        except Exception:
+            Counter = None  # фолбэк ниже
+        # (путь, проблем, видов, Counter) — сортировка по пути для
+        # детерминированного разрешения равенства (max стабилен).
+        stats = []
+        for fp in sorted(by_file):
+            issues = by_file[fp]
+            if Counter is not None:
+                c = Counter(i.issue_type for i in issues)
+            else:
+                c = {}
+                for i in issues:
+                    c[i.issue_type] = c.get(i.issue_type, 0) + 1
+            stats.append((fp, len(issues), len(c), c))
+
+        def _block(title, rec, subtitle):
+            out = [title, subtitle, "", "Статистика по файлу:"]
+            for code, n in sorted(rec[3].items(), key=lambda x: (-x[1], x[0])):
+                out.append(f"{code}: {n}")
+            out.append("")
+            return out
+
+        most_count = max(stats, key=lambda x: x[1])
+        most_div = max(stats, key=lambda x: (x[2], x[1]))
+        lines: List[str] = []
+        if most_count[0] == most_div[0]:
+            lines += _block(
+                "Файл с наибольшим количеством разнообразных проблем:", most_div,
+                f"{most_div[0]} — {most_div[2]} видов, {most_div[1]} проблем")
+            return lines
+        lines += _block(
+            "Файл с наибольшим количеством проблем:", most_count,
+            f"{most_count[0]} — {most_count[1]} проблем")
+        lines += _block(
+            "Файл с наибольшим количеством разнообразных проблем:", most_div,
+            f"{most_div[0]} — {most_div[2]} видов, {most_div[1]} проблем")
+        return lines
+
     def _generate_html_report(self, output_path: Path):
         """Генерация HTML-отчёта в формате дистрибутивного PlpCheck-отчёта (DS 025).
         

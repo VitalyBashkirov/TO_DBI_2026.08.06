@@ -2,7 +2,7 @@
 
 **Назначение:** адреса файлов и функций для ссылок в DS. Заменяет повтор адресов в каждой задаче.
 
-**Версия:** 1.9 от 23.09.2026 (после DS_063–DS_067 + Уточнения, DS_072a–DS_072e, DS_073).
+**Версия:** 2.0 от 25.09.2026 (после DS_063–DS_067 + Уточнения, DS_072a–DS_072e, DS_073, DS_075).
 
 ---
 
@@ -17,6 +17,11 @@
 | `_populate_rules_tree` | — | Построение дерева правил, начальное состояние чекбоксов. |
 | `show_sql_for_manual_fix` | — | Отображение результатов скана: счётчики «Всего issues (с дублями)» / «Всего проблем (после дедупа)». Строка «Уникальных (file,line,check)» **удалена** (DS_066). |
 | `on_close` | 3845 | Закрытие окна — вызов `save_settings`. |
+| `report_stats_min_files_var` | 128 | DS_075: `tk.StringVar(value="10")` — порог включения блока топ-файлов. |
+| Поле ввода `report_stats_min_files` | 477 | DS_075: `ttk.Entry` в `options_frame` (row 0, column 5). |
+| Загрузка из настроек | 2158 | DS_075: `settings.get('report_stats_min_files', 10)` → `report_stats_min_files_var`. |
+| Сохранение в настройки | 2240 | DS_075: `'report_stats_min_files': int(...)` в `save_settings` (ключ `settings.json`). |
+| Проброс в конвейер | 2663–2682 | DS_075: `_log_level` / `_min_files` передаются в `generate_report(...)` (2668) и `save_scan_only_log(...)` (2682). |
 
 ---
 
@@ -36,7 +41,10 @@
 | `scanner.py` | `_check_plp_code_in_comment` | — | Трекер блоков: открывает `/*`, закрывает `*/`. **DS_069:** возвращает 6-ки `(line, msg, orig, block_start, block_end)`; `block_end` = строка `*/` или EOF при незакрытом блоке (незакрытый блок репортится). Для `--` и однострочных блоков — `block_start=block_end=0`. |
 | `scanner.py` | `_generate_plan` | — | Формирование PLAN. Формат `> <действие>` (DS_066). Приоритет-3 (`example_out`) **удалён** (DS_065). Исправлен `UnboundLocalError` (локальный `import re`) — DS_066. **DS_067:** ключ сортировки отчёта (`generate_report`, scanner.py:2008) используется в `save_scan_only_log` для PLAN и цепочки. |
 | `scanner.py` | `_transform_action` | — | Сохранён для совместимости, **не вызывается** (DS_065). |
-| `scanner.py` | `generate_report` | 2008 | Строка «Уникальных проблем» **удалена** (DS_066). **Ключ сортировки:** `(line, not_mentioned первым, алфавит check)` — используется `save_scan_only_log` (DS_067_B). |
+| `scanner.py` | `generate_report` | 1951–2078 | Строка «Уникальных проблем» **удалена** (DS_066). **Ключ сортировки:** `(line, not_mentioned первым, алфавит check)` — используется `save_scan_only_log` (DS_067_B). **DS_075:** сигнатура `generate_report(output_path, mode='scan', fixed_count=0, log_level='Минимальный', report_stats_min_files=10)`; пишет 3 счётчика (`Прогноз исправлений:` / `Исправлено:` / `В AI:`) и блок топ-файлов. |
+| `scanner.py` | `_dedup_issues` | 2079–2091 | DS_075: список issues без дублей по ключу `(file, line, issue_type, description, match_fragment)` — общая основа счётчиков и топ-файлов. |
+| `scanner.py` | `_forecast_and_ai_counts` | 2092–2135 | DS_075: `(forecast, ai)`. `forecast` — число dry-run детерминированных фиксов, `ai` = дедуп-issues − forecast. Консервативный фолбэк при недоступности движка: `(0, len(dedup))`. |
+| `scanner.py` | `_top_files_lines` | 2136–2189 | DS_075: строки блока топ-файлов. Пусто, если `log_level != "Подробный"` или файлов < `min_files`. Лидер по числу issues + лидер по числу видов; при совпадении — один блок. Формат: `Статистика по файлу: <имя> (N issues, M видов)` + `  <issue_type>: K`. |
 | `scanner.py` | `scan_directory` | — | Итоговая статистика: строка «Всего issues (с дублями)» при `before != after` (DS_064_Уточнение_A). |
 | `scanner.py` | `PLPCHECK_RULE_TO_CATEGORY` | — | Маппинг: `plpcheck.CODE_IN_COMMENT` → `OTHER`; `plpcheck.WRONG_METHOD_SYNTAX` → `STYLE.SYNTAX` (DS_065). |
 | `scanner.py` | `PLPCHECK_CATEGORIES` | — | Категории GUI. Из `STYLE.PREFIXES` убраны `wrong_method_syntax`, `code_in_comment`; добавлена `STYLE.SYNTAX`; `code_in_comment` → `OTHER` (DS_065). |
@@ -65,7 +73,7 @@
 | `code_fixer.py` | `_apply_issue_fixes` | — | Основной цикл фиксера. Сухой прогон даёт `changes` `{line_number, rule_code, before, after}` (DS_067 §7). |
 | `code_fixer.py` | `_validate_fix` | 876–879 | Спец-обработка `&debug`. |
 | `code_fixer.py` | `_is_delete` | — | Хелпер: issue с действием удаления (`not_mentioned` / `code_in_comment` / действие «удалить» из `_generate_plan`) — DS_067_A. |
-| `code_fixer.py` | `save_scan_only_log` | ~2193 | Лог `scan_VVxVVx_*`. **DS_066:** PLAN = все issues (вариант A) с `[auto]`/`[ignore]`; заголовок через `_generate_active_rubricators_lines` (DS_059_Уточнение_B/D). **DS_067:** PLAN с колонкой `LINE` (заголовок `LINE AUTO ДЕЙСТВИЕ`); «Прогноз» — все строки-мишени, цепочка правил, единая позиция `>`, МКР = `max(len(код_правила)) + 1` по всем issues файла; итоговый текст: `not_mentioned` → `(удалить объявление)`, `code_in_comment` → `(удалить строку)`. **DS_067_A:** приоритет удаления (`_is_delete`), обрыв цепочки удалён как отдельный механизм. **DS_067_B:** сортировка PLAN и цепочки внутри LINE по ключу `scan_report_*`. |
+| `code_fixer.py` | `save_scan_only_log` | 2255 | Лог `scan_VVxVVx_*`. **DS_066:** PLAN = все issues (вариант A) с `[auto]`/`[ignore]`; заголовок через `_generate_active_rubricators_lines` (DS_059_Уточнение_B/D). **DS_067:** PLAN с колонкой `LINE` (заголовок `LINE AUTO ДЕЙСТВИЕ`); «Прогноз» — все строки-мишени, цепочка правил, единая позиция `>`, МКР = `max(len(код_правила)) + 1` по всем issues файла; итоговый текст: `not_mentioned` → `(удалить объявление)`, `code_in_comment` → `(удалить строку)`. **DS_067_A:** приоритет удаления (`_is_delete`), обрыв цепочки удалён как отдельный механизм. **DS_067_B:** сортировка PLAN и цепочки внутри LINE по ключу `scan_report_*`. **DS_075:** параметры `log_level='Минимальный'`, `report_stats_min_files=10`; после блока «Правил в ignore» пишет 3 счётчика (`Прогноз исправлений:` / `Исправлено: 0` / `В AI:`) и блок топ-файлов через `scanner._top_files_lines(...)`. |
 
 ---
 
@@ -168,3 +176,8 @@
 | 23.09.2026 | `code_fixer.py:_apply_issue_fixes`: интеграция `apply_fix_multiline` — первым проходом (до построчного `apply_fix`), окно Вариант C (`block_start/block_end` / весь файл), идемпотентность (правило исключается из построчного прохода). Заработали 4 multiline-правила C2 в прод-фиксе | DS_073 |
 | 23.09.2026 | PARSER_SQL: +15 правил группы D (109→124): 3 transform (`MATCHING_TYPES`, `SIZE_RESTRICTION`, `INDEX_LENGTH`, `replace_scope: "match"`) + 12 ignore (fallback брифа: `CONTROLTABLECOLUMNSTYPE`, `HINT_INDEX_ORDER_BY`, `INVALID_INIT`, D3 ×3, D4 ×6); PROMPT: `fix_instruction` для 15 NAME синхронно; SRC не тронут | DS_072d_Реализация |
 | 23.09.2026 | PARSER_SQL: +24 правила группы E (124→148) — все `transform_type: "ignore"`-детекторы (regex из PROMPT `for_search`), note по категориям брифа §4.2; PROMPT: `fix_instruction` для 24 NAME синхронно. PlpCheck-аудит DS_071 завершён: 74/74 NAME — 20 transform + 54 ignore/AI | DS_072e_Реализация |
+| 25.09.2026 | `scanner.py`: `generate_report` — параметры `mode`/`fixed_count`/`log_level`/`report_stats_min_files`; 3 счётчика `Прогноз исправлений` / `Исправлено` / `В AI` | DS_075 |
+| 25.09.2026 | `scanner.py`: новые хелперы `_dedup_issues` (2079), `_forecast_and_ai_counts` (2092), `_top_files_lines` (2136) | DS_075 |
+| 25.09.2026 | `code_fixer.py:save_scan_only_log` — параметры `log_level`/`report_stats_min_files`, те же 3 счётчика + блок топ-файлов | DS_075 |
+| 25.09.2026 | `gui_app.py`: `report_stats_min_files_var` (128), поле ввода (477), загрузка/сохранение ключа (2158/2240), проброс в отчёт и лог (2663–2682) | DS_075 |
+| 25.09.2026 | `settings.json`: новый ключ `report_stats_min_files` (по умолчанию 10) | DS_075 |

@@ -2,7 +2,7 @@
 
 **Назначение:** адреса файлов и функций для ссылок в DS. Заменяет повтор адресов в каждой задаче.
 
-**Версия:** 2.0 от 25.09.2026 (после DS_063–DS_067 + Уточнения, DS_072a–DS_072e, DS_073, DS_075).
+**Версия:** 2.1 от 25.09.2026 (после DS_063–DS_067 + Уточнения, DS_072a–DS_072e, DS_073, DS_075, DS_076).
 
 ---
 
@@ -41,9 +41,9 @@
 | `scanner.py` | `_check_plp_code_in_comment` | — | Трекер блоков: открывает `/*`, закрывает `*/`. **DS_069:** возвращает 6-ки `(line, msg, orig, block_start, block_end)`; `block_end` = строка `*/` или EOF при незакрытом блоке (незакрытый блок репортится). Для `--` и однострочных блоков — `block_start=block_end=0`. |
 | `scanner.py` | `_generate_plan` | — | Формирование PLAN. Формат `> <действие>` (DS_066). Приоритет-3 (`example_out`) **удалён** (DS_065). Исправлен `UnboundLocalError` (локальный `import re`) — DS_066. **DS_067:** ключ сортировки отчёта (`generate_report`, scanner.py:2008) используется в `save_scan_only_log` для PLAN и цепочки. |
 | `scanner.py` | `_transform_action` | — | Сохранён для совместимости, **не вызывается** (DS_065). |
-| `scanner.py` | `generate_report` | 1951–2078 | Строка «Уникальных проблем» **удалена** (DS_066). **Ключ сортировки:** `(line, not_mentioned первым, алфавит check)` — используется `save_scan_only_log` (DS_067_B). **DS_075:** сигнатура `generate_report(output_path, mode='scan', fixed_count=0, log_level='Минимальный', report_stats_min_files=10)`; пишет 3 счётчика (`Прогноз исправлений:` / `Исправлено:` / `В AI:`) и блок топ-файлов. |
+| `scanner.py` | `generate_report` | 1951–2078 | Строка «Уникальных проблем» **удалена** (DS_066). **Ключ сортировки:** `(line, not_mentioned первым, алфавит check)` — используется `save_scan_only_log` (DS_067_B). **DS_075:** сигнатура `generate_report(output_path, mode='scan', fixed_count=0, log_level='Минимальный', report_stats_min_files=10)`; пишет 3 счётчика (`Прогноз исправлений:` / `Исправлено:` / `В AI:`) и блок топ-файлов. **DS_076:** метрики файлов — `Всего файлов` (self.total_files; при прерывании `Обработано файлов` = self.files_scanned) / `Файлов с проблемами` / `Файлов с изменениями` (self.forecast_files_changed). |
 | `scanner.py` | `_dedup_issues` | 2079–2091 | DS_075: список issues без дублей по ключу `(file, line, issue_type, description, match_fragment)` — общая основа счётчиков и топ-файлов. |
-| `scanner.py` | `_forecast_and_ai_counts` | 2092–2135 | DS_075: `(forecast, ai)`. `forecast` — число dry-run детерминированных фиксов, `ai` = дедуп-issues − forecast. Консервативный фолбэк при недоступности движка: `(0, len(dedup))`. |
+| `scanner.py` | `_forecast_and_ai_counts` | 2092–2135 | DS_075: `(forecast, ai)`. `forecast` — число dry-run детерминированных фиксов, `ai` = дедуп-issues − forecast. Консервативный фолбэк при недоступности движка: `(0, len(dedup))`. **DS_076:** попутно фиксирует `self.forecast_files_changed` — файлов с ≥ 1 change (метрика «Файлов с изменениями»). |
 | `scanner.py` | `_top_files_lines` | 2136–2189 | DS_075: строки блока топ-файлов. Пусто, если `log_level != "Подробный"` или файлов < `min_files`. Лидер по числу issues + лидер по числу видов; при совпадении — один блок. Формат: `Статистика по файлу: <имя> (N issues, M видов)` + `  <issue_type>: K`. |
 | `scanner.py` | `scan_directory` | — | Итоговая статистика: строка «Всего issues (с дублями)» при `before != after` (DS_064_Уточнение_A). |
 | `scanner.py` | `PLPCHECK_RULE_TO_CATEGORY` | — | Маппинг: `plpcheck.CODE_IN_COMMENT` → `OTHER`; `plpcheck.WRONG_METHOD_SYNTAX` → `STYLE.SYNTAX` (DS_065). |
@@ -181,3 +181,6 @@
 | 25.09.2026 | `code_fixer.py:save_scan_only_log` — параметры `log_level`/`report_stats_min_files`, те же 3 счётчика + блок топ-файлов | DS_075 |
 | 25.09.2026 | `gui_app.py`: `report_stats_min_files_var` (128), поле ввода (477), загрузка/сохранение ключа (2158/2240), проброс в отчёт и лог (2663–2682) | DS_075 |
 | 25.09.2026 | `settings.json`: новый ключ `report_stats_min_files` (по умолчанию 10) | DS_075 |
+| 25.09.2026 | `scanner.py`: `__init__` — атрибуты `total_files`/`files_scanned`/`forecast_files_changed`; `scan_directory` фиксирует `total_files`/`files_scanned`; `_forecast_and_ai_counts` — `forecast_files_changed`; `generate_report` — 3 метрики файлов («Всего»/«с проблемами»/«с изменениями»; при прерывании «Обработано файлов») | DS_076 |
+| 25.09.2026 | `code_fixer.py:save_scan_only_log` — те же 3 метрики файлов (источник: `scanner.total_files`/`dedup_by_file`/`sim_files[changes]`) | DS_076 |
+| 25.09.2026 | `gui_app.py` (2505, 2970), `code_fixer.py` (2082): из `exclude_patterns` удалён мёртвый паттерн `.v????` | DS_076 |

@@ -2502,7 +2502,7 @@ class DBIMigrationApp:
                 'scan': {
                     'recursive': self.scan_recursive_var.get(),
                     'file_pattern': self.file_pattern_var.get(),
-                    'exclude_patterns': ['.v????', '.bak', '.tmp']
+                    'exclude_patterns': ['.bak', '.tmp']
                 },
                 'logging': {
                     'level': self.log_level_var.get()
@@ -2967,7 +2967,7 @@ class DBIMigrationApp:
                 'scan': {
                     'recursive': self.scan_recursive_var.get(),
                     'file_pattern': self.file_pattern_var.get() if self.file_pattern_var.get() else '**/*.plp',
-                    'exclude_patterns': ['.v????', '.bak', '.tmp']
+                    'exclude_patterns': ['.bak', '.tmp']
                 },
 'output': {
                     'only_modified': self.only_modified_var.get(),

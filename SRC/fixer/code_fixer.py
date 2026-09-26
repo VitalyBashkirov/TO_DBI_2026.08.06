@@ -2079,7 +2079,7 @@ def main():
         config['scan'] = {
             'recursive': config.get('recursive', True),
             'file_pattern': config.get('file_pattern', '**/*.plp'),
-            'exclude_patterns': ['.v????', '.bak', '.tmp']
+            'exclude_patterns': ['.bak', '.tmp']
         }
     if 'output' not in config:
         config['output'] = {
@@ -2592,7 +2592,21 @@ def save_scan_only_log(logs_dir: Path, source_name: str, flags: Dict[str, bool],
         lines.append(f"Прогноз исправлений: {_forecast}")
         lines.append("Исправлено: 0")
         lines.append(f"В AI: {_ai}")
-        lines.append(f"Всего файлов: {len([sf for sf in sim_files if sf['changes']]) or len(sim_files)}")
+        # DS_076 §4.1–4.2: три унифицированные метрики файлов (как в
+        # scan_report_*): всего / с проблемами / с dry-run changes.
+        # «Всего файлов» — scanner.total_files (найдено после _should_exclude);
+        # при прерывании — «Обработано файлов» = scanner.files_scanned.
+        # Фолбэк (scan_directory не вызывался): len(sim_files).
+        _files_total = getattr(scanner, 'total_files', 0) or len(sim_files)
+        _files_issues = len(dedup_by_file)
+        _files_changed = len([sf for sf in sim_files if sf['changes']])
+        if getattr(scanner, 'abort_percent', None) is not None:
+            lines.append(f"Обработано файлов: "
+                         f"{getattr(scanner, 'files_scanned', 0) or _files_total}")
+        else:
+            lines.append(f"Всего файлов: {_files_total}")
+        lines.append(f"Файлов с проблемами: {_files_issues}")
+        lines.append(f"Файлов с изменениями: {_files_changed}")
         lines.append("")
         # DS_075 §3.2: топ-файлы (2 лидера) при «Подробный» + файлов >= порог.
         try:

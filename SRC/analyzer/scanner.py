@@ -492,6 +492,13 @@ class PLPlusScanner:
         self.issues: List[Issue] = []
         # DS_064_Уточнение_A (B1): счётчик issues до дедупликации (по всем файлам)
         self.issues_before_dedup: int = 0
+        # DS_076: метрики файлов для отчётов (scan_report_* / scan_VVxVVx_*)
+        # total_files — найдено после _should_exclude; files_scanned — обработано
+        # (равно total_files без прерывания); forecast_files_changed — файлов,
+        # где dry-run прогноз дал >= 1 change (_forecast_and_ai_counts).
+        self.total_files: int = 0
+        self.files_scanned: int = 0
+        self.forecast_files_changed: int = 0
         self.stats: Dict[str, int] = {}
         self.lexer_state = LexerState()
         self.lines = []  # для многострочного анализа
@@ -1655,6 +1662,9 @@ class PLPlusScanner:
         
         all_files = [f for f in file_finder(file_pattern) if not self._should_exclude(f)]
         total_files = len(all_files)
+        # DS_076: метрики файлов для отчётов (Всего файлов / Файлов с проблемами /
+        # Файлов с изменениями)
+        self.total_files = total_files
         
         # DS 034: отладочный вывод списка найденных файлов (Шаги 1-2 диагностики)
         print(f"[DEBUG-DS034] scan_directory: source_dir={source_dir}, pattern={file_pattern}, recursive={recursive}")
@@ -1729,6 +1739,8 @@ class PLPlusScanner:
             log_callback('ИТОГОВАЯ СТАТИСТИКА ПО ВИДАМ КОДОВ ПРАВИЛ', 'info')
             log_callback(sep, 'info')
             log_callback(f'Всего файлов просканировано:    {files_scanned}', 'info')
+            # DS_076: файлы с issues — для унифицированных метрик отчётов
+            log_callback(f'Файлов с проблемами:            {len({i.file_path for i in self.issues})}', 'info')
             # DS_064_Уточнение_A (B1): оба счётчика — до и после дедупликации
             if self.issues_before_dedup != total_issues:
                 log_callback(f'Всего issues (с дублями):       {self.issues_before_dedup}', 'info')
@@ -1743,6 +1755,9 @@ class PLPlusScanner:
                 log_callback(f'  {rule_code}: {count}', 'info')
             log_callback(sep, 'info')
         
+        # DS_076: число обработанных файлов (для метрик generate_report;
+        # при прерывании < total_files)
+        self.files_scanned = files_scanned
         return {
             'files_scanned': files_scanned,
             'total_issues': len(self.issues),
@@ -2065,7 +2080,17 @@ class PLPlusScanner:
             f.write(f"Исправлено: {fixed_count}\n")
             f.write(f"В AI: {ai_count}\n")
             # Дефект 5 (DS_066 §3.5): счётчик «Уникальных проблем» удалён
-            f.write(f"{total_word} файлов: {len(meta_cache)}\n")
+            # DS_076 §4.1–4.2: три унифицированные метрики файлов.
+            # «Всего файлов» — найдено после _should_exclude (self.total_files);
+            # при прерывании — «Обработано файлов» = self.files_scanned.
+            # Фолбэк (scan_directory не вызывался): все метрики = файлы с issues.
+            _files_issues = len(meta_cache)
+            if self.abort_percent is not None:
+                f.write(f"Обработано файлов: {self.files_scanned or _files_issues}\n")
+            else:
+                f.write(f"Всего файлов: {self.total_files or _files_issues}\n")
+            f.write(f"Файлов с проблемами: {_files_issues}\n")
+            f.write(f"Файлов с изменениями: {self.forecast_files_changed}\n")
             # DS_075 §3.2: топ-файлы (2 лидера) при «Подробный» + файлов >= порог.
             for _tl in self._top_files_lines(log_level, report_stats_min_files):
                 f.write(_tl + "\n")
@@ -2100,8 +2125,12 @@ class PLPlusScanner:
         - ai — дедуп-issues минус forecast (то, что конвейер не закрыл:
           ignore / нет детерминированного transform → needs_ai_fix, DS_068).
         При недоступности фиксера/движка — (0, len(dedup)) консервативно.
+
+        DS_076: попутно фиксирует self.forecast_files_changed — число файлов,
+        где dry-run дал >= 1 change (метрика «Файлов с изменениями»).
         """
         dedup = self._dedup_issues()
+        self.forecast_files_changed = 0
         flags = self.fix_flags if isinstance(self.fix_flags, dict) else {}
         try:
             from fixer.code_fixer import PLPlusFixer, get_rule_engine
@@ -2118,6 +2147,7 @@ class PLPlusScanner:
         for iss in dedup:
             by_file.setdefault(iss.file_path, []).append(iss)
         forecast = 0
+        files_changed = 0
         for fp_str, issues in by_file.items():
             fp = Path(fp_str)
             if not fp.exists():
@@ -2128,8 +2158,11 @@ class PLPlusScanner:
                     list((text or '').splitlines(keepends=True)), issues,
                     dry_run=True)
                 forecast += len(changes)
+                if changes:
+                    files_changed += 1
             except Exception:
                 continue
+        self.forecast_files_changed = files_changed
         ai_count = max(0, len(dedup) - forecast)
         return forecast, ai_count
 

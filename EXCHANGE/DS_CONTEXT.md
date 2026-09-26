@@ -218,7 +218,7 @@ SRC\analyzer\sql_parser.py использует re.IGNORECASE глобально
 
 text
 23  code_in_comment  WARNING  STYLE  Удалите закомментированный код: "--if lrecBrInfo.f_BIC ..."  > Удалить закомментированный код
-Строка «Уникальных проблем» удалена из scan_report_* (DS_066). Остаётся «Всего проблем: N».
+Строка «Уникальных проблем» удалена из scan_report_* (DS_066). Итоговая строка: «Всего проблем: N»; при наличии дублей (`issues_before_dedup != len(issues)`) перед ней — «Всего проблем (с дублями): N» (DS_077).
 
 Ключ сортировки (scanner.generate_report, scanner.py:2008): (line, not_mentioned первым, алфавит check). Используется в save_scan_only_log для PLAN и цепочки (DS_067_B).
 
@@ -288,6 +288,7 @@ LINE AUTO ДЕЙСТВИЕ
   <КР-код-3>
   ...
 
+Всего проблем (с дублями): N  # при issues_before_dedup != len(dedup_issues) (DS_077)
 Всего проблем: N
 Всего файлов: M
 Ключевое (DS_066): PLAN = все issues (вариант A), с пометкой [auto] / [ignore].

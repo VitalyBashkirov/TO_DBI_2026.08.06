@@ -2588,6 +2588,10 @@ def save_scan_only_log(logs_dir: Path, source_name: str, flags: Dict[str, bool],
         # число dry-run изменений, В AI — дедуп-issues минус forecast).
         _forecast = len(all_changes)
         _ai = max(0, len(dedup_issues) - _forecast)
+        # DS_077: две строки проблем (с дублями + после дедупа), условно
+        _issues_before_dedup = getattr(scanner, 'issues_before_dedup', 0)
+        if _issues_before_dedup != len(dedup_issues):
+            lines.append(f"Всего проблем (с дублями): {_issues_before_dedup}")
         lines.append(f"Всего проблем: {len(dedup_issues)}")
         lines.append(f"Прогноз исправлений: {_forecast}")
         lines.append("Исправлено: 0")

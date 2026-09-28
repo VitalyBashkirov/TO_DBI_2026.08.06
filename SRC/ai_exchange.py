@@ -37,6 +37,11 @@ DIRS = ['AI_IN', 'AI_OUT', 'AI_IN_PROCESSED', 'AI_OUT_PROCESSED']
 REQUEST_PREFIX = 'AI_REQUEST_'
 RESPONSE_PREFIX = 'AI_RESPONSE_'
 
+# DS_081 §2.3: каталог артефактов разбора (EXCHANGE\OUTBOX) и префикс файла
+# needs_manual_<YYYYMMDD_HHMMSS>.md.
+OUTBOX_NAME = 'OUTBOX'
+NEEDS_MANUAL_PREFIX = 'needs_manual_'
+
 # Флаги детерминированного фикса в каноническом порядке (DS_053).
 FLAG_ORDER = ['regex', 'hybrid', 'ai_fallback', 'ignore', 'backup', 'other']
 
@@ -349,9 +354,16 @@ def apply_fixes(file_path: Path, fixes: List[dict]) -> Dict[str, object]:
 
     for ln, fx in prepared:
         kind = classify_fix(fx)
+        # DS_081 §2.2: детали нужны артефакту needs_manual (файл, строка,
+        # правило, исходный код, причина). rule_code/description AI-ответом
+        # не передаются — подставляются из файла-запроса в process_response.
+        old_line = lines[ln - 1] if 0 < ln <= len(lines) else ''
         detail = {'line': ln, 'kind': kind,
                   'confidence': fx.get('confidence'),
-                  'reason': fx.get('reason', '')}
+                  'reason': fx.get('reason', ''),
+                  'id': fx.get('id'),
+                  'rule_code': str(fx.get('rule_code', '') or fx.get('rule', '') or ''),
+                  'before': str(fx.get('before') or old_line or '')}
         if kind == 'manual':
             stats['needs_manual'] += 1
             stats['changes'].append(detail)
@@ -367,7 +379,7 @@ def apply_fixes(file_path: Path, fixes: List[dict]) -> Dict[str, object]:
             stats['changes'].append(detail)
             continue
 
-        old = lines[ln - 1]
+        old = old_line
         before = fx.get('before')
         # Проверка соответствия исходной строки (нечувствительно к отступам).
         if before not in (None, '') and str(before).strip() != old.strip():
@@ -437,6 +449,36 @@ def _source_from_request(req_path: Path) -> Optional[Path]:
     return Path(raw) if raw else None
 
 
+_RE_REQ_BLOCK = re.compile(
+    r'^###\s*Проблема\s+\d+\s*\n'
+    r'\s*-\s*Строка:\s*(?P<line>\d+)\s*\n'
+    r'\s*-\s*Код правила:\s*(?P<rule>.+?)\s*$',
+    re.MULTILINE,
+)
+
+
+def _rule_map_from_request(req_path: Optional[Path]) -> Dict[int, str]:
+    """DS_081 §2.3: карта «номер строки -> код правила» из файла-запроса.
+
+    Формат AI_REQUEST не меняется — читаем уже существующие блоки
+    «### Проблема N / - Строка: L / - Код правила: R». При повторной строке
+    сохраняется первое правило. Нужно для колонки «правило» в needs_manual.
+    """
+    if not req_path:
+        return {}
+    try:
+        text = Path(req_path).read_text(encoding='utf-8', errors='replace')
+    except Exception:
+        return {}
+    out: Dict[int, str] = {}
+    for m in _RE_REQ_BLOCK.finditer(text):
+        ln = int(m.group('line'))
+        rule = m.group('rule').strip()
+        if ln and rule:
+            out.setdefault(ln, rule)
+    return out
+
+
 def process_response(response_path: Path, base: Optional[Path] = None,
                      backup: bool = True) -> Dict[str, object]:
     """Обработать один файл-ответ: применить исправления, заархивировать.
@@ -475,14 +517,25 @@ def process_response(response_path: Path, base: Optional[Path] = None,
         return result
 
     result['source'] = str(source)
+    # DS_081 §2.1: путь pre-AI копии нужен GUI для повторного скана «до/после»
+    # (считать «было» по дофиксному скану, а не по исходному скану каталога).
+    result['backup_path'] = None
     if backup:
         try:
             ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-            shutil.copy2(source, source.with_name(f"{source.stem}_{ts}_preai{source.suffix}"))
+            backup_file = source.with_name(f"{source.stem}_{ts}_preai{source.suffix}")
+            shutil.copy2(source, backup_file)
+            result['backup_path'] = str(backup_file)
         except Exception:
             pass
 
     stats = apply_fixes(Path(source), fixes)
+    # DS_081 §2.3: код правила берём из файла-запроса (в ответе AI его нет).
+    rule_by_line = _rule_map_from_request(req_path)
+    if rule_by_line:
+        for ch in stats['changes']:
+            if not ch.get('rule_code'):
+                ch['rule_code'] = rule_by_line.get(int(ch.get('line') or 0), '')
     result['applied_auto'] = stats['applied_auto']
     result['applied_medium'] = stats['applied_medium']
     result['needs_manual'] = stats['needs_manual']
@@ -523,10 +576,26 @@ def _archive(src: Path, dst_dir: Path) -> None:
 # ----------------------------------------------------------------------
 # Человекочитаемая сводка для журнала АРМ
 # ----------------------------------------------------------------------
-def summarize(results: List[Dict[str, object]]) -> List[str]:
-    """Строки сводки для журнала (журнал АРМ / КР)."""
+def summarize(results: List[Dict[str, object]],
+              structured: bool = False):
+    """Сводка обработки AI-ответов.
+
+    structured=False — список строк для журнала АРМ / КР (как в DS_054);
+    structured=True  — словарь (DS_081 §2.2) для артефакта needs_manual:
+
+        {"lines": [те же строки, что и в неструктурированном режиме],
+         "by_confidence": {"auto": [...], "medium": [...],
+                           "manual": [...], "noop": [...]}}
+
+    Элемент корзины: {"file", "line", "rule_code", "before", "reason",
+    "confidence"}. В "noop" попадают kind='noop' (AI не предложил замену)
+    и 'skipped' (вне диапазона / before mismatch) — всё, что не применено
+    и не требует ручного разбора по причине low confidence.
+    """
     lines: List[str] = []
     tot = {'auto': 0, 'med': 0, 'man': 0, 'skip': 0}
+    buckets: Dict[str, List[Dict[str, object]]] = {
+        'auto': [], 'medium': [], 'manual': [], 'noop': []}
     for r in results:
         nm = Path(r.get('response', '?')).name
         st = r.get('status', 'ok')
@@ -542,6 +611,7 @@ def summarize(results: List[Dict[str, object]]) -> List[str]:
         tot['man'] += mn
         tot['skip'] += sk
         src = Path(r.get('source', '?')).name if r.get('source') else '?'
+        src_path = r.get('source') or ''
         lines.append(f"  {nm} → {src}: авто={a}, средняя={m}, "
                      f"needs_manual={mn}, пропущено={sk}")
         for ch in r.get('changes', []):
@@ -558,9 +628,79 @@ def summarize(results: List[Dict[str, object]]) -> List[str]:
             elif kind == 'skipped':
                 lines.append(f"      стр.{ch.get('line')}: пропущено "
                              f"({ch.get('error', '')})")
+            if structured:
+                bucket = {'auto': 'auto', 'medium': 'medium',
+                          'manual': 'manual'}.get(kind, 'noop')
+                buckets[bucket].append({
+                    'file': str(src_path),
+                    'line': ch.get('line'),
+                    'rule_code': ch.get('rule_code', ''),
+                    'before': ch.get('before', ''),
+                    'reason': ch.get('reason', '') or ch.get('error', ''),
+                    'confidence': ch.get('confidence'),
+                })
     lines.append(f"ИТОГО: авто={tot['auto']}, средняя уверенность={tot['med']}, "
                  f"needs_manual={tot['man']}, пропущено={tot['skip']}")
+    if structured:
+        return {'lines': lines, 'by_confidence': buckets}
     return lines
+
+
+def _md_cell(value: object, code: bool = False) -> str:
+    """Значение ячейки Markdown-таблицы: без переводов строк и вертикальных черт."""
+    text = str(value if value is not None else '')
+    text = text.replace('\r', ' ').replace('\n', ' ').replace('|', '\|').strip()
+    if code:
+        text = text.replace('`', "'")
+        return f'`{text}`' if text else '``'
+    return text
+
+
+def save_needs_manual(summary: Dict[str, object],
+                      base: Optional[Path] = None) -> Optional[Path]:
+    """DS_081 §2.3: артефакт needs_manual_<YYYYMMDD_HHMMSS>.md в EXCHANGE\OUTBOX.
+
+    summary — результат summarize(results, structured=True). Если корзина
+    manual пуста — файл НЕ создаётся, возвращается None (GUI пишет в bot.log
+    «needs_manual: 0»). Файл — Markdown, CRLF (AGENTS.md: OUTBOX — CRLF).
+    """
+    by_conf = (summary or {}).get('by_confidence') or {}
+    manual = list(by_conf.get('manual') or [])
+    if not manual:
+        return None
+
+    root = Path(base) if base else base_dir()
+    outbox = root / OUTBOX_NAME
+    outbox.mkdir(parents=True, exist_ok=True)
+
+    counts = {k: len(by_conf.get(k) or []) for k in ('auto', 'medium', 'manual', 'noop')}
+    total = sum(counts.values())
+    now = datetime.now()
+
+    out: List[str] = [
+        f"# needs_manual — {now.strftime('%d.%m.%Y %H:%M:%S')}",
+        "",
+        f"Всего: {total} "
+        f"(auto: {counts['auto']}, medium: {counts['medium']}, "
+        f"manual: {counts['manual']}, noop: {counts['noop']})",
+        "",
+        "| файл | строка | правило | before | reason |",
+        "|------|--------|---------|--------|--------|",
+    ]
+    for item in manual:
+        out.append("| {file} | {line} | {rule} | {before} | {reason} |".format(
+            file=_md_cell(item.get('file')),
+            line=_md_cell(item.get('line')),
+            rule=_md_cell(item.get('rule_code')),
+            before=_md_cell(item.get('before'), code=True),
+            reason=_md_cell(item.get('reason')),
+        ))
+    out.append("")
+
+    path = outbox / f"{NEEDS_MANUAL_PREFIX}{now.strftime('%Y%m%d_%H%M%S')}.md"
+    text = '\r\n'.join(out)
+    path.write_text(text, encoding='utf-8', newline='')
+    return path
 
 
 if __name__ == '__main__':  # pragma: no cover - ручная проверка

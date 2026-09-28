@@ -4607,6 +4607,95 @@ class DBIMigrationApp:
             self.log(f"Ошибка формирования AI-запроса: {e}", 'error')
             messagebox.showerror("Ошибка", f"Не удалось сформировать AI-запрос:\n{e}")
 
+    def _rescan_ai_files(self, results) -> dict:
+        """DS_081 §2.1: повторный скан только файлов, затронутых AI-ответами.
+
+        Полный каталог НЕ пересканируется: берём source из results процесса
+        «От AI», у которых что-то применено (applied_auto + applied_medium > 0).
+        «было» — по pre-AI копии (_preai, создаётся process_response при
+        backup=True), «стало» — по файлу после применения. Скан тем же
+        механизмом, что верификация в «Исправить код» (отдельный
+        PLPlusScanner с теми же правилами).
+
+        Возвращает {'files': K, 'before': N, 'after': M}; пишет bot.log на
+        файл и итоговую сводку. Ошибки не должны ронять обработку AI-ответов.
+        """
+        stats = {'files': 0, 'before': 0, 'after': 0}
+        touched = []
+        for r in results or []:
+            if not isinstance(r, dict) or r.get('status') != 'ok':
+                continue
+            try:
+                applied = (int(r.get('applied_auto', 0) or 0) +
+                           int(r.get('applied_medium', 0) or 0))
+            except (TypeError, ValueError):
+                applied = 0
+            src = r.get('source')
+            if applied > 0 and src and Path(src).exists():
+                touched.append((str(src), r.get('backup_path')))
+        if not touched:
+            return stats
+
+        base_sc = (getattr(self, 'scan_results', None) or {}).get('scanner')
+        if base_sc is None:
+            self.log("  Rescan: нет данных сканирования (scanner) — пропущен.", 'warning')
+            return stats
+        try:
+            from analyzer.scanner import PLPlusScanner
+            ver = PLPlusScanner(base_sc.config, base_sc.selected_rules,
+                                base_sc.rubricator_prompts,
+                                base_sc.plpcheck_categories)
+        except Exception as e:
+            self.log(f"  [!] Rescan: не создан verification-сканер: {e}", 'warning')
+            return stats
+
+        # _verify_file (верификация «как при Исправить код») живёт в фиксере —
+        # берём лёгкий экземпляр без рубрикатора, он ничего не пишет.
+        fx = None
+        try:
+            from fixer.code_fixer import PLPlusFixer
+            fx = PLPlusFixer(base_sc.config, 'ai_rescan', use_rubricator=False)
+            fx._verify_scanner = ver
+            try:
+                fx.flags = self._current_header_flags()
+            except Exception:
+                pass
+        except Exception as e:
+            self.log(f"  [!] Rescan: _verify_file недоступен, счёт по скану: {e}",
+                     'warning')
+            fx = None
+
+        for src, backup_path in touched:
+            try:
+                before_issues = []
+                if backup_path and Path(backup_path).exists():
+                    before_issues = ver.scan_file(Path(backup_path)) or []
+                n_before = len(before_issues)
+                n_after = None
+                if fx is not None:
+                    try:
+                        v = fx._verify_file(Path(src), before_issues) or {}
+                        n_after = sum((v.get('remaining_count_by_rule') or {}).values())
+                    except Exception:
+                        n_after = None
+                if n_after is None:
+                    n_after = len(ver.scan_file(Path(src)) or [])
+                stats['files'] += 1
+                stats['before'] += n_before
+                stats['after'] += n_after
+                line = (f"Rescan {Path(src).name}: было {n_before}, "
+                        f"стало {n_after}")
+                self._bot_log(line)
+                self.log("  " + line, 'info')
+            except Exception as e:
+                self.log(f"  [!] Rescan {Path(src).name}: ошибка {e}", 'warning')
+
+        summary = (f"Rescan: {stats['files']} файлов; было {stats['before']}, "
+                   f"стало {stats['after']}")
+        self.log(summary, 'highlight')
+        self._bot_log(summary)
+        return stats
+
     def receive_from_ai(self):
         """DS 054: обработать файлы-ответы из EXCHANGE\AI_OUT."""
         try:
@@ -4623,12 +4712,36 @@ class DBIMigrationApp:
             self._log_separator("ОБРАБОТКА AI-ОТВЕТОВ (DS 054)")
             self.log(f"Найдено ответов: {len(files)}", 'info')
             results = ai_exchange.process_all_responses(backup=True)
-            for line in ai_exchange.summarize(results):
+            # DS_081 §2.2: структурированная сводка — строки в журнал +
+            # корзины by_confidence для артефакта needs_manual.
+            summary = ai_exchange.summarize(results, structured=True)
+            for line in summary['lines']:
                 self.log(line, 'info')
+
+            # DS_081 §2.1: повторный скан только AI-затронутых файлов
+            # (полный каталог не пересканируется), строки в bot.log.
+            try:
+                self._rescan_ai_files(results)
+            except Exception as e:
+                self.log(f"  [!] Ошибка повторного скана после AI: {e}", 'warning')
+
+            # DS_081 §2.3/§2.4: needs_manual_* в EXCHANGE\OUTBOX (пусто —
+            # файл не создаётся, только bot.log).
+            try:
+                nm_path = ai_exchange.save_needs_manual(summary)
+                nm_count = len((summary.get('by_confidence') or {}).get('manual') or [])
+                if nm_path:
+                    self.log(f"  needs_manual: {nm_count} → {nm_path}", 'success')
+                    self._bot_log(f"needs_manual: {nm_count} → {nm_path.name}")
+                else:
+                    self.log("  needs_manual: 0", 'info')
+                    self._bot_log("needs_manual: 0")
+            except Exception as e:
+                self.log(f"  [!] Ошибка артефакта needs_manual: {e}", 'warning')
 
             # Дублируем сводку в Журнал изменений (КР).
             try:
-                summary_text = "\n".join(ai_exchange.summarize(results))
+                summary_text = "\n".join(summary['lines'])
                 self.changelog_text.configure(state='normal')
                 self.changelog_text.insert(tk.END,
                     f"\n\n=== AI-ответы ({datetime.now():%Y-%m-%d %H:%M:%S}) ===\n"

@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "description": "DS_082a: тривиальные правила для rule-based fixer. rule_code совпадает по последнему сегменту кода правила из AI_REQUEST (plpcheck.<NAME>).",
+  "confidence": 0.99,
+  "rules": [
+    {
+      "rule_code": "BAD_PREFIX",
+      "action": "rename",
+      "new_from_desc": "переименуйте в \"([^\"]+)\"",
+      "comment": "rename old->new, new_name из description"
+    },
+    {
+      "rule_code": "PREFIX_TYPE_IN_VAR_NAME",
+      "action": "rename",
+      "new_from_desc": "переименуйте в \"([^\"]+)\"",
+      "comment": "rename old->new, new_name из description"
+    },
+    {
+      "rule_code": "WRONG_METHOD_SYNTAX",
+      "action": "method_syntax",
+      "target_from_desc": "формате\\s+(::\\[[^\\]]+\\]\\.\\[[^\\]]+\\])",
+      "comment": "[X].Y -> ::[X].[Y]; target из description (в реальных запросах без скобок)"
+    },
+    {
+      "rule_code": "CODE_IN_COMMENT",
+      "action": "delete_line",
+      "comment": "удалить строку, если code начинается с -- или /*; диапазон — если в description «удалить диапазон строк N-M»"
+    },
+    {
+      "rule_code": "QUOTING",
+      "action": "quoting",
+      "comment": "# -> _ в идентификаторах (вне строк '...' и вне -- комментариев)"
+    },
+    {
+      "rule_code": "SIZELESS",
+      "action": "sizeless",
+      "string_type": "varchar2(255)",
+      "comment": "string -> varchar2(255); bare varchar2 без размера -> varchar2(255)"
+    },
+    {
+      "rule_code": "NOT_MENTIONED",
+      "action": "delete_line",
+      "comment": "удалить объявление (строку из code)"
+    }
+  ]
+}

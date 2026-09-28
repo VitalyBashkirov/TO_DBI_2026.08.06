@@ -31,6 +31,12 @@ FIX_FLAG_DESCRIPTIONS = {
     'other': 'hybrid без algorithmic_hint',
 }
 
+# DS_080 §0: строка only_ai в блоке «Флаги замены» — состояние галки
+# «Только AI» (send_to_ai). Не входит в FLAG_ORDER (не участвует в подписи
+# VVxVVx имени лога и в корзинах правил) — поэтому печатается отдельно.
+ONLY_AI_FLAG_NAME = 'only_ai'
+ONLY_AI_FLAG_DESCRIPTION = 'отправлять только issues, требующие AI (filter: needs_ai_fix)'
+
 
 def _fix_flags_block(flags: Dict[str, bool], indent: str = '  ') -> List[str]:
     """Блок «Флаги замены» с расшифровкой (выравнивание по «—»)."""
@@ -40,10 +46,78 @@ def _fix_flags_block(flags: Dict[str, bool], indent: str = '  ') -> List[str]:
         on = flags.get(name, False)
         left = f"{name}: {'V' if on else 'x'}"
         lines.append(f"{indent}  {left:<{width}} — {FIX_FLAG_DESCRIPTIONS.get(name, '')}")
+    # DS_080 §0: only_ai печатается, только если флаг передан (старые прогоны
+    # без него не должны менять заголовок).
+    if flags and ONLY_AI_FLAG_NAME in flags:
+        left = f"{ONLY_AI_FLAG_NAME}: {'V' if flags.get(ONLY_AI_FLAG_NAME) else 'x'}"
+        lines.append(f"{indent}  {left:<{width}} — {ONLY_AI_FLAG_DESCRIPTION}")
     return lines
+
+
+def append_only_ai_flag(lines: List[str], flags: Dict[str, bool],
+                        indent: str = '  ') -> List[str]:
+    """DS_080 §0: вставка строки only_ai в уже готовый блок «Флаги замены».
+
+    Нужна там, где заголовок сформирован вне этого модуля (сканер), а блок
+    флагов — последний в заголовке. Строка вставляется после последней строки
+    флага, идемпотентна (при знакомом only_ai ничего не дублируется).
+    Тире выравнивается по тире существующих строк блока.
+    """
+    if not flags or ONLY_AI_FLAG_NAME not in flags:
+        return lines
+    header = f"{indent}Флаги замены:"
+    try:
+        start = lines.index(header)
+    except ValueError:
+        return lines
+    flag_re = re.compile(r'^\s+(?:' + '|'.join(list(FLAG_ORDER) + [ONLY_AI_FLAG_NAME])
+                        + r'): [Vx]\b')
+    last = start
+    for i in range(start + 1, len(lines)):
+        if flag_re.match(lines[i]):
+            last = i
+        else:
+            break  # конец блока (пустая строка-разделитель или иной текст)
+    if any(f"{ONLY_AI_FLAG_NAME}:" in ln for ln in lines[start:last + 1]):
+        return lines
+    if last == start:  # флагов нет — вставлять не после чего
+        return lines
+    pad_to = max((ln.find(' — ') for ln in lines[start + 1:last + 1]
+                 if ln.find(' — ') != -1), default=-1)
+    lead = lines[last][:len(lines[last]) - len(lines[last].lstrip())]
+    left = f"{lead}{ONLY_AI_FLAG_NAME}: {'V' if flags.get(ONLY_AI_FLAG_NAME) else 'x'}"
+    if pad_to > len(left):
+        left = left.ljust(pad_to)
+    lines.insert(last + 1, f"{left} — {ONLY_AI_FLAG_DESCRIPTION}")
+    return lines
+
+
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _sorted_lines(values) -> List[int]:
+    """DS_080 §2.1: список номеров строк остатка — уникальные, по возрастанию."""
+    out: List[int] = []
+    for v in values or []:
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if n not in out:
+            out.append(n)
+    return sorted(out)
+
+
+def _remaining_count(value) -> int:
+    """DS_080 §2.1: мощность остатка по правилу — для list[int] и для int."""
+    if isinstance(value, (list, tuple, set)):
+        return len(value)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 # ============================================================
 # Маппинг типов данных на префиксы типов
@@ -482,6 +556,8 @@ class PLPlusFixer:
             'total_files': 0, 'total_fixes': 0,
             'fixed': 0, 'needs_manual': 0, 'needs_ai_fix': 0,
             'by_rule': {}, 'top_rules': [],
+            # DS_080 §2.1: сводный остаток по правилам (rule_code -> [строки]).
+            'remaining_by_rule': {},
         }
         
         # Загрузка рубрикатора для получения кратких описаний
@@ -1370,12 +1446,26 @@ class PLPlusFixer:
         for it in issues_before:
             before_by_rule[it.issue_type] = before_by_rule.get(it.issue_type, 0) + 1
         after_by_rule: Dict[str, int] = {}
+        # DS_080 §2.1: по остатку заводим не только счётчик, но и номера строк —
+        # they are the line numbers of the issues still present after the
+        # deterministic pipeline (filter source for send_to_ai «Только AI»).
+        after_lines_by_rule: Dict[str, List[int]] = {}
         for it in after_issues:
             after_by_rule[it.issue_type] = after_by_rule.get(it.issue_type, 0) + 1
+            after_lines_by_rule.setdefault(it.issue_type, []).append(it.line_number)
+        # Номера строк ИСХОДНОГО скана по правилу. Детерминированный фикс может
+        # удалять/добавлять строки (например, закомментированный код), поэтому
+        # строки после скана смещены и не совпадают с Issues из scan_results.
+        # Для фильтра «Только AI» берём исходные строки: если правило не
+        # исчезло полностью, все его исходные проблемы считаем оставшимися
+        # (безопасное over-include — AI не теряет реальные проблемы).
+        before_lines_by_rule: Dict[str, List[int]] = {}
+        for it in issues_before:
+            before_lines_by_rule.setdefault(it.issue_type, []).append(it.line_number)
 
         result = {
             'fixed': 0, 'needs_manual': 0, 'needs_ai_fix': 0,
-            'by_rule': {}, 'remaining_by_rule': {},
+            'by_rule': {}, 'remaining_by_rule': {}, 'remaining_count_by_rule': {},
         }
         ai_on = self.flags.get('ai_fallback', False)
         for code, bcount in before_by_rule.items():
@@ -1389,7 +1479,8 @@ class PLPlusFixer:
                     result['needs_ai_fix'] += remaining
                 else:
                     result['needs_manual'] += remaining
-                result['remaining_by_rule'][code] = remaining
+                result['remaining_by_rule'][code] = _sorted_lines(before_lines_by_rule.get(code))
+                result['remaining_count_by_rule'][code] = remaining
         # Правила, появившиеся после фикса (побочные) — тоже needs_manual.
         for code, acount in after_by_rule.items():
             if code not in before_by_rule and acount:
@@ -1397,7 +1488,8 @@ class PLPlusFixer:
                     result['needs_ai_fix'] += acount
                 else:
                     result['needs_manual'] += acount
-                result['remaining_by_rule'][code] = acount
+                result['remaining_by_rule'][code] = _sorted_lines(after_lines_by_rule.get(code))
+                result['remaining_count_by_rule'][code] = acount
         return result
 
     def fix_file(self, file_path: Path, issues: List[Issue]) -> Tuple[bool, int]:
@@ -1546,6 +1638,8 @@ class PLPlusFixer:
             'total_files': total_files, 'total_fixes': 0,
             'fixed': 0, 'needs_manual': 0, 'needs_ai_fix': 0,
             'by_rule': {}, 'top_rules': [],
+            # DS_080 §2.1: сводный остаток по правилам (rule_code -> [строки]).
+            'remaining_by_rule': {},
         }
         self.scan_log_data = []
         
@@ -1739,6 +1833,15 @@ class PLPlusFixer:
             self.verify_stats['needs_ai_fix'] += verify['needs_ai_fix']
             for code, cnt in verify['by_rule'].items():
                 self.verify_stats['by_rule'][code] = self.verify_stats['by_rule'].get(code, 0) + cnt
+            # DS_080 §2.1: сводный остаток по правилам — union номеров строк по
+            # всем файлам прогона (фильтр «Только AI» в send_to_ai) + точные
+            # счётчики остатка для лога (строки могут перекрываться между файлами).
+            agg = self.verify_stats.setdefault('remaining_by_rule', {})
+            agg_cnt = self.verify_stats.setdefault('remaining_count_by_rule', {})
+            for code, lns in verify['remaining_by_rule'].items():
+                agg[code] = _sorted_lines(list(agg.get(code, [])) + list(lns))
+            for code, cnt in verify.get('remaining_count_by_rule', {}).items():
+                agg_cnt[code] = agg_cnt.get(code, 0) + cnt
             self.verify_stats['total_fixes'] += fix_count
 
             # Исправления «было/стало» текущего файла (из fixed_issues).
@@ -1754,6 +1857,7 @@ class PLPlusFixer:
                 'line_logs': line_logs,
                 'stats': dict(verify['by_rule']),
                 'remaining_by_rule': dict(verify['remaining_by_rule']),
+                'remaining_count_by_rule': dict(verify.get('remaining_count_by_rule', {})),
                 'fixed': verify['fixed'],
                 'needs_manual': verify['needs_manual'],
                 'needs_ai_fix': verify['needs_ai_fix'],
@@ -1955,8 +2059,14 @@ class PLPlusFixer:
             if rem:
                 lines.append("**Остаток по правилам (не исправлено)**:")
                 lines.append("")
-                for code, cnt in sorted(rem.items(), key=lambda x: (-x[1], x[0])):
-                    lines.append(f"- `{code}`: {cnt}")
+                # DS_080 §2.1: значение — список строк ИСХОДНОГО скана; счётчик
+                # остатка берём из remaining_count_by_rule (он точный).
+                rem_cnt = fd.get('remaining_count_by_rule', {})
+                for code, lns in sorted(rem.items(),
+                                        key=lambda x: (-rem_cnt.get(x[0], _remaining_count(x[1])),
+                                                        x[0])):
+                    lines.append(f"- `{code}`: "
+                                 f"{rem_cnt.get(code, _remaining_count(lns))}")
                 lines.append("")
 
         try:
@@ -2308,6 +2418,9 @@ def save_scan_only_log(logs_dir: Path, source_name: str, flags: Dict[str, bool],
         lines.append("")
         # DS_053_Уточнение_5 (задача B): блок флагов с расшифровкой.
         lines.extend(_fix_flags_block(flags, indent='  '))
+    # DS_080 §0: only_ai в блок «Флаги замены» (в т.ч. когда блок пришёл из
+    # сканера, где канон флагов зашит и only_ai не печатается).
+    lines = append_only_ai_flag(lines, flags, indent='  ')
     lines.append("")
     lines.append(f"**Дата**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"**Источник**: {source_name}")

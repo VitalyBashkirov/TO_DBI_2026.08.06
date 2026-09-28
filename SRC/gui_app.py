@@ -111,6 +111,56 @@ class Tooltip:
             self._tip = None
 
 
+def filter_ai_issues(issues, remaining_by_rule, eng=None):
+    """DS_080 §2.2/§2.3: отбор issues для AI-запроса при галке «Только AI».
+
+    Возвращает (отобранные_issues, режим_фильтра):
+      'needs_ai_fix' — (а) правило transform_type=="ignore" И (б) строка issue
+                       осталась в remaining_by_rule (не закрыта детерминированным
+                       конвейером);
+      'ignore_set'   — remaining_by_rule пуст (не было «Исправить код»),
+                       отбор только по ignore_set (поведение DS_079);
+      'без фильтра'  — нет ни remaining_by_rule, ни движка правил.
+    """
+    remaining = remaining_by_rule or {}
+    if remaining:
+        kept = []
+        for it in issues:
+            code = getattr(it, 'issue_type', '')
+            if getattr(it, 'line_number', None) not in (remaining.get(code) or []):
+                continue
+            if eng is not None and not eng.rule_needs_ai(code):
+                continue
+            kept.append(it)
+        return kept, 'needs_ai_fix'
+    if eng is None:
+        return list(issues), 'без фильтра'
+    return ([it for it in issues if eng.rule_needs_ai(getattr(it, 'issue_type', ''))],
+            'ignore_set')
+
+
+def inject_only_ai_flag(report_path, flags: dict) -> bool:
+    """DS_080 §0: дописать строку only_ai в блок «Флаги замены» .md-лога.
+
+    Шаблон заголовка scan_report_* формирует analyzer/scanner.py (§4 DS_080 —
+    не менять), поэтому строка вставляется post-factum в уже записанный файл.
+    Идемпотентно: при знакомом only_ai файл не трогается. Возвращает True,
+    если файл изменён.
+    """
+    from fixer.code_fixer import append_only_ai_flag
+    p = Path(report_path)
+    if not p.exists():
+        return False
+    raw = p.read_text(encoding='utf-8', errors='replace')
+    src = raw.splitlines()
+    out = append_only_ai_flag(list(src), flags)
+    if out == src:
+        return False
+    nl = '\r\n' if '\r\n' in raw else '\n'
+    p.write_text(nl.join(out) + nl, encoding='utf-8')
+    return True
+
+
 class DBIMigrationApp:
     """Основное приложение"""
     
@@ -663,6 +713,16 @@ class DBIMigrationApp:
         # в EXCHANGE\AI_OUT (обновление — _update_ai_button_state, таймер 5 сек).
         self.btn_from_ai.state(['disabled'])
         
+        # DS_079: галка «Только AI» — фильтр отбора issues, требующих AI
+        # (правило transform_type == "ignore"). По умолчанию ВКЛЮЧЕНА
+        # (отправляем только AI). При выключенной — все issues (отладка,
+        # обратная совместимость с DS_054). Рядом с группой AI-кнопок,
+        # после «От AI» (сохраняет смежность «В AI»→«От AI» из DS_054_Уточнение).
+        self.ai_only_var = tk.BooleanVar(value=True)
+        self.chk_ai_only = ttk.Checkbutton(control_frame, text="Только AI",
+                                           variable=self.ai_only_var)
+        self.chk_ai_only.pack(side=tk.LEFT, padx=3)
+        
         self.btn_rubricator = ttk.Button(control_frame, text="Открыть рубрикатор", command=self.open_rubricator, width=25)
         self.btn_rubricator.pack(side=tk.LEFT, padx=3)
         
@@ -817,6 +877,9 @@ class DBIMigrationApp:
                            "(детерминированный фикс + AI-fallback)."),
         (self.btn_to_ai, "Сформировать файл-запрос для AI "
                          "(проблемы, требующие AI-анализа)."),
+        (getattr(self, 'chk_ai_only', None),
+         "Отправлять только issues, требующие AI "
+         "(transform_type=ignore + needs_ai_fix>0)."),
             (self.btn_rubricator, "Показать перечень файлов рубрикатора и "
                                   "текущий выбор правил."),
             (self.btn_test_gen, "Сгенерировать тестовые .plp-файлы "
@@ -2117,6 +2180,32 @@ class DBIMigrationApp:
             return defaults
         return {name: bool(var.get()) for name, var in vars_.items()}
 
+    def _current_header_flags(self) -> dict:
+        """DS_080 §0: 6 флагов замены + only_ai — для заголовков логов.
+
+        only_ai вне FLAG_ORDER: не участвует в подписи VVxVVx имени файла и в
+        корзинах правил, поэтому добавляется только сюда (settings.json и
+        AI_REQUEST остаются без изменений).
+        """
+        flags = dict(self._current_fix_flags())
+        try:
+            flags['only_ai'] = bool(self.ai_only_var.get())
+        except Exception:
+            flags['only_ai'] = True
+        return flags
+
+    def _append_only_ai_flag_line(self, report_path) -> None:
+        """DS_080 §0: строка only_ai в блоке «Флаги замены» уже записанного .md.
+
+        Шаблон блока формируется в analyzer/scanner.py (§4 DS_080 — не менять),
+        поэтому строка дописывается post-factum к файлу. Идемпотентно: при
+        знакомом only_ai файл не трогается.
+        """
+        try:
+            inject_only_ai_flag(report_path, self._current_header_flags())
+        except Exception as e:
+            self.log(f"  [!] only_ai не добавлен в заголовок: {e}", 'warning')
+
     def _autosave_fix_flags(self):
         """DS_053_Уточнение_2 (задача C): автосохранение состояния 6 флагов в
         settings.json (read-modify-write только ключа 'fix_flags'). Не писать
@@ -2613,7 +2702,7 @@ class DBIMigrationApp:
             scanner = PLPlusScanner(config, selected_rules, self.rubricator_prompts,
                                     plpcheck_categories=getattr(self, 'plpcheck_categories_filter', []),
                                     abort_callback=self._abort_requested,  # DS 038
-                                    fix_flags=self._current_fix_flags())  # DS_053_Уточнение_2 (задача A)
+                                    fix_flags=self._current_header_flags())  # DS_053_Уточнение_2 (задача A), DS_080 §0
             
             # Логирование вызова Парсера SQL
             self.root.after(0, lambda: self.log("\n[ПАРСЕР SQL] Начало сканирования и анализа...", 'highlight'))
@@ -2666,6 +2755,8 @@ class DBIMigrationApp:
             output_path = Path(config['paths']['logs_dir']) / f'scan_report_{source_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.md'
             scanner.generate_report(output_path, mode='scan', fixed_count=0,
                                     log_level=_log_level, report_stats_min_files=_min_files)
+            # DS_080 §0: строка only_ai в «Флаги замены» заголовка scan_report_*.md.
+            self._append_only_ai_flag_line(output_path)
             
             # DS 025: дополнительно HTML-отчёт в формате дистрибутивного PlpCheck
             html_report_path = Path(config['paths']['logs_dir']) / f'plpcheck_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.html'
@@ -2676,7 +2767,7 @@ class DBIMigrationApp:
             # без записи: пары «> было / <КР> станет» по Схеме A). Без флагов —
             # пустой лог с пометкой «флаги не выбраны» (имя scan_xxxxxx_*).
             from fixer.code_fixer import save_scan_only_log
-            _flags = self._current_fix_flags()
+            _flags = self._current_header_flags()  # DS_080 §0
             _scan_log_path = save_scan_only_log(
                 Path(config['paths']['logs_dir']), source_name, _flags,
                 scanner, config, log_level=_log_level, report_stats_min_files=_min_files)
@@ -2726,11 +2817,15 @@ class DBIMigrationApp:
             self.root.after(0, lambda: self.btn_show_sql.state(['!disabled']))
             
             # Сохраняем результаты сканирования для кнопки "Показать SQL для ручного исправления"
+            # DS_080 §2.3: при «Сканировать» верификации фиксера нет — ключ
+            # обнуляется явно, чтобы не/filter не использовал остаток прошлого
+            # прогона «Исправить код» (send_to_ai уходит на fallback ignore_set).
             self.scan_results = {
                 'scanner': scanner,
                 'issues': scanner.issues,
                 'issues_before_dedup': scanner.issues_before_dedup,
-                'stats': scan_results
+                'stats': scan_results,
+                'remaining_by_rule': {},
             }
             
             # DS 040: окно результата — обычное или «прервано на xxx.xx %»
@@ -3079,7 +3174,7 @@ class DBIMigrationApp:
             scanner = PLPlusScanner(config, selected_rules, self.rubricator_prompts,
                                     plpcheck_categories=getattr(self, 'plpcheck_categories_filter', []),
                                     abort_callback=self._abort_requested,  # DS 038
-                                    fix_flags=self._current_fix_flags())  # DS_053_Уточнение_2 (задача A)
+                                    fix_flags=self._current_header_flags())  # DS_053_Уточнение_2 (задача A), DS_080 §0
             
             # Callback для вывода в журнал
             def scan_log(message, level='info'):
@@ -3116,8 +3211,10 @@ class DBIMigrationApp:
             fixer = PLPlusFixer(config, iteration, clean_output=self.clean_output_var.get())
 
             # DS 053: передача флагов детерминированного фикса в фиксер.
+            # DS_080 §0: только_ai в общем блоке «Флаги замены» — только_ai не
+            # детерминированный, _run_fix() читает только известные ключи.
             try:
-                fixer.flags = self._current_fix_flags()
+                fixer.flags = self._current_header_flags()
             except Exception as e:
                 self.root.after(0, lambda e=e: self.log(f"  [!] Не удалось применить флаги DS_053: {e}", 'warning'))
 
@@ -3198,11 +3295,15 @@ class DBIMigrationApp:
             self.root.after(0, lambda: self.btn_show_sql.state(['!disabled']))
             
             # Сохраняем результаты сканирования для кнопки "Показать SQL для ручного исправления"
+            # DS_080 §2.1: остаток верификации фиксера (rule_code -> [строки]) —
+            # источник фильтра «Только AI» в send_to_ai.
             self.scan_results = {
                 'scanner': scanner,
                 'issues': scanner.issues,
                 'issues_before_dedup': scanner.issues_before_dedup,
-                'stats': scan_results
+                'stats': scan_results,
+                'remaining_by_rule': dict(
+                    (getattr(fixer, 'verify_stats', None) or {}).get('remaining_by_rule', {})),
             }
             
             # Обновить состояние кнопок после исправления
@@ -4388,8 +4489,33 @@ class DBIMigrationApp:
                 return 'WARNING'
         return 'WARNING'
 
+    def _bot_log(self, message: str):
+        """DS_079: запись в EXCHANGE\bot.log (формат DS_050: [ДД.ММ.ГГГГ ЧЧ:ММ:СС]).
+
+        Только EXCHANGE\bot.log — иные пути логов запрещены (AGENTS.md).
+        Ошибки записи молча игнорируются (не должны ронять GUI-операцию).
+        """
+        try:
+            log_path = Path(__file__).parent.parent / 'EXCHANGE' / 'bot.log'
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write(f"[{ts}] {message}\r\n")
+        except Exception:
+            pass
+
     def send_to_ai(self):
-        """DS 054: сформировать файл-запрос для AI в EXCHANGE\AI_IN."""
+        """DS 054: сформировать файл-запрос для AI в EXCHANGE\AI_IN.
+
+        DS_080 §2.2: при галке «Только AI» (по умолчанию включена) отбираются
+        issues, реально требующие AI: (а) правило transform_type == "ignore"
+        (5.RUBRICATOR_PARSER_SQL v5.json, plpcheck.<NAME> -> RuleEngine
+        _resolve_code) И (б) issue остался в scan_results['remaining_by_rule']
+        — не закрыт детерминированным конвейером (данные верификации фиксера).
+        Если remaining_by_rule нет (не было «Исправить код») — fallback на
+        ignore_set (DS_079) с записью в bot.log. При выключенной галке — все
+        issues (обратная совместимость, отладка).
+        """
         if not self.scan_results:
             messagebox.showwarning("Предупреждение", "Сначала выполните сканирование!")
             return
@@ -4403,6 +4529,42 @@ class DBIMigrationApp:
             flags = self._current_fix_flags()
             rubs = self._ai_rubricators()
             ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+            total = len(issues)
+            # DS_079 §2.1: галка «Только AI» (по умолчанию ВКЛ).
+            ai_only = bool(getattr(self, 'ai_only_var', None)
+                           and self.ai_only_var.get())
+            # DS_080 §2.2: критерий отбора — (а) правило transform_type=="ignore"
+            # И (б) issue остался в remaining_by_rule (не исправлен
+            # детерминированным конвейером). Если remaining_by_rule нет (не было
+            # «Исправить код») — fallback на ignore_set как в DS_079.
+            filter_mode = ''
+            if ai_only:
+                eng = None
+                try:
+                    from rule_engine import get_rule_engine
+                    eng = get_rule_engine()
+                except Exception:
+                    eng = None
+                remaining = self.scan_results.get('remaining_by_rule') or {}
+                issues, filter_mode = filter_ai_issues(issues, remaining, eng)
+                if filter_mode == 'needs_ai_fix':
+                    self.log(f"  Фильтр «только AI»: needs_ai_fix (остаток после "
+                             f"конвейера), правил в остатке: {len(remaining)}.", 'info')
+                elif filter_mode == 'без фильтра':
+                    self._bot_log("Движок правил недоступен — отправлены все issues.")
+                    self.log("  [!] Движок правил недоступен — отправлены все issues.", 'warning')
+                else:
+                    self._bot_log("needs_ai_fix недоступен, фильтр по ignore_set.")
+                    self.log("  Фильтр «только AI»: needs_ai_fix недоступен, "
+                             "отбор по ignore_set.", 'info')
+                if not issues:
+                    self._bot_log("Нет issues, требующих AI (фильтр «только AI»).")
+                    messagebox.showinfo(
+                        "Нет issues, требующих AI",
+                        "После фильтра «только AI» не осталось проблем.\n"
+                        "Снимите галку «Только AI» для отправки всех issues.")
+                    return
 
             # Группируем проблемы по файлам-источникам.
             by_file = {}
@@ -4421,6 +4583,15 @@ class DBIMigrationApp:
                 written.append(req)
                 self.log(f"  AI-запрос: {req.name} ({len(file_issues)} проблем)", 'success')
 
+            # DS_079 §2.2 п.5 / DS_080 §2.2 п.4: «Отправлено N issues из M
+            # (фильтр: needs_ai_fix)». filter_mode = ignore_set — fallback без
+            # верификации фиксера (не было «Исправить код»).
+            if ai_only:
+                self.log(f"Отправлено {len(issues)} issues из {total} "
+                         f"(фильтр: {filter_mode})", 'highlight')
+                self._bot_log(
+                    f"Отправлено {len(issues)} issues из {total} "
+                    f"(фильтр: {filter_mode}). AI-запросов: {len(written)}.")
             self.log(f"Сформировано AI-запросов: {len(written)} → EXCHANGE\AI_IN", 'highlight')
             self.log("Отправьте файл(ы) в AI, затем положите ответ "
                      "AI_RESPONSE_<source>_<ts>.md в EXCHANGE\AI_OUT и нажмите «От AI».", 'info')

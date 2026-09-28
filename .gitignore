@@ -70,3 +70,9 @@ temp_fix/
 synthetic*.plp
 EXCHANGE/Для нового чата.txt
 
+
+# AI-обмен (рабочие каталоги, не исходники) — DS_080
+EXCHANGE/AI_IN/
+EXCHANGE/AI_OUT/
+EXCHANGE/AI_IN_PROCESSED/
+EXCHANGE/AI_OUT_PROCESSED/

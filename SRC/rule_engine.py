@@ -52,6 +52,8 @@ class RuleEngine:
             if code:
                 self._rules[code] = rule
         self.version = self._config.get('version', 'N/A')
+        # DS_079: кэш кодов правил с паттерном transform_type == "ignore".
+        self._ignore_codes: Optional[Set[str]] = None
 
     # ------------------------------------------------------------------
     # Загрузка / классификация
@@ -89,6 +91,29 @@ class RuleEngine:
     def get_rule(self, rule_code: str) -> Optional[Dict[str, Any]]:
         """DS_059: правило PARSER_SQL по коду (с учётом маппинга plpcheck.*)."""
         return self._rules.get(self._resolve_code(rule_code))
+
+    def ignore_rule_codes(self) -> Set[str]:
+        """DS_079: коды правил PARSER_SQL, у которых хотя бы один паттерн имеет
+        transform_type == "ignore" (требуют AI/ручного разбора, не автофикс).
+
+        Кэшируется на движке (правила неизменяемы в рамках процесса).
+        """
+        if self._ignore_codes is None:
+            codes: Set[str] = set()
+            for code, rule in self._rules.items():
+                for pt in rule.get('patterns', []):
+                    if pt.get('transform_type') == 'ignore':
+                        codes.add(code)
+                        break
+            self._ignore_codes = codes
+        return self._ignore_codes
+
+    def rule_needs_ai(self, rule_code: str) -> bool:
+        """DS_079: требует ли правило AI/ручного разбора (есть ignore-паттерн).
+
+        Учитывает маппинг plpcheck.<NAME> -> PlpCheck.*.<NAME>.п.* (DS_059).
+        """
+        return self._resolve_code(rule_code) in self.ignore_rule_codes()
 
     def rule_buckets(self, rule_code: str) -> Set[str]:
         """Множество корзин (regex/hybrid/other), к которым относится правило."""

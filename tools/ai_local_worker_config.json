@@ -1,0 +1,9 @@
+{
+  "ollama_url": "http://localhost:11434",
+  "model": "deepseek-coder:6.7b",
+  "batch_size": 5,
+  "temperature": 0.1,
+  "num_ctx": 4096,
+  "max_tokens": 2000,
+  "timeout_sec": 600
+}

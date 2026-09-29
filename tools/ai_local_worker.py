@@ -73,6 +73,7 @@ DEFAULT_CONFIG = {
     'num_ctx': 4096,
     'max_tokens': 2000,
     'timeout_sec': 600,
+    'merge_same_line': False,   # DS_084: backward compat; config file = true
 }
 
 SYSTEM_PROMPT = 'PL/SQL migration expert.'
@@ -342,6 +343,109 @@ def classify_distribution(fixes):
     return dist
 
 
+# ---------------------------------------------------- merge фиксов по строке (DS_084)
+# Приоритеты правил (v1, DS_084 §2.2). Правило вне списка -> "replace".
+MERGE_PRIORITY = {
+    'delete': ['CODE_IN_COMMENT', 'NOT_MENTIONED', 'OBLIGATORY_IN_OTHERS'],
+    'replace': ['BAD_PREFIX', 'PREFIX_TYPE_IN_VAR_NAME', 'WRONG_METHOD_SYNTAX',
+                'COMPILE_MISSING_COND', 'FUNC_ATTR_DEREFERENCE', 'UDF',
+                'SUBOPTIMAL_UNSELECTED_COL_USAGE', 'COLUMNS_LIMIT_EXCEEDED'],
+    'append': [],
+}
+
+
+def _rule_priority(fix):
+    """Приоритет фикса по правилу из reason: delete=0, replace=1, append=2.
+
+    Правило извлекается из reason (формат 'ai-local: <model> — <rule>').
+    Вне списка -> replace (1).
+    """
+    reason = str(fix.get('reason', '') or '')
+    rule = ''
+    if '—' in reason:
+        rule = reason.split('—')[-1].strip()
+    for bucket, names in MERGE_PRIORITY.items():
+        if any(n in rule for n in names):
+            return {'delete': 0, 'replace': 1, 'append': 2}[bucket]
+    return 1
+
+
+def merge_fixes_by_line(fixes):
+    """DS_084 §2.1: объединить фиксы одной строки в один merged-фикс.
+
+    Алгоритм:
+    1. Группировать по line.
+    2. Группы с 2+ фиксами:
+       - Сортировать по приоритету правила.
+       - result = первый фикс (after берётся как есть).
+       - Для каждого следующего f:
+         - если f.before in result -> result = result.replace(f.before, f.after)
+         - иначе -> skip f, записать в merge_skipped
+    3. Группы с 1 фиксом — без изменений.
+
+    Возвращает (merged_fixes, merge_stats).
+    merge_stats = {'merged_lines': N, 'skipped_in_merge': N,
+                   'merge_skipped': [fix, ...]}.
+    """
+    from collections import defaultdict
+    by_line = defaultdict(list)
+    for fix in fixes:
+        by_line[fix['line']].append(fix)
+
+    merged = []
+    merge_stats = {'merged_lines': 0, 'skipped_in_merge': 0,
+                   'merge_skipped': []}
+
+    for line, group in by_line.items():
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+        # Сортируем по приоритету
+        group_sorted = sorted(group, key=_rule_priority)
+        # Пропускаем no-op фиксы (after.strip() == before.strip()),
+        # они не меняют строку — apply_fixes их применяет без эффекта,
+        # следующий фикс видит ту же строку и тоже применяется.
+        # Merged должен использовать первый РЕАЛЬНЫЙ фикс.
+        real_fixes = [f for f in group_sorted
+                      if f.get('after') is None
+                      or str(f.get('after') or '').strip() != str(f.get('before') or '').strip()]
+        if not real_fixes:
+            # Все фиксы no-op — берём первый как есть
+            merged.append(group_sorted[0])
+            continue
+        first = real_fixes[0]
+        result_after = first['after']
+        merged_count = 1
+        for f in real_fixes[1:]:
+            if result_after is None:
+                merge_stats['merge_skipped'].append(f)
+                merge_stats['skipped_in_merge'] += 1
+                continue
+            f_before = str(f.get('before') or '')
+            if f_before and f_before in result_after:
+                result_after = result_after.replace(f_before, str(f.get('after') or ''))
+                merged_count += 1
+            else:
+                merge_stats['merge_skipped'].append(f)
+                merge_stats['skipped_in_merge'] += 1
+        # Собираем merged-фикс: before от первого в группе (оригинал строки),
+        # after — от первого реального фикса (или накопленный)
+        merged_fix = {
+            'id': group_sorted[0]['id'],
+            'line': first['line'],
+            'before': group_sorted[0].get('before') or '',
+            'after': result_after,
+            'reason': (group_sorted[0].get('reason') or '') + f' [merged x{merged_count}]',
+            'confidence': group_sorted[0].get('confidence', 0.0),
+        }
+        merged.append(merged_fix)
+        merge_stats['merged_lines'] += 1
+
+    # Восстанавливаем порядок по line (стабильный)
+    merged.sort(key=lambda f: f['line'])
+    return merged, merge_stats
+
+
 # ---------------------------------------------------------------- запись ответа (§2.7)
 def _request_tail(request_path):
     """PSH_DEP_PRIV_GO_20260926_114002 из AI_REQUEST_PSH_DEP_PRIV_GO_..._...md."""
@@ -531,9 +635,23 @@ def run_request(request_path, out_dir, cfg, skip_rule_codes=None, limit=None,
             f'время={dt:.1f}с conf='
             f'{[round(f["confidence"], 2) for f in fixes]}')
 
+    # DS_084 §2.1: merge фиксов одной строки перед записью AI_RESPONSE.
+    merge_stats = {'merged_lines': 0, 'skipped_in_merge': 0,
+                   'merge_skipped': []}
+    if cfg.get('merge_same_line', True) and fixes_all:
+        fixes_all, merge_stats = merge_fixes_by_line(fixes_all)
+        log(f'{request_path.name}: merge_same_line — '
+            f'merged_lines={merge_stats["merged_lines"]}, '
+            f'skipped_in_merge={merge_stats["skipped_in_merge"]}')
+
     resp = write_response(request, fixes_all, out_dir)
     stats['response'] = resp.name if resp else None
     stats['classification'] = classify_distribution(fixes_all)
+    stats['merge'] = {
+        'enabled': bool(cfg.get('merge_same_line', True)),
+        'merged_lines': merge_stats['merged_lines'],
+        'skipped_in_merge': merge_stats['skipped_in_merge'],
+    }
     if fixes_all:
         avg_conf = sum(stats['confidences']) / len(stats['confidences'])
         avg_time = sum(stats['batch_times_sec']) / len(stats['batch_times_sec'])
@@ -584,6 +702,9 @@ def build_parser():
                         '(rubric 03/05/06/11) — стенды после rule-based')
     p.add_argument('--limit', type=int, default=None,
                    help='Только первые N issues (быстрые тесты)')
+    p.add_argument('--no-merge', action='store_true',
+                   help='DS_084: отключить merge фиксов одной строки '
+                        '(merge_same_line=false)')
     p.add_argument('--dry-run', action='store_true',
                    help='План батчей без обращения к Ollama: сколько батчей, '
                         'по 5 issues, prompt-формат (тест 4)')
@@ -616,6 +737,8 @@ def main(argv=None):
         cfg['timeout_sec'] = args.timeout
     if args.ollama_url:
         cfg['ollama_url'] = args.ollama_url.rstrip('/')
+    if args.no_merge:
+        cfg['merge_same_line'] = False
 
     if args.list_models:
         try:

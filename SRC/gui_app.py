@@ -62,6 +62,20 @@ RUBRICATOR_PREFIXES = {
     'PlpCheck': 'plpcheck.',
 }
 
+# DS_086: элементы GUI, не участвующие в workflow «Сканировать → Исправить код →
+# В AI». Скрываются через pack_forget (обратимо, НЕ destroy) по одному или все
+# сразу — меню «Вид». journal_frame («Журнал выполнения») в реестр НЕ входит.
+UI_HIDEABLE_ELEMENTS = (
+    ('btn_show_sql', 'Показать SQL для ручного исправления'),
+    ('btn_send_koda', 'Отправить в Koda'),
+    ('btn_from_ai', 'От AI'),
+    ('changelog_frame', 'Журнал изменений'),
+)
+# DS_086 §2.2: по умолчанию все элементы реестра скрыты (требование задачи).
+UI_HIDE_DEFAULT = tuple(key for key, _label in UI_HIDEABLE_ELEMENTS)
+# DS_086 §2.3: нижняя граница высоты окна при скрытии «Журнала изменений».
+UI_MIN_WINDOW_HEIGHT = 400
+
 
 class Tooltip:
     """DS_058+DS_057: простой тултип для Tkinter-виджетов."""
@@ -168,6 +182,9 @@ class DBIMigrationApp:
         self.root = root
         self.root.title(APP_TITLE)
         self.root.geometry("1090x650")
+        # DS_086 §2.3: базовый размер окна (значения из geometry выше). Высота
+        # при скрытии элементов считается от него — см. _adjust_window_height().
+        self._ui_base_geometry = (1090, 650)
         
         # Переменные
         self.source_dir_var = tk.StringVar()
@@ -383,6 +400,9 @@ class DBIMigrationApp:
         actions_menu.add_separator()
         actions_menu.add_command(label="Исправить код", command=self.start_fix, accelerator="F6")
         
+        # DS_086: меню "Вид" — скрытие/показ элементов GUI по одному и всех сразу
+        self._create_view_menu(menubar)
+        
         # Меню "Справка"
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Справка", menu=help_menu)
@@ -397,6 +417,174 @@ class DBIMigrationApp:
         self.root.bind('<F5>', lambda e: self.start_scan())
         self.root.bind('<Control-F5>', lambda e: self.start_deep_scan())
         self.root.bind('<F6>', lambda e: self.start_fix())
+    
+    # ------------------------------------------------------------------
+    # DS_086: скрытие элементов GUI (workflow «Сканировать → Исправить код → В AI»)
+    # Метод — pack_forget()/pack(), НЕ destroy: виджеты и их обработчики
+    # сохраняются, действие обратимо. journal_frame («Журнал выполнения») в
+    # реестр не входит (ТЗ §1a).
+    # ------------------------------------------------------------------
+    def _create_view_menu(self, menubar):
+        """Меню «Вид»: скрыть/показать элементы реестра по одному и все сразу."""
+        view_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Вид", menu=view_menu)
+        self.view_menu = view_menu
+        self.ui_visible_vars = {}
+        for key, label in UI_HIDEABLE_ELEMENTS:
+            var = tk.BooleanVar(value=key not in UI_HIDE_DEFAULT)
+            self.ui_visible_vars[key] = var
+            view_menu.add_checkbutton(label=label, variable=var,
+                                      command=lambda k=key: self.toggle_ui_element(k))
+        view_menu.add_separator()
+        view_menu.add_command(label="Скрыть все элементы",
+                              command=lambda: self.set_all_ui_elements(False))
+        view_menu.add_command(label="Показать все элементы",
+                              command=lambda: self.set_all_ui_elements(True))
+    
+    def _register_ui_hideables(self):
+        """Зафиксировать параметры pack элементов реестра и применить состояние.
+
+        Вызывается в конце _create_widgets, когда все виджеты уже созданы.
+        _ui_height_delta[key] — вклад элемента в высоту окна: учитываются
+        только блоки, упакованные по вертикали (side=top/bottom). Кнопки
+        реестра лежат в btn_bar_canvas (side=left) и высоту не меняют.
+        """
+        if not hasattr(self, 'ui_visible_vars'):
+            self.ui_visible_vars = {}
+        self._ui_pack_opts = {}
+        self._ui_height_delta = {}
+        self.root.update_idletasks()
+        for key, _label in UI_HIDEABLE_ELEMENTS:
+            widget = getattr(self, key, None)
+            if widget is None:
+                continue
+            try:
+                opts = widget.pack_info()
+            except Exception:
+                opts = {}
+            self._ui_pack_opts[key] = opts
+            if str(opts.get('side', 'top')) in ('top', 'bottom'):
+                try:
+                    pady = int(opts.get('pady') or 0)
+                except (TypeError, ValueError):
+                    pady = 0
+                self._ui_height_delta[key] = widget.winfo_reqheight() + 2 * pady
+            else:
+                self._ui_height_delta[key] = 0
+        self._apply_ui_visibility(persist=False)
+    
+    def _window_size(self):
+        """Текущие размеры окна (ширина, высота) из geometry()."""
+        try:
+            width, height = self.root.geometry().split('+')[0].split('x')
+            return int(width), int(height)
+        except Exception:
+            return 0, self.root.winfo_reqheight()
+    
+    def _apply_ui_visibility(self, persist=True):
+        """Применить видимость всех элементов реестра и пересчитать высоту окна."""
+        if not getattr(self, '_ui_pack_opts', None):
+            return
+        h_before = self._window_size()[1]
+        for key, opts in self._ui_pack_opts.items():
+            var = self.ui_visible_vars.get(key)
+            visible = True if var is None else bool(var.get())
+            widget = getattr(self, key, None)
+            if widget is None:
+                continue
+            try:
+                if visible:
+                    widget.pack(**opts)
+                else:
+                    widget.pack_forget()
+            except Exception as exc:
+                self.log(f"DS_086: {key} — не удалось изменить видимость: {exc}", 'warning')
+        h_after = self._adjust_window_height()
+        if persist:
+            self._autosave_ui_visibility()
+        self._bot_log(f"DS_086 GUI height: before={h_before}, after={h_after}")
+    
+    def _adjust_window_height(self):
+        """DS_086 §2.3: высота окна = базовая минус высота скрытых блоков.
+
+        Считается от базового размера (_ui_base_geometry), а не от текущего,
+        поэтому многократные переключения не «уводят» окно (нет дрейфа).
+        Кнопки реестра лежат в горизонтально-прокручиваемой панели
+        (btn_bar_canvas, side=left) и на высоту не влияют — уменьшает её
+        только «Журнал изменений» (changelog_frame, side=top).
+        """
+        w_base, h_base = getattr(self, '_ui_base_geometry', (1090, 650))
+        w_now, _h_now = self._window_size()
+        width = w_now if w_now > 1 else w_base
+        hidden = sum(self._ui_height_delta.get(key, 0)
+                     for key, var in self.ui_visible_vars.items() if not var.get())
+        target = max(UI_MIN_WINDOW_HEIGHT, h_base - hidden)
+        try:
+            self.root.geometry(f"{width}x{target}")
+            self.root.update_idletasks()
+        except Exception as exc:
+            self.log(f"DS_086: не удалось изменить высоту окна: {exc}", 'warning')
+            return self._window_size()[1]
+        return target
+    
+    def toggle_ui_element(self, key):
+        """Смена видимости одного элемента реестра (пункт меню «Вид»)."""
+        var = self.ui_visible_vars.get(key)
+        if var is None:
+            return
+        self._apply_ui_visibility()
+        label = dict(UI_HIDEABLE_ELEMENTS).get(key, key)
+        self.log(f"DS_086: «{label}» — {'виден' if var.get() else 'скрыт'}", 'info')
+    
+    def set_all_ui_elements(self, visible):
+        """Скрыть/показать все элементы реестра сразу (пункт меню «Вид»)."""
+        for var in self.ui_visible_vars.values():
+            var.set(visible)
+        self._apply_ui_visibility()
+        self.log(f"DS_086: элементы реестра — "
+                 f"{'все видны' if visible else 'все скрыты'}", 'info')
+    
+    def _hidden_ui_keys(self):
+        """Ключи скрытых элементов реестра (для settings.json)."""
+        return sorted(key for key, var in getattr(self, 'ui_visible_vars', {}).items()
+                      if not var.get())
+    
+    def _restore_ui_visibility(self, saved_keys):
+        """DS_086: применить состояние из settings.json.
+
+        saved_keys — список ключей, которые нужно СКРЫТЬ. None — ключа нет
+        (первый запуск): остаётся UI_HIDE_DEFAULT, ничего не меняем.
+        """
+        if saved_keys is None or not getattr(self, 'ui_visible_vars', None):
+            return
+        hidden = {k for k in saved_keys if k in self.ui_visible_vars}
+        for key, var in self.ui_visible_vars.items():
+            var.set(key not in hidden)
+        self._apply_ui_visibility(persist=False)
+    
+    def _autosave_ui_visibility(self):
+        """Автосохранение видимости в settings.json (read-modify-write одного ключа).
+
+        По образцу _autosave_fix_flags: не писать во время загрузки настроек.
+        """
+        if getattr(self, '_loading_settings', False):
+            return
+        if not getattr(self, 'ui_visible_vars', None):
+            return
+        try:
+            settings_path = Path(__file__).parent / 'settings.json'
+            settings = {}
+            if settings_path.exists():
+                try:
+                    with open(settings_path, 'r', encoding='utf-8') as f:
+                        settings = json.load(f)
+                except Exception:
+                    settings = {}
+            settings['ui_hidden_elements'] = self._hidden_ui_keys()
+            with open(settings_path, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            print(f"Не удалось автосохранить видимость GUI: {exc}")
     
     def _create_widgets(self):
         """Создание виджетов"""
@@ -867,6 +1055,10 @@ class DBIMigrationApp:
         self.logs_deep_dir = Path(__file__).parent.parent / 'logs_Deep'
         self.logs_deep_dir.mkdir(parents=True, exist_ok=True)
         self.current_log_file = None
+        
+        # DS_053_Уточнение_2 (задача A): реестр скрываемых элементов GUI.
+        # Вызывается ПОСЛЕДНИМ — все виджеты к этому моменту уже созданы.
+        self._register_ui_hideables()
     
     def _apply_button_tooltips(self):
         """DS_058+DS_057: тултипы для всех кнопок GUI (1–2 предложения)."""
@@ -2297,6 +2489,12 @@ class DBIMigrationApp:
                                 "Восстановлены флаги DS_053: " +
                                 ', '.join(f"{n}={'V' if v.get() else 'x'}"
                                           for n, v in self.var_fix_flags.items()), 'info')
+                    
+                    # DS_086: восстановление скрытых элементов GUI (меню «Вид»).
+                    # Ключа нет — первый запуск: действует UI_HIDE_DEFAULT.
+                    if getattr(self, 'ui_visible_vars', None):
+                        self._restore_ui_visibility(
+                            settings.get('ui_hidden_elements', None))
                         
                 self.log("Настройки загружены", 'info')
                 
@@ -2347,6 +2545,10 @@ class DBIMigrationApp:
         # DS_053_Уточнение_2 (задача C): сохранение 6 флагов детерминированного фикса
         if getattr(self, 'var_fix_flags', None):
             settings['fix_flags'] = self._current_fix_flags()
+        # DS_086: сохранение скрытых элементов GUI (меню «Вид»). Ключ нужен и
+        # здесь: save_settings пишет файл целиком и иначе стёр бы запись,
+        # сделанную _autosave_ui_visibility.
+        settings['ui_hidden_elements'] = self._hidden_ui_keys()
         try:
             with open(settings_path, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, ensure_ascii=False, indent=2)

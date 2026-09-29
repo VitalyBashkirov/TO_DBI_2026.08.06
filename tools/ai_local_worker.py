@@ -68,7 +68,9 @@ from ai_exchange import extract_json_array              # DS_054 §2.3 (парс
 DEFAULT_CONFIG = {
     'ollama_url': 'http://localhost:11434',
     'model': 'deepseek-coder:6.7b',
-    'batch_size': 5,
+    'batch_size': 10,
+    'fallback_batch_size': 5,      # DS_085 §2.3
+    'fallback_on_invalid': True,   # DS_085 §2.3
     'temperature': 0.1,
     'num_ctx': 4096,
     'max_tokens': 2000,
@@ -323,6 +325,37 @@ def normalize_fixes(parsed, batch, model):
     return fixes
 
 
+def validate_batch_response(parsed, batch):
+    """DS_085 §2.1: валидация ответа батча.
+
+    Валиден, если:
+      - parsed — непустой список;
+      - len(parsed) == len(batch);
+      - каждый элемент — dict; если у элемента есть поле `line`, оно должно
+        принадлежать множеству строк batch.
+
+    Иначе — invalid_json (count < len, count > len, пустой JSON, line mismatch).
+
+    Отсутствие `line` не считается mismatch: FIX_SCHEMA не требует поле `line`
+    (required = id/after/confidence), а normalize_fixes сопоставляет элементы с
+    issues по `line`, при отсутствии совпадения — по порядку (DS_082b §4 п.2).
+    Строгая проверка count ловит неполный/лишний ответ; проверка `line` при
+    наличии поля отсекает эхо-пример промпта (чужая строка, DS_082b §4 п.2).
+    """
+    if not isinstance(parsed, list) or not parsed:
+        return False
+    if len(parsed) != len(batch):
+        return False
+    batch_lines = set(iss['line'] for iss in batch)
+    for item in parsed:
+        if not isinstance(item, dict):
+            return False
+        line = item.get('line')
+        if line is not None and line not in batch_lines:
+            return False
+    return True
+
+
 # ------------------------------------------------------------------ классификация (§2.7)
 def classify_fix(fix):
     """Класс применения по confidence (DS_082b §2.7)."""
@@ -522,6 +555,98 @@ def chunked(items, size):
     return [items[i:i + size] for i in range(0, len(items), size)]
 
 
+def build_payload(batch, cfg):
+    """Payload для POST /api/chat (DS_082b §2.3 + JSON-схема ответа)."""
+    return {
+        'model': cfg['model'],
+        'messages': [{'role': 'system', 'content': SYSTEM_PROMPT},
+                     {'role': 'user', 'content': build_prompt(batch)}],
+        'stream': False,
+        # JSON-схема (structured output) — Ollama возвращает валидный
+        # массив фиксов без markdown (§2.3: «no markdown, no code fences»).
+        'format': FIX_SCHEMA,
+        'options': {
+            'temperature': float(cfg['temperature']),
+            'num_ctx': int(cfg['num_ctx']),
+            'num_predict': int(cfg['max_tokens']),
+        },
+    }
+
+
+def send_batch(batch, cfg):
+    """Отправить один батч в Ollama и провалидировать ответ.
+
+    Возвращает (fixes, status, dt):
+      status = 'ok'          — валидный ответ, fixes непустой;
+               'invalid'     — JSON невалиден по §2.1 (count/line mismatch);
+               'ollama_error'— HTTP-ошибка/таймаут, батч пропускается;
+               'unavailable' — Ollama недоступна (connection refused).
+    """
+    payload = build_payload(batch, cfg)
+    t0 = time.monotonic()
+    answer = call_ollama(cfg['ollama_url'], payload, int(cfg['timeout_sec']))
+    dt = time.monotonic() - t0
+    if answer is None:
+        return [], 'unavailable', dt
+    if str(answer.get('error', '')):
+        return [], 'ollama_error', dt
+    parsed = extract_json_array(content_of(answer))
+    if not validate_batch_response(parsed, batch):
+        return [], 'invalid', dt
+    fixes = normalize_fixes(parsed, batch, cfg['model'])
+    if not fixes:
+        return [], 'invalid', dt
+    return fixes, 'ok', dt
+
+
+def run_fallback(batch, cfg, stats, n=None, total=None):
+    """DS_085 §2.1: fallback при invalid_json — split батча и retry.
+
+    Батч (обычно 10) делится на подбатчи по fallback_batch_size (5). Каждый
+    подбатч отправляется отдельно:
+      - валидный -> fixes добавляются в общий список;
+      - invalid/error -> issues подбатча остаются в AI (needs_manual на
+        receive_from_ai через classify_fix), не попадают в AI_RESPONSE.
+
+    Метрики: fallback_count++ (внешне), fallback_time_sec += суммарное время
+    подбатчей, fallback_subbatches_ok/total.
+
+    Возвращает (fixes, aborted). aborted=True — Ollama отвалилась в процессе
+    (вызывающий обязан прервать прогон и не создавать AI_RESPONSE).
+    """
+    fb_size = int(cfg.get('fallback_batch_size', 5)) or 5
+    sub_batches = chunked(batch, fb_size)
+    prefix = f'batch {n}/{total} ' if n else ''
+    log(f'{prefix}fallback: split {len(batch)} -> {len(sub_batches)} '
+        f'по {fb_size}')
+
+    fixes = []
+    t0 = time.monotonic()
+    ok = 0
+    for k, sub in enumerate(sub_batches, 1):
+        sub_ids = [b['id'] for b in sub]
+        sub_fixes, status, dt = send_batch(sub, cfg)
+        stats['batch_times_sec'].append(round(dt, 1))
+        if status == 'unavailable':
+            stats['fallback_time_sec'] += round(time.monotonic() - t0, 1)
+            return fixes, True
+        if status == 'ok':
+            fixes.extend(sub_fixes)
+            ok += 1
+            log(f'  fallback sub {k}/{len(sub_batches)} ids={sub_ids}: '
+                f'fixes={len(sub_fixes)} время={dt:.1f}с')
+        else:
+            log(f'  fallback sub {k}/{len(sub_batches)} ids={sub_ids}: '
+                f'{status} — issues подбатча остаются в AI')
+    stats['fallback_time_sec'] += round(time.monotonic() - t0, 1)
+    stats['fallback_subbatches_ok'] += ok
+    stats['fallback_subbatches_total'] += len(sub_batches)
+    log(f'  fallback: валидных подбатчей {ok}/{len(sub_batches)}, '
+        f'fixes={len(fixes)}')
+    return fixes, False
+
+
+
 def run_request(request_path, out_dir, cfg, skip_rule_codes=None, limit=None,
                 metrics_path=None, filter_type=None, dry_run=False,
                 verbose=False):
@@ -551,11 +676,17 @@ def run_request(request_path, out_dir, cfg, skip_rule_codes=None, limit=None,
         'request': request_path.name,
         'issues': len(issues),
         'batch_size': int(cfg['batch_size']),
+        'fallback_batch_size': int(cfg.get('fallback_batch_size', 5) or 5),
+        'fallback_on_invalid': bool(cfg.get('fallback_on_invalid', True)),
         'batches': 0,
         'fixed': 0,
         'skipped_batches': 0,
         'invalid_json': 0,
         'ollama_errors': 0,
+        'fallback_count': 0,
+        'fallback_time_sec': 0.0,
+        'fallback_subbatches_ok': 0,
+        'fallback_subbatches_total': 0,
         'batch_times_sec': [],
         'confidences': [],
         'model': cfg['model'],
@@ -587,47 +718,50 @@ def run_request(request_path, out_dir, cfg, skip_rule_codes=None, limit=None,
     system_msgs = [{'role': 'system', 'content': SYSTEM_PROMPT}]
     fixes_all = []
     for n, batch in enumerate(batches, 1):
-        payload = {
-            'model': cfg['model'],
-            'messages': system_msgs + [
-                {'role': 'user', 'content': build_prompt(batch)}],
-            'stream': False,
-            # JSON-схема (structured output) — Ollama возвращает валидный
-            # массив фиксов без markdown (§2.3: «no markdown, no code fences»).
-            'format': FIX_SCHEMA,
-            'options': {
-                'temperature': float(cfg['temperature']),
-                'num_ctx': int(cfg['num_ctx']),
-                'num_predict': int(cfg['max_tokens']),
-            },
-        }
         ids = [b['id'] for b in batch]
-        t0 = time.monotonic()
-        answer = call_ollama(cfg['ollama_url'], payload,
-                             int(cfg['timeout_sec']))
-        dt = time.monotonic() - t0
+        fixes, status, dt = send_batch(batch, cfg)
         stats['batch_times_sec'].append(round(dt, 1))
-        if answer is None:
+
+        if status == 'unavailable':
             log('ollama unavailable')
             stats['ollama_errors'] += 1
             return stats, None
 
-        if str(answer.get('error', '')):
+        if status == 'ollama_error':
             log(f'batch {n}/{len(batches)} ids={ids}: ollama error '
-                f'({answer["error"]}) — батч пропущен')
+                f'— батч пропущен')
             stats['skipped_batches'] += 1
             continue
 
-        parsed = extract_json_array(content_of(answer))
-        fixes = normalize_fixes(parsed, batch, cfg['model'])
-        if not fixes:
-            got = len(parsed) if isinstance(parsed, list) else 'нет JSON'
+        if status == 'invalid':
+            # DS_085 §2.1: fallback — split батча и retry подбатчами.
+            if cfg.get('fallback_on_invalid', True) and len(batch) > 1:
+                stats['fallback_count'] += 1
+                log(f'batch {n}/{len(batches)} ids={ids}: невалидный JSON '
+                    f'(ожидалось {len(batch)}) — fallback')
+                fb_fixes, aborted = run_fallback(batch, cfg, stats,
+                                                 n=n, total=len(batches))
+                if aborted:
+                    log('ollama unavailable')
+                    stats['ollama_errors'] += 1
+                    return stats, None
+                if fb_fixes:
+                    fixes_all.extend(fb_fixes)
+                    stats['fixed'] += len(fb_fixes)
+                    stats['confidences'].extend(
+                        f['confidence'] for f in fb_fixes)
+                else:
+                    # Все подбатчи невалидны -> issues остаются в AI.
+                    stats['invalid_json'] += 1
+                    stats['skipped_batches'] += 1
+                continue
+            # fallback отключён (--no-fallback) или батч из 1 issue.
             log(f'batch {n}/{len(batches)} ids={ids}: невалидный JSON '
-                f'(элементов {got}, ожидалось {len(batch)}) — issues батча '
-                f'остаются в AI')
+                f'(ожидалось {len(batch)}) — issues батча остаются в AI')
             stats['invalid_json'] += 1
             stats['skipped_batches'] += 1
             continue
+
         fixes_all.extend(fixes)
         stats['fixed'] += len(fixes)
         stats['confidences'].extend(f['confidence'] for f in fixes)
@@ -659,6 +793,10 @@ def run_request(request_path, out_dir, cfg, skip_rule_codes=None, limit=None,
         log(f'{request_path.name}: итог {stats["fixed"]} из {stats["issues"]} '
             f'({pct}%), batch={stats["batches"]}, invalid_json='
             f'{stats["invalid_json"]}, skip_batch={stats["skipped_batches"]}, '
+            f'fallback={stats["fallback_count"]} '
+            f'({stats["fallback_subbatches_ok"]}/'
+            f'{stats["fallback_subbatches_total"]} ok, '
+            f'{stats["fallback_time_sec"]:.1f}с), '
             f'avg_time={avg_time:.1f}с, avg_conf={avg_conf:.2f}, '
             f'class={stats["classification"]}, response={resp.name}', bot=True)
     else:
@@ -689,7 +827,11 @@ def build_parser():
                    help=f'JSON-конфиг (default {CONFIG_PATH.name})')
     p.add_argument('--model', default=None, help='Override модели Ollama')
     p.add_argument('--batch-size', type=int, default=None,
-                   help='Override batch_size (default 5)')
+                   help='Override batch_size (default 10)')
+    p.add_argument('--fallback-size', type=int, default=None,
+                   help='DS_085: override fallback_batch_size (default 5)')
+    p.add_argument('--no-fallback', action='store_true',
+                   help='DS_085: отключить fallback (invalid батч без retry)')
     p.add_argument('--timeout', type=int, default=None,
                    help='Override timeout_sec (default 600)')
     p.add_argument('--ollama-url', default=None,
@@ -707,7 +849,7 @@ def build_parser():
                         '(merge_same_line=false)')
     p.add_argument('--dry-run', action='store_true',
                    help='План батчей без обращения к Ollama: сколько батчей, '
-                        'по 5 issues, prompt-формат (тест 4)')
+                        'по batch_size issues, prompt-формат (тест 4)')
     p.add_argument('--metrics', default=None,
                    help='Записать статистику прогонов в JSON')
     p.add_argument('--check', action='store_true',
@@ -733,6 +875,10 @@ def main(argv=None):
         cfg['model'] = args.model
     if args.batch_size:
         cfg['batch_size'] = args.batch_size
+    if args.fallback_size:
+        cfg['fallback_batch_size'] = args.fallback_size
+    if args.no_fallback:
+        cfg['fallback_on_invalid'] = False
     if args.timeout:
         cfg['timeout_sec'] = args.timeout
     if args.ollama_url:

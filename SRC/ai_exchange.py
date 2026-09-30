@@ -306,10 +306,15 @@ def _loads_lenient(candidate: str):
 # ----------------------------------------------------------------------
 # Применение исправлений
 # ----------------------------------------------------------------------
-def classify_fix(fix: dict) -> str:
+def classify_fix(fix: dict, conf_low: float = CONF_MEDIUM,
+                 conf_high: float = CONF_AUTO) -> str:
     """Классифицировать исправление по confidence/reason.
 
     Возвращает 'auto' | 'medium' | 'manual' | 'noop'.
+
+    DS_088a_fix §2.4: пороги можно передать (conf_low/conf_high). Значения по
+    умолчанию — прежние константы CONF_MEDIUM/CONF_AUTO (обратная совместимость,
+    логика не меняется).
     """
     reason = str(fix.get('reason', '') or '')
     if reason.strip().lower().startswith('needs_manual'):
@@ -321,16 +326,21 @@ def classify_fix(fix: dict) -> str:
     after = fix.get('after', None)
     if after is None or str(after).strip() == '':
         # AI не предложил замену.
-        return 'manual' if conf < CONF_MEDIUM else 'noop'
-    if conf < CONF_MEDIUM:
+        return 'manual' if conf < conf_low else 'noop'
+    if conf < conf_low:
         return 'manual'
-    if conf >= CONF_AUTO:
+    if conf >= conf_high:
         return 'auto'
     return 'medium'
 
 
-def apply_fixes(file_path: Path, fixes: List[dict]) -> Dict[str, object]:
+def apply_fixes(file_path: Path, fixes: List[dict],
+                conf_low: float = CONF_MEDIUM,
+                conf_high: float = CONF_AUTO) -> Dict[str, object]:
     """Применить исправления к файлу по порогам confidence.
+
+    DS_088a_fix §2.4: conf_low/conf_high — опциональные пороги (по умолчанию
+    прежние CONF_MEDIUM/CONF_AUTO). Логика не меняется.
 
     Возвращает сводку: applied_auto, applied_medium, needs_manual, skipped,
     changes (список деталей).
@@ -353,7 +363,7 @@ def apply_fixes(file_path: Path, fixes: List[dict]) -> Dict[str, object]:
     prepared.sort(key=lambda p: p[0], reverse=True)
 
     for ln, fx in prepared:
-        kind = classify_fix(fx)
+        kind = classify_fix(fx, conf_low, conf_high)
         # DS_081 §2.2: детали нужны артефакту needs_manual (файл, строка,
         # правило, исходный код, причина). rule_code/description AI-ответом
         # не передаются — подставляются из файла-запроса в process_response.
@@ -480,8 +490,13 @@ def _rule_map_from_request(req_path: Optional[Path]) -> Dict[int, str]:
 
 
 def process_response(response_path: Path, base: Optional[Path] = None,
-                     backup: bool = True) -> Dict[str, object]:
+                     backup: bool = True,
+                     conf_low: float = CONF_MEDIUM,
+                     conf_high: float = CONF_AUTO) -> Dict[str, object]:
     """Обработать один файл-ответ: применить исправления, заархивировать.
+
+    DS_088a_fix §2.4: conf_low/conf_high — опциональные пороги (дефолты —
+    CONF_MEDIUM/CONF_AUTO). Логика не меняется.
 
     Возвращает сводку для журнала/КР.
     """
@@ -529,7 +544,7 @@ def process_response(response_path: Path, base: Optional[Path] = None,
         except Exception:
             pass
 
-    stats = apply_fixes(Path(source), fixes)
+    stats = apply_fixes(Path(source), fixes, conf_low, conf_high)
     # DS_081 §2.3: код правила берём из файла-запроса (в ответе AI его нет).
     rule_by_line = _rule_map_from_request(req_path)
     if rule_by_line:
@@ -549,15 +564,22 @@ def process_response(response_path: Path, base: Optional[Path] = None,
 
 
 def process_all_responses(base: Optional[Path] = None,
-                          backup: bool = True) -> List[Dict[str, object]]:
-    """Обработать все файлы-ответы в AI_OUT (по возрастанию имён)."""
+                          backup: bool = True,
+                          conf_low: float = CONF_MEDIUM,
+                          conf_high: float = CONF_AUTO) -> List[Dict[str, object]]:
+    """Обработать все файлы-ответы в AI_OUT (по возрастанию имён).
+
+    DS_088a_fix §2.4: conf_low/conf_high — опциональные пороги (дефолты —
+    CONF_MEDIUM/CONF_AUTO). Старые вызовы без параметров работают как прежде.
+    """
     dirs = ensure_dirs(base)
     out_dir = dirs['AI_OUT']
     files = sorted(list(out_dir.glob(f"{RESPONSE_PREFIX}*.md")) +
                    list(out_dir.glob(f"{RESPONSE_PREFIX}*.json")))
     results = []
     for f in files:
-        results.append(process_response(f, base=base, backup=backup))
+        results.append(process_response(f, base=base, backup=backup,
+                                        conf_low=conf_low, conf_high=conf_high))
     return results
 
 

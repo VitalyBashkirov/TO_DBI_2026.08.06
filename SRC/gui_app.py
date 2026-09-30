@@ -23,6 +23,12 @@ from datetime import datetime
 import threading
 import shutil
 import zipfile
+# DS_088a: автоматизация AI-цикла («3. В Ai») — запуск воркеров и ожидание.
+import subprocess
+import time
+import re
+import urllib.request
+import urllib.error
 
 # Импорт модуля рубрикатора
 from rubricator_prompts import RubricatorPrompts
@@ -137,7 +143,7 @@ class Tooltip:
 
 
 def filter_ai_issues(issues, remaining_by_rule, eng=None):
-    """DS_080 §2.2/§2.3: отбор issues для AI-запроса при галке «Только AI».
+    """DS_080 §2.2/§2.3: отбор issues для AI-запроса при галке «Только Ai».
 
     Возвращает (отобранные_issues, режим_фильтра):
       'needs_ai_fix' — (а) правило transform_type=="ignore" И (б) строка issue
@@ -307,6 +313,9 @@ class DBIMigrationApp:
         
         # Привязка событий для поля ввода
         self._bind_entry_events()
+
+        # DS_088b §2.3: контекстное меню (ПКМ) для всех Entry/Text формы.
+        self._attach_all_context_menus()
     
     def _log_rubricator_status(self):
         """Вывод информации о загруженных рубрикаторах в Журнал выполнения (DS 029)"""
@@ -774,18 +783,24 @@ class DBIMigrationApp:
         ttk.Checkbutton(options_frame, text='"Исправить код" — только пометить найденные теги "--NEW YYYY-MM-DD"', 
                         variable=self.fix_only_found_var, style='Green.TCheckbutton').grid(row=1, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
         
-# Чекбокс PlpCheck — включение/выключение правил стиля кода
+        # Чекбокс PlpCheck — включение/выключение правил стиля кода
         # DS 038 (Проблема E): переименовано из "Добавлять PlpCheck-правила (стиль кода)"
+        # DS_088a_fix §2.7: без columnspan — подфлаги (2 колонки) идут правее.
         ttk.Checkbutton(options_frame, text="2. Рубрикатор PlpCheck", 
-                        variable=self.plpcheck_enabled_var).grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
+                        variable=self.plpcheck_enabled_var).grid(row=2, column=0, sticky=tk.W, pady=(5,0))
         # Синхронизация флага PlpCheck с чекбоксом в дереве правил
         self.plpcheck_enabled_var.trace_add('write', lambda *args: self._sync_plpcheck_checkbox())
         
-        # DS 036: группа флагов категорий PlpCheck (7 категорий + OTHER)
+        # DS 036: группа флагов категорий PlpCheck (8 категорий + OTHER)
+        # DS_088a_fix §2.7: подфлаги перевёрстаны в ДВЕ колонки (grid) —
+        # освобождает вертикальное место, «Фильтр по приоритету» и «Флаги
+        # DS_053» поднимаются выше автоматически.
         self.frame_plpcheck_categories = ttk.Frame(options_frame)
-        self.frame_plpcheck_categories.grid(row=2, column=1, sticky=tk.W, padx=(30, 0), pady=(5, 0))
+        self.frame_plpcheck_categories.grid(row=2, column=1, columnspan=5, sticky=tk.W, padx=(30, 0), pady=(5, 0))
+        self.frame_plpcheck_categories.grid_columnconfigure(0, weight=0)
+        self.frame_plpcheck_categories.grid_columnconfigure(1, weight=0)
         
-        # DS 036: чекбокс "Выбрать все PlpCheck-категории"
+        # DS 036: чекбокс "Выбрать все PlpCheck-категории" (на всю ширину)
         self.var_plpcheck_all = tk.BooleanVar(value=True)
         self.chk_plpcheck_all = ttk.Checkbutton(
             self.frame_plpcheck_categories,
@@ -794,16 +809,21 @@ class DBIMigrationApp:
             command=self._toggle_all_plpcheck_categories,
             state='disabled'  # DS 036: disabled пока PlpCheck не выбран
         )
-        self.chk_plpcheck_all.pack(anchor='w')
+        self.chk_plpcheck_all.grid(row=0, column=0, columnspan=2, sticky='w')
         
-        # DS 036: 8 чекбоксов категорий (7 + OTHER) с CHECK-значениями
+        # DS 036: 8 чекбоксов категорий (7 + OTHER) с CHECK-значениями.
+        # DS_088a_fix §2.7: раскладка в 2 колонки — каждая категория в своей
+        # ячейке (подкадре): чекбокс + опциональная строка «CHECK: ...».
         self.var_plpcheck_categories = {}
         self.chk_plpcheck_categories = {}
-        for code, descr, checks in PLPCHECK_CATEGORIES:
+        for _idx, (code, descr, checks) in enumerate(PLPCHECK_CATEGORIES):
             var = tk.BooleanVar(value=True)
             self.var_plpcheck_categories[code] = var
+            cell = ttk.Frame(self.frame_plpcheck_categories)
+            cell.grid(row=1 + _idx // 2, column=_idx % 2,
+                      sticky='nw', padx=(0, 24), pady=1)
             chk = ttk.Checkbutton(
-                self.frame_plpcheck_categories,
+                cell,
                 text=f"PlpCheck: {code} — {descr}",
                 variable=var,
                 command=self._update_plpcheck_all_checkbox,
@@ -815,7 +835,7 @@ class DBIMigrationApp:
             # DS 036 (ревизия 2): CHECK-значения серым текстом под чекбоксом
             if checks:
                 lbl = ttk.Label(
-                    self.frame_plpcheck_categories,
+                    cell,
                     text=f"CHECK: {checks}",
                     font=('Segoe UI', 8),
                     foreground='#666666',
@@ -949,7 +969,9 @@ class DBIMigrationApp:
         # «Исправить код» (обработка needs_ai_fix / needs_manual). Обработчики и
         # логика активации из DS_054 сохранены.
         # DS_087 §2.2: переименована в «3. В Ai» + tooltip.
-        self.btn_to_ai = ttk.Button(control_frame, text="3. В Ai", command=self.send_to_ai, width=10)
+        # DS_088a §1/§2.2: нажатие запускает полный AI-цикл (запрос → воркеры →
+        # ожидание AI_RESPONSE → приём). Логика send_to_ai() не изменена.
+        self.btn_to_ai = ttk.Button(control_frame, text="3. В Ai", command=self.start_ai_cycle, width=10)
         self.btn_to_ai.pack(side=tk.LEFT, padx=3)
         self.btn_to_ai.state(['disabled'])
         # DS_087 §2.2: tooltip «3. В Ai» (инстанс сохранён — для тестов).
@@ -963,15 +985,43 @@ class DBIMigrationApp:
         # в EXCHANGE\AI_OUT (обновление — _update_ai_button_state, таймер 5 сек).
         self.btn_from_ai.state(['disabled'])
         
-        # DS_079: галка «Только AI» — фильтр отбора issues, требующих AI
+        # DS_079: галка «Только Ai» — фильтр отбора issues, требующих AI
         # (правило transform_type == "ignore"). По умолчанию ВКЛЮЧЕНА
         # (отправляем только AI). При выключенной — все issues (отладка,
         # обратная совместимость с DS_054). Рядом с группой AI-кнопок,
         # после «От AI» (сохраняет смежность «В AI»→«От AI» из DS_054_Уточнение).
         self.ai_only_var = tk.BooleanVar(value=True)
-        self.chk_ai_only = ttk.Checkbutton(control_frame, text="Только AI",
+        self.chk_ai_only = ttk.Checkbutton(control_frame, text="Только Ai",
                                            variable=self.ai_only_var)
         self.chk_ai_only.pack(side=tk.LEFT, padx=3)
+
+        # DS_088a_fix §2.5: пороги confidence — рядом с «Только Ai».
+        # Часть C §2.6: поля добавляются ДО кнопок «Открыть рубикатор» /
+        # «Генерация тестовых .plp» — те сдвигаются правее автоматически.
+        self.conf_label = ttk.Label(control_frame, text="Пороги confidence:")
+        self.conf_label.pack(side=tk.LEFT, padx=(10, 3))
+        self.conf_low_var = tk.StringVar(value="0.5")
+        self.conf_high_var = tk.StringVar(value="0.8")
+        self.conf_low_entry = ttk.Entry(control_frame,
+                                        textvariable=self.conf_low_var, width=5)
+        self.conf_low_entry.pack(side=tk.LEFT)
+        ttk.Label(control_frame, text="–").pack(side=tk.LEFT, padx=2)
+        self.conf_high_entry = ttk.Entry(control_frame,
+                                         textvariable=self.conf_high_var, width=5)
+        self.conf_high_entry.pack(side=tk.LEFT)
+        # DS_088b §2.5: один tooltip на метку «Пороги confidence:» (не на поля).
+        self._tooltip_conf = Tooltip(
+            self.conf_label,
+            "Пороги confidence для AI-фиксов:\n"
+            "— ниже нижнего порога: needs_manual (ручная проверка);\n"
+            "— между порогами: средняя уверенность;\n"
+            "— выше верхнего порога: авто-применение.\n"
+            "Диапазон ввода: 0.0–1.0. Рекомендуемые значения: 0.5–0.8.")
+        self._conf_low_prev = 0.5
+        self._conf_high_prev = 0.8
+        for _w in (self.conf_low_entry, self.conf_high_entry):
+            _w.bind('<FocusOut>', lambda e: self._on_confidence_change())
+            _w.bind('<Return>', lambda e: self._on_confidence_change())
         
         self.btn_rubricator = ttk.Button(control_frame, text="Открыть рубрикатор", command=self.open_rubricator, width=25)
         self.btn_rubricator.pack(side=tk.LEFT, padx=3)
@@ -1689,6 +1739,43 @@ class DBIMigrationApp:
         except Exception as e:
             print(f"[DS 042] Ошибка сброса btn_abort: {e}")
     
+    def _play_result_sound(self, success: bool, duration: float):
+        """DS_088b §2.2: звук завершения операции (Windows-only).
+
+        duration — время операции в секундах. Если duration меньше
+        sound_min_duration (settings.json, по умолчанию 30) — звук не играет.
+        Победные: 1000→1200→1500; печальные: 1500→1200→1000.
+        При RuntimeError (нет доступа к динамику) — fallback MessageBeep.
+        """
+        try:
+            min_dur = float(self._read_settings_json().get(
+                'sound_min_duration', 30))
+        except Exception:
+            min_dur = 30
+        if duration < min_dur:
+            return
+        try:
+            import winsound
+            if success:
+                winsound.Beep(1000, 300)
+                winsound.Beep(1200, 300)
+                winsound.Beep(1500, 500)
+            else:
+                winsound.Beep(1500, 300)
+                winsound.Beep(1200, 300)
+                winsound.Beep(1000, 500)
+        except (ImportError, RuntimeError):
+            try:
+                import winsound
+                if success:
+                    winsound.MessageBeep(winsound.MB_ICONASTERISK)
+                else:
+                    winsound.MessageBeep(winsound.MB_ICONHAND)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def _progress_update(self, pct, force=False):
         """DS 041: установить индикатор выполнения.
         При заморозке (прерывание) обычные обновления игнорируются —
@@ -1847,7 +1934,55 @@ class DBIMigrationApp:
         
         # Привязка события изменения выбора в рубрикаторе
         self.root.after(100, self._update_buttons_state)
-    
+
+    def _attach_context_menu(self, widget, is_text=False):
+        """DS_088b §2.3: контекстное меню (ПКМ) для Entry/Text.
+
+        Выделить всё / Копировать / Вставить; для Text — ещё «Очистить».
+        """
+        menu = tk.Menu(widget, tearoff=0)
+        menu.add_command(
+            label="Выделить всё",
+            command=lambda: widget.event_generate('<<SelectAll>>'))
+        menu.add_command(
+            label="Копировать",
+            command=lambda: widget.event_generate('<<Copy>>'))
+        menu.add_command(
+            label="Вставить",
+            command=lambda: widget.event_generate('<<Paste>>'))
+        if is_text:
+            menu.add_separator()
+            menu.add_command(
+                label="Очистить",
+                command=lambda: widget.delete('1.0', 'end'))
+        widget.bind('<Button-3>',
+                    lambda e: menu.tk_popup(e.x_root, e.y_root))
+        widget._context_menu = menu
+        return menu
+
+    def _attach_all_context_menus(self, parent=None):
+        """DS_088b §2.3: рекурсивно навесить контекстное меню на все Entry/Text.
+
+        Исключения: Treeview (рубрикатор), Combobox (уровень лога), Checkbutton,
+        Label — они не Entry/Text и не затрагиваются.
+        """
+        if parent is None:
+            parent = self.root
+        count = 0
+        for child in parent.winfo_children():
+            try:
+                cls = child.winfo_class()
+            except Exception:
+                cls = ''
+            if cls in ('Entry', 'TEntry'):
+                self._attach_context_menu(child, is_text=False)
+                count += 1
+            elif cls == 'Text':
+                self._attach_context_menu(child, is_text=True)
+                count += 1
+            count += self._attach_all_context_menus(child)
+        return count
+
     def _on_source_dir_changed(self):
         """Обработка изменения исходного каталога - автоматическое обновление результата (DS 013: с детальным логированием)"""
         # === ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ ВЫЧИСЛЕНИЯ РК ===
@@ -2569,6 +2704,69 @@ class DBIMigrationApp:
         except Exception as e:
             print(f"Не удалось автосохранить флаги DS_053: {e}")
 
+    # ── DS_088a_fix §2.4/§2.5: пороги confidence ─────────────────────────
+    def _confidence_thresholds(self) -> tuple:
+        """Пороги confidence (low, high): из полей формы, иначе из settings.json.
+
+        DS_088a_fix §2.4: используется в receive_from_ai для проброса в
+        ai_exchange.process_all_responses(conf_low=..., conf_high=...).
+        """
+        low, high = 0.5, 0.8
+        try:
+            s = self._read_settings_json()
+            low = float(s.get('conf_low', low))
+            high = float(s.get('conf_high', high))
+        except Exception:
+            pass
+        try:
+            if getattr(self, 'conf_low_var', None):
+                low = float(self.conf_low_var.get().replace(',', '.'))
+            if getattr(self, 'conf_high_var', None):
+                high = float(self.conf_high_var.get().replace(',', '.'))
+        except Exception:
+            pass
+        return low, high
+
+    def _autosave_confidence(self):
+        """DS_088a_fix §2.5: сохранение conf_low/conf_high в settings.json
+        (read-modify-write, как UI-флаги DS_086)."""
+        try:
+            settings = self._read_settings_json()
+            settings['conf_low'] = self._conf_low_prev
+            settings['conf_high'] = self._conf_high_prev
+            self._write_settings_json(settings)
+        except Exception as e:
+            print(f"Не удалось автосохранить пороги confidence: {e}")
+
+    def _on_confidence_change(self):
+        """DS_088a_fix §2.5: контроль диапазона 0.0..1.0 + запись в ЖВ.
+
+        При неверном вводе — сообщение в ЖВ и возврат к предыдущему значению.
+        """
+        if getattr(self, '_loading_settings', False):
+            return
+        if not getattr(self, 'conf_low_var', None):
+            return
+        try:
+            low = float(self.conf_low_var.get().replace(',', '.'))
+            high = float(self.conf_high_var.get().replace(',', '.'))
+        except (ValueError, TypeError):
+            self.log("Пороги confidence: введите число (0.0–1.0) — откат", 'warning')
+            self.conf_low_var.set(str(self._conf_low_prev))
+            self.conf_high_var.set(str(self._conf_high_prev))
+            return
+        if not (0.0 <= low <= 1.0) or not (0.0 <= high <= 1.0):
+            self.log("Пороги confidence вне диапазона 0.0–1.0 — откат", 'warning')
+            self.conf_low_var.set(str(self._conf_low_prev))
+            self.conf_high_var.set(str(self._conf_high_prev))
+            return
+        if low == self._conf_low_prev and high == self._conf_high_prev:
+            return
+        self._conf_low_prev = low
+        self._conf_high_prev = high
+        self.log(f"Пороги confidence изменены: low={low}, high={high}", 'info')
+        self._autosave_confidence()
+
     def load_settings(self):
         """Загрузка настроек из файла"""
         # DS_053_Уточнение_2 (задача C): блокируем автосохранение на время
@@ -2589,6 +2787,14 @@ class DBIMigrationApp:
                     self.only_modified_var.set(settings.get('only_modified', True))
                     self.preserve_structure_var.set(settings.get('preserve_structure', True))
                     self.clean_output_var.set(settings.get('clean_output', False))
+                    # DS_088a_fix §2.5: пороги confidence из settings.json.
+                    if getattr(self, 'conf_low_var', None):
+                        _cl = float(settings.get('conf_low', 0.5))
+                        _ch = float(settings.get('conf_high', 0.8))
+                        self._conf_low_prev = _cl
+                        self._conf_high_prev = _ch
+                        self.conf_low_var.set(str(_cl))
+                        self.conf_high_var.set(str(_ch))
                     
                     # DS_058+DS_057: состояние чекбоксов рубрикатора хранится в
                     # settings.json -> rubricator_selected_rules (инициализируется
@@ -2680,6 +2886,14 @@ class DBIMigrationApp:
             'max_log_size_mb': MAX_LOG_SIZE_MB,
             'selected_priorities': list(getattr(self, '_selected_priorities', []))
         }
+        # DS_088a_fix §2.5: пороги confidence (иначе save_settings стёр бы ключи,
+        # записанные _autosave_confidence).
+        try:
+            settings['conf_low'] = float(getattr(self, '_conf_low_prev', 0.5))
+            settings['conf_high'] = float(getattr(self, '_conf_high_prev', 0.8))
+        except Exception:
+            settings['conf_low'] = 0.5
+            settings['conf_high'] = 0.8
         # DS_058+DS_057: состояние чекбоксов рубрикатора — в settings.json
         if self._rubricator_rule_vars:
             settings['rubricator_selected_rules'] = {
@@ -2905,6 +3119,8 @@ class DBIMigrationApp:
         Args:
             deep_mode: Если True - использовать углублённое сканирование
         """
+        # DS_088b §2.2: замер длительности для звука завершения.
+        _op_start = time.time()
         try:
             # Сброс индикатора (DS 041: через _progress_update — уважает заморозку)
             self._progress_update(0)
@@ -3199,6 +3415,11 @@ class DBIMigrationApp:
             # (успех / ошибка / прерывание) — раньше только в ветке успеха
             self.root.after(0, lambda: self.btn_scan.state(['!disabled']))
             self.root.after(0, lambda: self.btn_fix.state(['!disabled']))
+            # DS_088b §2.2: звук завершения (scan_aborted ещё не сброшен).
+            _sound_ok = not self.scan_aborted
+            _sound_dur = time.time() - _op_start
+            self.root.after(0, lambda s=_sound_ok, d=_sound_dur:
+                            self._play_result_sound(s, d))
             # DS 038: сброс флагов прерывания и деактивация кнопки
             self.root.after(0, self._finish_abortable_operation)
     
@@ -3378,6 +3599,8 @@ class DBIMigrationApp:
     
     def _run_fix(self):
         """Рабочая функция исправления (вызывается в отдельном потоке)"""
+        # DS_088b §2.2: замер длительности для звука завершения.
+        _op_start = time.time()
         try:
             source_dir = Path(self.source_dir_var.get())
             result_dir = Path(self.result_dir_var.get())
@@ -3648,7 +3871,7 @@ class DBIMigrationApp:
             
             # Сохраняем результаты сканирования для кнопки "Показать SQL для ручного исправления"
             # DS_080 §2.1: остаток верификации фиксера (rule_code -> [строки]) —
-            # источник фильтра «Только AI» в send_to_ai.
+            # источник фильтра «Только Ai» в send_to_ai.
             self.scan_results = {
                 'scanner': scanner,
                 'issues': scanner.issues,
@@ -3702,6 +3925,11 @@ class DBIMigrationApp:
         finally:
             # DS 043: финальный статус-бар (до сброса флагов)
             self.root.after(0, lambda: self.set_status("Прервано" if self.scan_aborted else "Готово"))
+            # DS_088b §2.2: звук завершения (scan_aborted ещё не сброшен).
+            _sound_ok = not self.scan_aborted
+            _sound_dur = time.time() - _op_start
+            self.root.after(0, lambda s=_sound_ok, d=_sound_dur:
+                            self._play_result_sound(s, d))
             # DS 038: сброс флагов прерывания и деактивация кнопки
             self.root.after(0, self._finish_abortable_operation)
     
@@ -4862,7 +5090,7 @@ class DBIMigrationApp:
     def send_to_ai(self):
         """DS 054: сформировать файл-запрос для AI в EXCHANGE\AI_IN.
 
-        DS_080 §2.2: при галке «Только AI» (по умолчанию включена) отбираются
+        DS_080 §2.2: при галке «Только Ai» (по умолчанию включена) отбираются
         issues, реально требующие AI: (а) правило transform_type == "ignore"
         (5.RUBRICATOR_PARSER_SQL v5.json, plpcheck.<NAME> -> RuleEngine
         _resolve_code) И (б) issue остался в scan_results['remaining_by_rule']
@@ -4886,7 +5114,7 @@ class DBIMigrationApp:
             ts = datetime.now().strftime('%Y%m%d_%H%M%S')
 
             total = len(issues)
-            # DS_079 §2.1: галка «Только AI» (по умолчанию ВКЛ).
+            # DS_079 §2.1: галка «Только Ai» (по умолчанию ВКЛ).
             ai_only = bool(getattr(self, 'ai_only_var', None)
                            and self.ai_only_var.get())
             # DS_080 §2.2: критерий отбора — (а) правило transform_type=="ignore"
@@ -4904,21 +5132,21 @@ class DBIMigrationApp:
                 remaining = self.scan_results.get('remaining_by_rule') or {}
                 issues, filter_mode = filter_ai_issues(issues, remaining, eng)
                 if filter_mode == 'needs_ai_fix':
-                    self.log(f"  Фильтр «только AI»: needs_ai_fix (остаток после "
+                    self.log(f"  Фильтр «только Ai»: needs_ai_fix (остаток после "
                              f"конвейера), правил в остатке: {len(remaining)}.", 'info')
                 elif filter_mode == 'без фильтра':
                     self._bot_log("Движок правил недоступен — отправлены все issues.")
                     self.log("  [!] Движок правил недоступен — отправлены все issues.", 'warning')
                 else:
                     self._bot_log("needs_ai_fix недоступен, фильтр по ignore_set.")
-                    self.log("  Фильтр «только AI»: needs_ai_fix недоступен, "
+                    self.log("  Фильтр «только Ai»: needs_ai_fix недоступен, "
                              "отбор по ignore_set.", 'info')
                 if not issues:
-                    self._bot_log("Нет issues, требующих AI (фильтр «только AI»).")
+                    self._bot_log("Нет issues, требующих AI (фильтр «только Ai»).")
                     messagebox.showinfo(
                         "Нет issues, требующих AI",
-                        "После фильтра «только AI» не осталось проблем.\n"
-                        "Снимите галку «Только AI» для отправки всех issues.")
+                        "После фильтра «только Ai» не осталось проблем.\n"
+                        "Снимите галку «Только Ai» для отправки всех issues.")
                     return
 
             # Группируем проблемы по файлам-источникам.
@@ -5066,7 +5294,11 @@ class DBIMigrationApp:
 
             self._log_separator("ОБРАБОТКА AI-ОТВЕТОВ (DS 054)")
             self.log(f"Найдено ответов: {len(files)}", 'info')
-            results = ai_exchange.process_all_responses(backup=True)
+            # DS_088a_fix §2.4: пороги confidence из settings.json/полей формы.
+            _conf_low, _conf_high = self._confidence_thresholds()
+            self.log(f"Пороги confidence: low={_conf_low}, high={_conf_high}", 'info')
+            results = ai_exchange.process_all_responses(
+                backup=True, conf_low=_conf_low, conf_high=_conf_high)
             # DS_081 §2.2: структурированная сводка — строки в журнал +
             # корзины by_confidence для артефакта needs_manual.
             summary = ai_exchange.summarize(results, structured=True)
@@ -5120,7 +5352,280 @@ class DBIMigrationApp:
                 self._update_ai_button_state()
             except Exception:
                 pass
-    
+
+    # ------------------------------------------------------------------
+    # DS_088a: автоматизация цикла «3. В Ai»
+    #   send_to_ai → rule_based_fixer → ai_local_worker (Ollama) →
+    #   ожидание AI_RESPONSE (timeout 35 мин) → receive_from_ai.
+    # Логика send_to_ai()/receive_from_ai() не меняется (§1).
+    # ------------------------------------------------------------------
+    def _log_to_journal(self, message: str):
+        """DS_088a §2.1: запись в ЖВ (log_text) с учётом потока.
+
+        Из главного потока — напрямую; из воркера — через root.after,
+        чтобы обращения к Tk шли только из главного потока.
+        """
+        try:
+            if threading.current_thread() is threading.main_thread():
+                self.log(message)
+            else:
+                self.root.after(0, lambda m=message: self.log(m))
+        except Exception:
+            pass
+
+    def _call_in_main(self, func, timeout=None):
+        """DS_088a: выполнить func в главном потоке Tk и дождаться результата.
+
+        Нужно, чтобы send_to_ai()/receive_from_ai() (работа с Tk-виджетами
+        и messagebox) исполнялись в главном потоке, даже когда цикл запущен
+        в фоновом потоке. Если мы уже в главном потоке — вызов прямой.
+        """
+        if threading.current_thread() is threading.main_thread():
+            return func()
+        done = threading.Event()
+        box = {}
+
+        def _wrap():
+            try:
+                box['result'] = func()
+            except Exception as exc:  # noqa: BLE001 - пробрасываем наружу
+                box['error'] = exc
+            finally:
+                done.set()
+
+        self.root.after(0, _wrap)
+        done.wait(timeout)
+        if 'error' in box:
+            raise box['error']
+        return box.get('result')
+
+    def _ai_batch_size(self) -> int:
+        """DS_088a §2.1: размер батча из tools/ai_local_worker_config.json."""
+        try:
+            cfg_path = (Path(__file__).parent.parent / 'tools'
+                        / 'ai_local_worker_config.json')
+            cfg = json.loads(cfg_path.read_text(encoding='utf-8'))
+            return int(cfg.get('batch_size', 10))
+        except Exception:
+            return 10
+
+    def _check_ollama(self) -> bool:
+        """DS_088a §2.6: доступность Ollama (GET /api/tags, timeout 5с).
+
+        Реализовано на stdlib urllib (без зависимости requests).
+        """
+        try:
+            url = 'http://localhost:11434/api/tags'
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                return getattr(resp, 'status', resp.getcode()) == 200
+        except Exception:
+            return False
+
+    @staticmethod
+    def _pretty_source(request_name: str) -> str:
+        """DS_088a §2.3: AI_REQUEST_<stem>_<ts>.md → <stem>.plp для ЖВ."""
+        name = str(request_name)
+        if name.startswith('AI_REQUEST_'):
+            name = name[len('AI_REQUEST_'):]
+        name = re.sub(r'_\d{8}_\d{6}\.(md|json)$', '', name)
+        name = re.sub(r'\.(md|json)$', '', name)
+        return f"{name}.plp"
+
+    def _source_from_request_name(self, request_name: str) -> str:
+        """DS_088a_fix §2.3: имя source-файла из AI_REQUEST_*.md («- Источник:»).
+
+        Запрос одно-файловый, поэтому источник однозначен. Если файл/строка
+        недоступны — fallback на _pretty_source (имя из самого AI_REQUEST).
+        """
+        try:
+            in_dir = Path(__file__).parent.parent / 'EXCHANGE' / 'AI_IN'
+            p = in_dir / request_name
+            if p.exists():
+                text = p.read_text(encoding='utf-8', errors='replace')
+                m = re.search(r'^-\s*Источник:\s*(.+)$', text, re.MULTILINE)
+                if m:
+                    return Path(m.group(1).strip()).name
+        except Exception:
+            pass
+        return self._pretty_source(request_name)
+
+    def _monitor_worker(self, proc, batch_size: int):
+        """DS_088a §2.5/§2.3 + DS_088a_fix §2.2: читать stdout воркера в ЖВ.
+
+        Строки «batch X/Y <остаток>» выводятся в формате:
+        «Батч(nn) X/Y: текущий — file.plp (<остаток>)», где nn — batch_size
+        из конфига, file.plp — источник из AI_REQUEST («- Источник:»),
+        остаток — из stdout как есть (ids=...: fixes=... время=... conf=...).
+        Fallback (`fallback: split A -> B (по S)`) дополняется «(fallback B×S)».
+        Прочие строки — как есть.
+        """
+        cur_file = ''
+        fallback_size = 5
+        batch_re = re.compile(r'batch\s+(\d+)\s*/\s*(\d+)')
+        fb_split_re = re.compile(
+            r'fallback:\s*split\s+\d+\s*->\s*(\d+)(?:\s*\(по\s*(\d+)\))?')
+        try:
+            for raw in iter(proc.stdout.readline, b''):
+                text = raw.decode('utf-8', errors='replace').strip()
+                if not text:
+                    continue
+                m = re.match(r'^(AI_REQUEST_[^:]+?):\s*\d+\s+issues', text)
+                if m:
+                    cur_file = self._source_from_request_name(m.group(1))
+                fm = fb_split_re.search(text)
+                if fm:
+                    n_sub = fm.group(1)
+                    size = fm.group(2) or str(fallback_size)
+                    self._log_to_journal(f"{text} (fallback {n_sub}×{size})")
+                else:
+                    bm = batch_re.search(text)
+                    if bm:
+                        rest = text[bm.end():].strip()
+                        suffix = f" ({rest})" if rest else ''
+                        self._log_to_journal(
+                            f"Батч({batch_size}) {bm.group(1)}/{bm.group(2)}: "
+                            f"текущий — {cur_file}{suffix}")
+                    else:
+                        self._log_to_journal(text)
+                if self._abort_requested():
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+                    break
+        finally:
+            try:
+                proc.wait()
+            except Exception:
+                pass
+
+    def _wait_for_ai_response(self, timeout: int) -> bool:
+        """DS_088a §2.4: ждать AI_RESPONSE_*.md/json в AI_OUT (шаг 10с).
+
+        Возвращает True, если ответ появился; False — timeout или abort.
+        """
+        start = time.time()
+        while time.time() - start < timeout:
+            if self._abort_requested():
+                return False
+            if self._ai_out_files():
+                return True
+            time.sleep(10)
+        return False
+
+    def start_ai_cycle(self):
+        """DS_088a: обработчик кнопки «3. В Ai» — запуск AI-цикла в фоне."""
+        if getattr(self, '_ai_cycle_running', False):
+            self.log("AI-цикл уже выполняется", 'warning')
+            return
+        if not self.scan_results:
+            messagebox.showwarning("Предупреждение",
+                                   "Сначала выполните сканирование!")
+            return
+        self._ai_cycle_running = True
+        # DS_038: активировать «Прервать» и статус «Выполняется...» на время цикла.
+        self._start_abortable_operation()
+        thread = threading.Thread(target=self._run_ai_cycle, daemon=True)
+        thread.start()
+
+    def _run_ai_cycle(self):
+        """DS_088a §2.2: полный AI-цикл (фоновый поток).
+
+        Шаги: send_to_ai → rule_based_fixer → ai_local_worker (если Ollama) →
+        ожидание AI_RESPONSE (35 мин) → receive_from_ai. Все шаги — в ЖВ.
+        messagebox на время цикла подавляются (автономный режим), методы
+        send_to_ai()/receive_from_ai() не изменяются.
+        """
+        root = Path(__file__).parent.parent
+        tools = root / 'tools'
+        ai_in = root / 'EXCHANGE' / 'AI_IN'
+        ai_out = root / 'EXCHANGE' / 'AI_OUT'
+        # DS_088b §2.2: замер длительности и признак успеха для звука.
+        _op_start = time.time()
+        _ai_ok = False
+        # Подавляем модальные диалоги, пока идёт автономный цикл.
+        import tkinter.messagebox as _mb
+        saved = {}
+        for name in ('showinfo', 'showwarning', 'showerror',
+                     'askyesno', 'askokcancel'):
+            saved[name] = getattr(_mb, name)
+            setattr(_mb, name, lambda *a, **k: None)
+        try:
+            self._log_to_journal("Начало AI-цикла")
+            # 1. Формирование AI_REQUEST_*.md в AI_IN.
+            self._call_in_main(self.send_to_ai)
+            if not self._ai_in_request_files():
+                self._log_to_journal(
+                    "AI-цикл прерван: AI_REQUEST не сформирован")
+                return
+            # 2a. rule_based_fixer (детерминированные правила).
+            self._log_to_journal("Запуск rule_based_fixer...")
+            try:
+                r = subprocess.run(
+                    [sys.executable, str(tools / 'rule_based_fixer.py'),
+                     '--in-dir', str(ai_in), '--out-dir', str(ai_out)],
+                    cwd=str(root), capture_output=True, timeout=600)
+                out = (r.stdout or b'').decode('utf-8', errors='replace').strip()
+                if out:
+                    self._log_to_journal(out)
+            except Exception as exc:
+                self._log_to_journal(f"rule_based_fixer: ошибка {exc}")
+            # 2b. ai_local_worker (локальная LLM) — если Ollama доступна.
+            if self._check_ollama():
+                self._log_to_journal("Запуск ai_local_worker...")
+                bs = self._ai_batch_size()
+                try:
+                    proc = subprocess.Popen(
+                        [sys.executable, str(tools / 'ai_local_worker.py'),
+                         '--in-dir', str(ai_in), '--out-dir', str(ai_out)],
+                        cwd=str(root), stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT)
+                    self._monitor_worker(proc, bs)
+                except Exception as exc:
+                    self._log_to_journal(f"ai_local_worker: ошибка {exc}")
+            else:
+                self._log_to_journal("Ollama недоступна, AI-воркер пропущен")
+            if self._abort_requested():
+                self._log_to_journal("AI-цикл прерван пользователем")
+                return
+            # 3. Ожидание AI_RESPONSE (timeout 35 мин).
+            if not self._wait_for_ai_response(timeout=35 * 60):
+                if self._abort_requested():
+                    self._log_to_journal("AI-цикл прерван пользователем")
+                else:
+                    self._log_to_journal("Timeout: AI_RESPONSE не получен")
+                return
+            # 4. Автоматический приём ответов.
+            self._log_to_journal("Применение AI_RESPONSE...")
+            self._call_in_main(self.receive_from_ai)
+            self._log_to_journal("AI-цикл завершён")
+            _ai_ok = True
+        except Exception as exc:
+            self._log_to_journal(f"AI-цикл: ошибка {exc}")
+        finally:
+            for name, fn in saved.items():
+                setattr(_mb, name, fn)
+            self._ai_cycle_running = False
+            # DS_088b §2.2: звук завершения AI-цикла (до сброса scan_aborted).
+            _sound_ok = _ai_ok and not self.scan_aborted
+            _sound_dur = time.time() - _op_start
+            try:
+                self._call_in_main(
+                    lambda s=_sound_ok, d=_sound_dur:
+                    self._play_result_sound(s, d))
+            except Exception:
+                pass
+            try:
+                self._call_in_main(self._finish_abortable_operation)
+            except Exception:
+                pass
+            # DS_088a тест 8: после цикла пересчитать активацию workflow
+            # (AI_REQUEST заархивированы → «3. В Ai» снова disabled).
+            try:
+                self._call_in_main(self._update_workflow_buttons)
+            except Exception:
+                pass
+
     def _save_changelog_to_disk(self, changelog_text: str, source_file: str = ''):
         """Сохранение журнала на диск"""
         import os

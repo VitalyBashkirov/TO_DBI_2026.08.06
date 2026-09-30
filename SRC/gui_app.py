@@ -70,9 +70,20 @@ UI_HIDEABLE_ELEMENTS = (
     ('btn_send_koda', 'Отправить в Koda'),
     ('btn_from_ai', 'От AI'),
     ('changelog_frame', 'Журнал изменений'),
+    # DS_087 §2.4: скрыть по умолчанию кнопки вне workflow 1→2→3.
+    # В ТЗ имена btn_get_answer / btn_history_rk — фактические переменные
+    # в коде: btn_receive_koda («Получить ответ»), btn_result_history
+    # («История РК»). Идентификация по уникальному тексту, см. отчёт §5.9.
+    ('btn_receive_koda', 'Получить ответ'),
+    ('btn_result_history', 'История РК'),
 )
 # DS_086 §2.2: по умолчанию все элементы реестра скрыты (требование задачи).
 UI_HIDE_DEFAULT = tuple(key for key, _label in UI_HIDEABLE_ELEMENTS)
+# DS_087: состав UI_HIDE_DEFAULT до расширения реестра (для миграции
+# сохранённого состояния: если в settings.json лежит ровно старый дефолт —
+# пользователь меню «Вид» не трогал → мигрируем на новый дефолт, новые
+# кнопки тоже скрыты).
+UI_HIDE_DEFAULT_V1 = ('btn_show_sql', 'btn_send_koda', 'btn_from_ai', 'changelog_frame')
 # DS_086 §2.3: нижняя граница высоты окна при скрытии «Журнала изменений».
 UI_MIN_WINDOW_HEIGHT = 400
 
@@ -181,10 +192,22 @@ class DBIMigrationApp:
     def __init__(self, root):
         self.root = root
         self.root.title(APP_TITLE)
-        self.root.geometry("1090x650")
-        # DS_086 §2.3: базовый размер окна (значения из geometry выше). Высота
-        # при скрытии элементов считается от него — см. _adjust_window_height().
-        self._ui_base_geometry = (1090, 650)
+        # DS_087 §2.5: размер окна 1600×900; если экран меньше — во весь экран;
+        # центрирование. _ui_base_geometry (DS_086) синхронизируется с фактическим
+        # размером — от него считается высота при скрытии элементов реестра.
+        W, H = 1600, 900
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        if sw < W or sh < H:
+            W, H = sw, sh  # во весь экран
+        x = (sw - W) // 2
+        y = (sh - H) // 2
+        self.root.geometry(f"{W}x{H}+{x}+{y}")
+        # DS_086 §2.3: базовый размер окна. Высота при скрытии элементов
+        # считается от него — см. _adjust_window_height().
+        self._ui_base_geometry = (W, H)
+        # DS_087 §2.5: minsize согласован с UI_MIN_WINDOW_HEIGHT = 400 (DS_086).
+        self.root.minsize(1200, 600)
         
         # Переменные
         self.source_dir_var = tk.StringVar()
@@ -557,6 +580,10 @@ class DBIMigrationApp:
         """
         if saved_keys is None or not getattr(self, 'ui_visible_vars', None):
             return
+        # DS_087: миграция старого дефолта (4 ключа DS_086) на новый (6 ключей) —
+        # иначе новые скрытые по умолчанию кнопки остались бы видимыми.
+        if tuple(sorted(saved_keys)) == tuple(sorted(UI_HIDE_DEFAULT_V1)):
+            saved_keys = list(UI_HIDE_DEFAULT)
         hidden = {k for k in saved_keys if k in self.ui_visible_vars}
         for key, var in self.ui_visible_vars.items():
             var.set(key not in hidden)
@@ -604,7 +631,18 @@ class DBIMigrationApp:
             lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
         )
         
-        main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        # DS_087 §2.6: scrollable_frame растягивается по ширине канваса —
+        # иначе LabelFrame'ы сжимаются по содержимому и элементы «липнут»
+        # к правому краю (напр. группа «Топ-файлов» в боксе 3).
+        _canvas_window = main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+
+        def _on_main_canvas_configure(event):
+            try:
+                main_canvas.itemconfigure(_canvas_window, width=event.width)
+            except Exception:
+                pass
+
+        main_canvas.bind("<Configure>", _on_main_canvas_configure)
         main_canvas.configure(yscrollcommand=scrollbar.set)
         
         main_canvas.pack(side="left", fill="both", expand=True)
@@ -615,8 +653,10 @@ class DBIMigrationApp:
         paths_frame.pack(fill=tk.X, padx=5, pady=3)
         
         # Строка 0: Исходный каталог
+        # DS_087 §2.6.1: поля ИК/КР сужены 50→40 — кнопки [...] гарантированно
+        # влезают даже при minsize=1200 (40 симв. + метка + кнопка в колонке).
         ttk.Label(paths_frame, text="Исходный каталог:").grid(row=0, column=0, sticky=tk.W, padx=(0,1))
-        self.source_entry = ttk.Entry(paths_frame, textvariable=self.source_dir_var, width=50, style='Valid.TEntry')
+        self.source_entry = ttk.Entry(paths_frame, textvariable=self.source_dir_var, width=40, style='Valid.TEntry')
         self.source_entry.grid(row=0, column=1, padx=0, sticky=tk.EW)
         self.btn_browse_source = ttk.Button(paths_frame, text="...", command=self.browse_source, width=3)
         self.btn_browse_source.grid(row=0, column=2, padx=(0,2))
@@ -624,7 +664,7 @@ class DBIMigrationApp:
 
         # Строка 0: Каталог результатов
         ttk.Label(paths_frame, text="Каталог результатов:").grid(row=0, column=3, sticky=tk.W, padx=(2,1))
-        self.result_entry = ttk.Entry(paths_frame, textvariable=self.result_dir_var, width=50, style='Valid.TEntry')
+        self.result_entry = ttk.Entry(paths_frame, textvariable=self.result_dir_var, width=40, style='Valid.TEntry')
         self.result_entry.grid(row=0, column=4, padx=0, sticky=tk.EW)
         self.btn_browse_result = ttk.Button(paths_frame, text="...", command=self.browse_result, width=3)
         self.btn_browse_result.grid(row=0, column=5, padx=(0,0))
@@ -659,8 +699,9 @@ class DBIMigrationApp:
         self._load_rubricator_files()
         
         # Treeview с прокруткой (высота -50%, ширина -30%)
-        tree_scroll_y = ttk.Scrollbar(rules_frame, orient=tk.VERTICAL)
-        tree_scroll_x = ttk.Scrollbar(rules_frame, orient=tk.HORIZONTAL)
+        # DS_087 §2.6.2: скроллбары сохранены в self — видны и проверяемы.
+        tree_scroll_y = self.tree_scroll_y = ttk.Scrollbar(rules_frame, orient=tk.VERTICAL)
+        tree_scroll_x = self.tree_scroll_x = ttk.Scrollbar(rules_frame, orient=tk.HORIZONTAL)
         
         self.rules_tree = ttk.Treeview(rules_frame,
                                        yscrollcommand=tree_scroll_y.set,
@@ -677,7 +718,9 @@ class DBIMigrationApp:
         self.rules_tree['columns'] = ('selected', 'code', 'name')
         self.rules_tree.column('selected', width=60, minwidth=60, anchor=tk.CENTER)
         self.rules_tree.column('code', width=110, minwidth=110, anchor=tk.W)
-        self.rules_tree.column('name', width=750, minwidth=400, anchor=tk.W)
+        # DS_087 §2.6.2: stretch=False — длинное имя НЕ сдвигает скроллбары;
+        # горизонтальная прокрутка показывает остаток.
+        self.rules_tree.column('name', width=750, minwidth=400, anchor=tk.W, stretch=False)
 
         # Заголовки
         self.rules_tree.heading('#0', text='Рубрикатор', anchor=tk.W)
@@ -686,9 +729,11 @@ class DBIMigrationApp:
         self.rules_tree.heading('name', text='Полное имя файла', anchor=tk.W)
         
         # Размещаем Treeview и скроллы
+        # DS_087 §2.6.2: таблица растягивается по ширине бокса 2, скроллбары
+        # (верт./гориз.) остаются в зоне видимости и не уходят за край.
         tree_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
         tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
-        self.rules_tree.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        self.rules_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
         
         # DS 018: панель приоритетов удалена из бокса 2 (перенесена в бокс 3 как HIGH/MEDIUM/LOW)
         
@@ -696,8 +741,12 @@ class DBIMigrationApp:
         # self._populate_rules_tree() будет вызван после инициализации кнопок
         
         # Секция 3 - Опции сканирования и исправления. Логирование
-        options_frame = ttk.LabelFrame(scrollable_frame, text="3. Опции сканирования и исправления. Логирование", padding="5")
+        # DS_087 §2.6.3: options_frame сохранён в self (для layout-тестов).
+        options_frame = self.options_frame = ttk.LabelFrame(scrollable_frame, text="3. Опции сканирования и исправления. Логирование", padding="5")
         options_frame.pack(fill=tk.X, padx=5, pady=3)
+        # DS_087 §2.6.3: колонка-распорка 6 поглощает свободное место —
+        # группа «Топ-файлов» (col 4-5) не прижимается к правому краю.
+        options_frame.grid_columnconfigure(6, weight=1)
         
         # Опции вывода
         ttk.Checkbutton(options_frame, text="Только модифицированные файлы", 
@@ -711,8 +760,11 @@ class DBIMigrationApp:
                     values=["Минимальный", "Подробный"], 
                     state="readonly", width=15).grid(row=0, column=3, sticky=tk.W)
         # DS_075 §3.2: порог вывода топ-файлов (при «Подробный»).
-        ttk.Label(options_frame, text="Топ-файлов, мин. файлов:").grid(row=0, column=4, sticky=tk.W, padx=(15,3))
-        ttk.Entry(options_frame, textvariable=self.report_stats_min_files_var, width=5).grid(row=0, column=5, sticky=tk.W)
+        # DS_087 §2.6.3: метка «Топ-файлов» сохранена (для layout-теста).
+        self.report_stats_label = ttk.Label(options_frame, text="Топ-файлов, мин. файлов:")
+        self.report_stats_label.grid(row=0, column=4, sticky=tk.W, padx=(15,3))
+        self.report_stats_entry = ttk.Entry(options_frame, textvariable=self.report_stats_min_files_var, width=5)
+        self.report_stats_entry.grid(row=0, column=5, sticky=tk.W)
         
 # Чекбокс для режима вывода при исправлении
         self.fix_only_found_var = tk.BooleanVar(value=False)
@@ -878,22 +930,32 @@ class DBIMigrationApp:
         _btn_bar_scrollx.pack(side=tk.BOTTOM, fill=tk.X)
         self.btn_bar_canvas.pack(fill=tk.X)
         
-        self.btn_scan = ttk.Button(control_frame, text="Сканировать", command=self.start_scan, width=20)
+        self.btn_scan = ttk.Button(control_frame, text="1. Сканировать", command=self.start_scan, width=20)
         self.btn_scan.pack(side=tk.LEFT, padx=3)
         
-        # Стиль для кнопки "Исправить код" — жирный шрифт
+        # DS_087 §2.3: стили для логики активации 1→2→3 — активная кнопка
+        # жирная, остальные обычные. ('Fix.TButton' оставлен для совместимости
+        # тестов, но шрифт btn_fix управляется workflow-стилями.)
         style = ttk.Style()
         style.configure('Fix.TButton', font=('Segoe UI', 9, 'bold'))
+        style.configure('WorkflowActive.TButton', font=('Segoe UI', 9, 'bold'))
+        style.configure('WorkflowNormal.TButton', font=('Segoe UI', 9))
         
-        self.btn_fix = ttk.Button(control_frame, text="Исправить код", command=self.start_fix, width=20, style='Fix.TButton')
+        # DS_087 §2.2: «2. Исправить код» — нумерованное имя workflow.
+        self.btn_fix = ttk.Button(control_frame, text="2. Исправить код", command=self.start_fix, width=20)
         self.btn_fix.pack(side=tk.LEFT, padx=3)
         
         # DS 054 / DS_054_Уточнение (задача A): «В AI» / «От AI» — сразу после
         # «Исправить код» (обработка needs_ai_fix / needs_manual). Обработчики и
         # логика активации из DS_054 сохранены.
-        self.btn_to_ai = ttk.Button(control_frame, text="В AI", command=self.send_to_ai, width=10)
+        # DS_087 §2.2: переименована в «3. В Ai» + tooltip.
+        self.btn_to_ai = ttk.Button(control_frame, text="3. В Ai", command=self.send_to_ai, width=10)
         self.btn_to_ai.pack(side=tk.LEFT, padx=3)
         self.btn_to_ai.state(['disabled'])
+        # DS_087 §2.2: tooltip «3. В Ai» (инстанс сохранён — для тестов).
+        self._tooltip_to_ai = Tooltip(
+            self.btn_to_ai,
+            "Использовать LLM для корректировки ошибок, требующих Ai-анализа.")
         
         self.btn_from_ai = ttk.Button(control_frame, text="От AI", command=self.receive_from_ai, width=10)
         self.btn_from_ai.pack(side=tk.LEFT, padx=3)
@@ -934,12 +996,14 @@ class DBIMigrationApp:
         self.btn_result_history.pack(side=tk.LEFT, padx=3)
         
         # Журнал выполнения — уменьшенный размер
-        journal_frame = ttk.LabelFrame(scrollable_frame, text="Журнал выполнения", padding="5")
+        # DS_087 §2.6.4: journal_frame и его скроллбары сохранены в self
+        # (проверяемость: верт. скроллбар должен быть видим).
+        journal_frame = self.journal_frame = ttk.LabelFrame(scrollable_frame, text="Журнал выполнения", padding="5")
         journal_frame.pack(fill=tk.BOTH, expand=False, padx=5, pady=3)
         
         # Журнал с прокруткой (вертикальная + горизонтальная)
-        log_scroll_y = ttk.Scrollbar(journal_frame, orient=tk.VERTICAL)
-        log_scroll_x = ttk.Scrollbar(journal_frame, orient=tk.HORIZONTAL)
+        log_scroll_y = self.log_scroll_y = ttk.Scrollbar(journal_frame, orient=tk.VERTICAL)
+        log_scroll_x = self.log_scroll_x = ttk.Scrollbar(journal_frame, orient=tk.HORIZONTAL)
         
         self.log_text = scrolledtext.ScrolledText(journal_frame, 
                                                   wrap=tk.NONE,
@@ -955,6 +1019,11 @@ class DBIMigrationApp:
         journal_buttons = ttk.Frame(journal_frame)
         journal_buttons.pack(side=tk.BOTTOM, fill=tk.X, pady=(3, 0))
         
+        # DS_087 §2.6.4: journal_frame занимает grid-строку 1 у parent
+        # (scrollable_frame через create_window — pack для соседей). Явный
+        # rowconfigure не нужен; проверяем, что Text + верт. скроллбар
+        # влезают: width=58 символов Consolas 9 ≈ 510 px + скроллбар 17 px
+        # + padding ≈ 560 px < 1200 (minsize) и < 1600 (базовый размер).
         self.btn_clear_log = ttk.Button(journal_buttons, text="Очистить журнал", command=self.clear_log)
         self.btn_clear_log.pack(side=tk.LEFT, padx=3)
         self.btn_copy_log = ttk.Button(journal_buttons, text="Копировать в буфер", command=self.copy_log)
@@ -1135,6 +1204,70 @@ class DBIMigrationApp:
         tooltip = getattr(self, '_tooltip_from_ai', None)
         if tooltip is not None:
             tooltip.text = tip
+
+    # ── DS_087 §2.3: workflow «Скан → Фикс → Ai» ──────────────────────────
+    def _result_dir_has_pattern_files(self) -> bool:
+        """Есть ли файлы по Шаблону в каталоге результатов (включая подкаталоги)."""
+        result = self.result_dir_var.get().strip()
+        pattern = self.file_pattern_var.get().strip()
+        if not result or not pattern:
+            return False
+        try:
+            p = Path(result)
+            if not p.exists() or not p.is_dir():
+                return False
+            if '**' in pattern:
+                gen = p.glob(pattern)
+            elif self.scan_recursive_var.get():
+                gen = p.rglob(pattern)
+            else:
+                gen = p.glob(pattern)
+            return any(True for _ in gen)
+        except Exception:
+            return False
+
+    def _ai_in_request_files(self) -> list:
+        """Файлы-запросы AI_REQUEST_*.md в EXCHANGE\AI_IN (маска из DS_087 §2.3)."""
+        try:
+            in_dir = Path(__file__).parent.parent / 'EXCHANGE' / 'AI_IN'
+            if not in_dir.exists():
+                return []
+            return sorted(in_dir.glob('AI_REQUEST_*.md'))
+        except Exception:
+            return []
+
+    def _update_workflow_buttons(self):
+        """DS_087 §2.3: активация workflow 1→2→3 (условия, жирный шрифт).
+
+        Ровно одна кнопка активна (state NORMAL + жирный), остальные
+        disabled + обычный шрифт. Во время операции (scan_running) — не
+        пересчитывать: их отключает/включает сам процесс operations.
+        """
+        if getattr(self, 'scan_running', False):
+            return
+        source = self.source_dir_var.get().strip()
+        result = self.result_dir_var.get().strip()
+        pattern = self.file_pattern_var.get().strip()
+        any_rule = any(var.get() for var in self.selected_rules.values())
+        scan_done = self.scan_results is not None
+        fix_done = bool(scan_done and self.scan_results.get('fix_done'))
+        cond_ai = fix_done and bool(self._ai_in_request_files())
+        cond_fix = scan_done and self._result_dir_has_pattern_files()
+        cond_scan = bool(source) and bool(result) and bool(pattern) and any_rule
+        # Приоритет у позднего шага: workflow идёт 1→2→3.
+        active = 'ai' if cond_ai else ('fix' if cond_fix else ('scan' if cond_scan else None))
+        self._workflow_active = active
+        for btn, key in ((getattr(self, 'btn_scan', None), 'scan'),
+                         (getattr(self, 'btn_fix', None), 'fix'),
+                         (getattr(self, 'btn_to_ai', None), 'ai')):
+            if btn is None:
+                continue
+            if key == active:
+                btn.state(['!disabled'])
+                btn.configure(style='WorkflowActive.TButton')
+            else:
+                btn.state(['disabled'])
+                btn.configure(style='WorkflowNormal.TButton')
 
     def _poll_ai_out(self):
         """Таймер (5 сек): периодическая проверка AI_OUT (DS_054_Уточнение_C)."""
@@ -1696,6 +1829,21 @@ class DBIMigrationApp:
         self.log_level_var.trace_add('write', lambda *args: self._reset_progress())
         self.scan_recursive_var.trace_add('write', lambda *args: self._reset_progress())
         self.file_pattern_var.trace_add('write', lambda *args: self._update_buttons_state())
+        # DS 54 §2: полный набор триггеров пересчёта активации кнопок —
+        # любые изменения в боксах 1-3 должны переключать «Сканировать»/«В Ai».
+        self.file_pattern_var.trace_add('write', lambda *args: self._update_workflow_buttons())
+        self.scan_recursive_var.trace_add('write', lambda *args: self._update_workflow_buttons())
+        self.log_level_var.trace_add('write', lambda *args: self._update_workflow_buttons())
+        self.report_stats_min_files_var.trace_add('write', lambda *args: self._update_workflow_buttons())
+        self.only_modified_var.trace_add('write', lambda *args: self._update_workflow_buttons())
+        self.preserve_structure_var.trace_add('write', lambda *args: self._update_workflow_buttons())
+        self.plpcheck_enabled_var.trace_add('write', lambda *args: self._update_workflow_buttons())
+        self.priority_high_var.trace_add('write', lambda *args: self._update_workflow_buttons())
+        self.priority_medium_var.trace_add('write', lambda *args: self._update_workflow_buttons())
+        self.priority_low_var.trace_add('write', lambda *args: self._update_workflow_buttons())
+        self.clean_output_var.trace_add('write', lambda *args: self._update_workflow_buttons())
+        self.fix_only_found_var.trace_add('write', lambda *args: self._update_workflow_buttons())
+        self.archive_result_var.trace_add('write', lambda *args: self._update_workflow_buttons())
         
         # Привязка события изменения выбора в рубрикаторе
         self.root.after(100, self._update_buttons_state)
@@ -1905,13 +2053,11 @@ class DBIMigrationApp:
         # 2. Указан каталог результатов (для исправления)
         # 3. Выбран хотя бы один файл в рубрикаторе
         
-        # Кнопка "Сканировать" - только источник и рубрикатор
-        scan_enabled = bool(source_dir) and any_rule_selected
-        self.btn_scan.state(['!disabled' if scan_enabled else 'disabled'])
-        
-        # Кнопка "Исправить" - источник + результат + рубрикатор
-        fix_enabled = bool(source_dir) and bool(result_dir) and any_rule_selected
-        self.btn_fix.state(['!disabled' if fix_enabled else 'disabled'])
+        # DS_087 §2.3: кнопки 1/2/3 («Сканировать»/«Исправить код»/«В Ai»)
+        # управляются единой логикой активации workflow — ровно одна активна
+        # и жирная. Старшие условия (источник/результат/рубрикатор) входят в
+        # cond_scan; см. _update_workflow_buttons().
+        self._update_workflow_buttons()
     
         # Кнопка "Показать SQL для ручного исправления" - активна после сканирования
         show_sql_enabled = self.scan_results is not None
@@ -1924,8 +2070,8 @@ class DBIMigrationApp:
         # DS 054: «В AI» активна после сканирования (есть проблемы для запроса).
         # DS_054_Уточнение_C: «От AI» — по наличию файлов-ответов в AI_OUT
         # (не включаем безусловно; обновление — _update_ai_button_state).
-        if getattr(self, 'btn_to_ai', None) is not None:
-            self.btn_to_ai.state(['!disabled' if show_sql_enabled else 'disabled'])
+        # DS_087 §2.3: state btn_to_ai («3. В Ai») больше НЕ ставится здесь —
+        # им управляет _update_workflow_buttons (ровно одна активна из 1/2/3).
         self._update_ai_button_state()
     
 # Кнопка "Архивировать" - активируется при установленном флаге "Сохранить структуру"
@@ -2124,6 +2270,8 @@ class DBIMigrationApp:
         self.update_field_colors()
         if hasattr(self, 'update_status_indicators'):
             self.update_status_indicators()
+        # DS 54 §2: статусы кнопок пересчитываются и при смене индикации
+        self._update_workflow_buttons()
     
     def _load_rules(self) -> dict:
         """Загрузка списка правил из рубрикатора"""
@@ -3028,6 +3176,8 @@ class DBIMigrationApp:
                 'issues_before_dedup': scanner.issues_before_dedup,
                 'stats': scan_results,
                 'remaining_by_rule': {},
+                # DS_087 §2.3: чистый скан — фикса ещё не было.
+                'fix_done': False,
             }
             
             # DS 040: окно результата — обычное или «прервано на xxx.xx %»
@@ -3506,6 +3656,9 @@ class DBIMigrationApp:
                 'stats': scan_results,
                 'remaining_by_rule': dict(
                     (getattr(fixer, 'verify_stats', None) or {}).get('remaining_by_rule', {})),
+                # DS_087 §2.3: «фикс завершён, есть что проверить через Ai» —
+                # состояние кнопки «От Ai» (btn_to_ai) до активации чекбокса.
+                'fix_done': bool(scanner.issues),
             }
             
             # Обновить состояние кнопок после исправления

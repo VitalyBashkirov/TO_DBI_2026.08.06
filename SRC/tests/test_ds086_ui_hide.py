@@ -124,7 +124,7 @@ def main():
         check(6, "winfo_exists() + command сохранены у всех скрытых", not det6,
               "; ".join(det6) or "all ok")
 
-        # --- 7: меню «Вид» — 4 чекбокса + 2 команды ---
+        # --- 7: меню «Вид» — 6 чекбоксов + 2 команды (DS_087 расширил реестр) ---
         vm = getattr(app, 'view_menu', None)
         n_check = n_cmd = 0
         if vm is not None:
@@ -133,8 +133,8 @@ def main():
                 t = vm.type(i)
                 n_check += t == 'checkbutton'
                 n_cmd += t == 'command'
-        check(7, "меню «Вид»: 4 checkbutton + 2 команды",
-              vm is not None and n_check == 4 and n_cmd == 2,
+        check(7, "меню «Вид»: 6 checkbutton + 2 команды",
+              vm is not None and n_check == 6 and n_cmd == 2,
               f"checkbutton={n_check} command={n_cmd}")
 
         # --- 8: «Показать все» — все видны, высота восстановлена ---

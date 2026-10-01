@@ -1254,6 +1254,10 @@ class PLPlusScanner:
             
             # ========== ОДНОСТРОЧНЫЙ ПОИСК ==========
             for line_num, line in enumerate(self.lines, 1):
+                # DS_089: mid-file abort check
+                if self.abort_callback and self.abort_callback():
+                    break
+
                 original_line = line
                 stripped = original_line.strip()
 

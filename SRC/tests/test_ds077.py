@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 DS_077 - tests for two problem lines (with dubs + after dedup).
 

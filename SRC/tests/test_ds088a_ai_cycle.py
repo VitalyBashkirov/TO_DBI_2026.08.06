@@ -114,12 +114,13 @@ def main():
         gui_app.subprocess.Popen = fake_popen
 
         # --- 1. Цикл с Ollama ---
+        # DS_089a §2.5: rule_based_fixer теперь через Popen (не subprocess.run).
         app._check_ollama = lambda: True
         journal.clear()
         app._run_ai_cycle()
-        ok1 = (calls == ['send', 'receive'] and len(run_calls) == 1
-               and len(popen_calls) == 1)
-        check(1, "Цикл с Ollama: send→rule_based→worker→receive",
+        ok1 = (calls == ['send', 'receive'] and len(run_calls) == 0
+               and len(popen_calls) == 2)
+        check(1, "Цикл с Ollama: send→rule_based(Popen)→worker(Popen)→receive",
               ok1, f"calls={calls} run={len(run_calls)} popen={len(popen_calls)}")
 
         # --- 4. Прогресс по батчам (из stdout) ---
@@ -138,11 +139,12 @@ def main():
         check(6, "ЖВ: все шаги цикла", not miss, f"missing={miss}")
 
         # --- 2. Цикл без Ollama ---
+        # DS_089a §2.5: rule_based_fixer — Popen; без Ollama popen=1, run=0.
         app._check_ollama = lambda: False
         calls.clear(); run_calls.clear(); popen_calls.clear(); journal.clear()
         app._run_ai_cycle()
-        ok2 = (calls == ['send', 'receive'] and len(run_calls) == 1
-               and len(popen_calls) == 0
+        ok2 = (calls == ['send', 'receive'] and len(run_calls) == 0
+               and len(popen_calls) == 1
                and any('Ollama недоступна' in m for m in journal))
         check(2, "Цикл без Ollama: worker пропущен, receive вызван",
               ok2, f"calls={calls} run={len(run_calls)} popen={len(popen_calls)}")

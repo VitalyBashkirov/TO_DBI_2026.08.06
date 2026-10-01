@@ -1680,26 +1680,64 @@ class DBIMigrationApp:
         self._reset_progress()
     
     def on_abort_click(self):
-        """DS 038 (Проблема A): обработчик кнопки «Прервать» — установить флаг прерывания.
-        Работающий поток проверяет флаг через abort_callback и останавливается."""
+        """DS 038 + DS_089a §2.2: toggle «Прервать»/«Продолжить».
+        Первый клик — scan_aborted=True, текст → «▶ Продолжить»;
+        второй — scan_aborted=False, текст → «⏹ Прервать»."""
         if not self.scan_running:
             return
-        
-        # DS 041: перекрасить индикатор в жёлтый СРАЗУ, до установки scan_aborted —
-        # НЕ сбрасывать value, только перекрасить (видно, на каком этапе прервано)
+
+        # --- ПРОДОЛЖИТЬ (второй клик) ---
+        if self.scan_aborted:
+            self.scan_aborted = False
+            self._progress_frozen = False
+            try:
+                if hasattr(self, 'progress'):
+                    self.progress.configure(style="Horizontal.TProgressbar")
+                    self.progress.update_idletasks()
+            except Exception as e:
+                print(f"[DS_089a] Ошибка сброса стиля: {e}")
+            self.btn_abort.config(text="⏹ Прервать")
+            _ts = time.strftime("%H:%M:%S")
+            self.log(f"[{_ts}] Операция продолжена", 'info')
+            return
+
+        # --- ПРЕРВАТЬ (первый клик) ---
         try:
             if hasattr(self, 'progress'):
                 self.progress.configure(style="Yellow.Horizontal.TProgressbar")
-                self.progress.update_idletasks()   # принудительное обновление UI
+                self.progress.update_idletasks()
         except Exception as e:
             print(f"[DS 041] Ошибка перекраски индикатора: {e}")
-        # DS 041: заморозить индикатор — последующие обновления (50/75/100%)
-        # не должны перекрывать процент прерывания (Дефект 3: разная длина)
         self._progress_frozen = True
-        
+
         self.scan_aborted = True
-        self.log("[ПРЕРВАНО] Пользователь нажал «Прервать». Завершаем текущую операцию...", 'warning')
-        self.btn_abort.config(state='disabled')
+        self.btn_abort.config(text="▶ Продолжить")
+        _ts = time.strftime("%H:%M:%S")
+        self.log(f"[{_ts}] Мягкое прерывание запрошено.", 'warning')
+        self.log(f"[{_ts}] Текущий файл будет дочитан, затем операция остановится.", 'warning')
+        # DS_089a §2.7: прогноз времени до фактического останова.
+        try:
+            _done = getattr(self, '_op_files_done', 0) or 0
+            _total = getattr(self, '_op_total_files', 0) or 0
+            _start = getattr(self, '_op_start_time', None)
+            if _start and _total and _done and _done < _total:
+                _elapsed = time.time() - _start
+                _eta = int(round(_elapsed / _done * (_total - _done)))
+                self.log(
+                    f"[{_ts}] Прогноз: остановка через ~{_eta} сек "
+                    f"(осталось {_total - _done} из {_total} файлов).",
+                    'warning')
+            elif _total and _done and _done >= _total:
+                self.log(
+                    f"[{_ts}] Прогноз: сканирование почти завершено "
+                    f"(~1 сек).",
+                    'warning')
+            else:
+                self.log(
+                    f"[{_ts}] Прогноз: AI-цикл — ~30 сек (без данных о файлах).",
+                    'warning')
+        except Exception:
+            pass
     
     def _abort_requested(self) -> bool:
         """DS 038: callback для сканера — проверка флага прерывания (потокобезопасно)."""
@@ -1726,6 +1764,11 @@ class DBIMigrationApp:
             self.progress.configure(style="Horizontal.TProgressbar")
         if self.btn_abort:
             self.btn_abort.config(state='normal')
+            # DS_089a §2.2: сброс toggle-текста при старте операции
+            try:
+                self.btn_abort.config(text="⏹ Прервать")
+            except Exception:
+                pass
     
     def _finish_abortable_operation(self):
         """DS 038: сбросить флаги и деактивировать кнопку «Прервать» (в finally)."""
@@ -1735,6 +1778,8 @@ class DBIMigrationApp:
         try:
             if self.btn_abort and self.btn_abort.winfo_exists():
                 self.btn_abort.config(state='disabled')
+                # DS_089a §2.2: сброс toggle-текста при завершении операции
+                self.btn_abort.config(text="⏹ Прервать")
                 self.btn_abort.update_idletasks()
         except Exception as e:
             print(f"[DS 042] Ошибка сброса btn_abort: {e}")
@@ -3121,6 +3166,10 @@ class DBIMigrationApp:
         """
         # DS_088b §2.2: замер длительности для звука завершения.
         _op_start = time.time()
+        # DS_089a §2.7: сохранение начала операции для прогноза времени.
+        self._op_start_time = _op_start
+        self._op_files_done = 0
+        self._op_total_files = 0
         try:
             # Сброс индикатора (DS 041: через _progress_update — уважает заморозку)
             self._progress_update(0)
@@ -3286,6 +3335,9 @@ class DBIMigrationApp:
                 if m:
                     pct = int(m.group(3))
                     self._progress_update(pct)
+                    # DS_089a §2.7: сохранение прогресса для прогноза
+                    self._op_files_done = int(m.group(1))
+                    self._op_total_files = int(m.group(2))
             
             # Callback для вывода с разными тегами
             def scan_log_with_tags(parts):
@@ -3599,8 +3651,12 @@ class DBIMigrationApp:
     
     def _run_fix(self):
         """Рабочая функция исправления (вызывается в отдельном потоке)"""
+        # DS_089: флаг отмены для _run_fix.
+        self._fix_abort = False
         # DS_088b §2.2: замер длительности для звука завершения.
         _op_start = time.time()
+        # DS_089a §2.7: сохранение начала операции для прогноза времени.
+        self._op_start_time = _op_start
         try:
             source_dir = Path(self.source_dir_var.get())
             result_dir = Path(self.result_dir_var.get())
@@ -3783,7 +3839,7 @@ class DBIMigrationApp:
             from fixer.code_fixer import PLPlusFixer
             iteration = datetime.now().strftime("%Y%m%d_%H%M%S")
             source_name = source_dir.name
-            fixer = PLPlusFixer(config, iteration, clean_output=self.clean_output_var.get())
+            fixer = PLPlusFixer(config, iteration, clean_output=self.clean_output_var.get(), abort_callback=self._abort_requested)
 
             # DS 053: передача флагов детерминированного фикса в фиксер.
             # DS_080 §0: только_ai в общем блоке «Флаги замены» — только_ai не
@@ -4015,7 +4071,11 @@ class DBIMigrationApp:
         thread.start()
     
     def _run_test_generation(self):
-        """Рабочая функция генерации тестовых файлов (один сводный файл)"""
+        """Рабочая функция генерации тестов (вызывается в отдельном потоке)"""
+        # DS_088b §2.2: замер длительности для звука завершения.
+        _op_start = time.time()
+        # DS_089a §2.7: сохранение начала операции для прогноза времени.
+        self._op_start_time = _op_start
         try:
             # Очистить журнал перед генерацией
             self.root.after(0, lambda: self.clear_log())
@@ -5558,16 +5618,15 @@ class DBIMigrationApp:
                 self._log_to_journal(
                     "AI-цикл прерван: AI_REQUEST не сформирован")
                 return
-            # 2a. rule_based_fixer (детерминированные правила).
+            # 2a. rule_based_fixer (детерминированные правила) — DS_089a §2.5: Popen + мониторинг.
             self._log_to_journal("Запуск rule_based_fixer...")
             try:
-                r = subprocess.run(
+                proc = subprocess.Popen(
                     [sys.executable, str(tools / 'rule_based_fixer.py'),
                      '--in-dir', str(ai_in), '--out-dir', str(ai_out)],
-                    cwd=str(root), capture_output=True, timeout=600)
-                out = (r.stdout or b'').decode('utf-8', errors='replace').strip()
-                if out:
-                    self._log_to_journal(out)
+                    cwd=str(root), stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT)
+                self._monitor_worker(proc, batch_size=0)
             except Exception as exc:
                 self._log_to_journal(f"rule_based_fixer: ошибка {exc}")
             # 2b. ai_local_worker (локальная LLM) — если Ollama доступна.
@@ -5587,11 +5646,19 @@ class DBIMigrationApp:
                 self._log_to_journal("Ollama недоступна, AI-воркер пропущен")
             if self._abort_requested():
                 self._log_to_journal("AI-цикл прерван пользователем")
+                # DS_089a §2.8: AI-цикл не возобновляется (resume — DS_089b).
+                self._log_to_journal(
+                    "Операция не возобновляется. "
+                    "Новый цикл — по кнопке «3. В Ai».")
                 return
             # 3. Ожидание AI_RESPONSE (timeout 35 мин).
             if not self._wait_for_ai_response(timeout=35 * 60):
                 if self._abort_requested():
                     self._log_to_journal("AI-цикл прерван пользователем")
+                    # DS_089a §2.8: AI-цикл не возобновляется (resume — DS_089b).
+                    self._log_to_journal(
+                        "Операция не возобновляется. "
+                        "Новый цикл — по кнопке «3. В Ai».")
                 else:
                     self._log_to_journal("Timeout: AI_RESPONSE не получен")
                 return

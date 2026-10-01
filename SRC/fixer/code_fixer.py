@@ -527,7 +527,8 @@ class PLPlusFixer:
     def in_block_comment(self, val):
         self.lexer_state.in_block_comment = val
 
-    def __init__(self, config: dict, iteration: str = 'v0001', use_rubricator: bool = True, clean_output: bool = False):
+    def __init__(self, config: dict, iteration: str = 'v0001', use_rubricator: bool = True, clean_output: bool = False,
+                 abort_callback=None):  # DS_089a §3: callback для проверки отмены
         self.config = config
         self.iteration = iteration
         self.changes_log: List[dict] = []
@@ -541,6 +542,8 @@ class PLPlusFixer:
         self.skipped_details = []  # Детали пропущенных исправлений для подробного лога
         self.fix_only_found = config.get('output', {}).get('fix_only_found', False)  # Флаг режима вывода
         self.clean_output = clean_output  # Флаг чистого вывода (без маркеров)
+        self._abort_flag = False  # DS_089a: флаг прерывания
+        self.abort_callback = abort_callback  # DS_089a §3: callback для проверки отмены
 
         # DS_053: единый RuleEngine + флаги-чекбоксы замены.
         # По умолчанию включены regex, hybrid и backup — чтобы конвейер реально
@@ -1671,6 +1674,12 @@ class PLPlusFixer:
                 log_callback(f"[{idx}/{total_files}] Обработка: {file_path_str}")
             else:
                 print(f"[{idx}/{total_files}] Обработка: {file_path_str}")
+            # DS_089a: проверка прерывания в цикле обработки файлов
+            if self.abort_callback and self.abort_callback():
+                if log_callback:
+                    log_callback("*** ПРЕРЫВАНИЕ: цикл обработки остановлен ***")
+                break
+
             
             # Нормализация пути: буква диска в верхнем регистре
             source_dir_str = self.config['paths']['source_dir']

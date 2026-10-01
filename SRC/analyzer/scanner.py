@@ -476,13 +476,16 @@ class PLPlusScanner:
         self.lexer_state.in_block_comment = val
 
     def __init__(self, config: dict, selected_rules: List[str] = None, rubricator_prompts=None,
-                 plpcheck_categories: List[str] = None, abort_callback=None, fix_flags: Dict[str, bool] = None):
+                 plpcheck_categories: List[str] = None, abort_callback=None, fix_flags: Dict[str, bool] = None,
+                 stop_event=None):
         self.config = config
         self.selected_rules = selected_rules or []
         # DS 036: выбранные категории PlpCheck (7 категорий + OTHER)
         self.plpcheck_categories = plpcheck_categories or []
         # DS 038: callback прерывания — возвращает True, если пользователь нажал «Прервать»
         self.abort_callback = abort_callback
+        # DS_089b: потокобезопасный Event для graceful stop
+        self.stop_event = stop_event
         # DS_053_Уточнение_2 (задача A): флаги детерминированного фикса для
         # отображения в заголовке всех отчётов. None — дефолт (regex+hybrid).
         self.fix_flags = fix_flags
@@ -1257,6 +1260,9 @@ class PLPlusScanner:
                 # DS_089: mid-file abort check
                 if self.abort_callback and self.abort_callback():
                     break
+                # DS_089b: потокобезопасная проверка stop_event
+                if self.stop_event is not None and self.stop_event.is_set():
+                    break
 
                 original_line = line
                 stripped = original_line.strip()
@@ -1703,6 +1709,9 @@ class PLPlusScanner:
                         f"({self.abort_percent:.2f}%)",
                         'warning'
                     )
+                break
+            # DS_089b: потокобезопасная проверка stop_event (graceful stop)
+            if self.stop_event is not None and self.stop_event.is_set():
                 break
             
             # DS 034: отладочный вывод вызова scan_file (Шаг 2)

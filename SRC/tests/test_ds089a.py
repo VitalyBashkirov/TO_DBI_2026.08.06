@@ -139,6 +139,7 @@ class TestDS089a_Logging(unittest.TestCase):
         app.progress = MagicMock()
         app.btn_abort = MagicMock()
         app.log = MagicMock()
+        app._stop_event = MagicMock()  # DS_089b
 
         app.on_abort_click()
 
@@ -158,6 +159,7 @@ class TestDS089a_Logging(unittest.TestCase):
         app.progress = MagicMock()
         app.btn_abort = MagicMock()
         app.log = MagicMock()
+        app._stop_event = MagicMock()  # DS_089b
 
         app.on_abort_click()
 
@@ -183,6 +185,7 @@ class TestDS089a_Forecast(unittest.TestCase):
         app._op_files_done = 5
         app._op_total_files = 10
         app._op_start_time = 1000.0
+        app._stop_event = MagicMock()  # DS_089b
 
         app.on_abort_click()
 
@@ -204,6 +207,7 @@ class TestDS089a_AICycle(unittest.TestCase):
         app.progress = MagicMock()
         app.btn_abort = MagicMock()
         app.log = MagicMock()
+        app._stop_event = MagicMock()  # DS_089b
 
         app.on_abort_click()
 

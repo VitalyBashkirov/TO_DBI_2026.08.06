@@ -528,7 +528,7 @@ class PLPlusFixer:
         self.lexer_state.in_block_comment = val
 
     def __init__(self, config: dict, iteration: str = 'v0001', use_rubricator: bool = True, clean_output: bool = False,
-                 abort_callback=None):  # DS_089a §3: callback для проверки отмены
+                 abort_callback=None, stop_event=None):  # DS_089a §3: callback для проверки отмены; DS_089b: Event для graceful stop
         self.config = config
         self.iteration = iteration
         self.changes_log: List[dict] = []
@@ -544,6 +544,7 @@ class PLPlusFixer:
         self.clean_output = clean_output  # Флаг чистого вывода (без маркеров)
         self._abort_flag = False  # DS_089a: флаг прерывания
         self.abort_callback = abort_callback  # DS_089a §3: callback для проверки отмены
+        self.stop_event = stop_event  # DS_089b: потокобезопасный Event для graceful stop
 
         # DS_053: единый RuleEngine + флаги-чекбоксы замены.
         # По умолчанию включены regex, hybrid и backup — чтобы конвейер реально
@@ -1675,9 +1676,15 @@ class PLPlusFixer:
             else:
                 print(f"[{idx}/{total_files}] Обработка: {file_path_str}")
             # DS_089a: проверка прерывания в цикле обработки файлов
-            if self.abort_callback and self.abort_callback():
+            # DS_089b: приоритет — stop_event (потокобезопасный Event)
+            _should_abort = False
+            if self.stop_event is not None and self.stop_event.is_set():
+                _should_abort = True
+            elif self.abort_callback and self.abort_callback():
+                _should_abort = True
+            if _should_abort:
                 if log_callback:
-                    log_callback("*** ПРЕРЫВАНИЕ: цикл обработки остановлен ***")
+                    log_callback("*** ПРЕРЫВАНИЕ: цикл обработки остановлен (graceful stop) ***")
                 break
 
             

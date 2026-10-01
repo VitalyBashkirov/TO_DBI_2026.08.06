@@ -289,6 +289,9 @@ class DBIMigrationApp:
         # DS 041: заморозка индикатора при прерывании + процент прерывания
         self._progress_frozen = False   # True — обычные обновления value игнорируются
         self.abort_percent = None       # None — не прервано; иначе float (0.0–100.0)
+
+        # DS_089b: механизм graceful stop через threading.Event
+        self._stop_event = threading.Event()
         
         # Создаём главное меню
         self._create_menu()
@@ -1689,6 +1692,7 @@ class DBIMigrationApp:
         # --- ПРОДОЛЖИТЬ (второй клик) ---
         if self.scan_aborted:
             self.scan_aborted = False
+            self._stop_event.clear()  # DS_089b: сброс сигнала остановки
             self._progress_frozen = False
             try:
                 if hasattr(self, 'progress'):
@@ -1711,6 +1715,7 @@ class DBIMigrationApp:
         self._progress_frozen = True
 
         self.scan_aborted = True
+        self._stop_event.set()  # DS_089b: потокобезопасный сигнал остановки
         self.btn_abort.config(text="▶ Продолжить")
         _ts = time.strftime("%H:%M:%S")
         self.log(f"[{_ts}] Мягкое прерывание запрошено.", 'warning')
@@ -3120,41 +3125,29 @@ class DBIMigrationApp:
         self.set_status("Готово")
     
     def start_scan(self):
-        """Запуск сканирования в отдельном потоке"""
-        # DS 036: проверка выбранных категорий PlpCheck
-        if not self._check_plpcheck_categories_before_action():
-            return  # Пользователь отменил
-        
-        # Валидация ИК и РК перед запуском (DS 008)
-        validation = self.validate_directories()
-        
-        if not validation["valid"]:
-            for error in validation["errors"]:
-                self.log(f"❌ {error}", 'error')
-            messagebox.showerror("Ошибка валидации каталогов", "\n".join(validation["errors"]))
-            return
-        
+        """Запуск сканирования"""
+        # Проверка заполнения путей
         if not self.source_dir_var.get():
-            messagebox.showerror("Ошибка", "Укажите исходный каталог!")
+            messagebox.showerror("Ошибка", "Укажите исходный каталог")
+            return
+        if not self.result_dir_var.get():
+            messagebox.showerror("Ошибка", "Укажите каталог результатов")
             return
         
-        for warning in validation["warnings"]:
-            self.log(f"⚠️ {warning}", 'warning')
-        
-        # Проверка: выбран ли хотя бы один файл в рубрикаторе
-        any_rule_selected = any(var.get() for var in self.selected_rules.values())
-        if not any_rule_selected:
-            messagebox.showerror("Ошибка", "Выберите хотя бы один файл в рубрикаторе!")
+        # Проверка существования исходного каталога
+        source_dir = Path(self.source_dir_var.get())
+        if not source_dir.exists():
+            messagebox.showerror("Ошибка", f"Исходный каталог не найден:\n{source_dir}")
             return
         
-        # Отключаем кнопку на время сканирования
+        # Отключение кнопок на время сканирования
         self.btn_scan.state(['disabled'])
         self.btn_fix.state(['disabled'])
+        self.btn_test_gen.state(['disabled'])
         
-        # DS 038: активировать кнопку «Прервать»
-        self._start_abortable_operation()
-        
-        # Запускаем сканирование в отдельном потоке с deep_mode=False
+        # Сброс флага и запуск в отдельном потоке
+        self.scanning = True
+        self._stop_event.clear()
         thread = threading.Thread(target=self._run_scan, args=(False,), daemon=True)
         thread.start()
     
@@ -3317,6 +3310,7 @@ class DBIMigrationApp:
             scanner = PLPlusScanner(config, selected_rules, self.rubricator_prompts,
                                     plpcheck_categories=getattr(self, 'plpcheck_categories_filter', []),
                                     abort_callback=self._abort_requested,  # DS 038
+                                    stop_event=self._stop_event,            # DS_089b
                                     fix_flags=self._current_header_flags())  # DS_053_Уточнение_2 (задача A), DS_080 §0
             
             # Логирование вызова Парсера SQL
@@ -3646,6 +3640,7 @@ class DBIMigrationApp:
             self.rules_changed = False
         
         # Запускаем исправление в отдельном потоке
+        self._stop_event.clear()
         thread = threading.Thread(target=self._run_fix, daemon=True)
         thread.start()
     
@@ -3805,6 +3800,7 @@ class DBIMigrationApp:
             scanner = PLPlusScanner(config, selected_rules, self.rubricator_prompts,
                                     plpcheck_categories=getattr(self, 'plpcheck_categories_filter', []),
                                     abort_callback=self._abort_requested,  # DS 038
+                                    stop_event=self._stop_event,            # DS_089b
                                     fix_flags=self._current_header_flags())  # DS_053_Уточнение_2 (задача A), DS_080 §0
             
             # Callback для вывода в журнал
@@ -3835,12 +3831,12 @@ class DBIMigrationApp:
                 self.root.after(0, lambda: self.btn_fix.state(['!disabled']))
                 return
             
-            # Создание фиксера
+             # Создание фиксера
             from fixer.code_fixer import PLPlusFixer
-            iteration = datetime.now().strftime("%Y%m%d_%H%M%S")
-            source_name = source_dir.name
-            fixer = PLPlusFixer(config, iteration, clean_output=self.clean_output_var.get(), abort_callback=self._abort_requested)
-
+            fixer = PLPlusFixer(config, iteration, clean_output=self.clean_output_var.get(),
+                                abort_callback=self._abort_requested,  # DS 038
+                                stop_event=self._stop_event)           # DS_089b
+            
             # DS 053: передача флагов детерминированного фикса в фиксер.
             # DS_080 §0: только_ai в общем блоке «Флаги замены» — только_ai не
             # детерминированный, _run_fix() читает только известные ключи.

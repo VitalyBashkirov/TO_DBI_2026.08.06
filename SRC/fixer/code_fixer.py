@@ -545,6 +545,9 @@ class PLPlusFixer:
         self._abort_flag = False  # DS_089a: флаг прерывания
         self.abort_callback = abort_callback  # DS_089a §3: callback для проверки отмены
         self.stop_event = stop_event  # DS_089b: потокобезопасный Event для graceful stop
+        # DS_089b §2.2: processed_files — файлы, полностью обработанные в
+        # текущем прогоне fix_directory (для resume)
+        self.processed_files = []
 
         # DS_053: единый RuleEngine + флаги-чекбоксы замены.
         # По умолчанию включены regex, hybrid и backup — чтобы конвейер реально
@@ -1601,12 +1604,14 @@ class PLPlusFixer:
         
         return files_copied
     
-    def fix_directory(self, scanner: PLPlusScanner, results_dir: Path, log_callback=None, log_level: str = 'Минимальный', fix_only_found: bool = False):
+    def fix_directory(self, scanner: PLPlusScanner, results_dir: Path, log_callback=None, log_level: str = 'Минимальный', fix_only_found: bool = False, skip_files=None):
         """
         Исправление всех файлов в директории.
         log_callback - функция для вывода сообщений в журнал (опционально).
         log_level - уровень логирования ('Минимальный' или 'Подробный').
         fix_only_found - если True, выводить только найденные строки в специальном формате.
+        skip_files - DS_089b §2.4: множество путей уже обработанных файлов
+            (resume) — такие файлы пропускаются циклом.
         """
         # Получаем паттерн файлов
         file_pattern = self.config.get('scan', {}).get('file_pattern', '**/*.plp')
@@ -1624,6 +1629,8 @@ class PLPlusFixer:
         files_modified = 0
         files_unchanged = 0
         total_files = len(issues_by_file)
+        # DS_089b §2.2: учёт полностью обработанных файлов для resume
+        self.processed_files = []
 
         # DS_053: verification-сканер (тот же конфиг/правила, что и основной)
         # для повторного скана исправленных файлов.
@@ -1686,6 +1693,13 @@ class PLPlusFixer:
                 if log_callback:
                     log_callback("*** ПРЕРЫВАНИЕ: цикл обработки остановлен (graceful stop) ***")
                 break
+
+            # DS_089b §2.4: resume fix — пропуск уже обработанных файлов
+            if skip_files and str(file_path_str) in skip_files:
+                if log_callback:
+                    log_callback(f"  [DS_089b] Пропуск (resume): {file_path_str}")
+                continue
+
 
             
             # Нормализация пути: буква диска в верхнем регистре
@@ -1921,6 +1935,9 @@ class PLPlusFixer:
                 self.skipped_in_comment = 0
                 self.skipped_in_string = 0
                 self.skipped_details = []
+
+            # DS_089b §2.2: файл полностью обработан — учёт для resume
+            self.processed_files.append(str(file_path_str))
         
         if log_callback:
             log_callback(f"\nГотово! Изменено файлов: {files_modified}/{total_files}")

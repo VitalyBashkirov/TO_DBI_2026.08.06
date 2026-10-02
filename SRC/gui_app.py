@@ -290,6 +290,10 @@ class DBIMigrationApp:
         self._progress_frozen = False   # True — обычные обновления value игнорируются
         self.abort_percent = None       # None — не прервано; иначе float (0.0–100.0)
 
+        # DS_089b §2.2: состояние прерванной операции для resume
+        # {'operation': 'scan'|'fix', 'processed_keys': [...], 'processed_files': [...]}
+        self._abort_state = None
+
         # DS_089b: механизм graceful stop через threading.Event
         self._stop_event = threading.Event()
         
@@ -1694,6 +1698,13 @@ class DBIMigrationApp:
             self.scan_aborted = False
             self._stop_event.clear()  # DS_089b: сброс сигнала остановки
             self._progress_frozen = False
+            # DS_089b §2.6: если есть сохранённое состояние — подсказка о resume.
+            # Состояние НЕ потребляется: resume применяется при следующем
+            # запуске «Сканировать»/«Исправить» (поток уже завершился бы).
+            if getattr(self, '_abort_state', None):
+                self.log("[DS_089b] Есть сохранённое состояние прерванной "
+                         "операции: следующий запуск пропустит обработанное.",
+                         'info')
             try:
                 if hasattr(self, 'progress'):
                     self.progress.configure(style="Horizontal.TProgressbar")
@@ -1716,6 +1727,8 @@ class DBIMigrationApp:
 
         self.scan_aborted = True
         self._stop_event.set()  # DS_089b: потокобезопасный сигнал остановки
+        # DS_089b §2.2: _abort_state сохраняется в конце _run_scan/_run_fix,
+        # когда поток завершился и обработанные ключи/файлы точно известны.
         self.btn_abort.config(text="▶ Продолжить")
         _ts = time.strftime("%H:%M:%S")
         self.log(f"[{_ts}] Мягкое прерывание запрошено.", 'warning')
@@ -1747,6 +1760,27 @@ class DBIMigrationApp:
     def _abort_requested(self) -> bool:
         """DS 038: callback для сканера — проверка флага прерывания (потокобезопасно)."""
         return self.scan_aborted
+    
+    # ------------------------------------------------------------------
+    # DS_089b §2.2/§2.3: ключ и фильтр resume-состояния (тестируемые методы).
+    # Формат ключа — тот же, что дедупликация в scanner.py:1636–1637.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _ds089b_issue_key(issue) -> tuple:
+        """DS_089b: ключ issue = (file_path, line_number, issue_type,
+        description, match_fragment)."""
+        return (issue.file_path, issue.line_number, issue.issue_type,
+                issue.description, issue.match_fragment)
+
+    @classmethod
+    def _ds089b_processed_keys(cls, issues) -> list:
+        """DS_089b §2.2: список ключей обработанных issues для _abort_state."""
+        return [cls._ds089b_issue_key(i) for i in issues]
+
+    @classmethod
+    def _ds089b_filter_processed(cls, issues, prev_keys) -> list:
+        """DS_089b §2.3: исключить issues с ранее обработанными ключами."""
+        return [i for i in issues if cls._ds089b_issue_key(i) not in prev_keys]
     
     def _set_status_running(self):
         """DS 043: установить статус 'Выполняется...' при старте длительной операции."""
@@ -3340,6 +3374,46 @@ class DBIMigrationApp:
             # Сканирование
             scan_results = scanner.scan_directory(log_callback=scan_log)
             
+            # DS_089b §2.3: resume скана — если есть состояние прерванного
+            # скана, исключить из результатов issues с ранее обработанными
+            # ключами (file_path, line_number, issue_type, description,
+            # match_fragment) — тот же ключ, что дедуп в scanner.py.
+            _ab = getattr(self, '_abort_state', None)
+            _resumed_scan = False
+            if _ab and _ab.get('operation') == 'scan':
+                _prev_keys = {tuple(k) for k in _ab.get('processed_keys', [])}
+                self._abort_state = None
+                if _prev_keys:
+                    _resumed_scan = True
+                    _before = len(scanner.issues)
+                    scanner.issues = self._ds089b_filter_processed(
+                        scanner.issues, _prev_keys)
+                    _removed = _before - len(scanner.issues)
+                    _ts = time.strftime("%H:%M:%S")
+                    _msg = (f"[{_ts}] Возобновление с {len(scanner.issues)} "
+                            f"issues (пропущено {_removed})")
+                    self.root.after(0, lambda m=_msg: self.log(m, 'info'))
+                    self._bot_log(f"DS 089: {_msg}")
+            
+            # DS_089b §2.2: скан прерван — сохранить ключи обработанных
+            # issues; следующий запуск («Сканировать») исключит их (resume).
+            if self.scan_aborted:
+                _keys = self._ds089b_processed_keys(scanner.issues)
+                self._abort_state = {'operation': 'scan',
+                                     'processed_keys': _keys}
+                _ts = time.strftime("%H:%M:%S")
+                _msg = (f"[{_ts}] Состояние сохранено: {len(_keys)} issues, "
+                        f"0 файлов. Следующий скан исключит их (resume).")
+                self.root.after(0, lambda m=_msg: self.log(m, 'warning'))
+                self._bot_log(f"DS 089: {_msg}")
+            
+            # DS_089b §2.6: resume завершён успешно (не прерван повторно).
+            if _resumed_scan and not self.scan_aborted:
+                _ts = time.strftime("%H:%M:%S")
+                _msg = f"[{_ts}] Операция возобновлена и завершена"
+                self.root.after(0, lambda m=_msg: self.log(m, 'success'))
+                self._bot_log(f"DS 089: {_msg}")
+            
             # DS 040: сохранить процент прерывания из сканера (None если не прервано)
             self.abort_percent = getattr(scanner, 'abort_percent', None)
             
@@ -3862,11 +3936,48 @@ class DBIMigrationApp:
             self.root.after(0, lambda: self.log(f"  Сохранять структуру: {config['output']['preserve_structure']}", 'info'))
             self.root.after(0, lambda: self.log(f"  Только модифицированные: {config['output']['only_modified']}", 'info'))
             
+            # DS_089b §2.4: resume fix — передаём фиксеру уже обработанные
+            # файлы из сохранённого состояния прерванного фикса (skip).
+            _skip_files = None
+            _resumed_fix = False
+            _ab = getattr(self, '_abort_state', None)
+            if _ab and _ab.get('operation') == 'fix':
+                _skip_files = set(_ab.get('processed_files', []))
+                self._abort_state = None
+                if _skip_files:
+                    _resumed_fix = True
+                    _ts = time.strftime("%H:%M:%S")
+                    _msg = (f"[{_ts}] Возобновление фикса "
+                            f"(пропущено {len(_skip_files)} файлов)")
+                    self.root.after(0, lambda m=_msg: self.log(m, 'info'))
+                    self._bot_log(f"DS 089: {_msg}")
+
             # Передаём callback для вывода в журнал
             files_modified = fixer.fix_directory(scanner, final_results_dir, 
                                                   log_callback=scan_log, 
                                                   log_level=self.log_level_var.get(),
-                                                  fix_only_found=self.fix_only_found_var.get())
+                                                  fix_only_found=self.fix_only_found_var.get(),
+                                                  skip_files=_skip_files)
+
+            # DS_089b §2.2: фикс прерван — сохранить обработанные файлы
+            # для resume при следующем запуске «Исправить».
+            if self.scan_aborted:
+                _proc = list(getattr(fixer, 'processed_files', []))
+                self._abort_state = {'operation': 'fix',
+                                     'processed_files': _proc}
+                _ts = time.strftime("%H:%M:%S")
+                _msg = (f"[{_ts}] Состояние сохранено: 0 issues, "
+                        f"{len(_proc)} файлов. Следующий фикс пропустит их "
+                        f"(resume).")
+                self.root.after(0, lambda m=_msg: self.log(m, 'warning'))
+                self._bot_log(f"DS 089: {_msg}")
+
+            # DS_089b §2.6: resume завершён успешно (не прерван повторно).
+            if _resumed_fix and not self.scan_aborted:
+                _ts = time.strftime("%H:%M:%S")
+                _msg = f"[{_ts}] Операция возобновлена и завершена"
+                self.root.after(0, lambda m=_msg: self.log(m, 'success'))
+                self._bot_log(f"DS 089: {_msg}")
             
             self._progress_update(75)
             
@@ -5644,7 +5755,7 @@ class DBIMigrationApp:
                 self._log_to_journal("AI-цикл прерван пользователем")
                 # DS_089a §2.8: AI-цикл не возобновляется (resume — DS_089b).
                 self._log_to_journal(
-                    "Операция не возобновляется. "
+                    "AI-цикл не возобновляется. "
                     "Новый цикл — по кнопке «3. В Ai».")
                 return
             # 3. Ожидание AI_RESPONSE (timeout 35 мин).
@@ -5653,7 +5764,7 @@ class DBIMigrationApp:
                     self._log_to_journal("AI-цикл прерван пользователем")
                     # DS_089a §2.8: AI-цикл не возобновляется (resume — DS_089b).
                     self._log_to_journal(
-                        "Операция не возобновляется. "
+                        "AI-цикл не возобновляется. "
                         "Новый цикл — по кнопке «3. В Ai».")
                 else:
                     self._log_to_journal("Timeout: AI_RESPONSE не получен")

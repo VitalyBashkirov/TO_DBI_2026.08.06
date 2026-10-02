@@ -1,7 +1,11 @@
 ﻿# ============================================
-# test_all_models.ps1
+# test_all_models.ps1 (v2)
 # Obshchiy test modeley Ollama i LMS dlya chata
 # ============================================
+
+param(
+    [switch]$OnlyNew  # Тест только новых моделей
+)
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
@@ -17,21 +21,26 @@ $ResultFile = Join-Path $ResultDir "test_$Timestamp.csv"
 $MdFile = Join-Path $ResultDir "test_$Timestamp.md"
 
 New-Item -ItemType Directory -Force -Path $ResultDir | Out-Null
-
 Add-Type -AssemblyName System.Net.Http
 
-# ============================================
-# TESTOVYE VOPROSY (Cyrillic)
-# ============================================
-$tests = @(
-    @{ id = 1; name = "greeting"; prompt = [char]0x041F + [char]0x0440 + [char]0x0438 + [char]0x0432 + [char]0x0435 + [char]0x0442 + "! " + [char]0x041A + [char]0x0430 + [char]0x043A + " " + [char]0x0434 + [char]0x0435 + [char]0x043B + [char]0x0430 + "?" }
+# --- Удаленные модели (не тестируем) ---
+$RemovedModels = @(
+    "phi3:mini",              # FAIL на PL/SQL (600 сек timeout)
+    "deepseek-r1:latest"      # 286 сек среднее, 2 FAIL
 )
 
-# Uproshchennyy nabor - perevedem cherez peremennuyu
+# --- Новые модели (тест только их при -OnlyNew) ---
+$NewModels = @(
+    "qwen2.5-coder:7b",
+    "qwen2.5-coder:1.5b-base"
+    # nomic-embed-text:latest — embedding, не для чата
+)
+
+# --- Тестовые вопросы ---
 $q1 = -join ([char]0x041F,[char]0x0440,[char]0x0438,[char]0x0432,[char]0x0435,[char]0x0442,"!"," ",[char]0x041A,[char]0x0430,[char]0x043A," ",[char]0x0434,[char]0x0435,[char]0x043B,[char]0x0430,"?")
 $q2 = -join ([char]0x0420,[char]0x0430,[char]0x0441,[char]0x0441,[char]0x043A,[char]0x0430,[char]0x0436,[char]0x0438," ",[char]0x043F,[char]0x0440,[char]0x043E," PL/SQL ",[char]0x0432," 3 ",[char]0x043F,[char]0x0440,[char]0x0435,[char]0x0434,[char]0x043B,[char]0x043E,[char]0x0436,[char]0x0435,[char]0x043D,[char]0x0438,[char]0x044F,[char]0x0445,".")
 $q3 = -join ([char]0x041A,[char]0x0430,[char]0x043A," PL/SQL ",[char]0x043E,[char]0x0431,[char]0x044A,[char]0x044F,[char]0x0432,[char]0x0438,[char]0x0442,[char]0x044C," VARCHAR2?")
-$q4 = -join ("17 x 24 = ?")
+$q4 = "17 x 24 = ?"
 $q5 = -join ([char]0x041E,[char]0x0442,[char]0x0432,[char]0x0435,[char]0x0442,[char]0x044C," ",[char]0x043E,[char]0x0434,[char]0x043D,[char]0x0438,[char]0x043C," ",[char]0x0441,[char]0x043B,[char]0x043E,[char]0x0432,[char]0x043E,[char]0x043C,": ",[char]0x0441,[char]0x0442,[char]0x043E,[char]0x043B,[char]0x0438,[char]0x0446,[char]0x0430," ",[char]0x0424,[char]0x0440,[char]0x0430,[char]0x043D,[char]0x0446,[char]0x0438,[char]0x0438,"?")
 
 $tests = @(
@@ -42,9 +51,7 @@ $tests = @(
     @{ id = 5; name = "one-word"; prompt = $q5 }
 )
 
-# ============================================
-# FUNKCII
-# ============================================
+# --- Функции ---
 
 function Get-OllamaModels {
     try {
@@ -133,13 +140,11 @@ function Analyze-Answer {
     return @{ HasQuestion = $hasQuestion; HasCyrillic = $hasCyr; Length = $Answer.Length; Preview = $preview }
 }
 
-# ============================================
-# SBOR MODELEY
-# ============================================
-
+# --- Сбор моделей ---
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  OBSHCHIY TEST MODELEY OLLAMA I LM STUDIO" -ForegroundColor Cyan
+if ($OnlyNew) { Write-Host "  (rezhim: tolko NOVYE modeli)" -ForegroundColor Yellow }
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -147,10 +152,19 @@ Write-Host "[1/3] Sbor modeley..." -ForegroundColor Yellow
 $ollamaModels = Get-OllamaModels
 $lmsModels = Get-LmsModels
 
+# Фильтр: только новые
+if ($OnlyNew) {
+    Write-Host "  Filtr: tolko NOVYE modeli" -ForegroundColor Yellow
+    $ollamaModels = $ollamaModels | Where-Object { $_.Name -in $NewModels }
+    $lmsModels = @()
+}
+
+# Исключить удаленные
+$ollamaModels = $ollamaModels | Where-Object { $_.Name -notin $RemovedModels }
+
 Write-Host "  Ollama: $($ollamaModels.Count) modeley" -ForegroundColor Green
 $ollamaModels | ForEach-Object { Write-Host "    - $($_.Name) ($($_.Size) GB)" }
 Write-Host "  LM Studio: $($lmsModels.Count) modeley" -ForegroundColor Green
-$lmsModels | ForEach-Object { Write-Host "    - $($_.Name)" }
 
 $allModels = @()
 $allModels += $ollamaModels
@@ -165,10 +179,7 @@ Write-Host ""
 Write-Host "[2/3] Testirovanie $($allModels.Count) modeley x $($tests.Count) voprosov = $($allModels.Count * $tests.Count) zaprosov" -ForegroundColor Yellow
 Write-Host ""
 
-# ============================================
-# TESTIROVANIE
-# ============================================
-
+# --- Тестирование ---
 $results = @()
 
 foreach ($model in $allModels) {
@@ -213,18 +224,16 @@ foreach ($model in $allModels) {
     Write-Host ""
 }
 
-# ============================================
-# SOKHRANENIE
-# ============================================
-
+# --- Сохранение ---
 Write-Host "[3/3] Sokhranenie rezultatov..." -ForegroundColor Yellow
 
 $results | Select-Object Backend, Model, TestID, TestName, Time, Length, HasCyr, HasQuestion, Success, Preview |
     Export-Csv -Path $ResultFile -NoTypeInformation -Encoding UTF8
 
-$md = "# Rezultaty testa modeley`n`n"
+$md = "# Rezultaty testa modeley (v2)`n`n"
 $md += "**Data:** $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`n`n"
 $md += "**Modeley:** $($allModels.Count) | **Voprosov:** $($tests.Count) | **Zaprosov:** $($results.Count)`n`n"
+if ($OnlyNew) { $md += "**Rezhim:** tolko NOVYE modeli`n`n" }
 $md += "## Svodka`n`n"
 $md += "| Model | Backend | Avg time | OK | Cyr |`n"
 $md += "|---|---|---|---|---|`n"

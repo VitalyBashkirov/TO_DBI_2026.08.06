@@ -1,125 +1,147 @@
-# AGENTS_SHORT.md — Контекст проекта для Continue
+# TO_DBI. Правило для Ai-Continue (CNT)
 
-> Краткая выжимка `AGENTS.md` для Continue (Ollama, локальные модели).
-> Для KODA (koda-base) — полный `F:\TO_DBI\AGENTS.md`.
+## Роль
+CNT (Ai-Continue) — помощник в редакторе (Chat / Edit / Apply /
+Autocomplete / Embed). НЕ исполнитель. Исполнитель DS — KODA.
+CNT не пишет вне разрешённых каталогов, не делает git без указания.
 
-## Проект
+## Контекст проекта
+- Проект TO_DBI. АРМ «Адаптация под DBI».
+- Перевод PL/SQL (Oracle) -> PostgreSQL (DBI).
+- Репозиторий F:\TO_DBI, ветка feature/dockerization.
 
-**АРМ «Адаптация под DBI»** — миграция PL/Plus кода с Oracle на PostgreSQL (DBI).
+## Ссылки
+- EXCHANGE\DS_STANDARD.md — стандарт DS.
+- EXCHANGE\DS_FILES.md, DS_CONTEXT.md — файлы и контекст.
+- EXCHANGE\DS_089b_report.md — шаблон отчёта.
+- EXCHANGE\test_ds089b.py — шаблон unittest.
+- EXCHANGE\DS_CNT_000_regulation.md — регламент ночных задач.
+- AGENTS.md — инструкция KODA (справочник).
 
-| Параметр | Значение |
-|----------|----------|
-| Версия рубрикатора | 5.3.0 |
-| Источник правил | `F:\TO_DBI\DATA\Рубрикатор v5\4.RUBRICATOR_PROMPT v5.json` |
-| Активные рубрикаторы | v53, тдс20240828, тклоик20240828, PlpCheck |
-| Устаревшие | v50, v5.0.0 |
+## Формат DS (Text Copy Download)
+Два блока: имя файла (code-блок) + содержимое DS.
+Без прогноза KODA.
 
-## Структура
+## Регламент
+- Логи операций АРМа — F:\TO_DBI\logs.
+- Лог АРМа — F:\TO_DBI\EXCHANGE\bot.log.
+- Отчёты — F:\TO_DBI\EXCHANGE\OUTBOX\.
+- GIT — только по запросу.
+- SRC не трогать без указания.
+- LM Studio + Ollama одновременно — запрещено.
+- Пакетный режим — без интерактива.
 
-### Модули (SRC)
+## Матрица доступа (роль АРМ)
+- чтение: DATA, EXCHANGE, PATCH_IN;
+- запись: logs, PATCH_OUT;
+- запрет: запись в DATA, EXCHANGE, PATCH_IN.
 
-| Файл | Назначение |
-|------|-----------|
-| `SRC\gui_app.py` | GUI (Tkinter), `DBIMigrationApp` |
-| `SRC\analyzer\scanner.py` | Сканер PLPlus, `PLPlusScanner` |
-| `SRC\fixer\code_fixer.py` | Детерминированный фиксер, `PLPlusFixer` |
-| `SRC\ai_exchange.py` | Файловый обмен AI (AI_IN/AI_OUT) |
-| `SRC\rule_engine.py` | Маппинг кодов, bucketing правил |
-| `SRC\rubricator_prompts.py` | Загрузка `4.RUBRICATOR_PROMPT v5.json` |
+## Запреты
+- Не формировать DS на правку SRC, ai_local_worker, rule_based_fixer,
+  scanner, code_fixer.
+- Не дублировать задачи чата 9 (DS_090).
+- Не использовать внешние AI.
 
-### Инструменты (tools)
+## MCP (когда будет включён)
+- Локальные MCP: shell (allow-list), git (read-only),
+  filesystem (rw: logs, PATCH_OUT; ro: DATA, EXCHANGE, PATCH_IN).
+- Внешние MCP запрещены.
+- CNT не пишет в DATA, EXCHANGE, PATCH_IN.
+- CNT не делает git push/commit без указания.
 
-| Файл | Назначение |
-|------|-----------|
-| `tools\rule_based_fixer.py` | Rule-based фиксер тривиальных issues |
-| `tools\ai_local_worker.py` | Local AI worker (Ollama) |
-| `tools\ai_local_worker_config.json` | Конфиг (model, batch_size, num_ctx) |
+## Ограничения ИБ (кратко)
+- Локальные модели (Ollama, 11434) и локальные MCP-серверы.
+- Внешние AI и облачные MCP — запрещены.
+- Логи — F:\TO_DBI\logs. Лог АРМа — EXCHANGE\bot.log.
+- При отказе — не обходить, эскалировать.
+- Пакетный режим: EXCHANGE\DS_CNT_000_regulation.md.
 
-### Рабочие каталоги (EXCHANGE)
 
-| Каталог | Назначение |
-|---------|-----------|
-| `EXCHANGE\INBOX\` | Задачи KODA (DS_XXX) |
-| `EXCHANGE\OUTBOX\` | Отчёты DS |
-| `EXCHANGE\PROCESSED\` | Выполненные DS |
-| `EXCHANGE\AI_IN\` | AI-запросы (AI_REQUEST_*.md) |
-| `EXCHANGE\AI_OUT\` | AI-ответы (AI_RESPONSE_*.md) |
-| `EXCHANGE\AI_IN_PROCESSED\`, `AI_OUT_PROCESSED\` | Архивы AI |
+## Ограничения ИБ (кратко)
+- Локальные модели (Ollama, 11434) и локальные MCP-серверы.
+- Внешние AI и облачные MCP — запрещены.
+- MCP: shell (allow-list), git (read-only),
+  filesystem (rw: logs, PATCH_OUT; ro: DATA, EXCHANGE, PATCH_IN).
+- CNT не пишет в DATA, EXCHANGE, PATCH_IN.
+- CNT не делает commit/push/checkout без указания.
+- CNT не читает SRC, .git, секреты, системные каталоги.
+- SRC, ai_local_worker, rule_based_fixer, scanner, code_fixer — не трогать.
+- Логи — F:\TO_DBI\logs. Лог АРМа — EXCHANGE\bot.log.
+- LM Studio + Ollama одновременно — запрещено.
+- Пакетный режим — без интерактива.
 
-### Данные
+Полная политика ИБ: EXCHANGE\SEC_POLICY_AI.md.
 
-| Каталог | Назначение |
-|---------|-----------|
-| `DATA\Рубрикатор v5\` | Правила рубрикатора |
 
-## Методология
+## MCP — конкретика (DS_CNT_004)
+- MCP shell — только allow-list команд.
+- MCP git — только read-only.
+- MCP filesystem: rw — logs, PATCH_OUT; ro — DATA, EXCHANGE, PATCH_IN.
+- Запись в DATA, EXCHANGE, PATCH_IN — запрещена.
+- MCP-серверы запускаются под учёткой `svc_mcp`.
+- При отказе MCP — не обходить, эскалировать.
 
-- **Формат:** `Было: <код>` → `Стало: <код>`.
-- **Поиск:** regex из рубрикатора.
-- **Правки:** минимальные, не ломать логику.
-- **Тесты:** запуск имеющихся после правок.
 
-## Термины
+## Индексация @codebase
+- Индексируется: F:\TO_DBI (кроме .continueignore).
+- Embed-модель: nomic-embed-text (Ollama, 11434).
+- Исключено: logs/, PATCH_IN/, PATCH_OUT/, .git/,
+  EXCHANGE/AI_IN|AI_OUT|OUTBOX, *.log.
+- Лог: F:\TO_DBI\logs\ds_cnt_005_index.log.
+- При ошибке — не обходить, эскалировать.
 
-| Термин | Значение |
-|--------|----------|
-| Issue | Проблема в PLPlus-коде |
-| PLAN | План исправления (`[auto]` / `[ignore]`) |
-| `needs_ai_fix` | Issues, требующие AI (остаток после фиксера) |
-| AI-fallback | Обмен `AI_IN` ↔ `AI_OUT` |
-| МКР | Максимальная колонка правила (форматирование) |
 
-## AI-контур
+## @codebase — ограничения (текущая версия Continue)
+- В текущей версии Continue индекс @codebase не построен.
+- @codebase работает «по памяти» модели: может ссылаться
+  на несуществующие файлы (галлюцинации).
+- Для точных данных — читать SEC_POLICY_AI.md, agents-short.md,
+  DS_STANDARD.md напрямую.
+- Для пакетного поиска — свой индексатор (DS_CNT_005c,
+  tools\indexer\).
+- @codebase — использовать с проверкой результата.
+- При ссылке на файл — проверить его существование:
+  `Get-ChildItem -Recurse -Filter "<имя>"`.
 
-1. Сканер → issues.
-2. Детерминированный фиксер → `PLUSFixer` (195 fix).
-3. Фильтр «Только AI» → 96 issues.
-4. Rule-based fixer (`tools\rule_based_fixer.py`) → 35 fix.
-5. Local AI worker (`tools\ai_local_worker.py`) → 61 fix через Ollama.
-6. `receive_from_ai` → применение + rescan.
-7. `needs_manual` → артефакт для ручного разбора.
+- F: — NTFS. ACL применены для `svc_mcp`: rw — logs, PATCH_OUT;
+  ro — DATA, EXCHANGE, PATCH_IN; нет доступа — SRC, .git.
+- `svc_mcp` — вне групп.
+- svc_mcp — служебная учётка для MCP-серверов.
 
-## Роли KODA vs Continue
 
-| Действие | KODA | Continue |
-|----------|------|----------|
-| DS-задания (INBOX → PROCESSED) | ✅ | ❌ |
-| `bot.log` | ✅ | ❌ |
-| GIT / PUSH | ✅ | ❌ |
-| AI-обмен `AI_IN`/`AI_OUT` | ✅ | ❌ |
-| Chat / Edit / Autocomplete | ❌ | ✅ |
-| Локальные модели Ollama | ❌ | ✅ |
+## Пакетные скрипты (DS_CNT_006)
+- Скрипты этапов: `tools\run_cnt_<NNN>_nightly.cmd`.
+- Старые скрипты: `tools\_archive\`.
+- Логи: `logs\ds_cnt_<NNN>.log`.
 
-## Модели Continue (Ollama)
+- CLI `ai-continue` отсутствует в публичной версии Continue;
+- индексация -- вручную в UI Continue (Settings -> Index);
+- Task Scheduler для 005b -- не применять;
+- пакетный режим -- отложен (DS_CNT_005c).
 
-- **Chat / Edit / Apply:** `qwen2.5-coder:7b` (contextLength: 8192)
-- **Autocomplete:** `qwen2.5-coder:1.5b-base` (contextLength: 2048)
-- **Embed:** `nomic-embed-text:latest`
+- MCP-серверы: проверка -- в UI Continue (Settings -> MCP Servers);
+- CLI `ai-continue` отсутствует (п. 1.12 регламента).
 
-Промпт ограничен `contextLength: 8192`. Компактный контекст — критичен.
+## Свой индексатор (DS_CNT_005c)
+- Назначение: пакетный семантический поиск по F:\TO_DBI.
+- Модель: nomic-embed-text (Ollama, 11434).
+- Хранилище: F:\TO_DBI\logs\indexer\ (chunks.db, embeddings.npy).
+- CLI: python -m tools.indexer.cli {index|query|stats}.
+- Запуск: tools\run_cnt_005c_index.cmd.
+- НЕ используется Continue @codebase (там - ручная индексация).
+- При ошибке - не обходить, эскалировать.
+- Массовый прогон: ночной режим (rate limit 1 req/sec).
 
-## Правила работы
 
-- Файлы `EXCHANGE\` — рабочие данные, не исходники.
-- `AGENTS.md` — для KODA, `AGENTS_SHORT.md` — для Continue.
-- Конкретный код — прикреплять через `@file`.
-- Архитектура — `@AGENTS.md` (полный) или `@DS_CONTEXT.md`.
-- Поиск — `@codebase` (требует индексации).
-
-## Ограничения
-
-- `SRC\analyzer\scanner.py`, `SRC\fixer\code_fixer.py`, `SRC\rule_engine.py` — не менять без указания.
-- `DATA\` — не менять.
-- `bot.log` — только `F:\TO_DBI\EXCHANGE\bot.log`.
-
-## Метрики проекта (актуальные)
-
-| Метрика | Значение |
-|---------|----------|
-| Скан (PSH_DEP_PRIV_GO) | 5067 issues |
-| Детерминированный фиксер | 195 fix |
-| Фильтр «Только AI» | 96 issues |
-| Rule-based | 35 fix |
-| Local AI | 61 fix (~28 мин) |
-| Автопокрытие | 95/96 = 99% |
-| Время на файл | ~28 мин (batch 10 + fallback) |
+## Модели Ollama (allow-list)
+- Продуктив (CNT): qwen2.5-coder:7b, qwen2.5-coder:1.5b-base,
+  nomic-embed-text.
+- Pipeline (ночные задачи CNT):
+  - qwen2.5-coder:3b — OK (check-standard, explain-log).
+    Компромисс между качеством и скоростью.
+- Разработка/тест: llama3.1:8b, deepseek-coder:6.7b — используются
+  разработчиком АРМа, KODA, ai_local_worker на этапах разработки
+  и тестирования.
+- Примечание: qwen2.5-coder:1.5b удалена (устарела, слабое качество).
+- В продуктивном AI-контуре CNT используются только модели продуктив.
+- Разработка/тест — вне CNT, по согласованию с ИБ.

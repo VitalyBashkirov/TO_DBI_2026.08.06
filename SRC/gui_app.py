@@ -3907,6 +3907,8 @@ class DBIMigrationApp:
             
              # Создание фиксера
             from fixer.code_fixer import PLPlusFixer
+            iteration = datetime.now().strftime("%Y%m%d_%H%M%S")
+            source_name = source_dir.name
             fixer = PLPlusFixer(config, iteration, clean_output=self.clean_output_var.get(),
                                 abort_callback=self._abort_requested,  # DS 038
                                 stop_event=self._stop_event)           # DS_089b

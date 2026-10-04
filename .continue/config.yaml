@@ -1,0 +1,102 @@
+models: []
+slashCommands:
+- name: ds-template
+  description: Черновик DS по шаблону DS_STANDARD.md
+  prompt: 'Ты — автор DS в TO_DBI. Стандарт: EXCHANGE\DS_STANDARD.md.
+
+    Сформируй заготовку DS по теме: {{{{ input }}}}.
+
+    Структура: Цель / Предусловия / Шаги / Ограничения / Артефакты /
+
+    Формат отчёта / Критерии успеха.
+
+    DS — Text Copy Download (два блока: имя файла + содержимое).
+
+    SRC не трогать без указания. GIT — по запросу. Без прогноза KODA.
+
+    '
+- name: report
+  description: Черновик отчёта в EXCHANGE\OUTBOX по шаблону DS_089b_report.md
+  prompt: 'Ты — автор отчёта в TO_DBI. Шаблон: EXCHANGE\DS_089b_report.md.
+
+    Сформируй отчёт по теме: {{{{ input }}}}.
+
+    Отчёт — в EXCHANGE\OUTBOX\. Без прогноза KODA.
+
+    '
+- name: check-standard
+  description: Ревью файла на соответствие DS_STANDARD.md (раздел 2)
+  prompt: 'Проверь файл на соответствие EXCHANGE\DS_STANDARD.md (раздел 2).
+
+    Укажи нарушения и правки. SRC не трогать без указания.
+
+    Файл: {{{{ input }}}}
+
+    '
+- name: explain-log
+  description: Разбор последних 200 строк EXCHANGE\bot.log (лог АРМа)
+  prompt: 'Разбери последние 200 строк EXCHANGE\bot.log.
+
+    Ошибки, предупреждения, аномалии. Шаги диагностики.
+
+    Только EXCHANGE\bot.log.
+
+    '
+- name: gen-test
+  description: Заготовка unittest по шаблону test_ds089b.py
+  prompt: 'Сформируй заготовку unittest по шаблону EXCHANGE\test_ds089b.py.
+
+    Тема: {{{{ input }}}}. SRC не трогать без указания.
+
+    '
+- name: mcp-shell
+  description: Пилот — CLI через MCP shell (после включения MCP)
+  prompt: 'Через MCP shell выполни: {{{{ input }}}}.
+
+    Локальные команды. Без записи вне разрешённых каталогов.
+
+    '
+- name: mcp-git
+  description: Пилот — git status через MCP git (после включения MCP)
+  prompt: 'Через MCP git выполни: git status.
+
+    Без commit/push/checkout. Только чтение.
+
+    '
+- name: mcp-write
+  description: Пилот — запись в PATCH_OUT через MCP filesystem
+  prompt: 'Через MCP filesystem запиши тестовый файл в PATCH_OUT\.
+
+    Имя: {{{{ input }}}}. Другие каталоги не трогать.
+
+    '
+embeddingsProvider:
+  provider: ollama
+  model: nomic-embed-text
+  apiBase: http://localhost:11434
+mcpServers:
+- name: shell
+  command: python
+  args:
+  - -m
+  - mcp_shell_server
+  env:
+    MCP_SHELL_ALLOW: python,git status,dir,ls
+    MCP_SHELL_CWD: F:\TO_DBI
+- name: git
+  command: python
+  args:
+  - -m
+  - mcp_git_server
+  env:
+    MCP_GIT_MODE: readonly
+    MCP_GIT_CWD: F:\TO_DBI
+- name: filesystem
+  command: python
+  args:
+  - -m
+  - mcp_filesystem_server
+  env:
+    MCP_FS_ROOTS_RW: F:\TO_DBI\logs;F:\TO_DBI\PATCH_OUT
+    MCP_FS_ROOTS_RO: F:\TO_DBI\DATA;F:\TO_DBI\EXCHANGE;F:\TO_DBI\PATCH_IN
+    MCP_FS_MODE: rw+ro

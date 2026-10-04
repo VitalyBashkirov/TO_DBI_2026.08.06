@@ -1,6 +1,0 @@
-[02.10.2026 10:16:30,98] UNLOAD_BOTH 
-[02.10.2026 10:17:18,98] START_CODER: model=deepseek-coder:6.7b 
-[02.10.2026 10:36:43,78] START_CODER: model=deepseek-coder:6.7b 
-[02.10.2026 10:37:12,02] OK: coder loaded 
-[02.10.2026 10:37:12,85] config updated: model=deepseek-coder:6.7b batch=10 
-[02.10.2026 10:38:34,04] KILL_LMS 

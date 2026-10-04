@@ -1,0 +1,57 @@
+# === Служебные ===
+.git/
+node_modules/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.log
+*.tmp
+*.bak
+*.old
+
+# === IDE ===
+.kilo/
+.kilocode/
+.vscode/
+
+# === Исходники и код ===
+SRC/
+tools/
+
+# === Логи ===
+logs/
+logs_Deep/
+
+# === Данные CFT ===
+PATCH_IN/
+PATCH_OUT/
+
+# === Временные ===
+reports/
+temp/
+temp_fix/
+RubricatorTemp/
+
+# === Нерелевантные ===
+Презентация/
+Вопросы-ответы/
+done/
+OUTBOX/
+
+# === EXCHANGE: только корень ===
+EXCHANGE/*/
+
+# === Исключения внутри индексируемых ===
+ALGORITHM_FLOWCHART.md
+EXCHANGE/CNT_config_example.yaml
+DATA/*.md
+
+# === Шум в индексе (DS_CNT_015) ===
+EXCHANGE/DS_031_NIGHTLY.md
+EXCHANGE/DS_031_NIGHTLY_report.md
+EXCHANGE/DS_054_AI-fallback_черновик.md
+
+# === Бинарные / операционные ===
+DATA/CFT Platform IDE Documentation/
+DATA/Patch_USERNAME/
+DATA/Тестовые файлы/

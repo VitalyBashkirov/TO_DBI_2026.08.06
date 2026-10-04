@@ -1,4 +1,4 @@
-а# Python
+﻿# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -76,3 +76,13 @@ EXCHANGE/AI_IN/
 EXCHANGE/AI_OUT/
 EXCHANGE/AI_IN_PROCESSED/
 EXCHANGE/AI_OUT_PROCESSED/
+
+# Additional ignores (CNT)
+*.log
+SRC/tests/_*.log
+EXCHANGE/dir
+EXCHANGE/DS_031_NIGHTLY*
+EXCHANGE/CNT_config_example.yaml
+EXCHANGE/DS_CNT_019_report.md
+done/
+reports/

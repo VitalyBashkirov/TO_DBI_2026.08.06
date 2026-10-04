@@ -1,29 +1,24 @@
-# Автоопределение текстовых/бинарных файлов
+﻿# Auto detect text files and perform LF normalization
 * text=auto
 
-# Явные правила для типов, где важен EOL
-*.py    text eol=lf
-*.json  text eol=lf
-*.sql   text eol=lf
-*.sh    text eol=lf
-*.ps1   text eol=lf
+# Source code
+*.py  text eol=lf
+*.js  text eol=lf
+*.ts  text eol=lf
 
-*.md    text eol=crlf
-*.txt   text eol=crlf
-*.bat   text eol=crlf
-*.vbs   text eol=crlf
+# Windows scripts
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
 
-# Бинарные файлы (без преобразования EOL)
-*.png   binary
-*.jpg   binary
-*.jpeg  binary
-*.gif   binary
-*.ico   binary
-*.pdf   binary
-*.docx  binary
-*.xlsx  binary
-*.zip   binary
-*.exe   binary
-*.dll   binary
-*.pyc   binary
-*.pyo   binary
+# Markdown
+*.md  text eol=crlf
+
+# YAML
+*.yaml text eol=lf
+*.yml  text eol=lf
+
+# Binary
+*.png binary
+*.jpg binary
+*.zip binary

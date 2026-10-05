@@ -60,7 +60,7 @@
 
 ### Другие команды KODA (DS_052)
 
-Помимо `DS`, доступны команды `GIT` (коммит без push) и `PUSH` (pull --rebase + push без коммита) — см. разделы «Команда GIT (DS_052)» и «Команда PUSH (DS_052)».
+Помимо `DS`, доступны команды `GIT` (коммит без push), `PUSH` (pull --rebase + push без коммита) и `GP` (полный цикл `GIT` + `PUSH`) — см. разделы «Команда GIT (DS_052)», «Команда PUSH (DS_052)» и «Команда GP (DS_052)».
 
 ## Очередь в INBOX и контроль блокировки
 
@@ -121,7 +121,7 @@
   - Логируй начало и конец каждого задания.
   - Логируй ошибки с указанием причины.
   - Логируй перемещения файлов и состояние очереди.
-  - Логируй события команд `GIT` и `PUSH` (DS_052): коммит, «Изменений нет», push — с меткой `GIT_YYYYMMDD_HHMM`.
+  - Логируй события команд `GIT`, `PUSH` и `GP` (DS_052): коммит, «Изменений нет», push — с меткой `GIT_YYYYMMDD_HHMM`.
   - **Путь `bot.log` — только `F:\TO_DBI\EXCHANGE\bot.log`.** Создание `bot.log` в любом другом каталоге (особенно `SRC\bot.log`, `SRC\*.log`, `EXCHANGE\LOG\*`) — **запрещено**. Все сообщения — через `EXCHANGE\bot.log`, формат DS_050.
 
 ## Кодировки и форматирование
@@ -424,6 +424,26 @@ Add-Content -Path "F:\TO_DBI\EXCHANGE\bot.log" -Value "[ДД.ММ.ГГГГ ЧЧ:
 5. **Вывод:** `-= PUSH: Отправлено в origin/feature/dockerization =-`
 6. **Запрещено:** создавать коммит по команде PUSH; `git push --force` без явной команды пользователя.
 
+## Команда GP (DS_052)
+
+Получив команду `GP`, выполни **полный цикл**: сначала `GIT` (коммит), затем `PUSH` (pull --rebase + push). Это объединение команд `GIT` и `PUSH` в одном запуске.
+
+1. **Шаг GIT** — см. «Команда GIT (DS_052)»:
+   - `git status --short` и `git branch --show-current` в `F:\TO_DBI`.
+   - Есть изменения → `git add -A` + `git commit -m "GIT_YYYYMMDD_HHMM Выполнено"`.
+   - Изменений нет → коммит **не** создавать, **перейти к шагу PUSH** (отправить существующие локальные коммиты).
+2. **Шаг PUSH** — см. «Команда PUSH (DS_052)»:
+   - `git pull --rebase origin feature/dockerization`.
+   - `git push origin feature/dockerization` (`Everything up-to-date` — тоже успех).
+3. **Конфликт rebase** — остановить, сообщить пользователю, **не** откатывать историю без команды. Push **не** выполнять.
+4. **Запись в `bot.log`** (метка `GIT_YYYYMMDD_HHMM`):
+   - Коммит + push: `[ДД.ММ.ГГГГ ЧЧ:ММ:СС] GIT_YYYYMMDD_HHMM GP. Выполнено. Закоммичено N файлов, отправлено в origin/feature/dockerization (<ветка>).`
+   - Без коммита, push успешен: `[ДД.ММ.ГГГГ ЧЧ:ММ:СС] GIT_YYYYMMDD_HHMM GP. Изменений нет, отправлено в origin/feature/dockerization.`
+5. **Вывод:**
+   - Коммит + push: `-= GP: Коммит создан и отправлено в origin/feature/dockerization =-`
+   - Без коммита, push успешен: `-= GP: Изменений нет, отправлено в origin/feature/dockerization =-`
+6. **Запрещено:** `git push --force` без явной команды пользователя; коммитить файлы из игнора; менять `.gitignore` без явного задания.
+
 ## Команды KODA — сводная таблица (DS_052)
 
 | Команда | Действие | bot.log |
@@ -431,8 +451,9 @@ Add-Content -Path "F:\TO_DBI\EXCHANGE\bot.log" -Value "[ДД.ММ.ГГГГ ЧЧ:
 | `DS` | Обработка задач из `INBOX` по протоколу DS_049 | `[ДД.ММ.ГГГГ ЧЧ:ММ:СС] DS XXX: Выполнено. ...` |
 | `GIT` | `git add -A` + `git commit` (без push) | `[ДД.ММ.ГГГГ ЧЧ:ММ:СС] GIT_YYYYMMDD_HHMM Выполнено. ...` / `Изменений нет.` |
 | `PUSH` | `git pull --rebase` + `git push` (без коммита) | `[ДД.ММ.ГГГГ ЧЧ:ММ:СС] GIT_YYYYMMDD_HHMM Push. Отправлено в origin/feature/dockerization.` |
+| `GP` | Полный цикл: `GIT` (коммит) + `PUSH` (pull --rebase + push) | `[ДД.ММ.ГГГГ ЧЧ:ММ:СС] GIT_YYYYMMDD_HHMM GP. Выполнено. Закоммичено N файлов, отправлено в origin/feature/dockerization.` |
 
-Полный цикл: задача DS выполнена → проверена → `GIT` → `PUSH`.
+Полный цикл: задача DS выполнена → проверена → `GIT` → `PUSH` (или сразу `GP` = `GIT` + `PUSH`).
 
 ## Работа с DS-заданиями
 

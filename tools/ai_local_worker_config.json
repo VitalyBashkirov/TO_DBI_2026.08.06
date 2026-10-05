@@ -1,4 +1,4 @@
-﻿{
+{
     "max_tokens":  2000,
     "timeout_sec":  600,
     "ollama_url":  "http://localhost:11434",

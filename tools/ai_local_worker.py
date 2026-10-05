@@ -127,6 +127,46 @@ def log(msg, bot=False):
             pass
 
 
+def load_processed_ids(out_dir):
+    """DS_094: загрузить обработанные id из *.processed.json в out_dir.
+
+    Возвращает set(id) — объединение по всем *.processed.json в каталоге.
+    Пустой set, если файлов нет.
+    """
+    out_dir = Path(out_dir)
+    ids = set()
+    if not out_dir.is_dir():
+        return ids
+    for pf in out_dir.glob('*.processed.json'):
+        try:
+            data = json.loads(pf.read_text(encoding='utf-8'))
+            for pid in data.get('processed_ids', []):
+                ids.add(pid)
+        except (OSError, ValueError):
+            pass
+    return ids
+
+
+def save_processed_ids(out_dir, request_name, ids, model=''):
+    """DS_094: сохранить обработанные id в <request_stem>.processed.json.
+
+    Схема: {request, processed_ids, timestamp, model}.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = Path(request_name).stem
+    path = out_dir / f'{stem}.processed.json'
+    data = {
+        'request': request_name,
+        'processed_ids': sorted(ids),
+        'timestamp': datetime.now().isoformat(timespec='seconds'),
+        'model': model,
+    }
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                    encoding='utf-8')
+    return path
+
+
 def load_config(path=None):
     """Конфиг из JSON поверх значений по умолчанию (§2.2)."""
     cfg = dict(DEFAULT_CONFIG)
@@ -330,21 +370,21 @@ def validate_batch_response(parsed, batch):
 
     Валиден, если:
       - parsed — непустой список;
-      - len(parsed) == len(batch);
+      - len(parsed) <= len(batch); under-return разрешён (DS_093);
       - каждый элемент — dict; если у элемента есть поле `line`, оно должно
         принадлежать множеству строк batch.
 
-    Иначе — invalid_json (count < len, count > len, пустой JSON, line mismatch).
+    Иначе — invalid_json (count > len → invalid (over-return); count < len — OK (DS_093), пустой JSON, line mismatch).
 
     Отсутствие `line` не считается mismatch: FIX_SCHEMA не требует поле `line`
     (required = id/after/confidence), а normalize_fixes сопоставляет элементы с
     issues по `line`, при отсутствии совпадения — по порядку (DS_082b §4 п.2).
-    Строгая проверка count ловит неполный/лишний ответ; проверка `line` при
-    наличии поля отсекает эхо-пример промпта (чужая строка, DS_082b §4 п.2).
+    Under-return (модель вернула меньше фиксов, чем issues) — приемлем: остаток
+    вернётся в следующем батче. Over-return (больше) — галлюцинация, отсекаем (DS_093).
     """
     if not isinstance(parsed, list) or not parsed:
         return False
-    if len(parsed) != len(batch):
+    if len(parsed) > len(batch):
         return False
     batch_lines = set(iss['line'] for iss in batch)
     for item in parsed:
@@ -649,7 +689,7 @@ def run_fallback(batch, cfg, stats, n=None, total=None):
 
 def run_request(request_path, out_dir, cfg, skip_rule_codes=None, limit=None,
                 metrics_path=None, filter_type=None, dry_run=False,
-                verbose=False):
+                verbose=False, skip_ids=None):
     """Обработать один AI_REQUEST батчами.
 
     Возвращает (stats, fixes). fixes is None — Ollama отвалилась в процессе:
@@ -660,6 +700,7 @@ def run_request(request_path, out_dir, cfg, skip_rule_codes=None, limit=None,
     (§2.7 --filter-type, тест 2). limit — только первые N issues.
     dry_run — смоделировать батчи без запроса к Ollama и без записи ответа
     (§2.7 --dry-run, тест 4). verbose — печатать промпт и ответ каждого батча.
+    skip_ids — множество id issues, пропущенных при resume (DS_094).
     """
     request_path = Path(request_path)
     request = parse_request(request_path)      # {path, source, issues} (§2.2)
@@ -667,6 +708,8 @@ def run_request(request_path, out_dir, cfg, skip_rule_codes=None, limit=None,
     if skip_rule_codes:
         skip = set(skip_rule_codes)
         issues = [i for i in issues if i.get('rule_code') not in skip]
+    if skip_ids:
+        issues = [i for i in issues if i['id'] not in skip_ids]
     if filter_type:
         issues = [i for i in issues if filter_type in i.get('rule_code', '')]
     if limit:
@@ -839,6 +882,10 @@ def build_parser():
     p.add_argument('--skip-rule', action='append', default=[],
                    help='Исключить правило (повторяемо) — стенды после '
                         'rule-based fixer')
+    p.add_argument('--resume', action='store_true',
+                   help='DS_094: пропустить issues из *.processed.json в --out-dir')
+    p.add_argument('--skip-ids', default=None, metavar='FILE',
+                   help='DS_094: JSON-файл со списком id для пропуска')
     p.add_argument('--filter-type', action='append', default=[],
                    help='Закрыть только issues этого типа rule-based fixer '
                         '(rubric 03/05/06/11) — стенды после rule-based')
@@ -923,6 +970,21 @@ def main(argv=None):
         log('ошибка: нужен --request или --in-dir (--check — проверить Ollama)')
         return 2
 
+    # DS_094: resume / skip-ids
+    skip_ids = set()
+    if args.resume:
+        for _, out in jobs:
+            skip_ids |= load_processed_ids(out)
+        if skip_ids:
+            log(f'resume: {len(skip_ids)} id уже обработано (пропускаю)')
+    if args.skip_ids:
+        try:
+            sid_data = json.loads(Path(args.skip_ids).read_text(encoding='utf-8'))
+            skip_ids |= set(sid_data.get('processed_ids', sid_data) if isinstance(sid_data, dict) else sid_data)
+        except (OSError, ValueError) as exc:
+            log(f'ошибка: --skip-ids {args.skip_ids}: {exc}')
+            return 2
+
     all_stats, aborted = [], False
     for req, out in jobs:
         stats, fixes = run_request(req, out, cfg,
@@ -930,12 +992,16 @@ def main(argv=None):
                                    limit=args.limit,
                                    filter_type=args.filter_type,
                                    dry_run=args.dry_run,
-                                   verbose=args.verbose)
+                                   verbose=args.verbose,
+                                   skip_ids=skip_ids or None)
         all_stats.append(stats)
         if fixes is None:                       # Ollama отвалилась в процессе
             log('ollama unavailable: обмен прерван, AI_RESPONSE не создаётся')
             aborted = True
             break
+        # DS_094: сохранить обработанные id
+        processed = {iss['id'] for iss in parse_request(req)['issues']}
+        save_processed_ids(out, req.name, processed, cfg.get('model', ''))
 
     if args.metrics:
         try:

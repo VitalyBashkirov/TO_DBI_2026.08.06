@@ -11,7 +11,8 @@ import tempfile
 from pathlib import Path
 from typing import List
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if __name__ == '__main__':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'SRC'))
 
 from analyzer.scanner import PLPlusScanner, Issue

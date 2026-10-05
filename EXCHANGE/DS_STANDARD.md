@@ -125,6 +125,54 @@
 | 4 | Чекбокс `PlpCheck` | `_populate_rules_tree` |
 | 5 | Состояние → `settings.json` | `save_settings` |
 
+### 6.1. Кодировка файлов и BOM
+
+**Правило:** для файлов, которые читает Python/pytest/любой не-Windows-парсер, — **UTF-8 без BOM**.
+
+| Расширение | Кодировка | Инструмент PowerShell |
+|-----------|-----------|----------------------|
+| `.py`, `.ini`, `.cfg`, `.json`, `.yaml`, `.toml` | **UTF-8 без BOM** | `[System.IO.File]::WriteAllText(..., UTF8Encoding($false))` |
+| `.md`, `.log`, `.txt` (отчёты) | UTF-8 без BOM | `Set-Content -Encoding UTF8` (BOM допустим) |
+| `.cmd`, `.bat` | ASCII / OEM | `Set-Content -Encoding ASCII` |
+
+**Почему:** PowerShell 5.1 `Out-File -Encoding UTF8` **всегда** добавляет BOM (`EF BB BF`). Python, pytest, `.ini`-парсеры **не понимают** BOM → ошибки:
+
+```
+ERROR: F:\TO_DBI\pytest.ini:1: unexpected line: '\ufeff[pytest]'
+```
+
+**Правильно (PowerShell 5.1, без BOM):**
+
+```powershell
+[System.IO.File]::WriteAllText('F:\TO_DBI\pytest.ini', @"
+[pytest]
+testpaths = SRC/tests
+"@, [System.Text.UTF8Encoding]::new($false))
+```
+
+**Правильно (UTF-8 с BOM допустим — для отчётов):**
+
+```powershell
+@"
+# Отчёт
+"@ | Set-Content -Encoding UTF8 F:\TO_DBI\EXCHANGE\OUTBOX\DS_XXX_report.md
+```
+
+**Проверка BOM:**
+
+```powershell
+Format-Hex -Path F:\TO_DBI\pytest.ini | Select-Object -First 1
+```
+
+**Первые 3 байта:**
+- `EF BB BF` — **BOM есть** (плохо для `.py`/`.ini`/`.json`).
+- Иначе — **BOM нет** (хорошо).
+
+**Случаи в проекте:**
+- DS_089a — BOM fix (git log).
+- DS_091a — `pytest.ini` BOM сломал парсинг.
+- Правило — **обязательное** для всех будущих DS.
+
 ---
 
 ## 7. Чего избегать

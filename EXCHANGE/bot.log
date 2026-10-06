@@ -857,3 +857,16 @@ F:\TO_DBI\EXCHANGE\bot.log
 [07.10.2026 04:02:00] GIT_20261007_0402 GP. Изменений нет, отправлено в origin/feature/dockerization.
 [07.10.2026 04:15:00] DS 104: Выполнено. Гигиена репо — PROCESSED/OUTBOX/bot.log в git, 46 мусорных файлов удалено. Коммит dff1d80, push OK. Файл перенесён в PROCESSED.
 [07.10.2026 04:31:49] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 04:35:03] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 04:38:05] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 04:38:14] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 04:38:22] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 04:38:31] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 04:38:40] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 04:38:48] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 04:38:55] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 04:39:03] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 04:39:10] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 04:39:24] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 04:45:00] DS 102: Выполнено. GUI передаёт --resume в ai_local_worker. Тест test_ds102_gui_resume.py (3 теста). Регресс 60 PASSED. Файл перенесён в PROCESSED.
+[07.10.2026 04:51:14] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан

@@ -5745,7 +5745,8 @@ class DBIMigrationApp:
                 try:
                     proc = subprocess.Popen(
                         [sys.executable, str(tools / 'ai_local_worker.py'),
-                         '--in-dir', str(ai_in), '--out-dir', str(ai_out)],
+                         '--in-dir', str(ai_in), '--out-dir', str(ai_out),
+                         '--resume'],
                         cwd=str(root), stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT)
                     self._monitor_worker(proc, bs)

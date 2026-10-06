@@ -855,3 +855,5 @@ F:\TO_DBI\EXCHANGE\bot.log
 [07.10.2026 03:51:09] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260930_071636.md: итог 36 из 36 (100%), batch=4, invalid_json=0, skip_batch=0, fallback=1 (2/2 ok, 4.1с), avg_time=2.1с, avg_conf=0.95, class={'auto': 36, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260930_071636.md
 [07.10.2026 03:57:30] GIT_20261007_0357 GP. Выполнено. Закоммичено 55 файлов, отправлено в origin/feature/dockerization (feature/dockerization).
 [07.10.2026 04:02:00] GIT_20261007_0402 GP. Изменений нет, отправлено в origin/feature/dockerization.
+[07.10.2026 04:15:00] DS 104: Выполнено. Гигиена репо — PROCESSED/OUTBOX/bot.log в git, 46 мусорных файлов удалено. Коммит dff1d80, push OK. Файл перенесён в PROCESSED.
+[07.10.2026 04:31:49] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан

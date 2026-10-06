@@ -1,0 +1,953 @@
+@echo off
+chcp 65001 >nul 2>&1
+setlocal enabledelayedexpansion
+title Ollama и LM Studio
+color 0A
+
+REM ============================================
+REM РОТАЦИЯ ЛОГА
+REM ============================================
+set "LOGFILE=%~dp0ollama_lms.log"
+if exist "%LOGFILE%" (
+    for %%A in ("%LOGFILE%") do (
+        if %%~zA gtr 1048576 (
+            set "ARCHIVE=%~dp0ollama_lms_%date:~-4%%date:~3,2%%date:~0,2%_%time:~0,2%%time:~3,2%.log"
+            set "ARCHIVE=!ARCHIVE: =0!"
+            move "%LOGFILE%" "!ARCHIVE!" >nul 2>&1
+        )
+    )
+)
+
+set "CSVFILE=%~dp0test_results.csv"
+set "CONFIG_FILE=F:\TO_DBI\tools\ai_local_worker_config.json"
+set "TEMP_RESULT=%~dp0temp_result.txt"
+set "TEMP_FIXES=%~dp0temp_fixes.txt"
+
+REM ============================================
+REM НАСТРОЙКИ / МОДЕЛИ ПО УМОЛЧАНИЮ
+REM ============================================
+set "OLLAMA_MODEL_CODER=qwen2.5-coder:7b"
+set "OLLAMA_MODEL_CHAT=llama3.1:8b"
+set "OLLAMA_MODEL_3B=qwen2.5-coder:3b"
+set "OLLAMA_MODEL_LEGACY=deepseek-coder:6.7b"
+
+set "LMS_MODEL_7B=models/local-bank/deepseek-r1-distill-qwen-7b-q4_k_m.gguf"
+set "LMS_MODEL_4B=local-bank@q3_k_m"
+set "LMS_MODEL_LLAMA8B=models/local-bank/meta-llama-3.1-8b-instruct-q4_k_m.gguf"
+set "LMS_MODEL_LLAMA1B=models/local-bank/llama-3.2-1b-instruct-q4_k_m.gguf"
+set "LMS_MODEL_GEMMA4B=models/local-bank/gemma-3-it-4b-q4_k_m.gguf"
+set "LMS_MODEL=%LMS_MODEL_LLAMA8B%"
+set "LMS_MODEL_3B=%LMS_MODEL_4B%"
+
+set "RAM_MIN_MB=4000"
+set "NUM_CTX=4096"
+set "KEEP_ALIVE=30m"
+
+:PREPARE_BACKENDS
+set "WHICH=%~1"
+set "PREP_OK=1"
+
+echo.
+echo ============================================
+echo   ПОДГОТОВКА БЭКЕНДОВ (%WHICH%)
+echo ============================================
+echo.
+
+set "NEED_OLLAMA=0"
+set "NEED_LMS=0"
+if /I "%WHICH%"=="ollama" set "NEED_OLLAMA=1"
+if /I "%WHICH%"=="lms"    set "NEED_LMS=1"
+if /I "%WHICH%"=="both"   set "NEED_OLLAMA=1" & set "NEED_LMS=1"
+
+set "OLLAMA_RUNNING=0"
+set "LMS_RUNNING=0"
+powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://localhost:11434/api/tags -Method Get -TimeoutSec 2 -ErrorAction Stop | Out-Null; exit 0 } catch { exit 1 }"
+if !errorlevel! equ 0 set "OLLAMA_RUNNING=1"
+powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://localhost:1234/v1/models -Method Get -TimeoutSec 2 -ErrorAction Stop | Out-Null; exit 0 } catch { exit 1 }"
+if !errorlevel! equ 0 set "LMS_RUNNING=1"
+
+echo [СТАТУС] Ollama: !OLLAMA_RUNNING!  LM Studio: !LMS_RUNNING!
+echo.
+
+REM --- ВЫГРУЖАЕМ ЛИШНЕЕ (раздельные if, без вложенных скобок) ---
+if "!NEED_OLLAMA!"=="0" (
+    if "!OLLAMA_RUNNING!"=="1" (
+        echo [ДЕЙСТВИЕ] Ollama не нужна - выгружаю...
+        taskkill /IM "ollama.exe" /F >nul 2>&1
+        taskkill /IM "ollama app.exe" /F >nul 2>&1
+        timeout /t 2 >nul
+        echo [OK] Ollama выгружена.
+    )
+)
+if "!NEED_LMS!"=="0" (
+    if "!LMS_RUNNING!"=="1" (
+        echo [ДЕЙСТВИЕ] LM Studio не нужна - выгружаю...
+        taskkill /IM "LM Studio.exe" /F >nul 2>&1
+        taskkill /IM "LMS.exe" /F >nul 2>&1
+        timeout /t 2 >nul
+        echo [OK] LM Studio выгружена.
+    )
+)
+echo.
+
+REM --- ЗАПУСКАЕМ НУЖНОЕ ---
+if "!NEED_OLLAMA!"=="1" (
+    if "!OLLAMA_RUNNING!"=="0" (
+        echo [ДЕЙСТВИЕ] Запускаю сервер Ollama...
+        powershell -NoProfile -Command "Start-Process 'ollama app.exe' -ErrorAction SilentlyContinue"
+        echo [ИНФО] Ожидание (8 сек)...
+        timeout /t 8 >nul
+        powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://localhost:11434/api/tags -Method Get -TimeoutSec 5 -ErrorAction Stop | Out-Null; exit 0 } catch { exit 1 }"
+        if !errorlevel! neq 0 (
+            echo [ОШИБКА] Ollama не поднялась.
+            set "PREP_OK=0"
+            goto :PREP_DONE
+        )
+        echo [OK] Ollama запущена.
+    )
+)
+if "!NEED_LMS!"=="1" (
+    if "!LMS_RUNNING!"=="0" (
+        echo [ДЕЙСТВИЕ] Запускаю сервер LM Studio...
+        powershell -NoProfile -Command "Start-Process 'lms' -ErrorAction SilentlyContinue"
+        timeout /t 5 >nul
+        lms server start
+        timeout /t 3 >nul
+        powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://localhost:1234/v1/models -Method Get -TimeoutSec 5 -ErrorAction Stop | Out-Null; exit 0 } catch { exit 1 }"
+        if !errorlevel! neq 0 (
+            echo [ОШИБКА] LM Studio не поднялась.
+            set "PREP_OK=0"
+            goto :PREP_DONE
+        )
+        echo [OK] LM Studio запущена.
+    )
+)
+
+for /f "delims=" %%R in ('powershell -NoProfile -Command "[math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024)"') do set "FREE_RAM=%%R"
+echo.
+echo [ИНФО] Свободно RAM: !FREE_RAM! МБ
+if !FREE_RAM! lss 3000 (
+    echo [ВНИМАНИЕ] Мало RAM - возможны FAIL.
+)
+
+:PREP_DONE
+echo.
+if "!PREP_OK!"=="1" (
+    echo [OK] Подготовка завершена.
+) else (
+    echo [ОШИБКА] Подготовка не удалась.
+)
+exit /b
+
+:MAIN_MENU
+cls
+echo ============================================
+echo   ПРОВЕРКА OLLAMA
+echo ============================================
+echo.
+where ollama >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ОШИБКА] Ollama не найдена.
+    goto OLLAMA_DONE
+)
+echo [OK] Ollama найдена.
+ollama --version
+echo.
+echo [Запущенные модели в RAM]
+ollama ps
+echo.
+echo [Скачанные модели]
+ollama list
+
+:OLLAMA_DONE
+echo.
+echo ============================================
+echo   ПРОВЕРКА LM STUDIO
+echo ============================================
+echo.
+where lms >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ОШИБКА] Утилита lms не найдена.
+    goto LMS_DONE
+)
+echo [OK] Утилита lms найдена.
+echo [Статус сервера]
+lms server status
+echo [Загруженные модели]
+lms ps
+echo [Скачанные модели]
+lms ls
+
+:LMS_DONE
+echo.
+call :SHOW_MEMORY
+
+:MENU
+echo ============================================
+echo   ГЛАВНОЕ МЕНЮ
+echo ============================================
+echo   0. Выход
+echo   1. Ollama: запуск только сервера (без загрузки модели)
+echo   2. Ollama: выбрать и загрузить модель (из списка / вручную)
+echo   3. Ollama: загрузить coder (%OLLAMA_MODEL_CODER%) + batch 10 + fallback
+echo   4. Ollama: загрузить chat (%OLLAMA_MODEL_CHAT%)
+echo   5. LM Studio: запуск только сервера (без загрузки модели)
+echo   6. LM Studio: выбрать и загрузить модель (из списка / вручную)
+echo   7. Выгрузить ОБЕ
+echo   8. Показать процессы + память
+echo   9. Показать загруженные модели (Ollama + LM Studio)
+echo  10. Выгрузить только Ollama
+echo  11. Выгрузить только LM Studio
+echo  12. Очистить окно
+echo  13. Запустить тест (test_all_models.ps1 или меню .bat)
+echo  14. Запустить чат (Chat-Ollama)
+echo ============================================
+set /p choice="Ваш выбор (0-14): "
+
+if "%choice%"=="" goto EXIT
+if "%choice%"=="0" goto EXIT
+if "%choice%"=="1" goto START_OLLAMA_SERVER
+if "%choice%"=="2" goto CHOOSE_OLLAMA_MODEL
+if "%choice%"=="3" goto OLLAMA_START_CODER
+if "%choice%"=="4" goto OLLAMA_START_CHAT
+if "%choice%"=="5" goto START_LMS_SERVER
+if "%choice%"=="6" goto CHOOSE_LMS_MODEL
+if "%choice%"=="7" goto UNLOAD_BOTH
+if "%choice%"=="8" goto SHOW_INFO
+if "%choice%"=="9" goto SHOW_MODELS
+if "%choice%"=="10" goto KILL_OLLAMA
+if "%choice%"=="11" goto KILL_LMS
+if "%choice%"=="12" goto CLEAR_SCREEN
+if "%choice%"=="13" goto TEST_MENU
+if "%choice%"=="14" goto START_CHAT
+echo [ОШИБКА] Неверный выбор.
+timeout /t 2 >nul
+goto MENU
+
+:CLEAR_SCREEN
+cls
+goto MENU
+
+REM ============================================
+REM 9 — Показать загруженные / скачанные модели
+REM ============================================
+:SHOW_MODELS
+cls
+echo ============================================
+echo   ЗАГРУЖЕННЫЕ / СКАЧАННЫЕ МОДЕЛИ
+echo ============================================
+echo.
+echo [Ollama — в RAM]
+ollama ps
+echo.
+echo [Ollama — скачано]
+ollama list
+echo.
+echo [LM Studio — в RAM]
+lms ps
+echo.
+echo [LM Studio — скачано]
+lms ls
+echo.
+pause
+goto MENU
+
+REM ============================================
+REM 1 — Запуск только сервера Ollama
+REM ============================================
+:START_OLLAMA_SERVER
+echo.
+echo [ДЕЙСТВИЕ] Запуск только сервера Ollama (без загрузки модели)...
+call :LOG "START_OLLAMA_SERVER"
+
+where ollama >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ОШИБКА] Ollama не найдена в PATH.
+    call :LOG "ERROR: ollama not found"
+    pause & goto MENU
+)
+
+taskkill /IM "ollama.exe" /F >nul 2>&1
+taskkill /IM "ollama app.exe" /F >nul 2>&1
+timeout /t 2 >nul
+
+start "" "ollama app.exe"
+echo [ИНФО] Ожидание запуска Ollama (8 сек)...
+timeout /t 8 >nul
+
+echo [ИНФО] Проверяю доступность API...
+powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://localhost:11434/api/tags -Method Get -ErrorAction Stop | Out-Null; exit 0 } catch { exit 1 }"
+if !errorlevel! equ 0 (
+    echo [OK] Сервер Ollama доступен: http://localhost:11434
+    call :LOG "OK: ollama server started"
+) else (
+    echo [ОШИБКА] Сервер Ollama недоступен.
+    call :LOG "ERROR: ollama server not reachable"
+)
+
+echo.
+echo [Версия]
+ollama --version
+echo.
+echo [Запущенные модели в RAM]
+ollama ps
+call :SHOW_MEMORY
+pause
+goto MENU
+
+REM ============================================
+REM 2 — Выбор и загрузка модели Ollama
+REM ============================================
+:CHOOSE_OLLAMA_MODEL
+cls
+echo ============================================
+echo   ВЫБОР МОДЕЛИ OLLAMA
+echo ============================================
+echo.
+echo [Скачанные модели]
+ollama list
+echo.
+echo   1. qwen2.5-coder:3b        (1.9 GB)   coder, ★ баланс
+echo   2. qwen2.5-coder:7b        (4.7 GB)   coder, лучшее качество
+echo   3. llama3.1:8b             (4.9 GB)   chat / диалог
+echo   4. deepseek-coder:6.7b     (3.8 GB)   coder, legacy
+echo   5. Ввести имя модели вручную
+echo   0. Назад
+echo ============================================
+set /p om="Ваш выбор (0-5): "
+if "%om%"=="" goto MENU
+if "%om%"=="0" goto MENU
+if "%om%"=="1" set "CHOSEN_OLLAMA=%OLLAMA_MODEL_3B%"     & goto OLLAMA_LOAD_CHOSEN
+if "%om%"=="2" set "CHOSEN_OLLAMA=%OLLAMA_MODEL_CODER%"  & goto OLLAMA_LOAD_CHOSEN
+if "%om%"=="3" set "CHOSEN_OLLAMA=%OLLAMA_MODEL_CHAT%"   & goto OLLAMA_LOAD_CHOSEN
+if "%om%"=="4" set "CHOSEN_OLLAMA=%OLLAMA_MODEL_LEGACY%" & goto OLLAMA_LOAD_CHOSEN
+if "%om%"=="5" (
+    set /p CHOSEN_OLLAMA="Введите имя модели Ollama: "
+    goto OLLAMA_LOAD_CHOSEN
+)
+echo [ОШИБКА] Неверный выбор.
+timeout /t 2 >nul
+goto CHOOSE_OLLAMA_MODEL
+
+:OLLAMA_LOAD_CHOSEN
+if "%CHOSEN_OLLAMA%"=="" goto CHOOSE_OLLAMA_MODEL
+echo.
+echo [ДЕЙСТВИЕ] Загрузка модели Ollama: %CHOSEN_OLLAMA%
+call :LOG "OLLAMA_LOAD_CHOSEN: %CHOSEN_OLLAMA%"
+
+call :CHECK_MODEL_EXISTS "%CHOSEN_OLLAMA%"
+if not "%CHECK_RESULT%"=="0" (
+    echo [ОШИБКА] Модель не найдена. Скачайте: ollama pull %CHOSEN_OLLAMA%
+    pause & goto MENU
+)
+
+call :CHECK_RAM %RAM_MIN_MB%
+if not "%RAM_RESULT%"=="0" (
+    echo [ВНИМАНИЕ] Свободно меньше %RAM_MIN_MB% МБ ОЗУ.
+    pause
+)
+
+taskkill /IM "ollama.exe" /F >nul 2>&1
+taskkill /IM "ollama app.exe" /F >nul 2>&1
+timeout /t 2 >nul
+start "" "ollama app.exe"
+timeout /t 8 >nul
+
+set TRIES=0
+:LOAD_CHOSEN_RETRY
+set /a TRIES+=1
+call :OLLAMA_LOAD "%CHOSEN_OLLAMA%"
+if not "%LOAD_RESULT%"=="0" (
+    if !TRIES! lss 5 (
+        echo [ИНФО] Попытка !TRIES! не удалась...
+        timeout /t 5 >nul
+        goto LOAD_CHOSEN_RETRY
+    ) else (
+        echo [ОШИБКА] Не удалось загрузить %CHOSEN_OLLAMA%.
+        pause & goto MENU
+    )
+)
+echo [OK] Модель %CHOSEN_OLLAMA% загружена.
+echo.
+echo [Загруженные модели Ollama]
+ollama ps
+call :SHOW_UNTIL
+call :SHOW_MEMORY
+pause
+goto MENU
+
+REM ============================================
+REM 3 — coder + batch 10 + fallback
+REM ============================================
+:OLLAMA_START_CODER
+echo.
+echo [ДЕЙСТВИЕ] Запуск Ollama с %OLLAMA_MODEL_CODER%...
+call :LOG "START_CODER: model=%OLLAMA_MODEL_CODER%"
+
+call :CHECK_MODEL_EXISTS "%OLLAMA_MODEL_CODER%"
+if not "%CHECK_RESULT%"=="0" (
+    echo [ОШИБКА] Модель %OLLAMA_MODEL_CODER% не найдена.
+    echo         Скачайте: ollama pull %OLLAMA_MODEL_CODER%
+    pause & goto MENU
+)
+call :CHECK_RAM %RAM_MIN_MB%
+if not "%RAM_RESULT%"=="0" (
+    echo [ВНИМАНИЕ] Свободно меньше %RAM_MIN_MB% МБ ОЗУ.
+    pause
+)
+taskkill /IM "ollama.exe" /F >nul 2>&1
+taskkill /IM "ollama app.exe" /F >nul 2>&1
+timeout /t 2 >nul
+start "" "ollama app.exe"
+timeout /t 8 >nul
+
+set TRIES=0
+:LOAD_CODER_RETRY
+set /a TRIES+=1
+call :OLLAMA_LOAD "%OLLAMA_MODEL_CODER%"
+if not "%LOAD_RESULT%"=="0" (
+    if !TRIES! lss 5 (
+        timeout /t 5 >nul & goto LOAD_CODER_RETRY
+    ) else (
+        echo [ОШИБКА] Не удалось загрузить модель.
+        pause & goto MENU
+    )
+)
+echo [OK] Модель загружена.
+call :UPDATE_WORKER_CONFIG "%OLLAMA_MODEL_CODER%" 10 true
+echo.
+echo [Загруженные модели Ollama]
+ollama ps
+call :SHOW_UNTIL
+call :SHOW_MEMORY
+pause
+goto MENU
+
+REM ============================================
+REM 4 — chat
+REM ============================================
+:OLLAMA_START_CHAT
+echo.
+echo [ДЕЙСТВИЕ] Запуск Ollama с %OLLAMA_MODEL_CHAT%...
+call :LOG "START_CHAT_MODEL: model=%OLLAMA_MODEL_CHAT%"
+
+call :CHECK_MODEL_EXISTS "%OLLAMA_MODEL_CHAT%"
+if not "%CHECK_RESULT%"=="0" (
+    echo [ОШИБКА] Модель %OLLAMA_MODEL_CHAT% не найдена.
+    echo         Скачайте: ollama pull %OLLAMA_MODEL_CHAT%
+    pause & goto MENU
+)
+call :CHECK_RAM %RAM_MIN_MB%
+if not "%RAM_RESULT%"=="0" (
+    echo [ВНИМАНИЕ] Свободно меньше %RAM_MIN_MB% МБ ОЗУ.
+    pause
+)
+taskkill /IM "ollama.exe" /F >nul 2>&1
+taskkill /IM "ollama app.exe" /F >nul 2>&1
+timeout /t 2 >nul
+start "" "ollama app.exe"
+timeout /t 8 >nul
+
+set TRIES=0
+:LOAD_CHAT_RETRY
+set /a TRIES+=1
+call :OLLAMA_LOAD "%OLLAMA_MODEL_CHAT%"
+if not "%LOAD_RESULT%"=="0" (
+    if !TRIES! lss 5 (
+        timeout /t 5 >nul & goto LOAD_CHAT_RETRY
+    ) else (
+        echo [ОШИБКА] Не удалось загрузить модель.
+        pause & goto MENU
+    )
+)
+echo [OK] Модель загружена.
+echo.
+echo [Загруженные модели Ollama]
+ollama ps
+call :SHOW_UNTIL
+echo [ИНФО] Для диалога запустите пункт 14 или Chat-Ollama вручную.
+call :SHOW_MEMORY
+pause
+goto MENU
+
+REM ============================================
+REM 5 — Запуск только сервера LM Studio
+REM ============================================
+:START_LMS_SERVER
+echo.
+echo [ДЕЙСТВИЕ] Запуск только сервера LM Studio (без загрузки модели)...
+call :LOG "START_LMS_SERVER"
+
+where lms >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ОШИБКА] Утилита lms не найдена в PATH.
+    pause & goto MENU
+)
+
+echo [ИНФО] Запускаю сервер LM Studio...
+lms server start
+if %errorlevel% equ 0 (
+    echo [OK] Сервер запущен.
+    call :LOG "OK: LMS server started"
+) else (
+    echo [ОШИБКА] Сервер не запущен.
+    call :LOG "ERROR: LMS server start failed"
+)
+
+echo.
+echo [Статус сервера]
+lms server status
+echo.
+echo [Загруженные модели]
+lms ps
+echo.
+echo [API] http://localhost:1234
+call :SHOW_MEMORY
+pause
+goto MENU
+
+REM ============================================
+REM 6 — Выбор и загрузка модели LM Studio
+REM ============================================
+:CHOOSE_LMS_MODEL
+cls
+echo ============================================
+echo   ВЫБОР МОДЕЛИ LM STUDIO
+echo ============================================
+echo.
+echo [Скачанные модели]
+lms ls
+echo.
+echo   1. DeepSeek-R1 distill 7B    (4.68 GB)   reason
+echo   2. Qwen3 4B (local-bank)     (2.08 GB)   chat / coder
+echo   3. Llama 3.1 8B              (4.92 GB)   chat, *
+echo   4. Llama 3.2 1B              (807 MB)    chat, самая быстрая
+echo   5. Gemma 3 IT 4B             (2.49 GB)   chat
+echo   6. Ввести имя модели вручную
+echo   0. Назад
+echo ============================================
+set /p lm="Ваш выбор (0-6): "
+if "%lm%"=="" goto MENU
+if "%lm%"=="0" goto MENU
+if "%lm%"=="1" set "CHOSEN_LMS=%LMS_MODEL_7B%"      & goto LMS_LOAD_CHOSEN
+if "%lm%"=="2" set "CHOSEN_LMS=%LMS_MODEL_4B%"      & goto LMS_LOAD_CHOSEN
+if "%lm%"=="3" set "CHOSEN_LMS=%LMS_MODEL_LLAMA8B%" & goto LMS_LOAD_CHOSEN
+if "%lm%"=="4" set "CHOSEN_LMS=%LMS_MODEL_LLAMA1B%" & goto LMS_LOAD_CHOSEN
+if "%lm%"=="5" set "CHOSEN_LMS=%LMS_MODEL_GEMMA4B%" & goto LMS_LOAD_CHOSEN
+if "%lm%"=="6" (
+    set /p CHOSEN_LMS="Введите имя модели LM Studio: "
+    goto LMS_LOAD_CHOSEN
+)
+echo [ОШИБКА] Неверный выбор.
+timeout /t 2 >nul
+goto CHOOSE_LMS_MODEL
+
+:LMS_LOAD_CHOSEN
+if "%CHOSEN_LMS%"=="" goto CHOOSE_LMS_MODEL
+echo.
+echo [ДЕЙСТВИЕ] Загрузка модели LM Studio: %CHOSEN_LMS%
+call :LOG "LMS_LOAD_CHOSEN: %CHOSEN_LMS%"
+
+taskkill /IM "LM Studio.exe" /F >nul 2>&1
+taskkill /IM "LMS.exe" /F >nul 2>&1
+timeout /t 2 >nul
+start "" "lms"
+timeout /t 5 >nul
+
+echo [ИНФО] Загружаю модель %CHOSEN_LMS%...
+lms load "%CHOSEN_LMS%"
+if %errorlevel% equ 0 (
+    echo [OK] Модель %CHOSEN_LMS% загружена.
+    call :LOG "OK: LMS model loaded: %CHOSEN_LMS%"
+) else (
+    echo [ОШИБКА] Модель %CHOSEN_LMS% не загружена.
+    echo         Проверьте: lms ls
+    echo         Скачать:  lms get "%CHOSEN_LMS%"
+    call :LOG "ERROR: LMS model load failed: %CHOSEN_LMS%"
+)
+
+echo [ИНФО] Запускаю сервер LM Studio...
+lms server start
+if %errorlevel% equ 0 (
+    echo [OK] Сервер запущен.
+) else (
+    echo [ОШИБКА] Сервер не запущен.
+)
+
+echo.
+echo [Статус сервера]
+lms server status
+echo.
+echo [Загруженные модели]
+lms ps
+echo.
+echo [API] http://localhost:1234
+call :SHOW_MEMORY
+pause
+goto MENU
+
+REM ============================================
+REM 14 — Запуск чата
+REM ============================================
+:START_CHAT
+echo.
+echo [ДЕЙСТВИЕ] Запуск чата через Chat-Ollama...
+call :LOG "START_CHAT"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ". $PROFILE; Chat-Ollama -Model '%OLLAMA_MODEL_CHAT%'"
+echo.
+echo [ИНФО] Чат завершён.
+pause
+goto MENU
+
+REM ============================================
+REM 13 — Меню тестов
+REM ============================================
+:TEST_MENU
+cls
+echo ============================================
+echo   ТЕСТЫ
+echo ============================================
+echo   1. Краткий тест .bat (1 запрос, test_results.csv)
+echo   2. Расширенный тест .bat (5 issues, test_results.csv)
+echo   3. Показать историю .bat (test_results.csv)
+echo   4. Показать, что тестируем
+echo   5. test_all_models.ps1 — полный (11 вопросов)
+echo   6. test_all_models.ps1 — только новые (-OnlyNew)
+echo   7. test_all_models.ps1 — Quick (-Quick)
+echo   8. test_all_models.ps1 — format,lang
+echo   9. Открыть последний отчёт test_all_models.ps1
+echo   0. Назад
+echo ============================================
+set /p testchoice="Ваш выбор (0-9): "
+if "%testchoice%"=="" goto MENU
+if "%testchoice%"=="0" goto MENU
+if "%testchoice%"=="1" goto TEST_SHORT
+if "%testchoice%"=="2" goto TEST_LONG
+if "%testchoice%"=="3" goto TEST_HISTORY
+if "%testchoice%"=="4" goto TEST_SHOW
+if "%testchoice%"=="5" goto TEST_ALL_FULL
+if "%testchoice%"=="6" goto TEST_ALL_NEW
+if "%testchoice%"=="7" goto TEST_ALL_QUICK
+if "%testchoice%"=="8" goto TEST_ALL_FORMAT
+if "%testchoice%"=="9" goto TEST_OPEN_LAST
+echo [ОШИБКА] Неверный выбор.
+timeout /t 2 >nul
+goto TEST_MENU
+
+:TEST_ALL_FULL
+echo.
+echo [ДЕЙСТВИЕ] Полный тест: Ollama, затем LM Studio (последовательно)...
+
+echo.
+echo === ЭТАП 1/2: Ollama ===
+call :PREPARE_BACKENDS ollama
+
+if "!PREP_OK!"=="1" (
+    set "PSARGS=-Backend ollama -OnlyNew -Category format,lang"
+) else (
+    set "PSARGS="
+    echo [WARN] Ollama ne gotova - etap 1 propushchen.
+)
+
+if not "!PSARGS!"=="" (
+    echo [DEBUG] PSARGS=!PSARGS!
+    powershell -NoProfile -ExecutionPolicy Bypass -File "F:\TO_DBI\test_all_models.ps1" !PSARGS!
+    echo [DEBUG] kod: !errorlevel!
+)
+
+echo.
+echo === ЭТАП 2/2: LM Studio ===
+call :PREPARE_BACKENDS lms
+
+if "!PREP_OK!"=="1" (
+    set "PSARGS=-Backend lms -Category basic,format,lang"
+) else (
+    set "PSARGS="
+    echo [WARN] LM Studio ne gotova - etap 2 propushchen.
+)
+
+if not "!PSARGS!"=="" (
+    echo [DEBUG] PSARGS=!PSARGS!
+    powershell -NoProfile -ExecutionPolicy Bypass -File "F:\TO_DBI\test_all_models.ps1" !PSARGS!
+    echo [DEBUG] kod: !errorlevel!
+)
+
+echo.
+echo [ГОТОВО] Полный тест завершён.
+pause
+goto TEST_MENU
+
+:TEST_ALL_NEW
+echo.
+echo [ДЕЙСТВИЕ] test_all_models.ps1 -OnlyNew...
+powershell -NoProfile -ExecutionPolicy Bypass -File "F:\TO_DBI\test_all_models.ps1" -OnlyNew
+pause
+goto TEST_MENU
+
+:TEST_ALL_QUICK
+echo.
+echo [ДЕЙСТВИЕ] test_all_models.ps1 -Quick...
+powershell -NoProfile -ExecutionPolicy Bypass -File "F:\TO_DBI\test_all_models.ps1" -Quick
+pause
+goto TEST_MENU
+
+:TEST_ALL_FORMAT
+echo.
+echo [ДЕЙСТВИЕ] test_all_models.ps1 -Category format,lang...
+powershell -NoProfile -ExecutionPolicy Bypass -File "F:\TO_DBI\test_all_models.ps1" -Category format,lang
+pause
+goto TEST_MENU
+
+:TEST_OPEN_LAST
+cls
+echo ============================================
+echo   ПОСЛЕДНИЙ ОТЧЁТ test_all_models.ps1
+echo ============================================
+powershell -NoProfile -Command "$d='F:\TO_DBI\temp\model_tests'; $f = Get-ChildItem $d -Filter *.md | Sort-Object LastWriteTime -Descending | Select-Object -First 1; if ($f) { Write-Host ('Файл: ' + $f.FullName); Write-Host ''; Get-Content $f.FullName; Write-Host ''; Write-Host ('CSV: ' + ($f.FullName -replace '\.md$','.csv')) } else { Write-Host '[ИНФО] Отчётов нет.' }"
+echo.
+echo [Д] Открыть папку отчётов
+echo [Enter] Назад
+set /p ol="Ваш выбор: "
+if /I "%ol%"=="Д" start "" "F:\TO_DBI\temp\model_tests"
+if /I "%ol%"=="d" start "" "F:\TO_DBI\temp\model_tests"
+goto TEST_MENU
+
+:TEST_SHOW
+cls
+echo ============================================
+echo   ЧТО ТЕСТИРУЕМ
+echo ============================================
+echo [Конфиг] %CONFIG_FILE%
+if exist "%CONFIG_FILE%" (
+    powershell -NoProfile -Command "$c = ConvertFrom-Json (Get-Content '%CONFIG_FILE%' -Raw); Write-Host ('  model:      ' + $c.model); Write-Host ('  batch:      ' + $c.batch_size); Write-Host ('  fallback:   ' + $c.fallback_on_invalid); Write-Host ('  ollama_url: ' + $c.ollama_url); Write-Host ('  num_ctx:    ' + $c.num_ctx)"
+)
+echo.
+echo [Краткий тест]: "Say one word: works?" (num_ctx=%NUM_CTX%)
+echo [Расширенный тест]: 5 PL/SQL issues (BAD_PREFIX), ожидается JSON из 5 элементов.
+echo [test_all_models.ps1 v3.1]: 11 вопросов (basic, knowledge, format, lang, load).
+pause
+goto TEST_MENU
+
+:TEST_SHORT
+echo.
+echo [ТЕСТ] Краткий тест
+if not exist "%CONFIG_FILE%" (
+    echo [ОШИБКА] Конфиг не найден
+    pause & goto TEST_MENU
+)
+for /f "delims=" %%M in ('powershell -NoProfile -Command "(ConvertFrom-Json (Get-Content '%CONFIG_FILE%' -Raw)).model"') do set "CURRENT_MODEL=%%M"
+echo [ИНФО] Модель: %CURRENT_MODEL%
+call :GET_FREE_RAM
+set "RAM_BEFORE=%FREE_RAM%"
+if exist "%TEMP_RESULT%" del "%TEMP_RESULT%" >nul 2>&1
+powershell -NoProfile -Command "$body = ConvertTo-Json @{ model = '%CURRENT_MODEL%'; messages = @(@{ role = 'user'; content = 'Say one word: works?' }); stream = $false; options = @{ num_ctx = %NUM_CTX% } }; $sw = [Diagnostics.Stopwatch]::StartNew(); try { $r = Invoke-RestMethod -Uri http://localhost:11434/api/chat -Method Post -Body $body -ContentType 'application/json' -ErrorAction Stop; $sw.Stop(); $sec = [math]::Round($sw.Elapsed.TotalSeconds,2); Set-Content -Path '%TEMP_RESULT%' -Value $sec; Write-Host '[OK] Ответ:' $r.message.content; Write-Host '[OK] Время:' $sec 'сек'; exit 0 } catch { $sw.Stop(); $sec = [math]::Round($sw.Elapsed.TotalSeconds,2); Set-Content -Path '%TEMP_RESULT%' -Value $sec; Write-Host '[ОШИБКА]' $_.Exception.Message; exit 1 }"
+set "TEST_STATUS=OK"
+if !errorlevel! neq 0 set "TEST_STATUS=FAIL"
+set "TEST_TIME=?"
+if exist "%TEMP_RESULT%" (for /f "delims=" %%T in ('type "%TEMP_RESULT%"') do set "TEST_TIME=%%T")
+call :GET_FREE_RAM
+set "RAM_AFTER=%FREE_RAM%"
+call :LOG_TEST "short" "ollama" "%CURRENT_MODEL%" "%RAM_BEFORE%" "%RAM_AFTER%" "%TEST_TIME%" "%TEST_STATUS%" "1"
+if exist "%TEMP_RESULT%" del "%TEMP_RESULT%" >nul 2>&1
+echo [ГОТОВО] %TEST_STATUS% (%TEST_TIME% сек)
+pause
+goto TEST_MENU
+
+:TEST_LONG
+echo.
+echo [ТЕСТ] Расширенный тест (5 issues)
+if not exist "%CONFIG_FILE%" (
+    echo [ОШИБКА] Конфиг не найден
+    pause & goto TEST_MENU
+)
+for /f "delims=" %%M in ('powershell -NoProfile -Command "(ConvertFrom-Json (Get-Content '%CONFIG_FILE%' -Raw)).model"') do set "CURRENT_MODEL=%%M"
+echo [ИНФО] Модель: %CURRENT_MODEL%
+call :GET_FREE_RAM
+set "RAM_BEFORE=%FREE_RAM%"
+set "PROMPT_FILE=%~dp0temp_prompt.txt"
+(
+echo You are a PL/SQL to PostgreSQL migration expert. Fix the issues below.
+echo.
+echo EXAMPLE:
+echo Issue: line 32, code: IS_EOD_NEW boolean;, rule: BAD_PREFIX, hint: rename to v_bIS_EOD_NEW
+echo Fix: {"id": 1, "line": 32, "before": "IS_EOD_NEW boolean;", "after": "v_bIS_EOD_NEW boolean;", "reason": "Add boolean prefix v_b", "confidence": 0.95}
+echo.
+echo ISSUES:
+echo 1. line 32, code: IS_EOD_NEW boolean;, rule: BAD_PREFIX, hint: rename to v_bIS_EOD_NEW
+echo 2. line 33, code: stream_num string;, rule: BAD_PREFIX, hint: rename to v_sStream_num
+echo 3. line 34, code: debug_on boolean;, rule: BAD_PREFIX, hint: rename to v_bDebug_on
+echo 4. line 36, code: IdFile integer;, rule: BAD_PREFIX, hint: rename to v_iIdFile
+echo 5. line 67, code: idx number := 0;, rule: BAD_PREFIX, hint: rename to v_nIdx
+echo.
+echo Return ONLY a JSON array with exactly 5 elements.
+) > "%PROMPT_FILE%"
+if exist "%TEMP_RESULT%" del "%TEMP_RESULT%" >nul 2>&1
+if exist "%TEMP_FIXES%" del "%TEMP_FIXES%" >nul 2>&1
+powershell -NoProfile -Command "$prompt = Get-Content '%PROMPT_FILE%' -Raw; $body = ConvertTo-Json @{ model = '%CURRENT_MODEL%'; messages = @(@{ role = 'user'; content = $prompt }); stream = $false; options = @{ num_ctx = %NUM_CTX% }; keep_alive = '%KEEP_ALIVE%' }; $sw = [Diagnostics.Stopwatch]::StartNew(); try { $r = Invoke-RestMethod -Uri http://localhost:11434/api/chat -Method Post -Body $body -ContentType 'application/json' -ErrorAction Stop; $sw.Stop(); $sec = [math]::Round($sw.Elapsed.TotalSeconds,2); Set-Content -Path '%TEMP_RESULT%' -Value $sec; $c = $r.message.content; Write-Host '[OK] Время:' $sec 'сек'; $json = [regex]::Match($c, '\[.*\]', 'Singleline').Value; if ($json) { $arr = ConvertFrom-Json $json; $cnt = $arr.Count; Set-Content -Path '%TEMP_FIXES%' -Value $cnt; Write-Host '[OK] JSON валидный, элементов:' $cnt } else { Write-Host '[ОШИБКА] JSON не найден'; Set-Content -Path '%TEMP_FIXES%' -Value 0 }; Write-Host ''; Write-Host $c.Substring(0, [Math]::Min(400, $c.Length)); exit 0 } catch { $sw.Stop(); $sec = [math]::Round($sw.Elapsed.TotalSeconds,2); Set-Content -Path '%TEMP_RESULT%' -Value $sec; Set-Content -Path '%TEMP_FIXES%' -Value 0; Write-Host '[ОШИБКА]' $_.Exception.Message; exit 1 }"
+set "TEST_STATUS=OK"
+if !errorlevel! neq 0 set "TEST_STATUS=FAIL"
+set "TEST_TIME=?"
+if exist "%TEMP_RESULT%" (for /f "delims=" %%T in ('type "%TEMP_RESULT%"') do set "TEST_TIME=%%T")
+set "TEST_FIXES=0"
+if exist "%TEMP_FIXES%" (for /f "delims=" %%F in ('type "%TEMP_FIXES%"') do set "TEST_FIXES=%%F")
+call :GET_FREE_RAM
+set "RAM_AFTER=%FREE_RAM%"
+call :LOG_TEST "long5" "ollama" "%CURRENT_MODEL%" "%RAM_BEFORE%" "%RAM_AFTER%" "%TEST_TIME%" "%TEST_STATUS%" "%TEST_FIXES%/5"
+if exist "%PROMPT_FILE%" del "%PROMPT_FILE%" >nul 2>&1
+if exist "%TEMP_RESULT%" del "%TEMP_RESULT%" >nul 2>&1
+if exist "%TEMP_FIXES%" del "%TEMP_FIXES%" >nul 2>&1
+echo [ГОТОВО] %TEST_STATUS% (%TEST_TIME% сек, fixes=%TEST_FIXES%/5)
+pause
+goto TEST_MENU
+
+:TEST_HISTORY
+cls
+echo ============================================
+echo   ИСТОРИЯ ТЕСТОВ (.bat)
+echo ============================================
+if not exist "%CSVFILE%" (
+    echo [ИНФО] test_results.csv ещё нет — тесты .bat не запускались.
+    echo        Есть отчёты test_all_models.ps1 в F:\TO_DBI\temp\model_tests\
+    pause & goto TEST_MENU
+)
+powershell -NoProfile -Command "Import-Csv '%CSVFILE%' | Format-Table -AutoSize | Out-String -Width 250 | Write-Host"
+pause
+goto TEST_MENU
+
+REM ============================================
+REM 7 — Выгрузить обе
+REM ============================================
+:UNLOAD_BOTH
+echo [ДЕЙСТВИЕ] Выгружаю обе...
+call :LOG "UNLOAD_BOTH"
+taskkill /IM "ollama.exe" /F >nul 2>&1
+taskkill /IM "ollama app.exe" /F >nul 2>&1
+taskkill /IM "LM Studio.exe" /F >nul 2>&1
+taskkill /IM "LMS.exe" /F >nul 2>&1
+echo [OK] Обе выгружены.
+call :SHOW_MEMORY
+pause
+goto MENU
+
+:KILL_OLLAMA
+echo [ДЕЙСТВИЕ] Выгружаю Ollama...
+call :LOG "KILL_OLLAMA"
+taskkill /IM "ollama.exe" /F >nul 2>&1
+taskkill /IM "ollama app.exe" /F >nul 2>&1
+echo [OK] Ollama выгружена.
+call :SHOW_MEMORY
+pause
+goto MENU
+
+:KILL_LMS
+echo [ДЕЙСТВИЕ] Выгружаю LM Studio...
+call :LOG "KILL_LMS"
+taskkill /IM "LM Studio.exe" /F >nul 2>&1
+taskkill /IM "LMS.exe" /F >nul 2>&1
+echo [OK] LM Studio выгружена.
+call :SHOW_MEMORY
+pause
+goto MENU
+
+:SHOW_INFO
+echo.
+echo [Процессы Ollama]
+tasklist /FI "IMAGENAME eq ollama.exe" 2>nul | find /I "ollama.exe" >nul
+if !errorlevel! equ 0 (tasklist /FI "IMAGENAME eq ollama.exe") else (echo [ИНФО] Нет ollama.exe.)
+echo.
+echo [Процессы LM Studio]
+tasklist /FI "IMAGENAME eq LM Studio.exe" 2>nul | find /I "LM Studio.exe" >nul
+if !errorlevel! equ 0 (tasklist /FI "IMAGENAME eq LM Studio.exe") else (echo [ИНФО] Нет LM Studio.exe.)
+call :SHOW_MEMORY
+pause
+goto MENU
+
+REM ============================================
+REM ФУНКЦИИ
+REM ============================================
+:SHOW_MEMORY
+echo.
+echo ============================================
+echo   СВОБОДНАЯ ПАМЯТЬ
+echo ============================================
+powershell -NoProfile -Command "$os = Get-CimInstance Win32_OperatingSystem; $free = [math]::Round($os.FreePhysicalMemory / 1024); $used = $os.TotalVisibleMemorySize/1024 - $free; Write-Host ('Всего: ' + [math]::Round($os.TotalVisibleMemorySize/1024) + ' МБ'); Write-Host ('Занято: ' + [math]::Round($used) + ' МБ'); Write-Host ('Свободно: ' + $free + ' МБ')"
+echo.
+exit /b
+
+:SHOW_UNTIL
+echo.
+echo [ИНФО] Модель в RAM до UNTIL (keep_alive=%KEEP_ALIVE%).
+exit /b
+
+:CHECK_MODEL_EXISTS
+set "M=%~1"
+set "CHECK_RESULT=1"
+ollama list 2>nul | find /I "%M%" >nul
+if !errorlevel! equ 0 set "CHECK_RESULT=0"
+exit /b
+
+:CHECK_RAM
+set "MIN_MB=%~1"
+set "RAM_RESULT=1"
+powershell -NoProfile -Command "if (((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory) -ge %MIN_MB%) { exit 0 } else { exit 1 }"
+if !errorlevel! equ 0 set "RAM_RESULT=0"
+exit /b
+
+:OLLAMA_LOAD
+set "M=%~1"
+set "LOAD_RESULT=1"
+powershell -NoProfile -Command "$body = ConvertTo-Json @{ model = '%M%'; messages = @(@{ role = 'user'; content = 'hi' }); stream = $false; options = @{ num_ctx = %NUM_CTX% }; keep_alive = '%KEEP_ALIVE%' }; try { Invoke-RestMethod -Uri http://localhost:11434/api/chat -Method Post -Body $body -ContentType 'application/json' -ErrorAction Stop | Out-Null; exit 0 } catch { exit 1 }"
+if !errorlevel! equ 0 set "LOAD_RESULT=0"
+exit /b
+
+:GET_FREE_RAM
+for /f "delims=" %%R in ('powershell -NoProfile -Command "[math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024)"') do set "FREE_RAM=%%R"
+exit /b
+
+:GET_TIME_NOW
+set "T=%time: =0%"
+for /f "tokens=1-3 delims=:," %%a in ("%T%") do set "TIME_NOW=%%a:%%b:%%c"
+exit /b
+
+:LOG_TEST
+set "T=%~1"
+set "API=%~2"
+set "M=%~3"
+set "RB=%~4"
+set "RA=%~5"
+set "TS=%~6"
+set "ST=%~7"
+set "FX=%~8"
+call :GET_TIME_NOW
+if not exist "%CSVFILE%" (
+    echo date, time, test, api, model, ram_before_mb, ram_after_mb, time_sec, status, fixes > "%CSVFILE%"
+)
+echo %date%, %TIME_NOW%, %T%, %API%, %M%, %RB%, %RA%, %TS%, %ST%, %FX% >> "%CSVFILE%"
+exit /b
+
+:LOG
+set "MSG=%~1"
+echo [%date% %time%] %MSG% >> "%LOGFILE%"
+exit /b
+
+:UPDATE_WORKER_CONFIG
+set "MODEL=%~1"
+set "BATCH=%~2"
+set "FALLBACK=%~3"
+powershell -NoProfile -Command "$cfg = @{ ollama_url = 'http://localhost:11434'; model = '%MODEL%'; batch_size = %BATCH%; fallback_batch_size = 5; fallback_on_invalid = $%FALLBACK%; temperature = 0.1; num_ctx = %NUM_CTX%; max_tokens = 2000; timeout_sec = 600; merge_same_line = $true }; Set-Content -Path '%CONFIG_FILE%' -Value (ConvertTo-Json $cfg -Depth 5) -Encoding UTF8"
+if !errorlevel! equ 0 (
+    echo [OK] Конфиг обновлён.
+    call :LOG "config updated: model=%MODEL% batch=%BATCH%"
+) else (
+    echo [ОШИБКА] Не удалось обновить конфиг.
+    call :LOG "ERROR: config update failed"
+)
+exit /b
+
+:EXIT
+echo.
+echo Выход...
+call :LOG "EXIT"
+timeout /t 2 >nul
+endlocal
+exit

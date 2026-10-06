@@ -11,6 +11,15 @@ import os
 import json
 import http.client
 
+# Принудительный UTF-8 для stdout/stderr на Windows
+import io
+if sys.platform == 'win32':
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 ARM_ROOT = r'F:\TO_DBI'
 LOGS = os.path.join(ARM_ROOT, 'logs')
 MODEL = 'qwen2.5-coder:3b'

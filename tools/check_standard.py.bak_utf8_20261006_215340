@@ -1,0 +1,100 @@
+# -*- coding: utf-8 -*-
+"""DS_CNT_007: check-standard.
+
+Проверка файла на соответствие EXCHANGE\DS_STANDARD.md (раздел 2)
+через локальную Ollama (qwen2.5-coder:3b). Заменяет slash-команду
+/check-standard, когда CLI ai-continue недоступен.
+
+Write target: только logs\ (см. матрицу доступа CNT).
+"""
+import sys
+import os
+import json
+import http.client
+
+ARM_ROOT = r'F:\TO_DBI'
+LOGS = os.path.join(ARM_ROOT, 'logs')
+MODEL = 'qwen2.5-coder:3b'
+OLLAMA_HOST = 'localhost'
+OLLAMA_PORT = 11434
+NUM_CTX = 4096
+OUT_FILE = os.path.join(LOGS, 'ds_cnt_007_check_standard.md')
+
+
+def read_text(path):
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        return f.read()
+
+
+def section(text, header):
+    """Вернуть блок от header до следующего заголовка того же уровня."""
+    lines = text.splitlines()
+    out = []
+    grab = False
+    level = header.count('#')
+    for ln in lines:
+        if ln.strip().startswith(header.strip()):
+            grab = True
+            out.append(ln)
+            continue
+        if grab and ln.startswith('#'):
+            if ln.count('#', 0, ln.find(' ')) <= level:
+                break
+        if grab:
+            out.append(ln)
+    return '\n'.join(out)
+
+
+def ollama_generate(prompt):
+    payload = json.dumps({
+        'model': MODEL,
+        'prompt': prompt,
+        'stream': False,
+        'options': {'num_ctx': NUM_CTX, 'temperature': 0.1,
+                    'num_predict': 600},
+    }).encode('utf-8')
+    conn = http.client.HTTPConnection(OLLAMA_HOST, OLLAMA_PORT, timeout=600)
+    conn.request('POST', '/api/generate', body=payload,
+                 headers={'Content-Type': 'application/json'})
+    resp = conn.getresponse()
+    body = resp.read().decode('utf-8')
+    conn.close()
+    if resp.status != 200:
+        raise RuntimeError('Ollama %d: %s' % (resp.status, body[:200]))
+    return json.loads(body).get('response', '')
+
+
+def main():
+    target = sys.argv[1] if len(sys.argv) > 1 else \
+        os.path.join(ARM_ROOT, 'EXCHANGE', 'SEC_POLICY_AI.md')
+    std_path = os.path.join(ARM_ROOT, 'EXCHANGE', 'DS_STANDARD.md')
+
+    standard = read_text(std_path)
+    sec2 = section(standard, '## 2.')
+    target_text = read_text(target)
+
+    prompt = (
+        'Ты — ревьюер DS в проекте TO_DBI. Ниже — стандарт оформления DS '
+        '(раздел 2 "Стандартные ограничения") и файл для проверки.\n\n'
+        '=== СТАНДАРТ (DS_STANDARD.md, раздел 2) ===\n%s\n\n'
+        '=== ФАЙЛ ДЛЯ ПРОВЕРКИ (%s) ===\n%s\n\n'
+        'Задача: проверь файл на соответствие стандарту. Кратко перечисли '
+        'нарушения (пункт стандарта -> что не так -> правка). Если файл не '
+        'является DS-заданием (например, политика/справочник) — отметь это '
+        'и проверь только применимые пункты. Без воды.'
+    ) % (sec2, os.path.basename(target), target_text)
+
+    result = ollama_generate(prompt)
+
+    os.makedirs(LOGS, exist_ok=True)
+    with open(OUT_FILE, 'w', encoding='utf-8', newline='\r\n') as f:
+        f.write('# /check-standard: %s\n\n' % os.path.basename(target))
+        f.write('Модель: %s\n\n' % MODEL)
+        f.write(result)
+
+    print(result)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

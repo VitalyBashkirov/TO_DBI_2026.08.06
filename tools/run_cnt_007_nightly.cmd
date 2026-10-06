@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 REM DS_CNT_007: nightly pipeline (index + check-standard + explain-log + report)
 setlocal
 

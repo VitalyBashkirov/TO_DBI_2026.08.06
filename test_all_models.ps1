@@ -1,57 +1,195 @@
-﻿# ============================================
-# test_all_models.ps1 (v2)
+# ============================================
+# test_all_models.ps1 (v3.1)
 # Obshchiy test modeley Ollama i LMS dlya chata
+# + rasshirennyy nabor voprosov i metrik
+# + ispravleniya chekerov (yesno, jsonfix, threeLines)
 # ============================================
 
 param(
-    [switch]$OnlyNew  # Тест только новых моделей
+    [switch]$OnlyNew,                    # Тест только новых моделей
+    [switch]$Quick,                      # Только 5 базовых вопросов
+    [string[]]$Category = @(),           # Фильтр по категориям: basic, knowledge, format, lang, load
+    [string]$ResultDir = "F:\TO_DBI\temp\model_tests",
+    [ValidateSet("all","ollama","lms")]
+    [string]$Backend = "all"
 )
 
+# Разбор -Category, если передан как "format,lang" одной строкой
+if ($Category.Count -eq 1 -and $Category[0] -match ',') {
+    $Category = $Category[0] -split ',' | ForEach-Object { $_.Trim() }
+}
+
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-$OllamaUrl = "http://localhost:11434"
-$LmsUrl = "http://localhost:1234"
-$NumCtx = 4096
+$OllamaUrl  = "http://localhost:11434"
+$LmsUrl     = "http://localhost:1234"
+$NumCtx     = 4096
 $TimeoutSec = 600
-$ResultDir = "F:\TO_DBI\temp\model_tests"
-$Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$Timestamp  = Get-Date -Format "yyyyMMdd_HHmmss"
 $ResultFile = Join-Path $ResultDir "test_$Timestamp.csv"
-$MdFile = Join-Path $ResultDir "test_$Timestamp.md"
+$MdFile     = Join-Path $ResultDir "test_$Timestamp.md"
+$SummaryCsv = Join-Path $ResultDir "summary.csv"
+$SummaryAllCsv = Join-Path $ResultDir "summary_all.csv"
+$SummaryModelsCsv = Join-Path $ResultDir "summary_models.csv"
+$SummaryMd  = Join-Path $ResultDir "summary_all.md"
 
 New-Item -ItemType Directory -Force -Path $ResultDir | Out-Null
 Add-Type -AssemblyName System.Net.Http
 
 # --- Удаленные модели (не тестируем) ---
 $RemovedModels = @(
-    "phi3:mini",              # FAIL на PL/SQL (600 сек timeout)
-    "deepseek-r1:latest"      # 286 сек среднее, 2 FAIL
+    "phi3:mini",
+    "deepseek-r1:latest",
+    "qwen2.5-coder:1.5b-base"
 )
 
 # --- Новые модели (тест только их при -OnlyNew) ---
 $NewModels = @(
-    "qwen2.5-coder:7b",
-    "qwen2.5-coder:1.5b-base"
-    # nomic-embed-text:latest — embedding, не для чата
+    "qwen2.5-coder:3b",
+    "qwen2.5-coder:7b"
 )
 
-# --- Тестовые вопросы ---
-$q1 = -join ([char]0x041F,[char]0x0440,[char]0x0438,[char]0x0432,[char]0x0435,[char]0x0442,"!"," ",[char]0x041A,[char]0x0430,[char]0x043A," ",[char]0x0434,[char]0x0435,[char]0x043B,[char]0x0430,"?")
-$q2 = -join ([char]0x0420,[char]0x0430,[char]0x0441,[char]0x0441,[char]0x043A,[char]0x0430,[char]0x0436,[char]0x0438," ",[char]0x043F,[char]0x0440,[char]0x043E," PL/SQL ",[char]0x0432," 3 ",[char]0x043F,[char]0x0440,[char]0x0435,[char]0x0434,[char]0x043B,[char]0x043E,[char]0x0436,[char]0x0435,[char]0x043D,[char]0x0438,[char]0x044F,[char]0x0445,".")
-$q3 = -join ([char]0x041A,[char]0x0430,[char]0x043A," PL/SQL ",[char]0x043E,[char]0x0431,[char]0x044A,[char]0x044F,[char]0x0432,[char]0x0438,[char]0x0442,[char]0x044C," VARCHAR2?")
+# --- Хелпер для кириллицы без порчи кодировки ---
+function Cyr {
+    param([int[]]$Codes)
+    -join ($Codes | ForEach-Object { [char]$_ })
+}
+
+# ============================================
+# ТЕСТОВЫЕ ВОПРОСЫ
+# ============================================
+
+$q1 = Cyr @(0x041F,0x0440,0x0438,0x0432,0x0435,0x0442) + "! " + (Cyr @(0x041A,0x0430,0x043A)) + " " + (Cyr @(0x0434,0x0435,0x043B,0x0430)) + "?"
+$q2 = Cyr @(0x0420,0x0430,0x0441,0x0441,0x043A,0x0430,0x0436,0x0438) + " " + (Cyr @(0x043F,0x0440,0x043E)) + " PL/SQL " + (Cyr @(0x0432)) + " 3 " + (Cyr @(0x043F,0x0440,0x0435,0x0434,0x043B,0x043E,0x0436,0x0435,0x043D,0x0438,0x044F,0x0445)) + "."
+$q3 = Cyr @(0x041A,0x0430,0x043A) + " PL/SQL " + (Cyr @(0x043E,0x0431,0x044A,0x044F,0x0432,0x0438,0x0442,0x044C)) + " VARCHAR2?"
 $q4 = "17 x 24 = ?"
-$q5 = -join ([char]0x041E,[char]0x0442,[char]0x0432,[char]0x0435,[char]0x0442,[char]0x044C," ",[char]0x043E,[char]0x0434,[char]0x043D,[char]0x0438,[char]0x043C," ",[char]0x0441,[char]0x043B,[char]0x043E,[char]0x0432,[char]0x043E,[char]0x043C,": ",[char]0x0441,[char]0x0442,[char]0x043E,[char]0x043B,[char]0x0438,[char]0x0446,[char]0x0430," ",[char]0x0424,[char]0x0440,[char]0x0430,[char]0x043D,[char]0x0446,[char]0x0438,[char]0x0438,"?")
+$q5 = Cyr @(0x041E,0x0442,0x0432,0x0435,0x0442,0x044C) + " " + (Cyr @(0x043E,0x0434,0x043D,0x0438,0x043C)) + " " + (Cyr @(0x0441,0x043B,0x043E,0x0432,0x043E,0x043C)) + ": " + (Cyr @(0x0441,0x0442,0x043E,0x043B,0x0438,0x0446,0x0430)) + " " + (Cyr @(0x0424,0x0440,0x0430,0x043D,0x0446,0x0438,0x0438)) + "?"
 
-$tests = @(
-    @{ id = 1; name = "greeting"; prompt = $q1 },
-    @{ id = 2; name = "plsql";    prompt = $q2 },
-    @{ id = 3; name = "code";     prompt = $q3 },
-    @{ id = 4; name = "math";     prompt = $q4 },
-    @{ id = 5; name = "one-word"; prompt = $q5 }
+# json-fix: 5 issues BAD_PREFIX
+$q6 = @"
+You are a PL/SQL to PostgreSQL migration expert. Fix the issues below.
+
+EXAMPLE:
+Issue: line 32, code: IS_EOD_NEW boolean;, rule: BAD_PREFIX, hint: rename to v_bIS_EOD_NEW
+Fix: {"id": 1, "line": 32, "before": "IS_EOD_NEW boolean;", "after": "v_bIS_EOD_NEW boolean;", "reason": "Add boolean prefix v_b", "confidence": 0.95}
+
+ISSUES:
+1. line 32, code: IS_EOD_NEW boolean;, rule: BAD_PREFIX, hint: rename to v_bIS_EOD_NEW
+2. line 33, code: stream_num string;, rule: BAD_PREFIX, hint: rename to v_sStream_num
+3. line 34, code: debug_on boolean;, rule: BAD_PREFIX, hint: rename to v_bDebug_on
+4. line 36, code: IdFile integer;, rule: BAD_PREFIX, hint: rename to v_iIdFile
+5. line 67, code: idx number := 0;, rule: BAD_PREFIX, hint: rename to v_nIdx
+
+Return ONLY a JSON array with exactly 5 elements.
+"@
+
+# format-strict
+$q7 = "Return EXACTLY 3 lines, nothing else. Format: NAME=<value> / TYPE=<value> / NULLABLE=<value>. Values: name is emp_id, type is NUMBER, nullable is NOT NULL."
+
+# ru-tech
+$q8 = Cyr @(0x041E,0x0431,0x044A,0x044F,0x0441,0x043D,0x0438) + " " + (Cyr @(0x043D,0x0430)) + " " + (Cyr @(0x0440,0x0443,0x0441,0x0441,0x043A,0x043E,0x043C)) + " " + (Cyr @(0x0440,0x0430,0x0437,0x043D,0x0438,0x0446,0x0443)) + " " + (Cyr @(0x043C,0x0435,0x0436,0x0434,0x0443)) + " %TYPE " + (Cyr @(0x0438)) + " %ROWTYPE " + (Cyr @(0x0432)) + " PL/SQL. 3-5 " + (Cyr @(0x043F,0x0440,0x0435,0x0434,0x043B,0x043E,0x0436,0x0435,0x043D,0x0438,0x0439)) + "."
+
+# no-hallucination
+$q9 = "Is there a statement FORALL DELETE in PL/SQL? Answer yes or no, then one short reason."
+
+# long-ctx
+$q10Body = @"
+Consider this PL/SQL package (truncated):
+
+CREATE OR REPLACE PACKAGE BODY eod_load AS
+  PROCEDURE load_eod(p_date IN DATE) IS
+    v_cnt NUMBER := 0;
+    v_bOk BOOLEAN := TRUE;
+    IS_EOD_NEW BOOLEAN;
+    stream_num STRING;
+    debug_on BOOLEAN;
+    IdFile INTEGER;
+    idx NUMBER := 0;
+    CURSOR c_src IS SELECT id, val FROM src_eod WHERE dt = p_date;
+  BEGIN
+    FOR r IN c_src LOOP
+      v_cnt := v_cnt + 1;
+      INSERT INTO dst_eod(id, val) VALUES (r.id, r.val);
+      IF v_cnt > 100000 THEN
+        v_bOk := FALSE;
+        EXIT;
+      END IF;
+    END LOOP;
+    COMMIT;
+    IF NOT v_bOk THEN
+      RAISE_APPLICATION_ERROR(-20001, 'too many rows');
+    END IF;
+  EXCEPTION
+    WHEN OTHERS THEN
+      ROLLBACK;
+      RAISE;
+  END;
+
+  PROCEDURE cleanup_old(p_days IN NUMBER) IS
+    stream_num STRING;
+    debug_on BOOLEAN;
+    idx NUMBER := 0;
+  BEGIN
+    FOR r IN (SELECT id FROM dst_eod WHERE dt < SYSDATE - p_days) LOOP
+      idx := idx + 1;
+      IF MOD(idx, 1000) = 0 THEN COMMIT; END IF;
+    END LOOP;
+  END;
+
+  FUNCTION get_count(p_date IN DATE) RETURN NUMBER IS
+    v_n NUMBER;
+    IdFile INTEGER;
+  BEGIN
+    SELECT COUNT(*) INTO v_n FROM dst_eod WHERE dt = p_date;
+    RETURN v_n;
+  END;
+END eod_load;
+/
+"@
+$q10 = $q10Body + "`n`nList exactly 3 potential issues in this PL/SQL code related to naming or data types. Be concise."
+
+# batch10: 10 issues BAD_PREFIX
+$issues10 = @()
+for ($i = 1; $i -le 10; $i++) {
+    $issues10 += "$i. line $($i+30), code: var_$i number;, rule: BAD_PREFIX, hint: rename to v_nVar_$i"
+}
+$q11 = @"
+You are a PL/SQL to PostgreSQL migration expert. Fix ALL 10 issues below.
+
+ISSUES:
+$($issues10 -join "`n")
+
+Return ONLY a JSON array with exactly 10 elements, each with fields: id, line, before, after, reason, confidence.
+"@
+
+# --- Полный список тестов ---
+$allTests = @(
+    @{ id = 1;  name = "greeting";         category = "basic";     prompt = $q1;  expected = $null;       checker = "none" },
+    @{ id = 2;  name = "plsql";            category = "knowledge"; prompt = $q2;  expected = $null;       checker = "none" },
+    @{ id = 3;  name = "code";             category = "knowledge"; prompt = $q3;  expected = $null;       checker = "none" },
+    @{ id = 4;  name = "math";             category = "basic";     prompt = $q4;  expected = "408";       checker = "contains" },
+    @{ id = 5;  name = "one-word";         category = "basic";     prompt = $q5;  expected = $null;       checker = "oneword" },
+    @{ id = 6;  name = "json-fix";         category = "format";    prompt = $q6;  expected = "5";         checker = "jsonfix5" },
+    @{ id = 7;  name = "format-strict";    category = "format";    prompt = $q7;  expected = $null;       checker = "threeLines" },
+    @{ id = 8;  name = "ru-tech";          category = "lang";      prompt = $q8;  expected = $null;       checker = "ruRatio" },
+    @{ id = 9;  name = "no-hallucination"; category = "knowledge"; prompt = $q9;  expected = "no";        checker = "yesno" },
+    @{ id = 10; name = "long-ctx";         category = "load";      prompt = $q10; expected = $null;       checker = "none" },
+    @{ id = 11; name = "batch10";          category = "load";      prompt = $q11; expected = "10";        checker = "jsonfixN" }
 )
 
-# --- Функции ---
+# --- Фильтр по -Quick / -Category ---
+$tests = $allTests
+if ($Quick) {
+    $tests = $tests | Where-Object { $_.category -eq "basic" }
+} elseif ($Category.Count -gt 0) {
+    $tests = $tests | Where-Object { $Category -contains $_.category }
+}
+
+# ============================================
+# ФУНКЦИИ БЭКЕНДОВ
+# ============================================
 
 function Get-OllamaModels {
     try {
@@ -105,7 +243,7 @@ function Invoke-LmsChat {
         model = $Model
         messages = @(@{ role = "user"; content = $Prompt })
         temperature = 0.6
-        max_tokens = 1000
+        max_tokens = 2000
     }
     $content = New-Object System.Net.Http.StringContent($jsonBody, [System.Text.Encoding]::UTF8, "application/json")
     $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -122,138 +260,411 @@ function Invoke-LmsChat {
     } finally { $client.Dispose() }
 }
 
-function Analyze-Answer {
-    param([string]$Answer)
-    if ([string]::IsNullOrWhiteSpace($Answer)) {
-        return @{ HasQuestion = $false; HasCyrillic = $false; Length = 0; Preview = "" }
-    }
-    $hasQuestion = $Answer.Contains("?")
-    $hasCyr = $false
-    foreach ($ch in $Answer.ToCharArray()) {
+# ============================================
+# АНАЛИЗ ОТВЕТА
+# ============================================
+
+function Get-RuRatio {
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return 0 }
+    $cyr = 0; $letters = 0
+    foreach ($ch in $Text.ToCharArray()) {
         $code = [int]$ch
-        if (($code -ge 0x0410 -and $code -le 0x044F) -or $code -eq 0x0401 -or $code -eq 0x0451) {
-            $hasCyr = $true
-            break
-        }
+        if (($code -ge 0x0410 -and $code -le 0x044F) -or $code -eq 0x0401 -or $code -eq 0x0451) { $cyr++; $letters++ }
+        elseif (($code -ge 0x0041 -and $code -le 0x005A) -or ($code -ge 0x0061 -and $code -le 0x007A)) { $letters++ }
     }
-    $preview = $Answer.Substring(0, [Math]::Min(100, $Answer.Length)) -replace "`r?`n", " "
-    return @{ HasQuestion = $hasQuestion; HasCyrillic = $hasCyr; Length = $Answer.Length; Preview = $preview }
+    if ($letters -eq 0) { return 0 }
+    return [math]::Round($cyr / $letters, 2)
 }
 
-# --- Сбор моделей ---
+# Извлекает первый валидный JSON-массив из ответа
+function Get-JsonArray {
+    param([string]$Text)
+    $matches = [regex]::Matches($Text, '\[.*?\]', 'Singleline')
+    foreach ($m in $matches) {
+        try {
+            $arr = ConvertFrom-Json $m.Value
+            return @($arr)
+        } catch {}
+    }
+    # fallback: один большой массив
+    $m = [regex]::Match($Text, '\[.*\]', 'Singleline')
+    if ($m.Success) {
+        try { return @(ConvertFrom-Json $m.Value) } catch {}
+    }
+    return $null
+}
+
+function Analyze-Answer {
+    param([string]$Answer, [string]$Checker, [string]$Expected)
+    if ([string]::IsNullOrWhiteSpace($Answer)) {
+        return @{
+            HasQuestion = $false; HasCyrillic = $false; Length = 0; Preview = ""
+            JsonValid = $false; JsonItems = 0; RuRatio = 0.0; ExactMatch = $false
+        }
+    }
+    $hasQuestion = $Answer.Contains("?")
+    $ruRatio = Get-RuRatio $Answer
+    $hasCyr = $ruRatio -gt 0
+    $preview = $Answer.Substring(0, [Math]::Min(100, $Answer.Length)) -replace "`r?`n", " "
+
+    $jsonValid = $false; $jsonItems = 0; $exactMatch = $false
+
+    switch ($Checker) {
+        "contains" {
+            if ($Expected) {
+                $esc = [regex]::Escape($Expected)
+                if ($Answer -match "\b$esc\b") { $exactMatch = $true }
+            }
+        }
+        "oneword" {
+            $trim = ($Answer.Trim() -replace '[.,!?;:]+$','')
+            $words = $trim -split '\s+'
+            if ($words.Count -eq 1) { $exactMatch = $true }
+        }
+        "threeLines" {
+            $lines = ($Answer -split "`r?`n") | Where-Object { $_.Trim() -ne "" }
+            $tail = $lines | Select-Object -Last 3
+            $joined = ($tail -join "`n")
+            if ($joined -match 'NAME=' -and $joined -match 'TYPE=' -and $joined -match 'NULLABLE=') {
+                $exactMatch = $true
+            }
+        }
+        "jsonfix5" {
+            $arr = Get-JsonArray $Answer
+            if ($null -ne $arr) {
+                $jsonItems = $arr.Count
+                $jsonValid = $true
+                if ($jsonItems -eq 5) { $exactMatch = $true }
+            }
+        }
+        "jsonfixN" {
+            $arr = Get-JsonArray $Answer
+            if ($null -ne $arr) {
+                $jsonItems = $arr.Count
+                $jsonValid = $true
+                if ($Expected -and $jsonItems -eq [int]$Expected) { $exactMatch = $true }
+            }
+        }
+        "yesno" {
+            $lower = $Answer.ToLower()
+            # кириллица через [char]-коды — не зависит от кодировки файла
+            $cyrNet = -join ([char]0x043D,[char]0x0435,[char]0x0442)   # нет
+            $cyrDa  = -join ([char]0x0434,[char]0x0430)                # да
+            $isNo  = ($lower -match '\bno\b')  -or ($lower.Contains($cyrNet))
+            $isYes = ($lower -match '\byes\b') -or ($lower.Contains($cyrDa))
+            if ($Expected -eq "no" -and $isNo -and -not $isYes) { $exactMatch = $true }
+            elseif ($Expected -eq "yes" -and $isYes -and -not $isNo) { $exactMatch = $true }
+        }
+        "ruRatio" {
+            # нужно и ratio >= 0.5, и хотя бы 20 кириллических букв
+            $cyrLetters = 0
+            foreach ($ch in $Answer.ToCharArray()) {
+                $code = [int]$ch
+                if (($code -ge 0x0410 -and $code -le 0x044F) -or $code -eq 0x0401 -or $code -eq 0x0451) { $cyrLetters++ }
+            }
+            if ($ruRatio -ge 0.5 -and $cyrLetters -ge 20) { $exactMatch = $true }
+        }
+    }
+
+    return @{
+        HasQuestion = $hasQuestion
+        HasCyrillic = $hasCyr
+        Length      = $Answer.Length
+        Preview     = $preview
+        JsonValid   = $jsonValid
+        JsonItems   = $jsonItems
+        RuRatio     = $ruRatio
+        ExactMatch  = $exactMatch
+    }
+}
+
+# ============================================
+# ПРОВЕРКА ФОРМАТА SUMMARY-ФАЙЛОВ
+# ============================================
+
+function Test-CsvHeader {
+    param([string]$Path, [string[]]$RequiredCols)
+    if (-not (Test-Path $Path)) { return $true }  # нет файла — ок
+    try {
+        $first = Get-Content $Path -TotalCount 1 -Encoding UTF8
+        foreach ($c in $RequiredCols) {
+            if ($first -notmatch [regex]::Escape($c)) { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
+
+# summary.csv — колонки v3
+if (Test-Path $SummaryCsv) {
+    if (-not (Test-CsvHeader -Path $SummaryCsv -RequiredCols @("Run","Backend","Model","Requests","AvgTimeSec","OK","Cyr"))) {
+        Move-Item $SummaryCsv "$SummaryCsv.bak" -Force
+        Write-Host "[WARN] summary.csv imel staryy format -> pereimenovan v .bak" -ForegroundColor Yellow
+    }
+}
+
+# summary_all.csv — колонки v3.1
+if (Test-Path $SummaryAllCsv) {
+    if (-not (Test-CsvHeader -Path $SummaryAllCsv -RequiredCols @("Run","Backend","Model","TestID","TestName","Category","Time","Length","HasCyr","RuRatio","JsonValid","JsonItems","ExactMatch","Success","Preview"))) {
+        Move-Item $SummaryAllCsv "$SummaryAllCsv.bak" -Force
+        Write-Host "[WARN] summary_all.csv imel staryy format -> pereimenovan v .bak" -ForegroundColor Yellow
+    }
+}
+
+# ============================================
+# СБОР МОДЕЛЕЙ
+# ============================================
+
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  OBSHCHIY TEST MODELEY OLLAMA I LM STUDIO" -ForegroundColor Cyan
+Write-Host "  OBSHCHIY TEST MODELEY OLLAMA I LM STUDIO (v3.2)" -ForegroundColor Cyan
+Write-Host "  (backend: $Backend)" -ForegroundColor Yellow
 if ($OnlyNew) { Write-Host "  (rezhim: tolko NOVYE modeli)" -ForegroundColor Yellow }
+if ($Quick)   { Write-Host "  (rezhim: QUICK - tolko basic)" -ForegroundColor Yellow }
+if ($Category.Count -gt 0) { Write-Host "  (kategorii: $($Category -join ', '))" -ForegroundColor Yellow }
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
 Write-Host "[1/3] Sbor modeley..." -ForegroundColor Yellow
-$ollamaModels = Get-OllamaModels
-$lmsModels = Get-LmsModels
+if ($Backend -in @("all","ollama")) {
+    $ollamaModels = Get-OllamaModels
+} else {
+    $ollamaModels = @()
+}
+if ($Backend -in @("all","lms")) {
+    $lmsModels = Get-LmsModels
+} else {
+    $lmsModels = @()
+}
 
-# Фильтр: только новые
 if ($OnlyNew) {
     Write-Host "  Filtr: tolko NOVYE modeli" -ForegroundColor Yellow
     $ollamaModels = $ollamaModels | Where-Object { $_.Name -in $NewModels }
     $lmsModels = @()
 }
 
-# Исключить удаленные
 $ollamaModels = $ollamaModels | Where-Object { $_.Name -notin $RemovedModels }
 
 Write-Host "  Ollama: $($ollamaModels.Count) modeley" -ForegroundColor Green
 $ollamaModels | ForEach-Object { Write-Host "    - $($_.Name) ($($_.Size) GB)" }
 Write-Host "  LM Studio: $($lmsModels.Count) modeley" -ForegroundColor Green
 
-$allModels = @()
-$allModels += $ollamaModels
-$allModels += $lmsModels
+$allModels = @(); $allModels += $ollamaModels; $allModels += $lmsModels
+if ($allModels.Count -eq 0) { Write-Host "[ERROR] Net modeley." -ForegroundColor Red; exit 1 }
 
-if ($allModels.Count -eq 0) {
-    Write-Host "[ERROR] Net modeley." -ForegroundColor Red
-    exit 1
-}
-
+$totalReq = $allModels.Count * $tests.Count
 Write-Host ""
-Write-Host "[2/3] Testirovanie $($allModels.Count) modeley x $($tests.Count) voprosov = $($allModels.Count * $tests.Count) zaprosov" -ForegroundColor Yellow
+Write-Host "[2/3] Testirovanie $($allModels.Count) modeley x $($tests.Count) voprosov = $totalReq zaprosov" -ForegroundColor Yellow
 Write-Host ""
 
-# --- Тестирование ---
+# ============================================
+# ТЕСТИРОВАНИЕ
+# ============================================
+
 $results = @()
 
 foreach ($model in $allModels) {
     Write-Host "============================================" -ForegroundColor Cyan
     Write-Host "Model: $($model.Backend) / $($model.Name)" -ForegroundColor Cyan
     Write-Host "============================================" -ForegroundColor Cyan
-    
+
+    $idx = 0
     foreach ($test in $tests) {
-        Write-Host "  [$($test.id)/$($tests.Count)] $($test.name): " -NoNewline
-        
+        $idx++
+        Write-Host "  [$idx/$($tests.Count)] $($test.name) [$($test.category)]: " -NoNewline
+
         $r = $null
         if ($model.Backend -eq "Ollama") {
             $r = Invoke-OllamaChat -Model $model.Name -Prompt $test.prompt -NumCtx $NumCtx -TimeoutSec $TimeoutSec
         } else {
             $r = Invoke-LmsChat -Model $model.Name -Prompt $test.prompt -TimeoutSec $TimeoutSec
         }
-        
-        $analysis = Analyze-Answer -Answer $r.Answer
-        
+
+        $a = Analyze-Answer -Answer $r.Answer -Checker $test.checker -Expected $test.expected
+
         $status = if ($r.Success) { "OK" } else { "FAIL" }
-        $cyr = if ($analysis.HasCyrillic) { "Cyr" } else { "noCyr" }
-        
-        Write-Host "[$status] $($r.Time) sec | $($analysis.Length) simv | $cyr" -ForegroundColor $(if ($r.Success) { "Green" } else { "Red" })
-        
+        $cyr = if ($a.HasCyrillic) { "Cyr" } else { "noCyr" }
+        $extra = ""
+        if ($test.checker -like "jsonfix*") { $extra = " | JSON=$($a.JsonValid) items=$($a.JsonItems)" }
+        if ($test.checker -eq "threeLines") { $extra = " | exact=$($a.ExactMatch)" }
+        if ($test.checker -eq "ruRatio")    { $extra = " | ru=$($a.RuRatio)" }
+        if ($test.checker -eq "contains")   { $extra = " | match=$($a.ExactMatch)" }
+        if ($test.checker -eq "yesno")      { $extra = " | match=$($a.ExactMatch)" }
+
+        Write-Host "[$status] $($r.Time) sec | $($a.Length) simv | $cyr$extra" -ForegroundColor $(if ($r.Success) { "Green" } else { "Red" })
+
         $results += [PSCustomObject]@{
-            Backend = $model.Backend
-            Model = $model.Name
-            TestID = $test.id
-            TestName = $test.name
-            Time = $r.Time
-            Length = $analysis.Length
-            HasCyr = $analysis.HasCyrillic
-            HasQuestion = $analysis.HasQuestion
-            Success = $r.Success
-            Error = $r.Error
-            Answer = $r.Answer
-            Preview = $analysis.Preview
+            Backend    = $model.Backend
+            Model      = $model.Name
+            TestID     = $test.id
+            TestName   = $test.name
+            Category   = $test.category
+            Time       = $r.Time
+            Length     = $a.Length
+            HasCyr     = $a.HasCyrillic
+            RuRatio    = $a.RuRatio
+            HasQuestion= $a.HasQuestion
+            JsonValid  = $a.JsonValid
+            JsonItems  = $a.JsonItems
+            ExactMatch = $a.ExactMatch
+            Success    = $r.Success
+            Error      = $r.Error
+            Answer     = $r.Answer
+            Preview    = $a.Preview
         }
-        
+
         Start-Sleep -Seconds 1
     }
     Write-Host ""
 }
 
-# --- Сохранение ---
+# ============================================
+# СОХРАНЕНИЕ
+# ============================================
+
 Write-Host "[3/3] Sokhranenie rezultatov..." -ForegroundColor Yellow
 
-$results | Select-Object Backend, Model, TestID, TestName, Time, Length, HasCyr, HasQuestion, Success, Preview |
+$results | Select-Object Backend, Model, TestID, TestName, Category, Time, Length, HasCyr, RuRatio, HasQuestion, JsonValid, JsonItems, ExactMatch, Success, Error, Preview |
     Export-Csv -Path $ResultFile -NoTypeInformation -Encoding UTF8
 
-$md = "# Rezultaty testa modeley (v2)`n`n"
+# --- MD отчёт по прогону ---
+$md  = "# Rezultaty testa modeley (v3.1)`n`n"
 $md += "**Data:** $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`n`n"
 $md += "**Modeley:** $($allModels.Count) | **Voprosov:** $($tests.Count) | **Zaprosov:** $($results.Count)`n`n"
 if ($OnlyNew) { $md += "**Rezhim:** tolko NOVYE modeli`n`n" }
-$md += "## Svodka`n`n"
+if ($Quick)   { $md += "**Rezhim:** QUICK`n`n" }
+
+$md += "## Svodka po modelyam`n`n"
 $md += "| Model | Backend | Avg time | OK | Cyr |`n"
 $md += "|---|---|---|---|---|`n"
-
 foreach ($model in $allModels) {
     $mResults = $results | Where-Object { $_.Model -eq $model.Name -and $_.Backend -eq $model.Backend }
+    if ($mResults.Count -eq 0) { continue }
     $avgTime = ($mResults | Measure-Object -Property Time -Average).Average
     $okCount = ($mResults | Where-Object { $_.Success }).Count
-    $cyrCount = ($mResults | Where-Object { $_.HasCyr }).Count
+    $cyrCount = @($mResults | Where-Object { $_.HasCyr }).Count
     $md += "| $($model.Name) | $($model.Backend) | $([math]::Round($avgTime,1)) sec | $okCount/$($mResults.Count) | $cyrCount/$($mResults.Count) |`n"
 }
 
+$md += "`n## Svodka po kategoriyam (model x category)`n`n"
+$md += "| Model | Category | Req | Avg time | OK | Exact |`n"
+$md += "|---|---|---|---|---|---|`n"
+$catGroups = $results | Group-Object Model, Backend, Category
+foreach ($g in $catGroups) {
+    $gg = $g.Group
+    $avg = [math]::Round(($gg | Measure-Object Time -Average).Average, 1)
+    $ok = @($gg | Where-Object { $_.Success }).Count
+    $ex = @($gg | Where-Object { $_.ExactMatch }).Count
+    $md += "| $($gg[0].Model) | $($gg[0].Category) | $($gg.Count) | $avg sec | $ok/$($gg.Count) | $ex/$($gg.Count) |`n"
+}
+
+$md += "`n## Detali po voprosam`n`n"
+$md += "| Model | Test | Cat | Time | Len | Cyr | JSON | Items | Exact | Status |`n"
+$md += "|---|---|---|---|---|---|---|---|---|---|`n"
+foreach ($r in $results) {
+    $md += "| $($r.Model) | $($r.TestName) | $($r.Category) | $($r.Time) | $($r.Length) | $($r.HasCyr) | $($r.JsonValid) | $($r.JsonItems) | $($r.ExactMatch) | $(if($r.Success){'OK'}else{'FAIL'}) |`n"
+}
+
 $md | Out-File -FilePath $MdFile -Encoding UTF8
+
+# --- Накопительный summary.csv (append) ---
+$aggRows = $results | Group-Object Backend, Model | ForEach-Object {
+    $g = $_.Group
+    $ok  = @($g | Where-Object { $_.Success }).Count
+    $cyr = @($g | Where-Object { $_.HasCyr }).Count
+    $avg = [math]::Round(($g | Measure-Object Time -Average).Average, 1)
+    [PSCustomObject]@{
+        Run        = $Timestamp
+        Backend    = $g[0].Backend
+        Model      = $g[0].Model
+        Requests   = $g.Count
+        AvgTimeSec = $avg
+        OK         = "$ok/$($g.Count)"
+        Cyr        = "$cyr/$($g.Count)"
+    }
+}
+if (Test-Path $SummaryCsv) {
+    $aggRows | Export-Csv -Path $SummaryCsv -NoTypeInformation -Encoding UTF8 -Append
+} else {
+    $aggRows | Export-Csv -Path $SummaryCsv -NoTypeInformation -Encoding UTF8
+}
+
+# --- Плоский summary_all.csv (append по всем прогонам) ---
+$flat = $results | Select-Object @{n='Run';e={$Timestamp}}, Backend, Model, TestID, TestName, Category, Time, Length, HasCyr, RuRatio, JsonValid, JsonItems, ExactMatch, Success, Preview
+if (Test-Path $SummaryAllCsv) {
+    $flat | Export-Csv -Path $SummaryAllCsv -NoTypeInformation -Encoding UTF8 -Append
+} else {
+    $flat | Export-Csv -Path $SummaryAllCsv -NoTypeInformation -Encoding UTF8
+}
+
+# --- summary_models.csv (агрегат модель x прогон, перестраиваем целиком) ---
+$allFlat = Import-Csv $SummaryAllCsv
+$agg = $allFlat | Group-Object Run, Backend, Model | ForEach-Object {
+    $g = $_.Group
+    $ok  = @($g | Where-Object { $_.Success -eq 'True' }).Count
+    $cyr = @($g | Where-Object { $_.HasCyr -eq 'True' }).Count
+    $times = $g | ForEach-Object { [double]($_.Time -replace ',', '.') }
+    $avg = [math]::Round(($times | Measure-Object -Average).Average, 1)
+    [PSCustomObject]@{
+        Run        = $g[0].Run
+        Backend    = $g[0].Backend
+        Model      = $g[0].Model
+        Requests   = $g.Count
+        AvgTimeSec = $avg
+        OK         = "$ok/$($g.Count)"
+        Cyr        = "$cyr/$($g.Count)"
+    }
+} | Sort-Object Run, Model
+$agg | Export-Csv -Path $SummaryModelsCsv -NoTypeInformation -Encoding UTF8
+
+# --- summary_all.md (перестраиваем целиком) ---
+$sb = New-Object System.Text.StringBuilder
+[void]$sb.AppendLine("# Svodka po vsem progonam test_all_models.ps1")
+[void]$sb.AppendLine("")
+$runs = ($allFlat | Select-Object -ExpandProperty Run -Unique)
+[void]$sb.AppendLine("**Progonov:** $($runs.Count) | **Zaprosov:** $($allFlat.Count)")
+[void]$sb.AppendLine("")
+[void]$sb.AppendLine("## Agregat: model x progon")
+[void]$sb.AppendLine("")
+[void]$sb.AppendLine("| Run | Backend | Model | Req | Avg time | OK | Cyr |")
+[void]$sb.AppendLine("|---|---|---|---|---|---|---|")
+foreach ($r in $agg) {
+    [void]$sb.AppendLine("| $($r.Run) | $($r.Backend) | $($r.Model) | $($r.Requests) | $($r.AvgTimeSec) sec | $($r.OK) | $($r.Cyr) |")
+}
+
+[void]$sb.AppendLine("")
+[void]$sb.AppendLine("## Svodka po modeli (vse progony)")
+[void]$sb.AppendLine("")
+$byModel = $allFlat | Group-Object Backend, Model | ForEach-Object {
+    $g = $_.Group
+    $ok  = @($g | Where-Object { $_.Success -eq 'True' }).Count
+    $cyr = @($g | Where-Object { $_.HasCyr -eq 'True' }).Count
+    $times = $g | ForEach-Object { [double]($_.Time -replace ',', '.') }
+    $avg = [math]::Round(($times | Measure-Object -Average).Average, 1)
+    [PSCustomObject]@{
+        Backend=$g[0].Backend; Model=$g[0].Model; Requests=$g.Count
+        AvgTimeSec=$avg; OK="$ok/$($g.Count)"; Cyr="$cyr/$($g.Count)"
+    }
+} | Sort-Object AvgTimeSec
+[void]$sb.AppendLine("| Backend | Model | Req | Avg time | OK | Cyr |")
+[void]$sb.AppendLine("|---|---|---|---|---|---|")
+foreach ($r in $byModel) {
+    [void]$sb.AppendLine("| $($r.Backend) | $($r.Model) | $($r.Requests) | $($r.AvgTimeSec) sec | $($r.OK) | $($r.Cyr) |")
+}
+
+Set-Content -Path $SummaryMd -Value $sb.ToString() -Encoding UTF8
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Green
 Write-Host "  TEST ZAVERSHEN" -ForegroundColor Green
 Write-Host "============================================" -ForegroundColor Green
-Write-Host "  CSV:      $ResultFile"
-Write-Host "  Markdown: $MdFile"
+Write-Host "  CSV:              $ResultFile"
+Write-Host "  Markdown:         $MdFile"
+Write-Host "  Summary (append): $SummaryCsv"
+Write-Host "  Summary all:      $SummaryAllCsv"
+Write-Host "  Summary models:   $SummaryModelsCsv"
+Write-Host "  Summary MD:       $SummaryMd"
 Write-Host ""
 Write-Host "Otkryt Markdown:" -ForegroundColor Yellow
 Write-Host "  notepad $MdFile"
+Write-Host "  notepad $SummaryMd"

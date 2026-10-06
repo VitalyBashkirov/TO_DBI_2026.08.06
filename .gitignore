@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -13,11 +13,11 @@ venv/
 # App state (user settings, flags)
 SRC/settings.json
 
-# Exchange and log
-EXCHANGE/bot.log
+# Exchange and log (нужные для воспроизводимости — версионируются, DS_104)
+# EXCHANGE/bot.log            — версионируется (DS_104)
 EXCHANGE/INBOX/
-EXCHANGE/OUTBOX/
-EXCHANGE/PROCESSED/
+# EXCHANGE/OUTBOX/            — версионируется (DS_104)
+# EXCHANGE/PROCESSED/         — версионируется (DS_104)
 EXCHANGE/result_dir_history.json
 
 # Temp
@@ -86,3 +86,12 @@ EXCHANGE/CNT_config_example.yaml
 EXCHANGE/DS_CNT_019_report.md
 done/
 reports/
+
+# Cleanup DS_104: отладочные бэкапы, мусор, исключение для bot.log
+*.bak_*
+*.broken_*
+*.before_*
+*.lnk
+test_cyr.bat
+cleanup_report.csv
+!EXCHANGE/bot.log

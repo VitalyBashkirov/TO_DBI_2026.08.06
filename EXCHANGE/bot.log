@@ -1,0 +1,857 @@
+[15.09.2026 15:37:17] Task moved to archive: Текстовый документ.txt
+[15.09.2026 16:35:08] DS 049: Найдено задач в INBOX: 1
+[15.09.2026 16:37:07] DS 997: Выполнено. Тест протокола DS_049. Файл перенесён в PROCESSED.
+[15.09.2026 16:38:13] DS 049: Выполнено. Протокол завершения Koda + process_inbox.py + AGENTS.md + DS_997 test. Файл перенесён в PROCESSED.
+[15.09.2026 16:49:00] DS 996: Выполнено. Тест формата bot.log. Файл перенесён в PROCESSED.
+[15.09.2026 16:49:46] DS 050: Выполнено. Формат записей bot.log: UTF-8, кириллица, дата; process_inbox.py и AGENTS.md обновлены; тест DS_996 пройден. Файл перенесён в PROCESSED.
+[15.09.2026 17:12:57] DS 049: Проверка INBOX - задач нет.
+[16.09.2026 14:26:00] DS 051: Выполнено. Финализация Git: PR #1 смерджен, история очищена от крупных файлов (report_all.html 51 MB и др.), force push выполнен, AGENTS.md дополнен. Файл перенесён в PROCESSED.
+[16.09.2026 16:20:39] GIT_20260916_1620 Выполнено. Закоммичено 5 файлов в feature/dockerization (коммит f03e848). Push не выполнялся.
+[16.09.2026 16:20:57] GIT_20260916_1621 Выполнено. Закоммичено 1 файл (удаление test_ds052.txt) в feature/dockerization. Push не выполнялся.
+[16.09.2026 16:21:11] GIT_20260916_1621 Изменений нет.
+[16.09.2026 16:21:47] GIT_20260916_1622 Push. Отправлено в origin/feature/dockerization (f2d3970..14795d8).
+[16.09.2026 16:22:03] GIT_20260916_1622 Push. Отправлено в origin/feature/dockerization (Everything up-to-date).
+[16.09.2026 16:23:06] DS 052: Выполнено. Git-команды GIT и PUSH добавлены в AGENTS.md. Протестированы. Файл перенесён в PROCESSED.
+[16.09.2026 16:37:19] GIT_20260916_1637 Изменений нет.
+[16.09.2026 16:38:54] GIT_20260916_1638 Push. Отправлено в origin/feature/dockerization (Everything up-to-date).
+[17.09.2026 11:54:11] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
+[17.09.2026 11:54:11] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
+[17.09.2026 11:54:11] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
+[17.09.2026 11:56:26] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
+[17.09.2026 11:56:26] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
+[17.09.2026 11:56:26] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
+[17.09.2026 11:59:28] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
+[17.09.2026 11:59:28] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
+[17.09.2026 11:59:28] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
+[17.09.2026 12:05:30] DS 053: Выполнено. Детерминированный фикс-конвейер: RuleEngine, _apply_issue_fixes, верификация повторным сканом, 6 флагов GUI, лог scan_VVxVVx. Тест 1 PASSED, Тест 2 PASSED (строгий), регресс 31/37 (6 падений — окружение, не DS_053). Файл перенесён в PROCESSED.
+[17.09.2026 12:23:03] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
+[17.09.2026 12:23:03] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
+[17.09.2026 12:23:03] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
+[17.09.2026 12:39:21] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
+[17.09.2026 12:39:21] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
+[17.09.2026 12:39:21] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
+[17.09.2026 12:48:00] DS 053_Уточнение: Выполнено. Хвосты по DS_053 закрыты: 6 падений регресса доказаны предсуществующими (прогон на HEAD), образец scan_VVxxVx приложен, 75/87 — поле total_rules в JSON не соответствует факт. 75 правилам (все загружены), флаги VVxxVx и кодировки уточнены. Исправлены 2 дефекта: BOM на выходе и лишняя пустая строка; тесты перепройдены. Файл перенесён в PROCESSED.
+[17.09.2026 15:33:06] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
+[17.09.2026 15:33:06] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
+[17.09.2026 15:33:06] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
+[17.09.2026 15:38:16] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
+[17.09.2026 15:38:16] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
+[17.09.2026 15:38:16] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
+[17.09.2026 15:40:35] DS 053_Уточнение_2: Выполнено. Задачи A-D (флаги в отчётах, makedirs, персистентность флагов GUI, формат Схема A). Тесты 1-3 PASSED, регресс 31/37 (базовая линия). Файл перенесён в PROCESSED.
+[17.09.2026 16:05:36] DS 053_Финальная_проверка: Выполнено. Остаточные замечания закрыты: канон ai_fallback (1 правка подписи чекбокса), settings.json добавлен в .gitignore (файл остаётся отслеживаемым — нужна отвязка по команде), тесты 37 шт DS_011-DS_048, регресс 31/37 без новых падений. Файл перенесён в PROCESSED.
+[17.09.2026 17:32:55] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
+[17.09.2026 17:32:55] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
+[17.09.2026 17:32:55] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
+[17.09.2026 17:35:12] DS 053_Уточнение_3: Выполнено. Дополнительный лог scan_VVxVVx_* при сканировании (всегда; без флагов — «флаги не выбраны»), logs\temp не создаётся, подпись GUI в 3 строки. Регресс — базовая линия. Файл перенесён в PROCESSED.
+[17.09.2026 17:38:30] GIT_20260917_1736 Выполнено. Закоммичено 2 файлов (code_fixer.py, gui_app.py) в feature/dockerization. DS_053_Уточнение_3.
+[18.09.2026 09:22:06] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
+[18.09.2026 09:22:06] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
+[18.09.2026 09:22:06] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
+[18.09.2026 09:27:13] DS 053_Уточнение_4: Выполнено. Прогноз исправлений при сканировании (симуляция конвейера dry-run, Схема A, исходник не меняется). Регресс — базовая линия 31/37. Файл перенесён в PROCESSED.
+[18.09.2026 09:30:17] GIT_20260918_0927 Выполнено. Закоммичено 2 файлов (code_fixer.py, gui_app.py) в feature/dockerization. DS_053_Уточнение_4: прогноз исправлений.
+[18.09.2026 11:24:46] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
+[18.09.2026 11:24:46] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
+[18.09.2026 11:24:46] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
+[18.09.2026 11:34:07] DS 053_Уточнение_5: Выполнено. Прогноз (устойчивый резолвинг путей + диагностика, N==M), расшифровка флагов в 3 логах, диалог завершения с 3 путями. ds036_gui — flaky. Файл перенесён в PROCESSED.
+[18.09.2026 11:46:00] GIT_20260918_1135 Выполнено. Закоммичено 3 файлов (scanner.py, code_fixer.py, gui_app.py) в feature/dockerization (abb57a1). DS_053_Уточнение_5. Примечание: при коммите обнаружено повреждение git-объектов (missing blobs в старой истории после спящего режима); блоб sql_parser.py восстановлен hash-object из рабочего файла (хеш совпал). Оставшиеся битые объекты (2cf3cb44, a4cf5dee, f26e810f) — в старых незапушенных коммитах, не влияют на index и новый коммит.
+[18.09.2026 14:42:18] DS 055: Начало. Проверка использования code_fixer_old.py.
+[18.09.2026 14:45:06] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
+[18.09.2026 14:45:06] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
+[18.09.2026 14:45:06] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
+[18.09.2026 15:05:00] DS 055: Выполнено. Удалён SRC/fixer/code_fixer_old.py. Файл перенесён в PROCESSED.
+[19.09.2026 12:41:34] DS 054: Начало обработки. AI-fallback: файловый обмен, кнопки «В AI» / «От AI».
+[19.09.2026 12:58:01] DS 054: Выполнено. AI-fallback: файловый обмен АРМ<->AI (каталоги AI_IN/AI_OUT, модуль SRC\ai_exchange.py, кнопки «В AI»/«От AI» в GUI). Тесты 46/46 PASSED. Файл перенесён в PROCESSED.
+[19.09.2026 13:30:01] GIT_20260919_1329 Выполнено. Закоммичено 2 файлов (SRC/ai_exchange.py, SRC/gui_app.py) в feature/dockerization.
+[19.09.2026 13:55:42] DS 054_Уточнение: Начало обработки. Перестановка кнопок «В AI» / «От AI» + скролл панели.
+[19.09.2026 14:02:03] DS 054_Уточнение: Выполнено. Перестановка кнопок «В AI» / «От AI» (сразу после «Исправить код») + горизонтальный скролл панели. Регресс: DS_054 46/46, GUI 9/9, DS_053 Тест1/Тест2 PASSED. Файл перенесён в PROCESSED.
+[19.09.2026 15:24:38] GIT_20260919_1524 Выполнено. Закоммичено 1 файл (SRC/gui_app.py) в feature/dockerization. DS_054_Уточнение: перестановка кнопок В AI/От AI, скролл панели.
+[19.09.2026 15:32:26] GIT_20260919_1529 Push. Отправлено в origin/feature/dockerization (b24a167..b774189).
+[19.09.2026 16:10:30] DS 056: Выполнено. Разведка _is_in_comment_or_string — 3 определения, 10 кейсов (4 бага), документация PlpCheck собрана. Файл перенесён в PROCESSED.
+[19.09.2026 18:39:50] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
+
+[19.09.2026 18:39:50] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
+
+[19.09.2026 18:39:50] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
+
+[19.09.2026 18:58:06] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
+
+[19.09.2026 18:58:06] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
+
+[19.09.2026 18:58:06] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
+
+[19.09.2026 19:12:30] DS 056A: Выполнено. Унификация _is_in_comment_or_string: создан SRC\analyzer\lexer_state.py (LexerState, is_in_comment_or_string, advance_lexer_state, is_line_fully_in_comment_or_string), три потребителя делегируют. Тесты: 15/15. Регресс DS_032-055: падения только из-за отсутствия входных данных (patch_WORK пуст, PSH_SLIB.plp отсутствует) и исторического bot.log, не связаны с изменениями. Файл перенесён в PROCESSED.
+[19.09.2026 19:35:25] DS 056A_Уточнение_кейс_1: Опечатка автора зафиксирована. Код корректен. Файл перенесён в PROCESSED.
+[19.09.2026 19:48:51] DS 058: Разведка выполнена. Отчёт: EXCHANGE\OUTBOX\DS_058_report.md. Файл перенесён в PROCESSED.
+[19.09.2026 20:15:19] DS 058+057: Рубрикаторы в GUI: хранение в settings.json, раздельные чекбоксы, тултипы. Баг DS_058 закрыт. Файл перенесён в PROCESSED.
+[19.09.2026 22:46:35] DS 059: Разведка выполнена. Отчёт: EXCHANGE\OUTBOX\DS_059_report.md. Файл перенесён в PROCESSED.
+[19.09.2026 23:37:30] DS 059: Реализация выполнена. Маппинг plpcheck.* в RuleEngine + унификация PLAN. Отчёт: EXCHANGE\OUTBOX\DS_059_реализация_report.md. Файл перенесён в PROCESSED.
+[20.09.2026 10:53:43] DS 059: Выполнено. Уточнение A: колонка ERROR в scan_report_* теперь содержит исходный фрагмент кода (scanner.py). Уточнение B: заголовок scan_VVxVVx_* приведён к виду scan_report_* через _generate_active_rubricators_lines (code_fixer.py, save_scan_only_log). Тесты 24/24 PASSED, регресс DS_059 PASSED. Оба файла перенесены в PROCESSED.
+[20.09.2026 14:22:30] DS 059: Выполнено. Уточнение_D: восстановлен эталонный формат scan_VVxVVx (режим, PLAN, Прогноз, статистика, пояснение ignore); PlpCheck bad_prefix и code_in_comment перенесены в regex, исправлены wrong_method_syntax и prefix_type_in_var_name. Тесты 16/16, регресс DS_053/DS_059 PASSED. Файл перенесён в PROCESSED.
+[20.09.2026 19:38:13] DS 059 Уточнение E: Выполнено. code_in_comment -> ignore (автофикс отключён), bad_prefix/missing_prefix разделены, vDateRep и параметры исключены из автофикса; правки sql_parser ((?-i)) и rule_engine (фолбэк BAD_PREFIX->PREFIX_TYPE). Тесты: ds059e 34/34, ds059d 16/16, ds059u 24/24, план/интеграция/эталон DS_053 — PASSED. Отчёт в OUTBOX. Файл перенесён в PROCESSED.
+[20.09.2026 19:49:23] GIT_20260920_1949 Выполнено. Закоммичено 18 файлов в feature/dockerization (коммит abf1c14). Презентация/ и temp_fix/ исключены из staged (склеенная строка в .gitignore — требует правки отдельной задачей). Push не выполнялся.
+[20.09.2026 20:26:48] DS 054 Уточнение C: Выполнено. Кнопка «От AI» disabled при пустом AI_OUT, включается при наличии файлов-ответов; тултип динамический, таймер 5 сек, обновление после send/receive. Тесты: ds054c 8/8, ds054 buttons 9/9, ds054 exchange 46/46, ds058/057 PASSED. Отчёт в OUTBOX. Файл перенесён в PROCESSED.
+[20.09.2026 20:39:52] DS 059 Уточнение F: Выполнено. Multi-line rename — вариант A: PREFIX_TYPE_IN_VAR_NAME -> ignore (автофикс отключён, правило в PLAN scan_report); параметры не автофиксятся (подтверждено тестами). Тесты: ds059f 16/16, ds059e 35/35, ds059d 15/15, ds059u 24/24, план/интеграция/эталон — PASSED. Отчёт в OUTBOX. Файл перенесён в PROCESSED.
+[20.09.2026 20:47:54] DS 062: Выполнено. Разведка дублей: «Всего» = все issues (по одному на каждое совпадение regex), «Уникальных» = (file,line,check); 89.6% дублей — SPEC_CHARS (issue на каждый спецсимвол, до 57 на строку). Бага подсчёта нет; рекомендации — отдельной задачей. Реализация не выполнялась. Файл перенесён в PROCESSED.
+[21.09.2026 10:29:47] GIT_20260921_1029 Выполнено. Закоммичено 4 файлов в feature/dockerization.
+[21.09.2026 10:51:07] DS 063: Выполнено. bad_prefix_* (4 правила) -> ignore (вариант A), тесты 11/11 + регресс 15/15. Расхождение по тесту 3 (missing_prefix_* уже ignore с DS_059_F) зафиксировано в отчёте. Файл перенесён в PROCESSED.
+[21.09.2026 10:51:07] DS 064: Выполнено. Дедупликация issues в scanner.py (C) + счётчики Всего/Уникальных в gui_app.py (B). SPEC в REPS_EXP_115_1: 634 -> 67 уникальных. Тесты 4/4. Файл перенесён в PROCESSED.
+[21.09.2026 11:46:04] DS 064_Уточнение_A: Выполнено. Ключ дедупа расширен match_fragment (original_code не годится - вся строка), поле Issue.match_fragment, счётчик issues_before_dedup (B1) + честные метки в gui_app.py. Тесты 5/5 + регресс DS_056 15/15. Файл перенесён в PROCESSED.
+[21.09.2026 12:10:40] GIT_20260921_1155 Выполнено. Закоммичено 5 файлов в feature/dockerization (коммит a104eca): правки DS_063/DS_064_Уточнение_A + удаление 2 ярлыков INBOX. Push не выполнялся.
+[21.09.2026 12:13:02] GIT_20260921_1213 Push. Отправлено в origin/feature/dockerization (b774189..a104eca).
+[21.09.2026 14:02:31] DS 065: Выполнено. 4 дефекта: example_out удалён из PLAN (_generate_plan), SPEC_CHARS regex сужен до имён (4.RUBRICATOR_PROMPT + 5.RUBRICATOR_PARSER_SQL, ложные 207 -> 0), категории code_in_comment -> OTHER, wrong_method_syntax -> STYLE.SYNTAX. Тесты 7/7 + регрессы. Файл перенесён в PROCESSED.
+[21.09.2026 14:20:52] GIT: Создан коммит GIT_20260921_1405 (ada183a): 4.RUBRICATOR_PROMPT v5.json (regex SPEC_CHARS сузился до имён, полная перезапись JSON indent=1), 5.RUBRICATOR_PARSER_SQL v5.json (regex SPEC_CHARS), scanner.py (example_out убран из PLAN, категории code_in_comment->OTHER, wrong_method_syntax->STYLE.SYNTAX).
+[21.09.2026 18:06:28] DS 066: Выполнено. 7 дефектов отчётов scan исправлены (PLAN, match_fragment, маркеры комментариев, PLAN scan_VVxVVx, счётчик Уникальных, префиксы v_rParam/v_sFile_Xml, JSON синхронно). Тесты 13/13, регресс 27/27. Файл перенесён в PROCESSED.
+[21.09.2026 19:43:33] DS 067: Начато. Разведка по Issue/save_scan_only_log.
+[21.09.2026 20:20:48] DS 067: Выполнено. Формат scan_VVxVVx доработан (PLAN с колонкой LINE, Прогноз по всем строкам-мишеням с МКР и обрывом цепочки, заглушки AI/диапазона, статистика по убыванию + итоговая). Тесты 15/15, регресс 40/40. Файл перенесён в PROCESSED.
+[21.09.2026 21:00:18] DS 067A: Начато. Приоритет удаления, порядок по №, (удалить объявление).
+[21.09.2026 21:27:14] DS 067A: Выполнено. Приоритет удаления в Прогнозе (только not_mentioned при наличии), порядок по № из scan_report, not_mentioned -> (удалить объявление). Тесты 15/15, регресс 55/55. Файл перенесён в PROCESSED.
+[21.09.2026 21:50:27] DS 067B: Выполнено. Сортировка PLAN внутри LINE по № из scan_report (not_mentioned первым, алфавит check), симметрично в цепочке Прогноза. Тесты 7/7, регресс 70/70. Файл перенесён в PROCESSED.
+[21.09.2026 22:35:02] GIT_20260921_2200 Выполнено. Закоммичено 7 файлов в feature/dockerization (DS_066, DS_067, DS_067_A, DS_067_B).
+[21.09.2026 22:38:27] GIT_20260921_2205 Push. Отправлено в origin/feature/dockerization (a104eca..3259784).
+[21.09.2026 23:39:58] DS 068: Начато. Разведка AI-пометки и диапазона удаления (read-only).
+[21.09.2026 23:54:11] DS 068: Выполнено. Разведка AI-пометки (needs_ai_fix — агрегат _verify_file, не поле Issue) и диапазона удаления (трекер репортит только opener; незакрытый блок теряется). Рекомендация: block_start/block_end в Issue (DS_069). Файл перенесён в PROCESSED.
+[22.09.2026 00:20:00] DS 069: Начато. Реализация диапазона удаления code_in_comment (block_start/block_end).
+[22.09.2026 00:50:00] DS 069: Выполнено. Диапазон удаления code_in_comment: block_start/block_end в Issue, 6-ки в проверке, незакрытый блок репортится (block_end=EOF), (удалить диапазон строк N–M) в save_scan_only_log. Тесты 13/13, регресс 77/77. Файл перенесён в PROCESSED.
+[22.09.2026 14:45:46] GIT_20260922_1445 Выполнено. Закоммичено 4 файлов в feature/dockerization.
+[22.09.2026 14:45] PUSH: Выполнено. Коммит 4daa3fa (GIT_20260922_1445) отправлен в origin/feature/dockerization. Локальная и удаленная ветки синхронизированы.
+[22.09.2026 16:18:03] DS 070: Выполнено. Разведка-аудит PlpCheck 2.5.2: 152 правила html, все покрыты паттернами сканера и GUI-категориями; 33/152 имеют transform, 119 без; 2 пустые GUI-категории (PLSQL/JAVA.OPTIMIZATION); полностью отсутствующих 0; MD5 html идентичен дубликату. Отчёт DS_070_report.md + CSV/JSON в temp. Файл перенесён в PROCESSED.
+[23.09.2026 11:00:00] GIT_20260923_1100 Выполнено. Закоммичено 2 файла в feature/dockerization.
+[23.09.2026 11:00:00] PUSH_20260923_1100 Выполнено. feature/dockerization -> origin (4daa3fa..347369a).
+[23.09.2026 11:40:00] DS 071: Выполнено. Разведка 74 NAME DBI.ADAPTATION без transform. Категории: A=11, B=5, C=19, D=15, E=24, F=0. Отчёт DS_071_report.md в OUTBOX. Файл перенесён в PROCESSED.
+[23.09.2026 12:55:00] DS 072a: Выполнено. Добавлены transform для 11 правил группы A в PARSER_SQL (86 правил) + синхронизация PROMPT (fix_instruction, 11 NAME). Тесты 27/27 PASSED, регресс DS_063-069 PASSED. Отчёт DS_072a_report.md в OUTBOX. Файл перенесён в PROCESSED.
+[23.09.2026 14:10:00] DS 072a_Уточнение_A: Выполнено. DYNAMIC_PLP: transform удалён из PARSER_SQL (86->85), правило — детектор (вариант B), fix_instruction синхронизирован в PROMPT. Тесты 9/9 + 27/27 PASSED, регресс DS_063-069 PASSED. Отчёт в OUTBOX. Файл перенесён в PROCESSED.
+[23.09.2026 14:35:00] DS 072a_Уточнение_B: Выполнено. Вариант 2: AI-фолбэк-паттерны max_size_id_other / platform_integer_mismatch_other -> transform_type ignore (hybrid не поддерживается _pattern_bucket), needs_ai_fix через _verify_file (DS_054). PROMPT синхронизирован. rule_engine.py не тронут. Тесты 6/6 PASSED, регресс DS_063-069 + DS_072a/A PASSED. Отчёт в OUTBOX. Файл перенесён в PROCESSED.
+[23.09.2026 15:10:00] DS 072b: Выполнено. Группа B: 3 transform (INSERT_WITH_ID, REFERENCED_TO_OBJECT, SELECTLOCKWAIT, replace_scope match) + 2 ignore-детектора (ALIAS_COLUMN_VIEW, MULTIPLE_MODIFIERS) в PARSER_SQL (85->90) + синхронизация PROMPT (fix_instruction, 5 NAME). Тесты 10/10 PASSED, регресс DS_063-069 + DS_072a/A/B PASSED. Отчёт DS_072b_report.md в OUTBOX. DS_CONTEXT v2.2, DS_FILES v1.4. Файл перенесён в PROCESSED.
+[23.09.2026 16:20:00] DS 072b_Уточнение_A: Выполнено. INSERT_WITH_ID: transform проверен и уже корректен (Вариант B: replace_scope match матчит всю конструкцию obj := ::[TBP]%insert(...), вывод без X := ); исправлен example_out в PARSER_SQL (была битая форма с := в метаданных); PROMPT fix_instruction проверен — корректен, не изменён. Тесты 6/6 PASSED, регресс 11 suites 114/114. DS_CONTEXT v2.3, DS_FILES v1.5. Отчёт DS_072b_Уточнение_A_report.md в OUTBOX. Файл перенесён в PROCESSED.
+[23.09.2026 16:50:00] DS 072c: Выполнено (Разведка, read-only). Группа C 19 NAME классифицирована: C1=1 (OUTER_JOIN, regex), C2=7 (multiline: close/commit/SET/подзапрос), C3=6 (AI: ACCESS_STATIC и др.), C4=5 (ignore). Артефакты: temp\ds072c_extract.json, temp\ds072c_audit.csv/.json. Отчёт DS_072c_Разведка_report.md в OUTBOX. Рубрикаторы не менялись. Файл перенесён в PROCESSED.
+[23.09.2026 16:40:00] GIT_20260923_1640 Выполнено. Закоммичено 4 файла в feature/dockerization (коммит f6c37aa): оба рубрикатора (DS_072b_Уточнение_A) + DS_CONTEXT v2.3 + DS_FILES v1.5. Push не выполнялся. Посторонний SRC/bot.log не закоммичен (логи не версионируются).
+[23.09.2026 16:45:00] GIT_20260923_1645 Push. Отправлено в origin/feature/dockerization (347369a..f6c37aa). Pull --rebase: up to date, конфликтов нет.
+[23.09.2026 17:45:00] DS 072c_Реализация: Выполнено. Движок multiline (apply_fix_multiline в sql_parser.py + rule_engine.py, построчный путь не сломан); PARSER_SQL +19 правил группы C (90->109): 4 multiline-transform (NOT_CLOSED_CURSOR, NOT_CLOSED_FILE, NOT_HANDLED_CURSOR_EXCEPTIONS, OBLIGATORY_IN_OTHERS) + 15 ignore (OUTER_JOIN fallback {object_type}, C2-структурные x3, C3-AI x6, C4 x5); PROMPT fix_instruction 19 NAME синхронно; AGENTS.md правило bot.log. Тесты 11/11 + 24/24, регресс 13 suites 0 FAILED. Отчёт в OUTBOX. Файл перенесён в PROCESSED.
+[23.09.2026 18:25:00] DS 072d: Выполнено (Разведка, read-only). Группа D 15 NAME классифицирована: D1=2 (MATCHING_TYPES, CONTROLTABLECOLUMNSTYPE — таблица), D2=4 (regex: HINT_INDEX_ORDER_BY, INVALID_INIT, SIZE_RESTRICTION, INDEX_LENGTH), D3=3 (multiline: VERIFY_TYPE_IN_WITH, WITHRECURSIVEMODEL, PARTITION_ALL — спят без DS_073), D4=6 (AI/ignore). PARSER_SQL MD5 сверен: 109 правил. Артефакты: temp\ds072d_audit.csv/.json. Отчёт DS_072d_Разведка_report.md в OUTBOX. Рубрикаторы не менялись. Файл перенесён в PROCESSED.
+[23.09.2026 18:55:00] DS 073: Выполнено. apply_fix_multiline интегрирован в code_fixer._apply_issue_fixes: первый проход до построчного apply_fix, окно Вариант C (block_start/block_end, fallback весь файл), идемпотентность (правило исключается из построчного прохода). Заработали 4 multiline-правила C2 в прод-фиксе. Тесты 11/11, регресс 14 suites 0 FAILED. DS_CONTEXT v2.5, DS_FILES v1.7. Отчёт DS_073_report.md в OUTBOX. Файл перенесён в PROCESSED.
+[23.09.2026 19:20:00] DS 072d_Реализация: Выполнено. Группа D закрыта (15 NAME): 3 transform (MATCHING_TYPES, SIZE_RESTRICTION, INDEX_LENGTH, replace_scope match) + 12 ignore (fallback брифа: CONTROLTABLECOLUMNSTYPE, HINT_INDEX_ORDER_BY, INVALID_INIT, D3 x3, D4 x6 — needs_ai_fix DS_054). PARSER_SQL 109->124, PROMPT fix_instruction 15 NAME синхронно, SRC не тронут. Тесты 12/12 + 9/9 + 6/6, регресс 17 suites 0 FAILED. DS_CONTEXT v2.6, DS_FILES v1.8. Отчёт в OUTBOX. Файл перенесён в PROCESSED.
+[23.09.2026 21:35:00] DS 072e: Выполнено. Группа E зафиксирована (24 NAME, все transform_type ignore-детекторы, note по категориям брифа 4.2): PARSER_SQL 124->148, PROMPT fix_instruction 24 NAME синхронно, SRC не тронут. PlpCheck-аудит DS_071 завершён: 74/74 NAME (20 transform + 54 ignore/AI). Тесты 7/7, регресс 18 suites 0 FAILED. DS_CONTEXT v2.7, DS_FILES v1.9. Отчёт в OUTBOX. Файл перенесён в PROCESSED.
+[23.09.2026 21:42:00] GIT_20260923_2140 Выполнено. Закоммичено 8 файлов в feature/dockerization (коммит 4dc2233).
+[23.09.2026 21:44:00] GIT_20260923_2140 Push. Отправлено в origin/feature/dockerization (f6c37aa..4dc2233).
+[25.09.2026 01:03:34] [������ ���������] DS_NOEXIST_999.md. ���������: in_processed, report_exists, bot_log_updated
+
+[25.09.2026 01:03:34] DS_043: �������� ������ ���������
+
+[25.09.2026 01:03:34] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
+
+[25.09.2026 01:03:34] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
+
+[25.09.2026 01:03:34] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
+
+[25.09.2026 01:06:21] [������ ���������] DS_NOEXIST_999.md. ���������: in_processed, report_exists
+
+[25.09.2026 01:06:21] DS_043: �������� ������ ���������
+
+[25.09.2026 01:06:21] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
+
+[25.09.2026 01:06:21] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
+
+[25.09.2026 01:06:21] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
+
+[25.09.2026 07:17:02] DS 075: Выполнено. Счётчики «Прогноз исправлений / Исправлено / В AI» и блок топ-файлов в scan_report_* и scan_VVxVVx_*; настройка report_stats_min_files (GUI + settings.json). Тесты 14/14 PASSED, регресс без падений. Отчёт в OUTBOX, файл перенесён в PROCESSED.
+[25.09.2026 07:24:12] GIT_20260925_0725 Выполнено. Закоммичено 5 файлов в feature/dockerization.
+[25.09.2026 07:25:00] GIT_20260925_0725 Push. Отправлено в origin/feature/dockerization.
+[25.09.2026 08:57:31] DS 076: Выполнено. Три унифицированные метрики файлов (Всего / с проблемами / с изменениями) в scan_report_* и scan_VVxVVx_*; при прерывании «Обработано файлов»; удалён мёртвый паттерн .v????. Тесты 6/6 PASSED, регресс DS_075 14/14 PASSED. Отчёт в OUTBOX, файл перенесён в PROCESSED.
+[26.09.2026 10:34:24] GIT_20260926_1034 Изменений нет.
+[26.09.2026 11:09:19] GIT_20260926_1109 Выполнено. Закоммичено 5 файлов в feature/dockerization.
+[26.09.2026 11:09:19] GIT_20260926_1109 Push. Отправлено в origin/feature/dockerization.
+[26.09.2026 11:14:12] DS_077: Две метрики проблем (с дублями + после дедупа) в обоих отчётах. Тесты 8/8 PASSED. Артефакты в OUTBOX.
+[26.09.2026 11:34:00] DS 078: Начато. Разведка AI-анализа + микроправка DS_FILES.md.
+[26.09.2026 11:44:42] DS 078: Выполнено. Разведка AI-анализа (схема, MD5, прогон DEPN: 6 файлов, 8933 issues, 6 AI-запросов) + микроправка DS_FILES.md v2.2. Расхождение §5.4 (btn_to_ai) доложено. Файл перенесён в PROCESSED.
+[26.09.2026 13:08:55] DS 079: Начато. Фильтр AI-отбора в send_to_ai + галка «Только AI» + микроправка DS_CONTEXT.md §9.5.
+[27.09.2026 01:37:52] DS 079: Выполнено. Фильтр AI-отбора в send_to_ai (галка «Только AI», ignore_set=58, DEPN 8933->301). Тесты 1-4 PASSED, регресс DS_054 46/46, DS_072a_B 6/6. Файл перенесён в PROCESSED.
+[28.09.2026 15:45:29] DS 080: Выполнено. remaining_by_rule в _verify_file (code_fixer.py) + фильтр needs_ai_fix в send_to_ai (gui_app.py) + fallback ignore_set + строка only_ai в заголовках scan_report_*.md и scan_VVxVVx_*.md. DS_CONTEXT.md 9.5 обновлён.
+[28.09.2026 15:45:29] DS 080: Метрика patch_PSH_DEP_PRIV_GO: В AI было 129 (ignore_set DS_079) -> стало 96 (remaining_by_rule); без галки 5067. Тесты 1-4 PASSED. Регресс DS_079 (8933->301), DS_054 (46/46, 8/8, 9/9), DS_068 - PASSED.
+[28.09.2026 15:45:29] DS 080: Расхождение: цифра 249 из таблицы тестов не воспроизводится (ignore_set=129, всего issues=5067); доложено автору в отчёте 5.6.
+[28.09.2026 15:45:29] DS 080: Отчёт EXCHANGE\OUTBOX\DS_080_report.md. Файл перенесён в PROCESSED.
+[28.09.2026 17:38:42] DS 081: Выполнено. Rescan AI-затронутых файлов в receive_from_ai, summarize(structured=True), save_needs_manual -> EXCHANGE\OUTBOX. Тесты 1-5: 31/31 PASSED. Регресс DS_054 (46+9+8), DS_079 (8933->301), DS_080 (96 из 5067) — PASSED. Файл перенесён в PROCESSED.
+[28.09.2026 17:38:42] DS 081: Отчёт EXCHANGE\OUTBOX\DS_081_report.md. Изменены SRC\ai_exchange.py, SRC\gui_app.py, EXCHANGE\DS_CONTEXT.md (§9.5). needs_manual на патче patch_PSH_DEP_PRIV_GO = 0 (AI не подключён).
+[28.09.2026 18:17:19] GIT_20260928_1816 Выполнено. Закоммичено 3 файла в feature/dockerization (DS_081: rescan после AI-ответов, needs_manual-артефакт, DS_CONTEXT §9.5).
+[28.09.2026 18:19:11] GIT_20260928_1816 Push. Отправлено в origin/feature/dockerization (bd01675..57ace3f).
+[28.09.2026 21:12:13] DS 082a: Rule-based fixer: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_211213.md: fixes=0, skip=1, response=None
+[28.09.2026 21:12:14] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260928_211213.md: fixes=0, skip=1, response=None
+[28.09.2026 21:12:14] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260928_211213x.md: fixes=0, skip=1, response=None
+[28.09.2026 21:23:37] DS 082a: Rule-based fixer: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_212337.md: fixes=25, skip=71, response=F:\TO_DBI\temp\ds082a_run_212226_out\AI_RESPONSE_PSH_DEP_PRIV_GO_20260928_212337.md
+[28.09.2026 21:23:38] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260928_212337.md: fixes=8, skip=0, response=F:\TO_DBI\temp\ds082a_run_212226_syn\resp2\AI_RESPONSE_SYNTH_20260928_212337.md
+[28.09.2026 21:23:38] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260928_212337x.md: fixes=0, skip=1, response=None
+[28.09.2026 21:36:24] DS 082a: Rule-based fixer: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: fixes=35, skip=61, response=F:\TO_DBI\temp\ds082a_run_213450_out\AI_RESPONSE_PSH_DEP_PRIV_GO_20260928_213624.md
+[28.09.2026 21:36:24] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260928_213624.md: fixes=8, skip=0, response=F:\TO_DBI\temp\ds082a_run_213450_syn\resp2\AI_RESPONSE_SYNTH_20260928_213624.md
+[28.09.2026 21:36:24] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260928_213624x.md: fixes=0, skip=1, response=None
+[28.09.2026 21:37:29] DS 082a: В каталоге нет AI_REQUEST_*: F:\TO_DBI\temp\ds082a_run_213450_in
+[28.09.2026 21:39:15] DS 082a: Rule-based fixer (batch): запросов=1, fixes=35, skip=61 -> F:\TO_DBI\temp\ds082a_batch_out
+[28.09.2026 22:15:23] DS 082a: Выполнено. Создан tools\rule_based_fixer.py + tools\rule_based_rules.json (7 тривиальных правил). Тесты 1-5: 22/22 PASSED. SRC, DATA, формат AI_REQUEST/AI_RESPONSE не менялись. Файл перенесён в PROCESSED.
+[28.09.2026 22:15:23] DS 082a: Метрика PSH_DEP_PRIV_GO (96 issues после фильтра DS_080): rule-based закрыто 35 (BAD_PREFIX 25/25, CODE_IN_COMMENT 10/11), в AI уходит 61 (60 нетривиальных + 1 skip). Расхождение с ожиданием ~65-70: в запросе только 36 тривиальных issues — задокументировано в отчёте 5.5.
+[28.09.2026 22:15:23] DS 082a: Регресс DS_054 (46+9+8), DS_080 (96 из 5067), DS_081 (31/31) — PASSED. Отчёт EXCHANGE\OUTBOX\DS_082a_report.md.
+[28.09.2026 22:32:23] GIT_20260928_2232 Изменений нет.
+[28.09.2026 22:32:23] GIT_20260928_2232 Ошибка предварительной проверки: запись «Изменений нет» аннулирована — найдены незакоммиченные файлы в tools/.
+[28.09.2026 22:35:02] GIT_20260928_2234 Выполнено. Закоммичено 2 файлов в feature/dockerization (tools/rule_based_fixer.py, tools/rule_based_rules.json).
+[28.09.2026 22:35:02] GIT_20260928_2234 Push. Отправлено в origin/feature/dockerization (57ace3f..d82579a).
+[28.09.2026 22:42:15] GIT_20260928_2242 Изменений нет.
+[28.09.2026 23:08:18] DS 082a: Rule-based fixer: AI_REQUEST_PSH_DEP_PRIV_GO_20260926_114002.md: fixes=89, skip=4978, response=temp\ds082b_out_rule\AI_RESPONSE_PSH_DEP_PRIV_GO_20260926_114002.md
+[28.09.2026 23:19:25] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[28.09.2026 23:21:16] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[28.09.2026 23:21:16] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=61, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[28.09.2026 23:21:19] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[28.09.2026 23:21:19] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 5 из 61 (8%), batch=13, invalid_json=12, skip_batch=12, avg_time=0.0с, avg_conf=0.85, class={'auto': 5, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[28.09.2026 23:21:19] DS 082a: Rule-based fixer: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: fixes=1, skip=60, response=C:\Users\99E7~1\AppData\Local\Temp\ds082b_qawt2z9z\ai_out_rulebased\AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[28.09.2026 23:23:09] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[28.09.2026 23:23:09] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=61, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[28.09.2026 23:23:11] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[28.09.2026 23:23:11] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 5 из 61 (8%), batch=13, invalid_json=12, skip_batch=12, avg_time=0.0с, avg_conf=0.85, class={'auto': 5, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[28.09.2026 23:23:11] DS 082a: Rule-based fixer: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: fixes=1, skip=60, response=C:\Users\99E7~1\AppData\Local\Temp\ds082b_oeo8je0k\ai_out_rulebased\AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[28.09.2026 23:31:44] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260926_114002.md: итог 10 из 10 (100%), batch=2, invalid_json=0, skip_batch=0, avg_time=108.9с, avg_conf=0.90, class={'auto': 3, 'medium': 0, 'manual': 0, 'noop': 7}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260926_114002.md
+[29.09.2026 02:36:17] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: dry-run — 13 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[29.09.2026 02:44:04] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 02:44:04] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=61, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 02:44:06] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[29.09.2026 02:44:06] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 5 из 61 (8%), batch=13, invalid_json=12, skip_batch=12, avg_time=0.0с, avg_conf=0.85, class={'auto': 5, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 02:44:06] DS 082a: Rule-based fixer: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: fixes=1, skip=60, response=C:\Users\99E7~1\AppData\Local\Temp\ds082b_aqrpudxo\ai_out_rulebased\AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 02:44:25] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: dry-run — 13 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[29.09.2026 02:44:26] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: dry-run — 13 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[29.09.2026 03:16:58] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 03:16:58] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=61, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 03:17:00] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[29.09.2026 03:17:00] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 5 из 61 (8%), batch=13, invalid_json=12, skip_batch=12, avg_time=0.0с, avg_conf=0.85, class={'auto': 5, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 03:17:00] DS 082a: Rule-based fixer: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: fixes=1, skip=60, response=C:\Users\99E7~1\AppData\Local\Temp\ds082b_5hkmt8y1\ai_out_rulebased\AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 03:17:57] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[29.09.2026 03:23:27] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 03:23:27] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=61, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 03:23:29] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[29.09.2026 03:23:29] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 5 из 61 (8%), batch=13, invalid_json=12, skip_batch=12, avg_time=0.0с, avg_conf=0.85, class={'auto': 5, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 03:23:29] DS 082a: Rule-based fixer: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: fixes=1, skip=60, response=C:\Users\99E7~1\AppData\Local\Temp\ds082b_zy53nm83\ai_out_rulebased\AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 03:27:17] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: итог 5 из 5 (100%), batch=1, invalid_json=0, skip_batch=0, avg_time=221.9с, avg_conf=0.95, class={'auto': 5, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260928_213624.md
+[29.09.2026 04:04:20] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, avg_time=170.3с, avg_conf=0.95, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260928_213624.md
+[29.09.2026 04:10:52] DS 082a: Rule-based fixer: AI_REQUEST_PSH_DEP_PRIV_GO_20260929_041052.md: fixes=35, skip=61, response=F:\TO_DBI\temp\ds082a_run_041016_out\AI_RESPONSE_PSH_DEP_PRIV_GO_20260929_041052.md
+[29.09.2026 04:10:52] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260929_041052.md: fixes=8, skip=0, response=F:\TO_DBI\temp\ds082a_run_041016_syn\resp2\AI_RESPONSE_SYNTH_20260929_041052.md
+[29.09.2026 04:10:52] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260929_041052x.md: fixes=0, skip=1, response=None
+[29.09.2026 04:14:27] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: итог 2 из 2 (100%), batch=2, invalid_json=0, skip_batch=0, avg_time=69.8с, avg_conf=0.95, class={'auto': 2, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260928_213624.md
+[29.09.2026 04:15:39] DS 082b: Выполнено. Local AI worker через Ollama (tools\ai_local_worker.py): 61/61 fix за 36.9 мин, invalid_json=0, conf=0.95; тесты 1-5 и регресс DS_054/080/081/082a PASSED. Файл перенесён в PROCESSED.
+[29.09.2026 05:12:55] GIT_20260929_0512 Выполнено. Закоммичено 2 файлов в feature/dockerization.
+[29.09.2026 05:13:26] GIT_20260929_0513 Push. Отправлено в origin/feature/dockerization.
+[29.09.2026 07:02:21] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: итог 51 из 61 (83%), batch=7, invalid_json=1, skip_batch=1, avg_time=227.2с, avg_conf=0.95, class={'auto': 51, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260928_213624.md
+[29.09.2026 07:27:24] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 07:27:24] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=61, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 07:27:26] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[29.09.2026 07:27:26] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 5 из 61 (8%), batch=13, invalid_json=12, skip_batch=12, avg_time=0.0с, avg_conf=0.85, class={'auto': 5, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 07:27:26] DS 082a: Rule-based fixer: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: fixes=1, skip=60, response=C:\Users\99E7~1\AppData\Local\Temp\ds082b_09u21u07\ai_out_rulebased\AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 07:28:14] DS 082a: Rule-based fixer: AI_REQUEST_PSH_DEP_PRIV_GO_20260929_072813.md: fixes=35, skip=61, response=F:\TO_DBI\temp\ds082a_run_072750_out\AI_RESPONSE_PSH_DEP_PRIV_GO_20260929_072813.md
+[29.09.2026 07:28:14] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260929_072814.md: fixes=8, skip=0, response=F:\TO_DBI\temp\ds082a_run_072750_syn\resp2\AI_RESPONSE_SYNTH_20260929_072814.md
+[29.09.2026 07:28:14] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260929_072814x.md: fixes=0, skip=1, response=None
+[29.09.2026 08:09:40] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 19, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 08:09:40] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=61, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 19, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 08:09:42] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[29.09.2026 08:09:42] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 5 из 61 (8%), batch=13, invalid_json=12, skip_batch=12, avg_time=0.0с, avg_conf=0.85, class={'auto': 1, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 08:09:42] DS 082a: Rule-based fixer: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: fixes=1, skip=60, response=C:\Users\99E7~1\AppData\Local\Temp\ds082b_7gh2d2jp\ai_out_rulebased\AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 08:10:21] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 08:10:21] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=61, invalid_json=0, skip_batch=0, avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 08:10:24] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[29.09.2026 08:10:24] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 5 из 61 (8%), batch=13, invalid_json=12, skip_batch=12, avg_time=0.0с, avg_conf=0.85, class={'auto': 5, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 08:10:24] DS 082a: Rule-based fixer: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: fixes=1, skip=60, response=C:\Users\99E7~1\AppData\Local\Temp\ds082b_q9dejmp9\ai_out_rulebased\AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 08:11:02] DS 082a: Rule-based fixer: AI_REQUEST_PSH_DEP_PRIV_GO_20260929_081102.md: fixes=35, skip=61, response=F:\TO_DBI\temp\ds082a_run_081038_out\AI_RESPONSE_PSH_DEP_PRIV_GO_20260929_081102.md
+[29.09.2026 08:11:02] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260929_081102.md: fixes=8, skip=0, response=F:\TO_DBI\temp\ds082a_run_081038_syn\resp2\AI_RESPONSE_SYNTH_20260929_081102.md
+[29.09.2026 08:11:02] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260929_081102x.md: fixes=0, skip=1, response=None
+[29.09.2026 08:11:49] DS 084: Vypolneno. merge_fixes_by_line v ai_local_worker. Skipped 9->1. File perenesen v PROCESSED.
+[29.09.2026 08:11:56] DS 084: Выполнено. merge_fixes_by_line в ai_local_worker. Skipped 9->1. Файл перенесён в PROCESSED.
+[29.09.2026 11:40:49] DS 082b: AI_REQUEST_MOCK_20260929_000000.md: итог 10 из 10 (100%), batch=1, invalid_json=0, skip_batch=0, fallback=1 (2/2 ok, 0.0с), avg_time=0.0с, avg_conf=0.95, class={'auto': 10, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_MOCK_20260929_000000.md
+[29.09.2026 11:41:50] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[29.09.2026 11:43:39] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 11:43:39] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=61, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 11:43:41] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[29.09.2026 11:43:41] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 5 из 61 (8%), batch=13, invalid_json=12, skip_batch=12, fallback=11 (0/11 ok, 0.0с), avg_time=0.0с, avg_conf=0.85, class={'auto': 5, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 11:43:42] DS 082a: Rule-based fixer: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: fixes=1, skip=60, response=C:\Users\99E7~1\AppData\Local\Temp\ds082b_s4fayfhi\ai_out_rulebased\AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 11:46:23] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: итог 61 из 61 (100%), batch=7, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=0.0с, avg_conf=0.95, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260928_213624.md
+[29.09.2026 11:46:23] DS 082b: AI_REQUEST_MOCK_20260929_000000.md: итог 10 из 10 (100%), batch=1, invalid_json=0, skip_batch=0, fallback=1 (2/2 ok, 0.0с), avg_time=0.0с, avg_conf=0.95, class={'auto': 10, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_MOCK_20260929_000000.md
+[29.09.2026 11:46:23] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[29.09.2026 11:46:24] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=0.0с, avg_conf=0.95, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260928_213624.md
+[29.09.2026 11:46:24] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: итог 1 из 61 (1%), batch=7, invalid_json=6, skip_batch=6, fallback=6 (0/12 ok, 0.0с), avg_time=0.0с, avg_conf=0.95, class={'auto': 1, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260928_213624.md
+[29.09.2026 11:48:52] DS 082a: Rule-based fixer: AI_REQUEST_PSH_DEP_PRIV_GO_20260929_114851.md: fixes=35, skip=61, response=F:\TO_DBI\temp\ds082a_run_114755_out\AI_RESPONSE_PSH_DEP_PRIV_GO_20260929_114851.md
+[29.09.2026 11:48:52] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260929_114852.md: fixes=8, skip=0, response=F:\TO_DBI\temp\ds082a_run_114755_syn\resp2\AI_RESPONSE_SYNTH_20260929_114852.md
+[29.09.2026 11:48:52] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260929_114852x.md: fixes=0, skip=1, response=None
+[29.09.2026 11:48:52] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 11:48:52] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=61, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 11:48:54] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[29.09.2026 11:48:54] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 5 из 61 (8%), batch=13, invalid_json=12, skip_batch=12, fallback=11 (0/11 ok, 0.0с), avg_time=0.0с, avg_conf=0.85, class={'auto': 5, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 11:48:54] DS 082a: Rule-based fixer: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: fixes=1, skip=60, response=C:\Users\99E7~1\AppData\Local\Temp\ds082b_zm6u8_l4\ai_out_rulebased\AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 11:51:24] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: итог 61 из 61 (100%), batch=7, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=0.0с, avg_conf=0.95, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260928_213624.md
+[29.09.2026 11:51:24] DS 082b: AI_REQUEST_MOCK_20260929_000000.md: итог 10 из 10 (100%), batch=1, invalid_json=0, skip_batch=0, fallback=1 (2/2 ok, 0.0с), avg_time=0.0с, avg_conf=0.95, class={'auto': 10, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_MOCK_20260929_000000.md
+[29.09.2026 11:51:24] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[29.09.2026 11:51:25] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=0.0с, avg_conf=0.95, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260928_213624.md
+[29.09.2026 11:51:25] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: итог 61 из 61 (100%), batch=7, invalid_json=0, skip_batch=0, fallback=1 (2/2 ok, 0.0с), avg_time=0.0с, avg_conf=0.95, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260928_213624.md
+[29.09.2026 11:53:59] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: итог 61 из 61 (100%), batch=7, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=0.0с, avg_conf=0.95, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260928_213624.md
+[29.09.2026 11:53:59] DS 082b: AI_REQUEST_MOCK_20260929_000000.md: итог 10 из 10 (100%), batch=1, invalid_json=0, skip_batch=0, fallback=1 (2/2 ok, 0.0с), avg_time=0.0с, avg_conf=0.95, class={'auto': 10, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_MOCK_20260929_000000.md
+[29.09.2026 11:53:59] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[29.09.2026 11:54:00] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=0.0с, avg_conf=0.95, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260928_213624.md
+[29.09.2026 11:54:00] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: итог 61 из 61 (100%), batch=7, invalid_json=0, skip_batch=0, fallback=1 (2/2 ok, 0.0с), avg_time=0.0с, avg_conf=0.95, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260928_213624.md
+[29.09.2026 11:56:33] DS 082a: Rule-based fixer: AI_REQUEST_PSH_DEP_PRIV_GO_20260929_115633.md: fixes=35, skip=61, response=F:\TO_DBI\temp\ds082a_run_115539_out\AI_RESPONSE_PSH_DEP_PRIV_GO_20260929_115633.md
+[29.09.2026 11:56:33] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260929_115633.md: fixes=8, skip=0, response=F:\TO_DBI\temp\ds082a_run_115539_syn\resp2\AI_RESPONSE_SYNTH_20260929_115633.md
+[29.09.2026 11:56:33] DS 082a: Rule-based fixer: AI_REQUEST_SYNTH_20260929_115633x.md: fixes=0, skip=1, response=None
+[29.09.2026 11:56:33] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=13, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 11:56:33] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 61 из 61 (100%), batch=61, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=0.0с, avg_conf=0.85, class={'auto': 61, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 11:56:35] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[29.09.2026 11:56:35] DS 082b: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: итог 5 из 61 (8%), batch=13, invalid_json=12, skip_batch=12, fallback=11 (0/11 ok, 0.0с), avg_time=0.0с, avg_conf=0.85, class={'auto': 5, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 11:56:35] DS 082a: Rule-based fixer: AI_REQUEST_PSH_PRD_CALC_PR_20260926_114002.md: fixes=1, skip=60, response=C:\Users\99E7~1\AppData\Local\Temp\ds082b_aruinc6d\ai_out_rulebased\AI_RESPONSE_PSH_PRD_CALC_PR_20260926_114002.md
+[29.09.2026 11:56:58] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: dry-run — 7 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[29.09.2026 11:57:08] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260928_213624.md: dry-run — 7 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[29.09.2026 11:58:41] DS 085: Выполнено. Fallback при invalid_json в ai_local_worker (split 10->2x5, fallback_count/fallback_time), batch_size=10, fallback_batch_size=5, CLI --no-fallback/--fallback-size. Тесты 1-5: 25/25 PASSED, регресс DS_054/080/081/082a/082b/084 PASSED. Файл перенесён в PROCESSED.
+[29.09.2026 12:04:57] GIT_20260929_1204 Выполнено. Закоммичено 2 файлов в feature/dockerization (4b5d7f8, DS_085: batch 10 + fallback).
+[29.09.2026 12:04:57] GIT_20260929_1204 Push. Отправлено в origin/feature/dockerization (bb58d09..4b5d7f8).
+[29.09.2026 12:38:00] Отправлено 96 issues из 285 (фильтр: needs_ai_fix). AI-запросов: 1.
+[29.09.2026 16:47:07] DS_086 GUI height: before=650, after=441
+[29.09.2026 16:48:28] DS_086 GUI height: before=650, after=441
+[29.09.2026 16:48:30] DS_086 GUI height: before=441, after=650
+[29.09.2026 16:48:30] DS_086 GUI height: before=650, after=441
+[29.09.2026 16:48:30] DS_086 GUI height: before=441, after=650
+[29.09.2026 16:48:30] DS_086 GUI height: before=650, after=650
+[29.09.2026 16:48:30] DS_086 GUI height: before=650, after=441
+[29.09.2026 16:48:30] DS_086 GUI height: before=441, after=650
+[29.09.2026 16:48:30] DS_086 GUI height: before=650, after=441
+[29.09.2026 16:48:30] DS_086 GUI height: before=441, after=650
+[29.09.2026 16:49:10] DS_086 GUI height: before=650, after=441
+[29.09.2026 16:49:11] DS_086 GUI height: before=441, after=650
+[29.09.2026 16:49:11] DS_086 GUI height: before=650, after=441
+[29.09.2026 16:49:11] DS_086 GUI height: before=441, after=650
+[29.09.2026 16:49:11] DS_086 GUI height: before=650, after=650
+[29.09.2026 16:49:11] DS_086 GUI height: before=650, after=441
+[29.09.2026 16:49:11] DS_086 GUI height: before=441, after=650
+[29.09.2026 16:49:11] DS_086 GUI height: before=650, after=441
+[29.09.2026 16:49:11] DS_086 GUI height: before=441, after=650
+[29.09.2026 16:53:18] DS_086 GUI height: before=650, after=441
+[29.09.2026 16:59:43] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:05:04] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:07:09] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:13:46] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:14:45] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:14:45] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:15:19] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:15:19] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:15:21] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:15:21] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:15:21] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:15:56] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:15:56] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:15:58] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:18:20] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:18:21] DS_086 GUI height: before=441, after=650
+[29.09.2026 17:18:21] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:18:21] DS_086 GUI height: before=441, after=650
+[29.09.2026 17:18:21] DS_086 GUI height: before=650, after=650
+[29.09.2026 17:18:21] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:18:21] DS_086 GUI height: before=441, after=650
+[29.09.2026 17:18:21] DS_086 GUI height: before=650, after=441
+[29.09.2026 17:18:21] DS_086 GUI height: before=441, after=650
+[29.09.2026 18:45:58] DS_086 GUI height: before=650, after=441
+[29.09.2026 18:47:11] DS_086 GUI height: before=650, after=441
+[29.09.2026 18:47:13] DS_086 GUI height: before=441, after=650
+[29.09.2026 18:47:13] DS_086 GUI height: before=650, after=441
+[29.09.2026 18:51:06] DS_086 GUI height: before=650, after=441
+[29.09.2026 18:51:09] DS_086 GUI height: before=441, after=650
+[29.09.2026 18:51:09] DS_086 GUI height: before=650, after=441
+[29.09.2026 18:51:09] DS_086 GUI height: before=441, after=650
+[29.09.2026 18:51:09] DS_086 GUI height: before=650, after=650
+[29.09.2026 18:51:09] DS_086 GUI height: before=650, after=441
+[29.09.2026 18:51:09] DS_086 GUI height: before=441, after=650
+[29.09.2026 18:51:09] DS_086 GUI height: before=650, after=441
+[29.09.2026 18:51:09] DS_086 GUI height: before=441, after=650
+[29.09.2026 18:51:50] DS_086 GUI height: before=650, after=441
+[29.09.2026 18:51:52] DS_086 GUI height: before=441, after=650
+[29.09.2026 18:51:52] DS_086 GUI height: before=650, after=441
+[29.09.2026 18:51:52] DS_086 GUI height: before=441, after=650
+[29.09.2026 18:51:52] DS_086 GUI height: before=650, after=650
+[29.09.2026 18:51:52] DS_086 GUI height: before=650, after=441
+[29.09.2026 18:51:52] DS_086 GUI height: before=441, after=650
+[29.09.2026 18:51:52] DS_086 GUI height: before=650, after=441
+[29.09.2026 18:51:52] DS_086 GUI height: before=441, after=650
+[29.09.2026 20:00:11] DS 086: Выполнено. Скрытие 4 элементов GUI (btn_show_sql, btn_send_koda, btn_from_ai, changelog_frame) через pack_forget + меню «Вид»; высота окна 650→441; состояние в settings.json (ui_hidden_elements). Тесты DS_086 15/15 PASSED, регресс DS_036/038/039/054/054c/056/057/058/075/076/077 — PASSED. Отчёт EXCHANGE\OUTBOX\DS_086_report.md. Файл перенесён в PROCESSED.
+[29.09.2026 20:06:02] DS_086 GUI height: before=650, after=441
+[29.09.2026 20:06:02] DS_086 GUI height: before=441, after=441
+[29.09.2026 20:13:04] DS_086 GUI height: before=650, after=441
+[29.09.2026 20:13:04] DS_086 GUI height: before=441, after=441
+[29.09.2026 20:13:20] GIT_20260929_2013 Выполнено. Закоммичено 2 файлов в feature/dockerization (SRC/gui_app.py +202, SRC/tests/test_ds086_ui_hide.py новый). Коммит d9c57cf.
+[29.09.2026 20:14:21] GIT_20260929_2014 Выполнено. PUSH в origin/feature/dockerization, коммит d9c57cf.
+[29.09.2026 20:33:17] DS_086 GUI height: before=650, after=441
+[29.09.2026 20:33:17] DS_086 GUI height: before=441, after=441
+[29.09.2026 20:35:18] DS_086 GUI height: before=650, after=441
+[29.09.2026 20:35:18] DS_086 GUI height: before=441, after=441
+[29.09.2026 20:51:35] DS_086 GUI height: before=650, after=441
+[29.09.2026 20:51:35] DS_086 GUI height: before=441, after=441
+[29.09.2026 22:05:40] DS_086 GUI height: before=800, after=591
+[29.09.2026 22:05:42] DS_086 GUI height: before=600, after=800
+[29.09.2026 22:05:42] DS_086 GUI height: before=800, after=591
+[29.09.2026 22:05:42] DS_086 GUI height: before=600, after=800
+[29.09.2026 22:05:42] DS_086 GUI height: before=800, after=800
+[29.09.2026 22:05:42] DS_086 GUI height: before=800, after=591
+[29.09.2026 22:05:42] DS_086 GUI height: before=600, after=800
+[29.09.2026 22:05:43] DS_086 GUI height: before=800, after=591
+[29.09.2026 22:05:43] DS_086 GUI height: before=600, after=800
+[30.09.2026 02:18:49] DS_086 GUI height: before=800, after=591
+[30.09.2026 02:18:49] DS_086 GUI height: before=800, after=591
+[30.09.2026 02:22:39] DS_086 GUI height: before=800, after=591
+[30.09.2026 02:22:41] DS_086 GUI height: before=600, after=800
+[30.09.2026 02:22:41] DS_086 GUI height: before=800, after=591
+[30.09.2026 02:22:41] DS_086 GUI height: before=600, after=800
+[30.09.2026 02:22:41] DS_086 GUI height: before=800, after=800
+[30.09.2026 02:22:41] DS_086 GUI height: before=800, after=591
+[30.09.2026 02:22:41] DS_086 GUI height: before=600, after=800
+[30.09.2026 02:22:41] DS_086 GUI height: before=800, after=591
+[30.09.2026 02:22:41] DS_086 GUI height: before=600, after=800
+[30.09.2026 02:24:20] DS_086 GUI height: before=800, after=591
+[30.09.2026 02:24:21] DS_086 GUI height: before=600, after=591
+[30.09.2026 02:25:55] DS_086 GUI height: before=800, after=591
+[30.09.2026 02:25:55] DS_086 GUI height: before=600, after=591
+[30.09.2026 02:26:25] DS_086 GUI height: before=800, after=591
+[30.09.2026 02:26:27] DS_086 GUI height: before=600, after=800
+[30.09.2026 02:26:27] DS_086 GUI height: before=800, after=591
+[30.09.2026 02:26:27] DS_086 GUI height: before=600, after=800
+[30.09.2026 02:26:27] DS_086 GUI height: before=800, after=800
+[30.09.2026 02:26:27] DS_086 GUI height: before=800, after=591
+[30.09.2026 02:26:27] DS_086 GUI height: before=600, after=800
+[30.09.2026 02:26:27] DS_086 GUI height: before=800, after=591
+[30.09.2026 02:26:27] DS_086 GUI height: before=600, after=800
+[30.09.2026 02:27:01] DS 087: Выполнено. Переименование кнопок 1/2/3, активация workflow, layout, реестр DS_086. Файл перенесён в PROCESSED.
+[30.09.2026 06:57:29] DS_086 GUI height: before=800, after=591
+[30.09.2026 06:57:29] DS_086 GUI height: before=600, after=591
+[30.09.2026 07:08:00] GIT_20260930_0708 Выполнено. Закоммичено 3 файлов в feature/dockerization.
+[30.09.2026 07:08:00] GIT_20260930_0708 Push. Отправлено в origin/feature/dockerization.
+[30.09.2026 07:16:36] Отправлено 36 issues из 121 (фильтр: needs_ai_fix). AI-запросов: 1.
+[30.09.2026 09:09:46] DS_086 GUI height: before=800, after=591
+[30.09.2026 09:09:46] DS_086 GUI height: before=600, after=591
+[30.09.2026 09:10:18] DS_086 GUI height: before=800, after=591
+[30.09.2026 09:10:18] DS_086 GUI height: before=800, after=591
+[30.09.2026 09:11:09] DS_086 GUI height: before=800, after=591
+[30.09.2026 09:11:09] DS_086 GUI height: before=600, after=591
+[30.09.2026 09:11:34] DS_086 GUI height: before=800, after=591
+[30.09.2026 09:11:34] DS_086 GUI height: before=600, after=591
+[30.09.2026 09:11:39] DS_086 GUI height: before=800, after=591
+[30.09.2026 09:11:41] DS_086 GUI height: before=600, after=800
+[30.09.2026 09:11:41] DS_086 GUI height: before=800, after=591
+[30.09.2026 09:11:41] DS_086 GUI height: before=600, after=800
+[30.09.2026 09:11:41] DS_086 GUI height: before=800, after=800
+[30.09.2026 09:11:41] DS_086 GUI height: before=800, after=591
+[30.09.2026 09:11:41] DS_086 GUI height: before=600, after=800
+[30.09.2026 09:11:41] DS_086 GUI height: before=800, after=591
+[30.09.2026 09:11:41] DS_086 GUI height: before=600, after=800
+[30.09.2026 09:12:05] DS 088a: Выполнено. Автоматизация цикла «3. В Ai» (send_to_ai → воркеры → ожидание AI_RESPONSE → receive_from_ai). Файл перенесён в PROCESSED.
+[30.09.2026 09:18:23] DS 082b: AI_REQUEST_sample_20260930_091802.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[30.09.2026 09:19:38] DS 082b: AI_REQUEST_sample_20260930_091802.md: итог 1 из 1 (100%), batch=1, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=53.6с, avg_conf=0.95, class={'auto': 1, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_sample_20260930_091802.md
+[30.09.2026 09:22:25] DS 088a_DIAG: Выполнено. Разведка LLM-детекта (READ-ONLY): воркер только Ollama, LM Studio не поддержан. Файл перенесён в PROCESSED.
+[30.09.2026 10:04:56] DS_086 GUI height: before=800, after=591
+[30.09.2026 10:04:56] DS_086 GUI height: before=600, after=591
+[30.09.2026 10:25:31] DS_086 GUI height: before=800, after=591
+[30.09.2026 10:25:31] DS_086 GUI height: before=600, after=591
+[30.09.2026 10:57:13] DS 088a_fix: Ожидание ответа пользователя. Пороги confidence в ai_exchange.py (C) — СТОП по §2.1. Файл остаётся в INBOX.
+[30.09.2026 11:56:38] DS_086 GUI height: before=800, after=591
+[30.09.2026 11:56:38] DS_086 GUI height: before=600, after=591
+[30.09.2026 11:59:13] DS_086 GUI height: before=800, after=591
+[30.09.2026 11:59:13] DS_086 GUI height: before=600, after=591
+[30.09.2026 11:59:14] needs_manual: 0
+[30.09.2026 11:59:49] DS_086 GUI height: before=800, after=591
+[30.09.2026 11:59:49] DS_086 GUI height: before=600, after=591
+[30.09.2026 11:59:53] DS_086 GUI height: before=800, after=591
+[30.09.2026 11:59:53] DS_086 GUI height: before=600, after=591
+[30.09.2026 11:59:57] DS_086 GUI height: before=800, after=591
+[30.09.2026 11:59:59] DS_086 GUI height: before=600, after=800
+[30.09.2026 11:59:59] DS_086 GUI height: before=800, after=591
+[30.09.2026 11:59:59] DS_086 GUI height: before=600, after=800
+[30.09.2026 11:59:59] DS_086 GUI height: before=800, after=800
+[30.09.2026 11:59:59] DS_086 GUI height: before=800, after=591
+[30.09.2026 11:59:59] DS_086 GUI height: before=600, after=800
+[30.09.2026 11:59:59] DS_086 GUI height: before=800, after=591
+[30.09.2026 11:59:59] DS_086 GUI height: before=600, after=800
+[30.09.2026 12:00:45] DS_086 GUI height: before=800, after=591
+[30.09.2026 12:00:45] DS_086 GUI height: before=600, after=591
+[30.09.2026 12:40:28] DS_086 GUI height: before=800, after=591
+[30.09.2026 12:40:28] DS_086 GUI height: before=600, after=591
+[30.09.2026 12:40:30] needs_manual: 0
+[30.09.2026 12:40:54] DS_086 GUI height: before=800, after=591
+[30.09.2026 12:40:55] DS_086 GUI height: before=600, after=800
+[30.09.2026 12:40:55] DS_086 GUI height: before=800, after=591
+[30.09.2026 12:40:55] DS_086 GUI height: before=600, after=800
+[30.09.2026 12:40:55] DS_086 GUI height: before=800, after=800
+[30.09.2026 12:40:55] DS_086 GUI height: before=800, after=591
+[30.09.2026 12:40:55] DS_086 GUI height: before=600, after=800
+[30.09.2026 12:40:55] DS_086 GUI height: before=800, after=591
+[30.09.2026 12:40:55] DS_086 GUI height: before=600, after=800
+[30.09.2026 12:40:56] DS_086 GUI height: before=800, after=591
+[30.09.2026 12:40:56] DS_086 GUI height: before=600, after=591
+[30.09.2026 12:41:24] DS_086 GUI height: before=800, after=591
+[30.09.2026 12:41:24] DS_086 GUI height: before=600, after=591
+[30.09.2026 12:42:41] DS_086 GUI height: before=800, after=591
+[30.09.2026 12:42:41] DS_086 GUI height: before=600, after=591
+[30.09.2026 12:43:05] DS 088a_fix: Выполнено. Формат ЖВ, пороги confidence, layout. Файл перенесён в PROCESSED.
+[30.09.2026 12:50:00] DS_086 GUI height: before=800, after=591
+[30.09.2026 12:50:00] DS_086 GUI height: before=600, after=591
+[30.09.2026 13:30:44] DS_086 GUI height: before=800, after=591
+[30.09.2026 13:30:44] DS_086 GUI height: before=600, after=591
+[30.09.2026 13:31:08] DS_086 GUI height: before=800, after=591
+[30.09.2026 13:31:09] DS_086 GUI height: before=600, after=800
+[30.09.2026 13:31:09] DS_086 GUI height: before=800, after=591
+[30.09.2026 13:31:09] DS_086 GUI height: before=600, after=800
+[30.09.2026 13:31:10] DS_086 GUI height: before=800, after=800
+[30.09.2026 13:31:10] DS_086 GUI height: before=800, after=591
+[30.09.2026 13:31:10] DS_086 GUI height: before=600, after=800
+[30.09.2026 13:31:10] DS_086 GUI height: before=800, after=591
+[30.09.2026 13:31:10] DS_086 GUI height: before=600, after=800
+[30.09.2026 13:31:11] DS_086 GUI height: before=800, after=591
+[30.09.2026 13:31:11] DS_086 GUI height: before=600, after=591
+[30.09.2026 13:31:28] DS_086 GUI height: before=800, after=591
+[30.09.2026 13:31:28] DS_086 GUI height: before=600, after=591
+[30.09.2026 13:31:33] DS_086 GUI height: before=800, after=591
+[30.09.2026 13:31:33] DS_086 GUI height: before=600, after=591
+[30.09.2026 13:31:35] needs_manual: 0
+[30.09.2026 13:32:58] DS 088b: Выполнено. Звуки, контекстное меню, «Только Ai», tooltip. Файл перенесён в PROCESSED.
+[30.09.2026 14:00:20] DS_086 GUI height: before=800, after=591
+[30.09.2026 14:00:20] DS_086 GUI height: before=600, after=591
+[30.09.2026 14:03:53] GIT_20260930_1403 Выполнено. Закоммичено 5 файлов в feature/dockerization.
+[30.09.2026 14:03:53] PUSH_20260930_1403 Выполнено. Отправлено в origin/feature/dockerization.
+[30.09.2026 16:50:00] DS 089_DIAG: Выполнено. Пробный запуск в temp\diag_ds089 (20 проверок, 16 OK, 4 FAIL=подтверждение гипотез). Отчёт в OUTBOX\DS_089_DIAG_report.md. Файл перенесён в PROCESSED.
+[30.09.2026 19:02:15] DS_086 GUI height: before=800, after=591
+[30.09.2026 19:02:15] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:03:00] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:03:04] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:03:04] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:03:04] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:03:04] DS_086 GUI height: before=800, after=800
+[01.10.2026 18:03:04] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:03:04] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:03:04] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:03:04] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:03:59] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:03:59] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:04:06] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:04:06] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:04:11] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:04:11] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:04:13] needs_manual: 0
+[01.10.2026 18:04:15] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:04:15] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:04:57] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:04:57] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:05:02] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:05:02] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:05:04] needs_manual: 0
+[01.10.2026 18:05:05] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:05:05] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:05:48] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:05:49] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:45:09] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:45:09] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:46:48] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:46:48] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:47:28] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:47:31] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:47:31] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:47:31] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:47:31] DS_086 GUI height: before=800, after=800
+[01.10.2026 18:47:31] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:47:31] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:47:31] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:47:31] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:47:33] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:47:33] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:47:39] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:47:39] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:47:42] needs_manual: 0
+[01.10.2026 18:48:24] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:48:26] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:48:26] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:48:26] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:48:26] DS_086 GUI height: before=800, after=800
+[01.10.2026 18:48:26] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:48:26] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:48:26] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:48:26] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:48:28] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:48:28] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:48:34] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:48:34] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:48:36] needs_manual: 0
+[01.10.2026 18:49:05] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:49:07] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:49:08] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:49:08] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:49:08] DS_086 GUI height: before=800, after=800
+[01.10.2026 18:49:08] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:49:08] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:49:08] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:49:08] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:49:09] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:49:09] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:49:16] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:49:16] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:49:19] needs_manual: 0
+[01.10.2026 18:50:02] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:50:04] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:50:04] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:50:04] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:50:04] DS_086 GUI height: before=800, after=800
+[01.10.2026 18:50:04] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:50:04] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:50:04] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:50:04] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:50:59] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:51:01] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:51:01] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:51:01] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:51:01] DS_086 GUI height: before=800, after=800
+[01.10.2026 18:51:01] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:51:01] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:51:01] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:51:01] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:51:02] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:51:03] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:51:10] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:51:10] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:51:14] needs_manual: 0
+[01.10.2026 18:51:55] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:51:56] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:51:57] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:51:57] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:51:57] DS_086 GUI height: before=800, after=800
+[01.10.2026 18:51:57] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:51:57] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:51:57] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:51:57] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:51:58] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:51:58] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:52:03] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:52:03] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:52:06] needs_manual: 0
+[01.10.2026 18:52:48] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:52:50] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:52:50] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:52:50] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:52:50] DS_086 GUI height: before=800, after=800
+[01.10.2026 18:52:50] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:52:50] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:52:50] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:52:51] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:52:53] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:52:54] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:53:01] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:53:01] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:53:04] needs_manual: 0
+[01.10.2026 18:53:06] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:53:07] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:53:13] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:53:13] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:55:07] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:55:09] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:55:09] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:55:09] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:55:09] DS_086 GUI height: before=800, after=800
+[01.10.2026 18:55:09] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:55:10] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:55:10] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:55:10] DS_086 GUI height: before=600, after=800
+[01.10.2026 18:55:12] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:55:12] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:55:18] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:55:18] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:55:20] needs_manual: 0
+[01.10.2026 18:55:22] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:55:22] DS_086 GUI height: before=600, after=591
+[01.10.2026 18:55:28] DS_086 GUI height: before=800, after=591
+[01.10.2026 18:55:28] DS_086 GUI height: before=600, after=591
+[01.10.2026 21:53:29] DS_086 GUI height: before=800, after=591
+[01.10.2026 21:53:29] DS_086 GUI height: before=600, after=591
+[01.10.2026 21:54:04] DS_086 GUI height: before=800, after=591
+[01.10.2026 21:54:04] DS_086 GUI height: before=600, after=591
+[01.10.2026 21:54:42] DS_086 GUI height: before=800, after=591
+[01.10.2026 21:54:42] DS_086 GUI height: before=600, after=591
+[01.10.2026 21:54:44] needs_manual: 0
+[01.10.2026 21:55:44] DS_086 GUI height: before=800, after=591
+[01.10.2026 21:55:44] DS_086 GUI height: before=600, after=591
+[01.10.2026 21:56:20] DS_086 GUI height: before=800, after=591
+[01.10.2026 21:56:22] DS_086 GUI height: before=600, after=800
+[01.10.2026 21:56:22] DS_086 GUI height: before=800, after=591
+[01.10.2026 21:56:22] DS_086 GUI height: before=600, after=800
+[01.10.2026 21:56:22] DS_086 GUI height: before=800, after=800
+[01.10.2026 21:56:22] DS_086 GUI height: before=800, after=591
+[01.10.2026 21:56:22] DS_086 GUI height: before=600, after=800
+[01.10.2026 21:56:22] DS_086 GUI height: before=800, after=591
+[01.10.2026 21:56:22] DS_086 GUI height: before=600, after=800
+[01.10.2026 22:00:00] DS 089a: Выполнено. Прерывание/продолжение UI. Тесты 13/13 PASSED. Файл перенесён в PROCESSED.
+[01.10.2026 23:40:03] DS_086 GUI height: before=800, after=591
+[01.10.2026 23:40:04] DS_086 GUI height: before=600, after=800
+[01.10.2026 23:40:04] DS_086 GUI height: before=800, after=591
+[01.10.2026 23:40:04] DS_086 GUI height: before=600, after=800
+[01.10.2026 23:40:04] DS_086 GUI height: before=800, after=800
+[01.10.2026 23:40:04] DS_086 GUI height: before=800, after=591
+[01.10.2026 23:40:04] DS_086 GUI height: before=600, after=800
+[01.10.2026 23:40:04] DS_086 GUI height: before=800, after=591
+[01.10.2026 23:40:04] DS_086 GUI height: before=600, after=800
+[01.10.2026 23:40:05] DS_086 GUI height: before=800, after=591
+[01.10.2026 23:40:05] DS_086 GUI height: before=600, after=591
+[01.10.2026 23:40:08] DS_086 GUI height: before=800, after=591
+[01.10.2026 23:40:08] DS_086 GUI height: before=600, after=591
+[01.10.2026 23:40:11] DS_086 GUI height: before=800, after=591
+[01.10.2026 23:40:11] DS_086 GUI height: before=600, after=591
+[01.10.2026 23:40:12] needs_manual: 0
+[01.10.2026 23:40:14] DS_086 GUI height: before=800, after=591
+[01.10.2026 23:40:14] DS_086 GUI height: before=600, after=591
+[02.10.2026 06:09:03] DS_086 GUI height: before=800, after=591
+[02.10.2026 06:09:05] DS_086 GUI height: before=600, after=800
+[02.10.2026 06:09:05] DS_086 GUI height: before=800, after=591
+[02.10.2026 06:09:05] DS_086 GUI height: before=600, after=800
+[02.10.2026 06:09:05] DS_086 GUI height: before=800, after=800
+[02.10.2026 06:09:05] DS_086 GUI height: before=800, after=591
+[02.10.2026 06:09:05] DS_086 GUI height: before=600, after=800
+[02.10.2026 06:09:05] DS_086 GUI height: before=800, after=591
+[02.10.2026 06:09:05] DS_086 GUI height: before=600, after=800
+[02.10.2026 06:09:07] DS_086 GUI height: before=800, after=591
+[02.10.2026 06:09:07] DS_086 GUI height: before=600, after=591
+[02.10.2026 06:09:13] DS_086 GUI height: before=800, after=591
+[02.10.2026 06:09:13] DS_086 GUI height: before=600, after=591
+[02.10.2026 06:09:16] DS_086 GUI height: before=800, after=591
+[02.10.2026 06:09:17] DS_086 GUI height: before=600, after=591
+[02.10.2026 06:09:18] needs_manual: 0
+[02.10.2026 06:09:20] DS_086 GUI height: before=800, after=591
+[02.10.2026 06:09:20] DS_086 GUI height: before=600, after=591
+[02.10.2026 06:10:40] DS 089: Выполнено. Resume по ключу (скан/фикс) + идемпотентность. Тесты 15/15, регресс 88/88. Файл перенесён в PROCESSED.
+[02.10.2026 17:56:17] DS 090: Запуск live-прогона CLI на patch_PSH_DEP_PRIV_GO. Начало прогона.
+[02.10.2026 17:56:18] DS 082a: Rule-based fixer (batch): запросов=2, fixes=70, skip=62 -> EXCHANGE\AI_OUT
+[02.10.2026 19:02:42] DS 090: Live-прогон CLI завершён. Статус: Частично. Сканер требует GUI (СТОП-развилка). Rule-based: 70/132 issues за 0.4с. AI worker: таймаут на batch 10, валидные батчи (5 issues) — 3s/issue. Resume в CLI недоступен.
+
+[02.10.2026 18:30:00] DS_090 — Live-прогон CLI (PSH_DEP_PRIV_GO)
+  Статус: ЧАСТИЧНО
+  Целевой файл: PSH_DEP_PRIV_GO.plp (100323 байт, 2161 строк)
+  Issues: 132 (из AI_REQUEST 20260929 + 20260930)
+  Rule-based: 70 fixes / 62 skip за 0.4 сек
+  AI fix (batch 5): 35 fixes за 112 сек
+  AI fix (batch 10): 100% invalid JSON (timeout)
+  Общее время: ~112 сек (частичный прогон)
+  ~28 мин/файл: ЧАСТИЧНО подтверждён (13 сек/fix для batch 5)
+  Resume CLI: НЕдоступен (GUI-only, DS_089b)
+  СТОП-развилки: сканер не CLI, resume не в ai_local_worker.py
+  Отчёт: EXCHANGE\OUTBOX\DS_090_report.md
+  Артефакты: AI_OUT (35 fixes), SRC не изменён
+[02.10.2026 20:36:45] DS_086 GUI height: before=800, after=591
+[02.10.2026 20:36:45] DS_086 GUI height: before=600, after=591
+[02.10.2026 20:39:36] DS_086 GUI height: before=800, after=591
+[02.10.2026 20:39:36] DS_086 GUI height: before=600, after=591
+[02.10.2026 20:42:38] DS_086 GUI height: before=800, after=591
+[02.10.2026 20:42:38] DS_086 GUI height: before=600, after=591
+[02.10.2026 20:44:00] DS_086 GUI height: before=800, after=591
+[02.10.2026 20:44:00] DS_086 GUI height: before=600, after=591
+[02.10.2026 22:20:16] DS_086 GUI height: before=800, after=591
+[02.10.2026 22:20:16] DS_086 GUI height: before=600, after=591
+[02.10.2026 22:24:39] DS_086 GUI height: before=800, after=591
+[02.10.2026 22:24:39] DS_086 GUI height: before=600, after=591
+[02.10.2026 22:48:06] DS_086 GUI height: before=800, after=591
+[02.10.2026 22:48:06] DS_086 GUI height: before=600, after=591
+[02.10.2026 23:54:24] DS_086 GUI height: before=800, after=591
+[02.10.2026 23:54:24] DS_086 GUI height: before=800, after=591
+[02.10.2026 23:57:28] DS_086 GUI height: before=800, after=591
+[02.10.2026 23:57:28] DS_086 GUI height: before=800, after=591
+[02.10.2026 23:58:43] DS_086 GUI height: before=800, after=591
+[02.10.2026 23:58:43] DS_086 GUI height: before=800, after=591
+[03.10.2026 00:48:14] DS_086 GUI height: before=800, after=591
+[03.10.2026 00:48:15] DS_086 GUI height: before=800, after=591
+[03.10.2026 00:48:41] DS_086 GUI height: before=800, after=591
+[03.10.2026 00:48:41] DS_086 GUI height: before=800, after=591
+[03.10.2026 00:49:50] DS_086 GUI height: before=800, after=591
+[03.10.2026 00:49:50] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:00:56] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:00:56] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:04:52] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:04:52] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:05:17] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:05:17] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:07:39] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:07:39] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:12:04] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:12:04] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:12:26] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:12:27] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:12:50] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:12:50] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:16:58] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:16:58] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:17:45] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:17:45] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:19:49] DS_086 GUI height: before=800, after=591
+[03.10.2026 01:19:49] DS_086 GUI height: before=800, after=591
+[03.10.2026 02:00:51] DS_086 GUI height: before=800, after=591
+[03.10.2026 02:00:52] DS_086 GUI height: before=800, after=591
+[03.10.2026 02:10:04] DS_086 GUI height: before=800, after=591
+[03.10.2026 02:10:05] DS_086 GUI height: before=800, after=591
+03.10.2026 03:20:00 DS_CNT_000 COMPLETED EXIT_CODE=0
+03.10.2026 03:20:00 DS_CNT_000 task file moved INBOX->PROCESSED
+03.10.2026 03:20:00 DS_CNT_000 report written OUTBOX
+[DS_CNT_001] Start 2025-07-09
+[DS_CNT_001] Prev task OK (exit 0). Running main...
+[DS_CNT_001] agents-short.md written: 1949 chars
+[DS_CNT_001] config.yaml written: 2238 chars
+[DS_CNT_001] YAML OK. slashCommands count: 8
+[DS_CNT_001] agents-short.md: all 9 sections present
+[DS_CNT_001] Report written: DS_CNT_001_report.md
+[DS_CNT_001] Exit 0 (OK) 2025-07-09
+[03.10.2026 03:40:00] DS_CNT_001..005: Выполнено. Настройка Ai-Continue: agents-short, config.yaml, SEC_POLICY_AI, mcpServers, @codebase-индексация (отложена). Коды 0/0/0/0/0.
+[03.10.2026 05:10:00] DS 000a: Выполнено. exFAT в регламент, SEC_POLICY_AI, agents-short. Файл перенесён в PROCESSED.
+[03.10.2026 05:10:01] DS 004a: Частично. MCP-конфиг проверен, svc_mcp OK, CLI не в PATH. Файл перенесён в PROCESSED.
+[03.10.2026 05:10:02] DS 005a: Не выполнено (код 3). CLI ai-continue не установлен. Файл перенесён в PROCESSED.
+[03.10.2026 05:10:03] DS 006: Выполнено. Скрипты 001-005 приведены к регламенту, dry-run OK. Файл перенесён в PROCESSED.
+[03.10.2026 06:30:00] DS 005b: Выполнено частично. Подготовка к индексации OK, UI-шаги отложены. Регламент п. 1.12. Файл перенесён в PROCESSED.
+[03.10.2026 06:30:01] DS 004b: Выполнено частично. MCP-конфиг OK, svc_mcp OK, UI-проверка отложена. Файл перенесён в PROCESSED.
+[03.10.2026 06:30:02] DS 005c: Отложено (код 1). Согласование ИБ не получено. Файл перенесён в PROCESSED.
+[03.10.2026 08:00:00] DS 005c: Vypolneno (kod 0). Skript indeksatora sozdan. Massovyj progone - nochnoj rezhim. p. 1.13 dobavlen.
+[03.10.2026 08:05:00] DS 008: Vypolneno. Tablitsa, otchyoty 005a/004a.
+[03.10.2026 13:39:30] DS CNT 009: Выполнено. Фиксация моделей Ollama, правки отчётов, rate limit. Файл перенесён в PROCESSED.
+[03.10.2026 14:17:45] DS CNT 010: Выполнено. Фиксация @codebase-галлюцинаций, оговорка в agents-short.md. Файл перенесён в PROCESSED.
+[03.10.2026 23:15:00] DS CNT_012: Выполнено. Оптимальный список для индексации CNT. Отчёт в OUTBOX\DS_CNT_012_optimal_index_list_report.md. Файл перенесён в PROCESSED.
+[03.10.2026 23:30:00] DS CNT_013: Выполнено. Уточнения к списку индексации CNT (8 вопросов). Отчёт в OUTBOX\DS_CNT_013_optimal_index_clarifications_report.md. Файл перенесён в PROCESSED.
+[03.10.2026 23:59:03] DS CNT 014: Приостановлен. Шаги 1-8 выполнены (config.py, reader.py, .continueignore, переиндексация 29 файлов/160 чанков, поиск OK). Шаги 9-14 отложены до DS CNT 015. Отчёт в OUTBOX\DS_CNT_014_report.md. Файл остаётся в INBOX.
+[04.10.2026 00:20:46] DS CNT 015: Начало. Исключение шума (3 файла) + исследование SEC_POLICY_AI.md раздел 3.
+[04.10.2026 10:11:51] DS CNT 015: Выполнено. Исключён шум (3 файла), переиндексация 26 файлов/156 чанков, поиск top-1 по всем 6 запросам. SEC_POLICY_AI раздел 3 — Вариант C (откат корректировки). CNT_REFERENCE v1.2. Файл перенесён в PROCESSED.
+[04.10.2026 10:20:12] DS CNT 016: DS_CNT_014 завершён (шаги 9-14 закрыты в DS_CNT_015). DS_CNT_000_report.md обновлён. Индекс: 26 файлов, 156 чанков. Файл 014 не найден (INBOX/PROCESSED) — не блокирует.
+[04.10.2026 10:55:44] DS CNT 007: Начало. Пилотный ночной прогон связки (индекс + check-standard + explain-log + отчёт).
+[04.10.2026 11:49:24] DS CNT 007: Пилотная связка реализована и прогнана (RC=0): индекс(158ч/26ф) -> check-standard(SEC_POLICY_AI) -> explain-log(bot.log) -> сводный отчёт. Скрипты: check_standard.py/.ps1, explain_log.py/.ps1, make_pilot_report.ps1, run_cnt_007_nightly.cmd. Модель: qwen2.5-coder:1.5b (3b отсутствует в Ollama). PS-скрипты — UTF-8 BOM.
+[04.10.2026 12:15:13] DS CNT 018: Начало. Обновление pipeline на qwen2.5-coder:3b + повтор DS_CNT_007.
+[04.10.2026 12:38:09] DS CNT 018: Выполнено. Pipeline обновлён на qwen2.5-coder:3b. Повтор DS_CNT_007 — RC=0. Качество check-standard/explain-log — осмысленное, без галлюцинаций. Файл перенесён в PROCESSED.
+[04.10.2026 13:04:08] DS CNT 020: CNT-цикл завершён. 25 DS, 22 выполнены, 3 частично, 1 отложен (Task Scheduler). Файл перенесён в PROCESSED.
+[04.10.2026 13:07:52] DS CNT 019: Ожидание ответа пользователя. Register-ScheduledTask — Access Denied (0x80070005). Требуется запуск от администратора. Файл остаётся в INBOX.
+F:\TO_DBI\EXCHANGE\bot.log
+[04.10.2026 13:15] DS_CNT_019: Task Scheduler registration. TO_DBI_CNT_NightlyPipeline (Ready, daily 01:00). First run interrupted (session 0). Regulation p.8. Report RC=0
+04.10.2026 19:18:30 Миграция F: exFAT → NTFS завершена.
+04.10.2026 19:18:30 ACL применены для svc_mcp: rw - logs, PATCH_OUT; ro - DATA, EXCHANGE, PATCH_IN; deny WD,AD - DATA, EXCHANGE, PATCH_IN; нет доступа - SRC, .git.
+04.10.2026 19:18:30 svc_mcp удалён из группы Пользователи. DS_CNT_004a - выполнено. DS_CNT_021 - выполнено.
+04.10.2026 20:45:15 DS_CNT_021a: Убраны остатки exFAT в agents-short.md и DS_CNT_000_regulation.md.
+[04.10.2026 21:10:37] DS_086 GUI height: before=800, after=591
+[04.10.2026 21:10:37] DS_086 GUI height: before=800, after=591
+[04.10.2026 21:10:37] DS_086 GUI height: before=600, after=591
+[04.10.2026 21:10:37] DS_086 GUI height: before=600, after=591
+[04.10.2026 15:30:00] DS 090: Выполнено. Контекст проекта восстановлен. Создан отчёт в OUTBOX. Файл перенесён в PROCESSED.
+[05.10.2026 09:45:10] DS 091b: Vypolneno. 7 faylov testov - sys.stdout obernut v if __name__. pytest 57/57 PASSED. Fayl perenesen v PROCESSED.
+[05.10.2026 09:45:10] DS 092: Vypolneno. E2e GUI resume test (5 testov). Skan+abort+resume, fix+abort+resume. Fayl perenesen v PROCESSED.
+[05.10.2026 09:45:10] DS 093: Vypolneno. validate_batch_response: != -> > (under-return). 8/8 PASSED. Fayl perenesen v PROCESSED.
+[05.10.2026 09:45:10] DS 094: Vypolneno. CLI resume (--resume/--skip-ids), load/save_processed_ids. 8/8 PASSED. Fayl perenesen v PROCESSED.
+[05.10.2026 09:45:10] DS 095: Vypolneno. DS_STANDARD.md -> podrazdel 6.1 (BOM). Fayl perenesen v PROCESSED.
+[05.10.2026 10:06:22] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[05.10.2026 10:06:37] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[05.10.2026 10:06:53] DS 096a: Vypolneno. BOM udalen (config), t4 ispravlens (rus format + assert). 8/8 PASSED, 57/57 pytest.
+[05.10.2026 10:06:53] DS 096b: Vypolneno. pytest_out.txt, pytest_summary.txt udaleny.
+[05.10.2026 10:17:48] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[05.10.2026 10:19:01] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[05.10.2026 10:22:40] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[05.10.2026 10:22:48] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[05.10.2026 10:22:59] GIT_20261005_1022 Vypolneno: DS_091b+092+093+094+095+096a+096b. Hash 9245fa1, 15 files, push feature/dockerization OK. pytest 57 PASSED.
+[05.10.2026 10:24:13] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[05.10.2026 10:52:33] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[05.10.2026 10:53:08] DS 100a: Vypolneno. cli.py - try/except KeyboardInterrupt, rc=130. py_compile OK, stats OK, pytest 57 PASSED.
+[05.10.2026 10:55:45] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 02:02:36] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 02:10:25] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 02:10:26] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 02:33:56] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260930_071636.md: итог 36 из 36 (100%), batch=36, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=28.9с, avg_conf=0.96, class={'auto': 36, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260930_071636.md
+[07.10.2026 02:51:59] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260930_071636.md: итог 36 из 36 (100%), batch=4, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=203.8с, avg_conf=0.95, class={'auto': 36, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260930_071636.md
+[07.10.2026 03:26:00] DS 101b: Выполнено. Мок-сервер Ollama создан и проверен (tools\mock_ollama_invalid.py). Файл перенесён в PROCESSED.
+[07.10.2026 03:29:55] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260930_071636.md: 0 fixes — AI_RESPONSE не создан (issues остаются в AI)
+[07.10.2026 03:46:00] DS 101c: Выполнено. Фикс мока — извлечение N из 'exactly N elements', EXAMPLE игнорируется. Тесты batch=3/10/5 PASSED. Файл перенесён в PROCESSED.
+[07.10.2026 03:51:09] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260930_071636.md: итог 36 из 36 (100%), batch=4, invalid_json=0, skip_batch=0, fallback=1 (2/2 ok, 4.1с), avg_time=2.1с, avg_conf=0.95, class={'auto': 36, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260930_071636.md
+[07.10.2026 03:57:30] GIT_20261007_0357 GP. Выполнено. Закоммичено 55 файлов, отправлено в origin/feature/dockerization (feature/dockerization).
+[07.10.2026 04:02:00] GIT_20261007_0402 GP. Изменений нет, отправлено в origin/feature/dockerization.

@@ -902,3 +902,6 @@ F:\TO_DBI\EXCHANGE\bot.log
 [07.10.2026 13:29:31] DS 109: Выполнено. Регламент имён отчётов (§3.2 DS_STANDARD.md), правки AGENTS.md, git mv DS_103, финальный GP DS_106. Коммит 7ef9ca7, push OK.
 [07.10.2026 13:34:44] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [07.10.2026 13:40:25] DS 110: Выполнено. Унификация плейсхолдера DS_STANDARD.md (строки 84, 207, 294). Коммит 3fb6e31, push OK.
+[07.10.2026 13:42:25] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 14:13:19] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 14:17:48] DS 111: Выполнено. §5 обязателен в отчёте KODA — DS_STANDARD.md + AGENTS.md. Коммит d6d7f05, push OK. Файл перенесён в PROCESSED.

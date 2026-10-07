@@ -906,3 +906,8 @@ F:\TO_DBI\EXCHANGE\bot.log
 [07.10.2026 14:13:19] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [07.10.2026 14:17:48] DS 111: Выполнено. §5 обязателен в отчёте KODA — DS_STANDARD.md + AGENTS.md. Коммит d6d7f05, push OK. Файл перенесён в PROCESSED.
 [07.10.2026 14:55:30] DS 112: Выполнено. pytest-шум (logger.debug) + git-гигиена (прямые слэши, проверка PROCESSED). Коммит 6af52c2, push OK. Файл перенесён в PROCESSED.
+[07.10.2026 15:15:28] DS 113: Выполнено. DS_STANDARD.md: новый §6.2 (сводные блоки PowerShell), правка §9.1. Без коммита (по §7 — только по команде GIT). Файл перенесён в PROCESSED.
+[07.10.2026 15:29:20] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 15:29:37] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 15:29:47] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 15:39:42] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан

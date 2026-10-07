@@ -81,7 +81,7 @@
 
 Отчёты KODA размещаются в `EXCHANGE\OUTBOX\` и именуются по шаблону:
 
-**`DS_XXX_краткое_описание_report.md`**
+**`DS_XXX_<краткое_описание>_report.md`**
 
 где:
 - `XXX` — номер DS (например, `103`, `108`, `109`),
@@ -204,7 +204,7 @@ testpaths = SRC/tests
 ```powershell
 @"
 # Отчёт
-"@ | Set-Content -Encoding UTF8 F:\TO_DBI\EXCHANGE\OUTBOX\DS_XXX_<desc>_report.md
+"@ | Set-Content -Encoding UTF8 F:\TO_DBI\EXCHANGE\OUTBOX\DS_XXX_<краткое_описание>_report.md
 ```
 
 **Проверка BOM:**
@@ -291,7 +291,7 @@ Format-Hex -Path F:\TO_DBI\pytest.ini | Select-Object -First 1
 
 ## Формат отчёта
 
-Файл: EXCHANGE\OUTBOX\DS_XXX_report.md
+Файл: EXCHANGE\OUTBOX\DS_XXX_<краткое_описание>_report.md
 Структура:
 ## 1. Что сделано
 ...

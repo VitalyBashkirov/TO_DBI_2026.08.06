@@ -29,7 +29,7 @@
 - Соблюдать протоколы DS_048/049/050/052.
 - Запись в `EXCHANGE\bot.log`:
   `[ДД.ММ.ГГГГ ЧЧ:ММ:СС] DS XXX: <краткий итог>.`
-- Отчёт — в `EXCHANGE\OUTBOX\DS_XXX_report.md`, UTF-8 без BOM.
+- Отчёт — в `EXCHANGE\OUTBOX\DS_XXX_<краткое_описание>_report.md` (см. §3.2), UTF-8 без BOM.
 - Если при реализации выявится расхождение с предположениями задачи — остановиться, доложить автору DS, не додумывать.
 
 ---
@@ -76,6 +76,38 @@
 
 Согласовано с AGENTS.md, раздел «Формат записей в bot.log
 (DS_050)»: там требование кириллицы для записей лога.
+
+### 3.2. Имена файлов отчётов KODA
+
+Отчёты KODA размещаются в `EXCHANGE\OUTBOX\` и именуются по шаблону:
+
+**`DS_XXX_краткое_описание_report.md`**
+
+где:
+- `XXX` — номер DS (например, `103`, `108`, `109`),
+- `краткое_описание` — латиница, `snake_case`, без пробелов
+  (например, `gui_manual_run`, `gui_fixes_rescan_ui`, `final_gp`),
+- `_report` — обязательный суффикс отчёта.
+
+**Примеры:**
+- `DS_103_gui_manual_run_report.md`
+- `DS_108_gui_fixes_rescan_ui_report.md`
+- `DS_109_report_naming_convention_report.md`
+
+**Задания DS (исполненные)** переносятся KODA в `EXCHANGE\PROCESSED\`
+с тем же базовым именем, но **без** суффикса `_report`:
+- `DS_103_gui_manual_run_report.md` (отчёт) → `DS_103_gui_manual_run.md` (задание).
+- `DS_108_gui_fixes_rescan_ui_report.md` (отчёт) → `DS_108_gui_fixes_rescan_ui.md` (задание).
+
+**ЗАПРЕЩЕНО:**
+- Имена без краткого описания: `DS_XXX_report.md`.
+- Транслит: `DS_XXX_отчет.md`, `DS_XXX_otchet.md`.
+- Пробелы в имени файла.
+
+**Область применения:** с DS_109 вперёд. Исторические отчёты
+(`DS_100a_report.md`, `DS_101*`, `DS_102_report.md`, `DS_104_report.md`,
+`DS_105_report.md`, `DS_107_report.md`) **не переименовываются** —
+во избежание разрыва ссылок в `bot.log` и `PROCESSED`.
 
 ---
 
@@ -172,7 +204,7 @@ testpaths = SRC/tests
 ```powershell
 @"
 # Отчёт
-"@ | Set-Content -Encoding UTF8 F:\TO_DBI\EXCHANGE\OUTBOX\DS_XXX_report.md
+"@ | Set-Content -Encoding UTF8 F:\TO_DBI\EXCHANGE\OUTBOX\DS_XXX_<desc>_report.md
 ```
 
 **Проверка BOM:**

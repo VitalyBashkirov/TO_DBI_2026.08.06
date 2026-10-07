@@ -894,3 +894,8 @@ F:\TO_DBI\EXCHANGE\bot.log
 [07.10.2026 11:21:26] Rescan: 2 файлов; было 9514, стало 9514
 [07.10.2026 11:21:26] needs_manual: 0
 [07.10.2026 12:08:45] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 12:10:45] DS 108: Выполнено. Фиксы GUI: 108a (сброс UI), 108b (дедуп rescan + фильтр бэкапов). 65/65 PASSED. Файл перенесён в PROCESSED.
+[07.10.2026 12:10:45] DS 106: Выполнено. GP: коммит 4bd51b3 (6 файлов), push в origin/feature/dockerization. Файл перенесён в PROCESSED.
+[07.10.2026 13:11:02] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 13:11:04] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 13:18:01] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан

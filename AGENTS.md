@@ -281,7 +281,7 @@ dir "F:\TO_DBI\EXCHANGE\INBOX\DS_XXX_*.md"
 
 ### 2. Создание отчёта в OUTBOX
 
-**Файл**: `F:\TO_DBI\EXCHANGE\OUTBOX\DS_XXX_отчет.md`.
+**Файл**: `F:\TO_DBI\EXCHANGE\OUTBOX\DS_XXX_<краткое_описание>_report.md` (см. DS_STANDARD.md §3.2).
 
 **Содержимое**:
 
@@ -390,7 +390,7 @@ Add-Content -Path "F:\TO_DBI\EXCHANGE\bot.log" -Value "[ДД.ММ.ГГГГ ЧЧ:
 - **Основная ветка:** `main`
 - **Ветка разработки:** `feature/dockerization`
 - **Remote:** `origin` → `https://github.com/VitalyBashkirov/TO_DBI_2026.08.06.git`
-- **НЕ версионируются:** `EXCHANGE/bot.log`, `EXCHANGE/INBOX/`, `EXCHANGE/OUTBOX/`, `EXCHANGE/PROCESSED/`, `PATCH_IN/`, `PATCH_OUT/`, `logs/`, `logs_Deep/`, `temp/`, `DATA/CFT Platform IDE Documentation/`, `DATA/Рубрикатор v5/OLD v5/`, `SRC/AI_DOCS/`, `Презентация/`, `ПРОМТы/`, `.git_broken_backup/`, `*.bak`, `backup_*.zip`.
+- **НЕ версионируются:** `EXCHANGE/INBOX/`, `PATCH_IN/`, `PATCH_OUT/`, `logs/`, `logs_Deep/`, `temp/`, `DATA/CFT Platform IDE Documentation/`, `DATA/Рубрикатор v5/OLD v5/`, `SRC/AI_DOCS/`, `Презентация/`, `ПРОМТы/`, `.git_broken_backup/`, `*.bak`, `backup_*.zip`.
 - **EOL:** LF для `.py`, `.json`, `.sql`, `.sh`, `.ps1`; CRLF для `.md`, `.txt`, `.bat`, `.vbs`.
 - **Очистка истории:** `git filter-repo --path "<путь>" --invert-paths --force` (при необходимости несколько `--path`).
 - **Бэкап перед очисткой:** `git bundle create F:\TO_DBI_backup_<timestamp>.bundle --all`.

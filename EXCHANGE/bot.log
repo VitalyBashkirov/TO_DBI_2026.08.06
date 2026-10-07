@@ -870,3 +870,4 @@ F:\TO_DBI\EXCHANGE\bot.log
 [07.10.2026 04:39:24] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [07.10.2026 04:45:00] DS 102: Выполнено. GUI передаёт --resume в ai_local_worker. Тест test_ds102_gui_resume.py (3 теста). Регресс 60 PASSED. Файл перенесён в PROCESSED.
 [07.10.2026 04:51:14] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 04:55:00] DS 105: Выполнено. Правило «русский язык отчётов» — DS_STANDARD.md §3.1 + AGENTS.md (2 ссылки). Файл перенесён в PROCESSED.

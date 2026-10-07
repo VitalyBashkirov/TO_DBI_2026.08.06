@@ -2751,7 +2751,7 @@ class DBIMigrationApp:
         self.root.clipboard_clear()
         self.root.clipboard_append(log_content)
         self.log("Журнал скопирован в буфер обмена", 'info')
-        messagebox.showinfo("Копирование", "Журнал скопирован в буфер обмена")
+        self._show_copyable_dialog("Копирование", "Журнал скопирован в буфер обмена")
     
     def _current_fix_flags(self) -> dict:
         """DS_053_Уточнение_2: текущее состояние 6 флагов детерминированного
@@ -5373,7 +5373,7 @@ class DBIMigrationApp:
                              "отбор по ignore_set.", 'info')
                 if not issues:
                     self._bot_log("Нет issues, требующих AI (фильтр «только Ai»).")
-                    messagebox.showinfo(
+                    self._show_copyable_dialog(
                         "Нет issues, требующих AI",
                         "После фильтра «только Ai» не осталось проблем.\n"
                         "Снимите галку «Только Ai» для отправки всех issues.")
@@ -5587,7 +5587,7 @@ class DBIMigrationApp:
                 pass
 
             total_ok = sum(1 for r in results if r.get('status') == 'ok')
-            messagebox.showinfo(
+            self._show_copyable_dialog(
                 "AI-ответы обработаны",
                 f"Обработано файлов: {total_ok} из {len(results)}\n\n"
                 "См. Журнал выполнения и Журнал изменений.")

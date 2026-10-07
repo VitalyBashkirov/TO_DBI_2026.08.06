@@ -13,6 +13,9 @@ if sys.stdout.encoding != 'utf-8':
 if sys.stderr.encoding != 'utf-8':
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
+import logging
+logger = logging.getLogger(__name__)
+
 from typing import List, Tuple, Optional
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog, Menu
@@ -1833,17 +1836,17 @@ class DBIMigrationApp:
                 self.btn_abort.config(text="⏹ Прервать")
                 self.btn_abort.update_idletasks()
         except Exception as e:
-            print(f"[DS 042] Ошибка сброса btn_abort: {e}")
+            logger.debug(f"[DS 042] Ошибка сброса btn_abort: {e}")
         # DS_108a: сброс статуса и прогресса после завершения операции
         self._progress_frozen = False
         try:
             self.set_status("Готово")
         except Exception as e:
-            print(f"[DS_108a] Ошибка сброса status: {e}")
+            logger.debug(f"[DS_108a] Ошибка сброса status: {e}")
         try:
             self._reset_progress()
         except Exception as e:
-            print(f"[DS_108a] Ошибка сброса progress: {e}")
+            logger.debug(f"[DS_108a] Ошибка сброса progress: {e}")
     
     def _play_result_sound(self, success: bool, duration: float):
         """DS_088b §2.2: звук завершения операции (Windows-only).

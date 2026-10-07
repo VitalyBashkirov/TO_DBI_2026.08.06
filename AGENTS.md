@@ -279,6 +279,14 @@ dir "F:\TO_DBI\EXCHANGE\INBOX\DS_XXX_*.md"
 
 **Ожидаемо**: файла нет.
 
+**Проверка переноса**:
+
+```powershell
+Get-ChildItem "F:\TO_DBI\EXCHANGE\PROCESSED\DS_XXX_*.md"
+```
+
+**Ожидаемо**: файл есть. Если файла нет в PROCESSED — перенос не выполнен; **не переходить к §2**, разобраться.
+
 ### 2. Создание отчёта в OUTBOX
 
 **Файл**: `F:\TO_DBI\EXCHANGE\OUTBOX\DS_XXX_<краткое_описание>_report.md` (см. DS_STANDARD.md §3.2).
@@ -393,6 +401,7 @@ Add-Content -Path "F:\TO_DBI\EXCHANGE\bot.log" -Value "[ДД.ММ.ГГГГ ЧЧ:
 - **Remote:** `origin` → `https://github.com/VitalyBashkirov/TO_DBI_2026.08.06.git`
 - **НЕ версионируются:** `EXCHANGE/INBOX/`, `PATCH_IN/`, `PATCH_OUT/`, `logs/`, `logs_Deep/`, `temp/`, `DATA/CFT Platform IDE Documentation/`, `DATA/Рубрикатор v5/OLD v5/`, `SRC/AI_DOCS/`, `Презентация/`, `ПРОМТы/`, `.git_broken_backup/`, `*.bak`, `backup_*.zip`.
 - **EOL:** LF для `.py`, `.json`, `.sql`, `.sh`, `.ps1`; CRLF для `.md`, `.txt`, `.bat`, `.vbs`.
+- **Пути в git:** использовать **прямые** слэши (`/`) в путях `git add` / `git restore` / `git ls-files`. Обратные слэши (`\`) в Windows могут дать `fatal: pathspec ... did not match any files`.
 - **Очистка истории:** `git filter-repo --path "<путь>" --invert-paths --force` (при необходимости несколько `--path`).
 - **Бэкап перед очисткой:** `git bundle create F:\TO_DBI_backup_<timestamp>.bundle --all`.
 - **После перезаписи истории:** `git push --force origin <branch>` для каждой затронутой ветки.

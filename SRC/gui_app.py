@@ -1365,11 +1365,19 @@ class DBIMigrationApp:
         max_size_bytes = MAX_LOG_SIZE_MB * 1024 * 1024
         if total_size > max_size_bytes:
             size_mb = total_size / (1024 * 1024)
+            # Каталоги логов (только существующие)
+            log_dirs_str = '\n'.join(
+                f'  - {d}' for d in log_dirs if d.exists()
+            )
+            # Путь к файлу настроек (единый источник — метод класса)
+            settings_path = self._settings_path()
             result = messagebox.askyesno(
                 "Лимит логов превышен",
                 f"Размер файлов логов: {size_mb:.2f} МБ\n"
                 f"Максимальный размер: {MAX_LOG_SIZE_MB} МБ\n\n"
-                f"Удалить все файлы логов?"
+                f"Настройка: {settings_path} (max_log_size_mb)\n"
+                f"Каталоги для очистки:\n{log_dirs_str}\n\n"
+                f"Удалить все файлы логов (.log, .md) из этих каталогов?"
             )
             
             if result:

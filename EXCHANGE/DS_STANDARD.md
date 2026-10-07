@@ -232,19 +232,18 @@ Format-Hex -Path F:\TO_DBI\pytest.ini | Select-Object -First 1
 
 **Обязательные элементы (см. также §2 и §6.1):**
 
+0. **`Set-Location -LiteralPath 'F:\TO_DBI'`** + `Write-Host "Текущий каталог: $(Get-Location)"`
+   — первой командой после `chcp`, для контроля CWD (урок чата 16).
 1. **Команда 0 — кодировка** (первой строкой):
    ```powershell
    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
    $OutputEncoding = [System.Text.Encoding]::UTF8
    chcp 65001
    ```
-2. **После каждого `Write-Host` с кириллицей** — проверка вывода:
-   `$OutputEncoding.BodyName` должен быть `utf-8`/`cp65001`. Иначе следующая
-   команда может прочитать байты как cp1251.
-3. Секции с заголовками: `# --- N. <назначение> ---`.
-4. Готовность к одной кнопке (без промежуточного ввода).
-5. Ожидание — таблицей **вне** блока.
-6. Чтение — `-Encoding UTF8`; запись .py/.ini/.json/.md —
+2. Секции с заголовками: `# --- N. <назначение> ---`.
+3. Готовность к одной кнопке (без промежуточного ввода).
+4. Ожидание — таблицей **вне** блока.
+5. Чтение — `-Encoding UTF8`; запись .py/.ini/.json/.md —
    `[System.IO.File]::WriteAllText(..., UTF8Encoding($false))`.
 
 **Запреты (проверено практикой, чат 15):**
@@ -281,9 +280,8 @@ Format-Hex -Path F:\TO_DBI\pytest.ini | Select-Object -First 1
 5. **Большие блоки дробить** на маленькие шаги с проверкой после каждого:
    `Select-String` / `Test-Path` / `Write-Host`.
 
-6. **`MessageBox` для длинного текста** — `messagebox.showinfo` не даёт копировать
-   текст. Для лога/отчёта/длинного текста — `_show_copyable_dialog` (ScrolledText +
-   кнопка «Копировать»). Пилот: DS_114, строка 3655.
+6. **BOM-check / git-операции / `Select-String` без предварительного
+   `Set-Location` в корень проекта** — читается не тот файл (урок чата 16).
 
 **Git-гигиена (связано):**
 

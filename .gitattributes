@@ -1,4 +1,4 @@
-﻿# Auto detect text files and perform LF normalization
+# Auto detect text files and perform LF normalization
 * text=auto
 
 # Source code
@@ -6,12 +6,19 @@
 *.js  text eol=lf
 *.ts  text eol=lf
 
+# Data / config / scripts
+*.json text eol=lf
+*.ini  text eol=lf
+*.sql  text eol=lf
+*.sh   text eol=lf
+
 # Windows scripts
 *.cmd text eol=crlf
 *.bat text eol=crlf
 *.ps1 text eol=crlf
 
-# Markdown
+# Markdown - CRLF для корректного отображения в Notepad на Windows
+# (отчёты KODA генерируются на Windows; git хранит с LF, checkout — CRLF)
 *.md  text eol=crlf
 
 # YAML

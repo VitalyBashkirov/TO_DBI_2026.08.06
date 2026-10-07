@@ -3120,7 +3120,7 @@ class DBIMigrationApp:
         if current_version != APP_VERSION:
             self.log(f"Версия АРМ обновлена: {current_version}", 'info')
         
-        messagebox.showinfo(
+        self._show_copyable_dialog(
             "О программе",
             f"АРМ 'Адаптация под DBI' {current_version}\n\n"
             "Автоматизированное рабочее место для миграции\n"
@@ -3652,6 +3652,42 @@ class DBIMigrationApp:
 
         self.root.wait_window(dialog)
     
+    def _show_copyable_dialog(self, title: str, text: str, kind: str = "info"):
+        """DS_114: кастомный диалог с кнопкой «Копировать».
+
+        kind: "info" | "warning" | "error" — влияет на иконку/заголовок.
+        Нативный messagebox не поддерживает копирование — используется tk.Toplevel.
+        """
+        dialog = tk.Toplevel(self.root)
+        dialog.title(title)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(True, True)
+
+        # Текстовое поле (read-only, но с возможностью выделения)
+        txt = tk.Text(dialog, wrap="word", width=80, height=15)
+        txt.insert("1.0", text)
+        txt.configure(state="disabled")
+        txt.pack(fill="both", expand=True, padx=10, pady=(10, 5))
+
+        # Фрейм кнопок
+        btn_frame = tk.Frame(dialog)
+        btn_frame.pack(fill="x", padx=10, pady=(0, 10))
+
+        def _copy():
+            dialog.clipboard_clear()
+            dialog.clipboard_append(text)
+            self.log("Текст диалога скопирован в буфер обмена", "info")
+
+        tk.Button(btn_frame, text="Копировать", command=_copy).pack(side="left", padx=(0, 5))
+        tk.Button(btn_frame, text="Закрыть", command=dialog.destroy).pack(side="right")
+
+        dialog.update_idletasks()
+        # Центрирование относительно root
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - dialog.winfo_width()) // 2
+        y = self.root.winfo_rooty() + (self.root.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+
     def start_deep_scan(self):
         """Запуск глубокого сканирования в отдельном потоке"""
         if not self.source_dir_var.get():

@@ -912,3 +912,5 @@ F:\TO_DBI\EXCHANGE\bot.log
 [07.10.2026 15:29:47] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [07.10.2026 15:39:42] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [07.10.2026 16:10:38] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[07.10.2026 16:34:35] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
+[2026-10-07 22:55] [DS/KODA->Vitaly] DS_116: otkat pomeny 6.2 + CWD-punkt + audit showinfo. Udaleny: BodyName-punkt 2, MessageBox-zapret 6. Dobavleny: CWD-punkt 0, BOM-check-zapret 6. Itog: 15-3=12 showinfo, 18 showerror, 6 showwarning. pytest=0. Vывод: DS oshilsya v starschom podschete (14 vmesto 15), KODA v DS_115 byl prav.

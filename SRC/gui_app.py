@@ -1818,7 +1818,11 @@ class DBIMigrationApp:
                 pass
     
     def _finish_abortable_operation(self):
-        """DS 038: сбросить флаги и деактивировать кнопку «Прервать» (в finally)."""
+        """DS 038: сбросить флаги и деактивировать кнопку «Прервать» (в finally).
+
+        DS_108a: дополнительно сбросить статус-бар, прогресс-бар и
+        _progress_frozen, чтобы UI не оставался в состоянии «Выполняется...».
+        """
         self.scan_running = False
         self.scan_aborted = False
         # DS 042: гарантированный сброс кнопки «Прервать» с проверкой существования
@@ -1830,6 +1834,16 @@ class DBIMigrationApp:
                 self.btn_abort.update_idletasks()
         except Exception as e:
             print(f"[DS 042] Ошибка сброса btn_abort: {e}")
+        # DS_108a: сброс статуса и прогресса после завершения операции
+        self._progress_frozen = False
+        try:
+            self.set_status("Готово")
+        except Exception as e:
+            print(f"[DS_108a] Ошибка сброса status: {e}")
+        try:
+            self._reset_progress()
+        except Exception as e:
+            print(f"[DS_108a] Ошибка сброса progress: {e}")
     
     def _play_result_sound(self, success: bool, duration: float):
         """DS_088b §2.2: звук завершения операции (Windows-only).
@@ -5381,6 +5395,9 @@ class DBIMigrationApp:
         файл и итоговую сводку. Ошибки не должны ронять обработку AI-ответов.
         """
         stats = {'files': 0, 'before': 0, 'after': 0}
+        # DS_108b: суффиксы бэкапов — в rescan не берём
+        _backup_suffix_re = re.compile(
+            r'(_preai|_\d{8}_\d{6})\.plp$', re.IGNORECASE)
         touched = []
         for r in results or []:
             if not isinstance(r, dict) or r.get('status') != 'ok':
@@ -5392,7 +5409,23 @@ class DBIMigrationApp:
                 applied = 0
             src = r.get('source')
             if applied > 0 and src and Path(src).exists():
-                touched.append((str(src), r.get('backup_path')))
+                s = str(src)
+                # DS_108b: отсеиваем бэкапы
+                if _backup_suffix_re.search(s):
+                    continue
+                touched.append((s, r.get('backup_path')))
+        # DS_108b: дедупликация по src (один файл мог быть в нескольких
+        # AI-ответах — считать его дважды нельзя)
+        if touched:
+            seen = set()
+            unique = []
+            for s, bp in touched:
+                key = str(Path(s).resolve()).lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique.append((s, bp))
+            touched = unique
         if not touched:
             return stats
 

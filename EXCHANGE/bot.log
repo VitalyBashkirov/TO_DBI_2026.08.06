@@ -877,3 +877,20 @@ F:\TO_DBI\EXCHANGE\bot.log
 [07.10.2026 09:43:54] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [07.10.2026 09:44:01] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [07.10.2026 05:10:00] DS 107: Выполнено. Диалог _check_log_size расширен (settings.json, каталоги, расширения). Регресс 60 PASSED. Файл перенесён в PROCESSED.
+[07.10.2026 09:48:26] DS_086 GUI height: before=800, after=591
+[07.10.2026 09:48:26] DS_086 GUI height: before=600, after=591
+[07.10.2026 09:50:34] DS_086 GUI height: before=800, after=591
+[07.10.2026 09:50:34] DS_086 GUI height: before=600, after=591
+[07.10.2026 10:01:41] DS_086 GUI height: before=800, after=591
+[07.10.2026 10:01:41] DS_086 GUI height: before=600, after=591
+[07.10.2026 10:03:41] DS_086 GUI height: before=800, after=591
+[07.10.2026 10:03:41] DS_086 GUI height: before=600, after=591
+[07.10.2026 10:37:45] Нет issues, требующих AI (фильтр «только Ai»).
+[07.10.2026 10:37:45] DS 082a: Rule-based fixer (batch): запросов=2, fixes=70, skip=62 -> F:\TO_DBI\EXCHANGE\AI_OUT
+[07.10.2026 11:09:23] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260929_123800.md: итог 96 из 96 (100%), batch=10, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=189.6с, avg_conf=0.95, class={'auto': 80, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260929_123800.md
+[07.10.2026 11:21:05] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260930_071636.md: итог 36 из 36 (100%), batch=4, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=175.5с, avg_conf=0.95, class={'auto': 36, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260930_071636.md
+[07.10.2026 11:21:16] Rescan PSH_DEP_PRIV_GO.plp: было 4757, стало 4757
+[07.10.2026 11:21:26] Rescan PSH_DEP_PRIV_GO.plp: было 4757, стало 4757
+[07.10.2026 11:21:26] Rescan: 2 файлов; было 9514, стало 9514
+[07.10.2026 11:21:26] needs_manual: 0
+[07.10.2026 12:08:45] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан

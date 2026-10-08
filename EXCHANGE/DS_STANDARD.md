@@ -248,6 +248,11 @@ Get-Content -Path 'F:\TO_DBI\EXCHANGE\bot.log' -Encoding UTF8 |
 - DS_091a — `pytest.ini` BOM сломал парсинг.
 - Правило — **обязательное** для всех будущих DS.
 
+
+**ИСКЛЮЧЕНИЕ (Урок I, DS_126):** файлы `.ps1` с кириллицей должны
+записываться **С BOM** (UTF-8 with BOM, EF BB BF). Причина — PS 5.1
+читает .ps1 без BOM в системной ANSI (CP1251) и ломает кириллицу.
+Для .py / .md / .json / .ini / .sql правило «UTF-8 без BOM» сохраняется.
 ### 6.2. Техника сводных блоков PowerShell (ручной запуск)
 
 Сводный блок — это набор команд PowerShell, который KODA/пользователь
@@ -343,6 +348,28 @@ Get-Content -Path 'F:\TO_DBI\EXCHANGE\bot.log' -Encoding UTF8 |
 3. **[System.IO.File]::ReadAllBytes / WriteAllText — только абсолютные пути**
    ПЛОХО: $p = 'EXCHANGE\INBOX\file.md'; ReadAllBytes($p) -> DirectoryNotFoundException
    ХОРОШО: $p = (Resolve-Path -LiteralPath 'EXCHANGE\INBOX\file.md').Path; ReadAllBytes($p)
+
+4. **-Filter в Get-ChildItem не поддерживает regex-классы**
+   ПЛОХО: Get-ChildItem -Filter 'DS_12[1-5]*'  (Filter не понимает [1-5])
+   ХОРОШО (wildcard): Get-ChildItem -Filter 'DS_12*'
+   ХОРОШО (Where-Object): Get-ChildItem | Where-Object { $_.Name -match '^DS_12[1-5]' }
+
+5. **[Parser]::ParseFile и BOM (Урок H)**
+   При ОТСУТСТВИИ BOM у .ps1 с кириллицей:
+   - [Parser]::ParseFile читает файл в ANSI (CP1251) -> ложные ошибки.
+   - [Parser]::ParseInput с ReadAllText(UTF8) -> 0 ошибок.
+   Корень проблемы — не метод, а отсутствие BOM.
+   ХОРОШО: обеспечить BOM у .ps1 (см. п.6).
+
+6. **.ps1 с кириллицей требует BOM в PS 5.1 (Урок I)**
+   PS 5.1 при запуске .ps1 БЕЗ BOM читает файл в системной ANSI
+   (CP1251 на русской Windows). Кириллица -> кракозябры -> ложные
+   ошибки парсинга ("Непредвиденная лексема }" на корректных строках).
+   ХОРОШО: записывать .ps1 с кириллицей С BOM:
+     $utf8WithBom = New-Object System.Text.UTF8Encoding($true)
+     [System.IO.File]::WriteAllText($path, $text, $utf8WithBom)
+   ПРОВЕРКА: $bytes = [IO.File]::ReadAllBytes($path)
+             BOM = ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
 
 ### 6.3. Порядок завершения DS
 

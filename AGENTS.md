@@ -598,11 +598,16 @@ Get-Content -Path "F:\TO_DBI\EXCHANGE\bot.log" -Encoding UTF8 -Tail N
     -BotLogMessage "Выполнено. ..." `
     -CommitMessage "DS_121: ..." `
     -Files @("SRC/ai_local_worker.py") `
+    -InboxFile "EXCHANGE/INBOX/DS_XXX_описание.md" `
     -Push
 ```
 
 Тела `$taskBody` и `$reportBody` формируются DeepSeek в том же блоке
 до вызова `close_ds.ps1` (here-string).
+
+Если задан `-InboxFile` — INBOX-файл удаляется после создания
+PROCESSED-версии (урок E, DS_125). Если не задан — секция [2.5]
+выводит «InboxFile не задан (ок)».
 
 **Последняя строка PS-блока:**
 `Write-Host "В KODA DS_XXX_описание.md запускать не нужно. Задачу закроем в PowerShell"`

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Универсальный скрипт закрытия DS-задания (v2).
     Выполняет: создание файлов задания/отчёта (если переданы),
@@ -29,7 +29,9 @@ param(
 
     [switch]$Push,
 
-    [string]$Branch = ''
+    [string]$Branch = '',
+
+    [string]$InboxFile = ''
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -104,6 +106,21 @@ if (-not [string]::IsNullOrWhiteSpace($DsFileName) -and -not [string]::IsNullOrW
     Write-Host "[2.2] Отчёт: $reportPath"
 } elseif (-not [string]::IsNullOrWhiteSpace($DsFileName)) {
     Write-Host "[2.2] ReportBody не передан — файл отчёта не создаётся" -ForegroundColor Yellow
+}
+
+Write-Host ""
+Write-Host "=== [2.5/8] Очистка INBOX ===" -ForegroundColor Cyan
+
+if ([string]::IsNullOrWhiteSpace($InboxFile)) {
+    Write-Host "[2.5] InboxFile не задан (ок)"
+} else {
+    $inboxPath = Join-Path 'F:\TO_DBI' $InboxFile
+    if (Test-Path -LiteralPath $inboxPath) {
+        Remove-Item -LiteralPath $inboxPath -Force
+        Write-Host "[2.5] INBOX удалён: $inboxPath"
+    } else {
+        Write-Host "[2.5] INBOX не найден (ок): $inboxPath" -ForegroundColor Yellow
+    }
 }
 
 Write-Host ""

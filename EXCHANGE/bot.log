@@ -1415,3 +1415,4 @@ DS_118: Task file created in PROCESSED. Branch: feature/dockerization. Push: 142
 [09.10.2026 01:31:33] DS_125: .gitattributes + *.log eol=lf; AGENTS.md + 'Простые DS без KODA' + 'INBOX-гигиена'; DS_STANDARD.md §6.2.1 + плоский формат. BOM=False.
 [09.10.2026 01:41:49] DS_086 GUI height: before=800, after=591
 [09.10.2026 01:41:49] DS_086 GUI height: before=600, after=591
+[09.10.2026 02:14:20] DS 126: close_ds.ps1: добавлен -InboxFile + авто-очистка INBOX. AGENTS.md, DS_STANDARD.md обновлены (Уроки G, H, I).

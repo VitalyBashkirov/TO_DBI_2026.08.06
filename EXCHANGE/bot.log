@@ -1408,3 +1408,4 @@ F:\TO_DBI\EXCHANGE\bot.log
 DS_118: Task file moved to PROCESSED. Branch: feature/dockerization. Push: 1424514..17057ef
 DS_118: Task file created in PROCESSED. Branch: feature/dockerization. Push: 1424514..17057ef
 [08.10.2026 17:50:58] DS 118-fix3: Выполнено. Отчёт DS_118-fix2 перезаписан без BOM. Файл перенесён в PROCESSED.
+[09.10.2026 00:06:40] DS_CNT_007: Ночной pipeline обновил отчёт (Index 163->253 chunks, 27->32 files). BOM снят (был True). Коммит отдельным сообщением.

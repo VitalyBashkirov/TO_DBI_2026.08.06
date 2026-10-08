@@ -1412,3 +1412,4 @@ DS_118: Task file created in PROCESSED. Branch: feature/dockerization. Push: 142
 [09.10.2026 00:21:19] DS 122: Выполнено. AGENTS.md — добавлен подраздел 'Запрещено при выполнении DS (DS_122)' перед '### Что не делать'. Без BOM.
 [09.10.2026 01:24:55] DS_121: ai_local_worker.py L757 bot=True -> bot=False. dry-run больше не пишет в bot.log. pytest test_ds094_resume.py: 8 passed.
 [09.10.2026 01:24:55] DS_124: settings.json — extensions.autoUpdate=false, extensions.autoCheckUpdates=false. JSON валиден.
+[09.10.2026 01:31:33] DS_125: .gitattributes + *.log eol=lf; AGENTS.md + 'Простые DS без KODA' + 'INBOX-гигиена'; DS_STANDARD.md §6.2.1 + плоский формат. BOM=False.

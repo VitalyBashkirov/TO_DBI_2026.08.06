@@ -112,6 +112,12 @@
 `DS_105_report.md`, `DS_107_report.md`) **не переименовываются** —
 во избежание разрыва ссылок в `bot.log` и `PROCESSED`.
 
+
+**Плоский формат для INBOX-заданий (DS_125):**
+При копировании .md-задания через Text Copy Download вложенные блоки
+кода (три бэктика) ломают разметку — внешний блок "съедает" внутренние.
+Решение: для тел заданий использовать плоский формат — отступы (4 пробела)
+вместо вложенных блоков кода. Тело задания в OUTBOX/PROCESSED — плоский текст.
 ---
 
 ## 4. Стандартный шаблон «Разведка»
@@ -322,6 +328,21 @@ Get-Content -Path 'F:\TO_DBI\EXCHANGE\bot.log' -Encoding UTF8 |
 8. **После переноса INBOX → PROCESSED** — проверять `Test-Path` в PROCESSED.
 9. **DS-задание может оказаться в OUTBOX вместо INBOX** — проверять
    фактическое расположение перед переносом.
+
+### 6.2.1. Практические грабли PowerShell (DS_125)
+
+1. **-SimpleMatch не понимает |**
+   ПЛОХО: Select-String -Pattern 'a|b' -SimpleMatch  (ищет буквальную строку "a|b")
+   ХОРОШО (regex, без -SimpleMatch): Select-String -Pattern 'a|b'
+   ХОРОШО (два вызова): Select-String -Pattern 'a' -SimpleMatch; Select-String -Pattern 'b' -SimpleMatch
+
+2. **Select-String находит docstring и сигнатуры, а не только вызовы**
+   ПЛОХО: Select-String -Pattern 'bot=True' -SimpleMatch  (найдёт docstring L109 и сигнатуру L108)
+   ХОРОШО: Select-String -Pattern 'bot=True)' -SimpleMatch  (только вызовы)
+
+3. **[System.IO.File]::ReadAllBytes / WriteAllText — только абсолютные пути**
+   ПЛОХО: $p = 'EXCHANGE\INBOX\file.md'; ReadAllBytes($p) -> DirectoryNotFoundException
+   ХОРОШО: $p = (Resolve-Path -LiteralPath 'EXCHANGE\INBOX\file.md').Path; ReadAllBytes($p)
 
 ### 6.3. Порядок завершения DS
 

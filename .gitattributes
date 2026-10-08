@@ -12,6 +12,7 @@
 *.ini  text eol=lf
 *.sql  text eol=lf
 *.sh   text eol=lf
+*.log text eol=lf
 
 # Windows scripts
 *.cmd text eol=crlf

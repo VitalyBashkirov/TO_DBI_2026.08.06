@@ -1,0 +1,379 @@
+# Проект TO_DBI. Чат 21. Продолжение работы.
+
+## Контекст
+
+АРМ «Адаптация под DBI» — миграция PL/SQL (Oracle) → PostgreSQL (DBI).
+Репозиторий F:\TO_DBI. Ветка feature/dockerization.
+Роли: Автор DS — DeepSeek. Исполнитель — KODA. Пользователь — Vitaly.
+
+## Что сделано в чате 20
+
+### DS_CNT_007 (закрыт автоматикой pipeline)
+
+- Ночной pipeline обновил отчёт `EXCHANGE\OUTBOX\DS_CNT_007_pilot_report.md`.
+- Index: 163→253 chunks, 27→32 files.
+- **BOM снят** (был `True`, стал `False`).
+- Раздел «Пункты, требующие проверки на АРМ» переработан в «Нарушения (если есть)».
+- Коммит: `4fd31ce`.
+
+### DS_122 (закрыт вручную PowerShell, KODA не запускалась)
+
+- **AGENTS.md:** добавлен подраздел **«### Запрещено при выполнении DS (DS_122)»**
+  перед `### Что не делать` (L548-L575, +28 строк).
+- 6 запретов для KODA (урок чата 19: KODA работает по имени файла):
+  1. Не создавать новый файл в OUTBOX вместо перезаписи.
+  2. Не менять имя задания (fix2→fix3, fix3→fix2).
+  3. Не писать в `EXCHANGE\bot.log` произвольные строки.
+  4. Не игнорировать пронумерованные шаги DS.
+  5. Не подмешивать правила параллельных DS.
+  6. При конфликте — остановиться, доложить в OUTBOX.
+- **Файлы:**
+  - `EXCHANGE\PROCESSED\DS_122_agents_md_koda_bans.md`
+  - `EXCHANGE\OUTBOX\DS_122_agents_md_koda_bans_report.md`
+- **Коммиты:** `efa0471` (AGENTS.md + bot.log), `8c1b162` (файлы задания/отчёта).
+
+### tools\close_ds.ps1 (новый инструмент)
+
+- **Универсальный скрипт закрытия DS** (`F:\TO_DBI\tools\close_ds.ps1`, 219 строк).
+- Выполняет: проверки → bot.log → git add → commit → push → проверка → сводка.
+- Параметры: `-DsNumber`, `-BotLogMessage`, `-CommitMessage`, `-Files`, `-Push`, `-Branch`.
+- `EXCHANGE/bot.log` добавляется автоматически.
+- BOM-check для `.md` файлов из `-Files`.
+- Коммит: `605b96c`.
+
+**Пример запуска:**
+```powershell
+.\tools\close_ds.ps1 `
+    -DsNumber "DS 121" `
+    -BotLogMessage "Выполнено. ..." `
+    -CommitMessage "DS_121: ..." `
+    -Files @('SRC/ai_local_worker.py') `
+    -Push
+```
+
+### Настройка VSCode (settings.json)
+
+- **Удалён** `deepseekAssistant.apiKey` (был в plain-text).
+- **Ключ `sk-11c190775ce44dbb95ce452222482ec3` утёк** в чат 20 через скриншот.
+  **Отзыв отложен** Vitaly (ключ нигде не используется).
+- **ВНИМАНИЕ:** `extensions.autoUpdate` / `extensions.autoCheckUpdates` в
+  `settings.json` **отсутствуют** → VSCode пытается обновить Koda 1.2.2→1.2.3.
+  **Надо отключить** (кандидат в DS_123 или ручная правка).
+
+## Состояние (на момент старта чата 21)
+
+- **Ветка:** feature/dockerization на `8c1b162`, синхронизирована с origin.
+- **git status:** clean, ahead 0.
+- **pytest:** exit code 0 (65 passed) — на момент чата 19, не перепроверялся.
+- **BOM:** False для AGENTS.md, DS_STANDARD.md, bot.log, DS_122_*.
+- **INBOX:** пуст.
+- **PROCESSED:** DS_118, DS_118_fix, DS_118_fix2, DS_118_fix3, DS_122 — все на месте.
+- **OUTBOX:** отчёты DS_118…DS_122_fix3, DS_122 — все на месте.
+- **AGENTS.md:** раздел «Порядок завершения DS-задания» (9 шагов) + новый
+  «### Запрещено при выполнении DS (DS_122)».
+- **bot.log:** записи DS_118, DS_118-fix, DS_118-fix2, DS_118-fix3, DS_CNT_007, DS_122.
+
+## Диагноз Koda (важно для чата 21)
+
+### 1. Koda зависит от Karing
+
+- **Karing нужна для Koda.** Без неё DNS не резолвит `api.kodacode.ru`
+  (`getaddrinfo ENOTFOUND`).
+- **Karing не отключать** при работе с Koda.
+- Профиль: Finland, Helsinki.
+
+### 2. api.kodacode.ru периодически отдаёт 429
+
+- `HTTP 429 Too Many Requests` / `"The service is busy. Please retry shortly."`
+  (`rate_limit_error`, `code: service_busy`, `source: gateway`).
+- **Это внешняя перегрузка сервера Koda, не баг.**
+- Koda ретраит 4 раза (4s→7s), иногда с 2-3 попытки пробивается (`recovered`).
+- **При 429 — не чинить, ждать или делать вручную PowerShell.**
+
+### 3. Koda.gallerycdn.vsassets.io — HTTPS timeout (DPI)
+
+- `HTTPS GET manifest 1.2.3` → **timeout** и напрямую, и через Karing.
+- TCP 443 проходит (`TcpTestSucceeded=True`), но TLS рвётся.
+- **Признак DPI-фильтра у провайдера** (не Karing).
+- **Автообновление Koda 1.2.2 → 1.2.3 невозможно.**
+- **Обход:** отключить `extensions.autoUpdate` и `extensions.autoCheckUpdates`.
+
+### 4. Реальный домен Koda — api.kodacode.ru
+
+- НЕ `api.koda.ai` (его не существует).
+- Логи Koda: `~\.koda\logs\core.log`.
+
+## Уроки чата 20 (кандидаты в DS_STANDARD.md / AGENTS.md)
+
+### 1. Koda зависит от Karing (DNS)
+
+Не отключать Karing при работе с Koda. Проверять `Resolve-DnsName api.kodacode.ru`
+перед диагностикой Koda.
+
+### 2. 429 service_busy — перегрузка, не «сломалась»
+
+При 429 — не «чинить» Koda, а ждать или делать вручную PowerShell.
+
+### 3. Проверять settings.json на plain-text секреты
+
+Перед диагностикой VSCode — `Select-String -LiteralPath $settingsPath -Pattern 'sk-[A-Za-z0-9]'`.
+Утечка ключа DeepSeek в чат 20 — из-за plain-text в `settings.json`.
+
+### 4. Простые DS — вручную PowerShell, без KODA
+
+Расширение урока чата 19 п.30. При ручном выполнении DS:
+1. Выполнить действие через PowerShell.
+2. Создать `PROCESSED/DS_XXX.md` — задание (постфактум).
+3. Создать `OUTBOX/DS_XXX_report.md` — отчёт.
+4. Запись в `bot.log`.
+5. `tools\close_ds.ps1` — bot.log + git add + commit + push.
+6. В чате: «KODA не запускать».
+7. Последняя строка PS-блока:
+   `Write-Host "В KODA DS_XXX_описание.md запускать не нужно. Задачу закроем в PowerShell"`.
+
+**Кандидат в DS_123** — правило в AGENTS.md: «Простые DS — без KODA, вручную PS».
+
+### 5. close_ds.ps1 — автоматизация завершения DS
+
+Скрипт `tools\close_ds.ps1` выполняет 9 шагов DS_STANDARD.md §6.3 в одну команду.
+Полезен для ручных DS и для DS, выполненных KODA (в части закрытия).
+
+## Открытые проблемы (актуально на старт чата 21)
+
+1. **DS_121** — DS_082b не должен писать в bot.log. Приоритет: **средний**.
+   - Источник: тесты / `tools/ai_local_worker.py` / Task Scheduler.
+   - В `/explain-log` pipeline видно **13+ одинаковых записей DS_082b** подряд —
+     это засоряет отчёты.
+
+2. **DS_123** (кандидат) — правило в AGENTS.md: «Простые DS — без KODA, вручную PS».
+   Приоритет: **средний**.
+
+3. **DS_124** (кандидат) — отключить `extensions.autoUpdate` и
+   `extensions.autoCheckUpdates` в settings.json.
+   Приоритет: **средний/низкий** (мешает, но не критично).
+
+4. **DS_125** (кандидат) — `.gitattributes`: `*.log text eol=lf`,
+   `*.ps1 text eol=lf`. Убирает warning `LF will be replaced by CRLF`.
+   Приоритет: **низкий**.
+
+5. **DS_119** — CLI-сканер `run_scanner.py` отсутствует. Приоритет: **низкий**.
+
+6. **DS_120** — Массовая замена messagebox (12 showinfo). Приоритет: **низкий/средний**.
+
+7. **Отзыв API-ключа DeepSeek** `sk-11c190775ce44dbb95ce452222482ec3` —
+   отложен Vitaly. Приоритет: **низкий** (ключ не используется).
+
+## План DS на чат 21
+
+### DS_121 (рекомендуется) — источник DS_082b в bot.log
+
+**Тема:** найти, что пишет `DS 082b: AI_REQUEST_test.md: dry-run...` в
+`EXCHANGE\bot.log`, отключить логирование в тестовом режиме.
+
+**Где искать:**
+- `SRC\tests\` — pytest фикстуры/teardown.
+- `tools\ai_local_worker.py` — если пишет в bot.log по умолчанию.
+- Task Scheduler `TO_DBI_CNT_NightlyPipeline` — но он пишет в свой лог.
+
+**Действие:**
+- Найти источник (Select-String по `bot.log` / `082b` / `AI_REQUEST_test`).
+- Отключить запись в bot.log в тестовом режиме (писать в temp).
+- Проверить: после pytest `git status` остаётся clean.
+
+### DS_123 (кандидат) — AGENTS.md: правило «Простые DS — без KODA»
+
+**Тема:** добавить в AGENTS.md правило из «Уроков чата 20 п.4».
+
+## AI-инфраструктура
+
+- **Ollama:** http://localhost:11434, работает.
+- **Модель:** qwen2.5-coder:7b (основная).
+- **LM Studio:** закрыт.
+- **Мок-сервер:** tools\mock_ollama_invalid.py, порт 11500.
+- **ai_local_worker.py --check:** OK (аргумент без точки).
+- **Koda:** 1.2.2 (откат с 1.2.3), автообновление **НЕ отключено** (надо исправить).
+- **Karing:** нужна для Koda (Finland, Helsinki).
+
+## Реальный путь и имена (важно!)
+
+- Проект: F:\TO_DBI\ (SRC\ — исходники, tools\ — утилиты).
+- Класс GUI: DBIMigrationApp.
+- Тесты: F:\TO_DBI\SRC\tests\ — pytest exit code 0.
+- Python 3.11 в PATH. pytest 8.3.4.
+- pytest.ini в корне — testpaths = SRC/tests, addopts = --capture=no.
+- **BOM — критичная тема.** Out-File -Encoding UTF8 / Set-Content
+  -Encoding UTF8 (PS 5.1) добавляют BOM → Python/pytest падают.
+  Правило в DS_STANDARD.md §6.1.
+- **ВАЖНО:** путь D:\RUBRICATOR\SRC и F:\ARM\STR — НЕ существуют.
+- **Task Scheduler TO_DBI_CNT_NightlyPipeline** — LogonType = S4U,
+  daily 01:00. Работает штатно.
+- **AI-контур:** tools\ai_local_worker.py, конфиг
+  tools\ai_local_worker_config.json.
+- **Мок-сервер:** tools\mock_ollama_invalid.py (порт 11500).
+- **PATCH_IN:** F:\TO_DBI\PATCH_IN\patch_PSH_DEP_PRIV_GO — существует.
+- **AI_REQUEST:** EXCHANGE\AI_IN\AI_REQUEST_PSH_DEP_PRIV_GO_20260930_071636.md
+  (33 763 B, 36 issues).
+- **Новый инструмент:** `tools\close_ds.ps1` — универсальный скрипт
+  закрытия DS (см. чат 20).
+
+## Инфраструктура версионирования (после DS_104)
+
+- EXCHANGE\INBOX\ — игнор (рабочие задания).
+- EXCHANGE\OUTBOX\ — в git (отчёты KODA).
+- EXCHANGE\PROCESSED\ — в git (исполненные DS).
+- EXCHANGE\bot.log — в git (лог операций).
+- EXCHANGE\AI_IN\, AI_OUT\, AI_IN_PROCESSED\, AI_OUT_PROCESSED\ — игнор.
+
+## Регламент имён отчётов KODA (DS_109, действует)
+
+- **Отчёты:** EXCHANGE\OUTBOX\DS_XXX_<краткое_описание>_report.md.
+- **Задания:** EXCHANGE\PROCESSED\DS_XXX_<краткое_описание>.md
+  (без суффикса _report).
+- **Запрещено:** DS_XXX_report.md, транслит (DS_XXX_отчет.md), пробелы.
+- **Исторические отчёты** (DS_100a … DS_122) — не переименовываются.
+
+## Регламент работы
+
+- DS — в обёртке Text Copy Download (ДВА блока: имя файла + содержимое).
+- **Имя DS-файла:** DS_xxx_краткая_тема.md.
+- **Имя файла DS помещать в отдельный блок** для копирования одной кнопкой.
+- **Сводный блок для PowerShell** — обязателен, если формируется
+  несколько команд. Формат заголовка:
+  Сводный блок для PowerShell (ручной запуск) — <ПОМЕТКА>.
+  Пометки: ДО DS / ПОСЛЕ DS / ДО И ПОСЛЕ DS / ВМЕСТО DS / ОПЦИОНАЛЬНО /
+  ПАРАЛЛЕЛЬНО / ОТ АДМИНИСТРАТОРА.
+- **Обязательные элементы:**
+  0. **`Set-Location -LiteralPath 'F:\TO_DBI'`** — первой командой
+     после chcp. Плюс `Write-Host "Текущий каталог: $(Get-Location)"`.
+  1. Команда 0 — кодировка:
+     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+     $OutputEncoding = [System.Text.Encoding]::UTF8
+     chcp 65001
+  2. Секции с заголовками: # --- N. <назначение> ---.
+  3. Готовность к одной кнопке.
+  4. Ожидание — таблицей вне блока.
+  5. Кодировка — -Encoding UTF8 для чтения; UTF8Encoding($false) для
+     записи .py/.ini/.json/.md.
+  6. Прогноз KODA — НЕ запрашиваем.
+  7. Не трогать SRC без явного указания в DS.
+  8. Логи — только EXCHANGE\bot.log.
+  9. Отчёты KODA — в EXCHANGE\OUTBOX\, UTF-8 без BOM, русский
+     (DS_STANDARD.md §3.1).
+  10. GIT / PUSH / GP — по запросу.
+  11. Ограничения — DS_STANDARD.md раздел 2 + раздел 6.1 (BOM).
+  12. Не открывать LM Studio одновременно с Ollama.
+  13. KODA пишет отчёты на русском. Транслит не использовать.
+  14. **Git-гигиена:** .gitignore содержит *.bak_*, *.broken_*,
+      *.before_*, *.lnk.
+  15. **Перед GP** — проверить git status (clean).
+  16. **После GP** — проверить git branch -vv (синхронизация).
+  17. **§5 (Проверка) обязателен.** Select-String / BOM / git log /
+      pytest — в отчёт KODA.
+  18. **Прямые слэши в git add.**
+  19. **Никаких return в ручных блоках PowerShell.**
+  20. **Никаких @"..."@ (here-string) с бэктиками/кавычками/кириллицей.**
+  21. **Get-ChildItem + Format-Table** — отложенный вывод. Явный
+      Write-Host "$($_.Name)".
+  22. **$LASTEXITCODE после Select-String** — не работает.
+  23. **Дробить большие блоки** на маленькие шаги.
+  24. **BOM-check — только из корня проекта.**
+  25. **Читать фактический git diff**, не пересказ KODA.
+  26. **Проверять, не занят ли номер DS_XXX.**
+  27. **Проверочный блок запускать только ПОСЛЕ выполнения DS.**
+  28. **Не доверять описанию состояния в стартовом файле** — предполётная
+      проверка Select-String / BOM / git status перед формированием DS
+      (урок чата 18).
+  29. **bot.log пишется ДО коммита, не после** (урок чата 18,
+      DS_116/DS_117/DS_117-fix).
+  30. **KODA работает по имени INBOX-файла, а не по содержимому**
+      (урок чата 19, 4 случая: DS_118, DS_118-fix, DS_118-fix2,
+      DS_118-fix3). Для надёжности:
+      - имя DS — явно отражает действие;
+      - тело DS — пронумерованные шаги с точными путями;
+      - простые одношаговые DS — **вручную PowerShell**.
+  31. **Koda 1.2.3 имела баги Agent-режима** — откат до 1.2.2,
+      автообновление отключено (урок чата 19).
+  32. **DS_082b пишет в bot.log** — оставляет `M EXCHANGE/bot.log`
+      после pytest/тестов (кандидат в DS_121).
+  33. **Karing нужна для Koda** — без неё DNS `api.kodacode.ru` не
+      резолвится (урок чата 20).
+  34. **api.kodacode.ru отдаёт 429 service_busy** — внешняя перегрузка
+      сервера. При 429 — ждать или делать вручную PS (урок чата 20).
+  35. **Koda.gallerycdn.vsassets.io блокируется DPI** — автообновление
+      Koda 1.2.2→1.2.3 невозможно. Отключить `extensions.autoUpdate`
+      (урок чата 20).
+  36. **Простые DS — вручную PS, без KODA** — файлы задания/отчёта
+      создаются постфактум; последняя строка PS-блока:
+      `Write-Host "В KODA DS_XXX_описание.md запускать не нужно. Задачу закроем в PowerShell"`
+      (урок чата 20).
+  37. **close_ds.ps1** — универсальный скрипт закрытия DS
+      (`tools\close_ds.ps1`). Использовать для ручных DS и для
+      закрытия DS после KODA (урок чата 20).
+  38. **Проверять settings.json на plain-text секреты** — `Select-String
+      -LiteralPath $settingsPath -Pattern 'sk-[A-Za-z0-9]'` перед
+      диагностикой VSCode (урок чата 20).
+
+## Справочники (читать перед работой, не задания)
+
+- F:\TO_DBI\AGENTS.md — инструкция KODA (команды DS, GIT, PUSH, GP).
+- F:\TO_DBI\EXCHANGE\DS_STANDARD.md — стандарт оформления DS.
+  §3.1 — язык отчёта. §3.2 — имена отчётов KODA. §6.1 — BOM.
+  §6.2 — сводные блоки. §6.3 — порядок завершения DS (9 шагов).
+  §6.4 — типовой результат DS. §6.5 — общие правила завершения.
+  §9.1 — §5 обязателен.
+- F:\TO_DBI\EXCHANGE\DS_CONTEXT.md — общий контекст (§9.5 — AI-контур).
+- F:\TO_DBI\EXCHANGE\DS_FILES.md — карта файлов.
+- F:\TO_DBI\EXCHANGE\CNT_REFERENCE.md — справочник по Continue (CNT).
+
+## Отдельный трек: CNT (Continue) — ЗАКРЫТ
+
+Трек обучения CNT закрыт 07.10.2026.
+Ночной pipeline: TO_DBI_CNT_NightlyPipeline — S4U, daily 01:00,
+LastTaskResult = 0.
+Логи: logs\ds_cnt_007.log, logs\ds_cnt_005c_run.log.
+
+## Первый шаг
+
+1. Прочитать этот стартовый файл (21.Старт.txt).
+2. Прочитать отчёты чата 20:
+   - EXCHANGE\OUTBOX\DS_122_agents_md_koda_bans_report.md
+3. Проверить Ollama: python tools\ai_local_worker.py --check (БЕЗ точки!).
+4. Проверить модель: ollama ps.
+5. Проверить Karing: запущена (нужна для Koda).
+6. Убедиться, что Koda 1.2.2, автообновление — проверить (надо отключить).
+7. **Запросить у Vitaly приоритет на чат 21:**
+   - DS_121 — источник DS_082b в bot.log — да/нет.
+   - DS_123 — AGENTS.md: правило «Простые DS — без KODA» — да/нет.
+   - DS_124 — отключить autoUpdate — да/нет.
+   - DS_119 / DS_120 — по остаточному принципу.
+8. По приоритету — сформировать DS_121 (или иной) / 22.Старт.txt.
+
+## Команды (справочно)
+
+- ollama list — модели.
+- ollama ps — загруженные модели (RAM).
+- python tools\ai_local_worker.py --check — доступность Ollama.
+- python -m pytest SRC\tests\ -q — регресс.
+- python SRC\gui_app.py — запуск АРМ.
+- python tools\mock_ollama_invalid.py --port 11500 --fail-first.
+- git status -sb — состояние ветки.
+- git branch -vv — синхронизация с origin.
+- **.\tools\close_ds.ps1** — закрытие DS (bot.log + git add + commit + push).
+
+## Перед формированием нового DS_XXX
+
+- **Предполётная проверка** — git status, Select-String, BOM.
+- Имя файла — в отдельном блоке (Text Copy Download).
+- Прогноз KODA — не запрашивать.
+- Сводный блок PowerShell — с пометкой ДО / ПОСЛЕ / ВМЕСТО / ОПЦИОНАЛЬНО.
+- **`Set-Location -LiteralPath 'F:\TO_DBI'`** — первой командой.
+- Кодировка — -Encoding UTF8 для чтения, UTF8Encoding($false) для записи.
+- Имя DS-файла — DS_XXX_краткое_описание.md.
+- Дробить большие блоки на маленькие шаги с проверкой после каждого.
+- Никаких return / @"..."@ в ручных блоках.
+- Прямые слэши в git add.
+- **Читать фактический git diff**, не пересказ.
+- **Проверять, не занят ли номер DS_XXX.**
+- **Имя DS — явно отражает действие** (урок чата 19, KODA по имени).
+- **Простые одношаговые DS — вручную PowerShell** (урок чата 19).
+- **При ручном выполнении DS — файлы задания/отчёта постфактум** (урок чата 20).

@@ -54,7 +54,7 @@
 ### Настройка VSCode (settings.json)
 
 - **Удалён** `deepseekAssistant.apiKey` (был в plain-text).
-- **Ключ `sk-11c190775ce44dbb95ce452222482ec3` утёк** в чат 20 через скриншот.
+- **Ключ `sk-11c1...2ec3` утёк** в чат 20 через скриншот.
   **Отзыв отложен** Vitaly (ключ нигде не используется).
 - **ВНИМАНИЕ:** `extensions.autoUpdate` / `extensions.autoCheckUpdates` в
   `settings.json` **отсутствуют** → VSCode пытается обновить Koda 1.2.2→1.2.3.
@@ -160,7 +160,7 @@
 
 6. **DS_120** — Массовая замена messagebox (12 showinfo). Приоритет: **низкий/средний**.
 
-7. **Отзыв API-ключа DeepSeek** `sk-11c190775ce44dbb95ce452222482ec3` —
+7. **Отзыв API-ключа DeepSeek** `sk-11c1...2ec3` —
    отложен Vitaly. Приоритет: **низкий** (ключ не используется).
 
 ## План DS на чат 21

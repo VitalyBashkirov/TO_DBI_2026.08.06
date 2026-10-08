@@ -1407,3 +1407,4 @@ F:\TO_DBI\EXCHANGE\bot.log
 [08.10.2026 17:05:00] DS 118-fix2: Выполнено (исправлено). Файл перенесён в PROCESSED. Порядок завершения и кодировка bot.log применены.
 DS_118: Task file moved to PROCESSED. Branch: feature/dockerization. Push: 1424514..17057ef
 DS_118: Task file created in PROCESSED. Branch: feature/dockerization. Push: 1424514..17057ef
+[08.10.2026 17:50:58] DS 118-fix3: Выполнено. Отчёт DS_118-fix2 перезаписан без BOM. Файл перенесён в PROCESSED.

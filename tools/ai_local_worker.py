@@ -754,7 +754,7 @@ def run_request(request_path, out_dir, cfg, skip_rule_codes=None, limit=None,
             if verbose:
                 print(build_prompt(batch))
         log(f'{request_path.name}: dry-run — {len(batches)} батч(ов), '
-            f'Ollama не запрошена, AI_RESPONSE не создан', bot=True)
+            f'Ollama не запрошена, AI_RESPONSE не создан', bot=False)
         stats['classification'] = classify_distribution([])
         return stats, []
 

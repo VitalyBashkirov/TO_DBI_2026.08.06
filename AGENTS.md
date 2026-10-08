@@ -573,6 +573,40 @@ Get-Content -Path "F:\TO_DBI\EXCHANGE\bot.log" -Encoding UTF8 -Tail N
    в `EXCHANGE\OUTBOX\` отчётом с явной формулировкой проблемы.
    Не «додумывать» задание.
 
+### Закрытие DS через PS (одним блоком, DS_123)
+
+Если DS выполнен **вручную PowerShell** (без KODA) — DeepSeek формирует
+**один блок** для PS, включающий:
+
+1. Создание `EXCHANGE\PROCESSED\DS_XXX_<тема>.md` — тело задания (`-TaskBody`).
+2. Создание `EXCHANGE\OUTBOX\DS_XXX_<тема>_report.md` — тело отчёта (`-ReportBody`).
+3. Вызов `tools\close_ds.ps1` с параметрами:
+   `-DsNumber`, `-DsFileName`, `-TaskBody`, `-ReportBody`,
+   `-BotLogMessage`, `-CommitMessage`, `-Files`, `-Push`.
+
+**Vitaly копирует блок, вставляет в PS, запускает — DS закрыт.**
+**KODA не запускается.**
+
+Пример:
+
+```powershell
+.\tools\close_ds.ps1 `
+    -DsNumber "DS 121" `
+    -DsFileName "DS_121_botlog_082b_source.md" `
+    -TaskBody $taskBody `
+    -ReportBody $reportBody `
+    -BotLogMessage "Выполнено. ..." `
+    -CommitMessage "DS_121: ..." `
+    -Files @("SRC/ai_local_worker.py") `
+    -Push
+```
+
+Тела `$taskBody` и `$reportBody` формируются DeepSeek в том же блоке
+до вызова `close_ds.ps1` (here-string).
+
+**Последняя строка PS-блока:**
+`Write-Host "В KODA DS_XXX_описание.md запускать не нужно. Задачу закроем в PowerShell"`
+
 ### Что не делать
 
 - Не читать `DS_STANDARD.md` / `DS_CONTEXT.md` / `DS_FILES.md` как задания — это справочники.

@@ -95,3 +95,7 @@ reports/
 test_cyr.bat
 cleanup_report.csv
 !EXCHANGE/bot.log
+
+# Test artifacts — scanner reports (DS_117-fix)
+format/
+lang/

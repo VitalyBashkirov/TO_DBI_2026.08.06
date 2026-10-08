@@ -1,0 +1,372 @@
+# Проект TO_DBI. Чат 22. Продолжение работы.
+
+## Контекст
+
+АРМ «Адаптация под DBI» — миграция PL/SQL (Oracle) → PostgreSQL (DBI).
+Репозиторий F:\TO_DBI. Ветка feature/dockerization.
+Роли: Автор DS — DeepSeek. Пользователь — Vitaly.
+
+ВАЖНО: KODA не запускается. Karing не нужна.
+Все DS — вручную PowerShell (правило F, DS_125).
+
+## Что сделано в чате 21
+
+### DS_121 (закрыт вручную PS)
+
+- tools/ai_local_worker.py L757: bot=True → bot=False.
+- Причина: pytest test_ds094_resume.py (t4, t7) вызывал run_request(dry_run=True),
+  а тот писал в bot.log через log(..., bot=True). Засорил bot.log 145 записями.
+- pytest test_ds094_resume.py: 8 passed.
+- git diff: 1 строка.
+- Коммит: 5d73e17.
+
+### DS_124 (закрыт вручную PS)
+
+- settings.json: extensions.autoUpdate=false, extensions.autoCheckUpdates=false.
+- Причина: VSCode пытался обновить Koda 1.2.2→1.2.3, но Koda.gallerycdn.vsassets.io
+  блокируется DPI. Автообновление невозможно — отключено.
+- JSON валиден.
+- settings.json — вне git-репозитория (%APPDATA%).
+- Коммит: 5d73e17 (в части закрытия DS).
+
+### DS_125 (закрыт вручную PS)
+
+- .gitattributes: добавлено "*.log text eol=lf".
+- AGENTS.md: два новых подраздела после L608:
+  - ### Простые DS — без KODA (DS_125) — L610.
+  - ### INBOX-гигиена при ручном выполнении DS (DS_125) — L624.
+- DS_STANDARD.md §6.2.1: "Практические грабли PowerShell (DS_125)" — L326.
+- DS_STANDARD.md §3.2: "Плоский формат для INBOX-заданий (DS_125)" — L116.
+- BOM: все три файла False.
+- Коммит: 316889c.
+
+### Коммит bot.log
+
+- bot.log: DS_086 GUI height (запуск АРМ 09.10.2026 01:41) — 2 записи.
+- Коммит: 089c036.
+
+## Состояние (на момент старта чата 22)
+
+- Ветка: feature/dockerization на 089c036, синхронизирована с origin.
+- git status: clean, ahead 0.
+- INBOX: пуст.
+- PROCESSED: DS_118, DS_118_fix, DS_118_fix2, DS_118_fix3, DS_121, DS_122,
+  DS_124, DS_125 — все на месте.
+- OUTBOX: отчёты DS_118…DS_122, DS_121, DS_124, DS_125, DS_CNT_007 — на месте.
+- BOM: False для AGENTS.md, DS_STANDARD.md, bot.log, ai_local_worker.py,
+  .gitattributes.
+- AGENTS.md: разделы "Запрещено при выполнении DS (DS_122)",
+  "Закрытие DS через PS (одним блоком, DS_123)",
+  "Простые DS — без KODA (DS_125)",
+  "INBOX-гигиена при ручном выполнении DS (DS_125)".
+- DS_STANDARD.md: §6.2.1 (грабли PS), §3.2 (плоский формат).
+- .gitattributes: *.log eol=lf.
+
+## ОПРОВЕРГНУТ урок чата 20
+
+Урок 33 ("Karing нужна для Koda") — ОПРОВЕРГНУТ практикой чата 21.
+
+Проверка (чат 21):
+- Karing процесс: не запущен.
+- Resolve-DnsName api.kodacode.ru → 161.104.57.9 (резолвится штатно).
+- TCP 443 Koda.gallerycdn.vsassets.io → TcpTestSucceeded=True.
+
+ВЫВОД: KODA работает без Karing. Karing не нужна.
+Урок 33 архивируется как частный случай.
+
+## Реальный домен Koda — api.kodacode.ru
+
+- НЕ api.koda.ai (его не существует).
+- Логи Koda: ~\.koda\logs\core.log.
+- KODA 1.2.2 (откат с 1.2.3, автообновление отключено — DS_124).
+
+## Уроки чата 21 (в DS_STANDARD.md §6.2.1 и AGENTS.md)
+
+### Урок A: -SimpleMatch не понимает |
+
+- ПЛОХО: Select-String -Pattern 'a|b' -SimpleMatch (ищет буквальную строку "a|b").
+- ХОРОШО (regex, без -SimpleMatch): Select-String -Pattern 'a|b'.
+- ХОРОШО (два вызова): Select-String -Pattern 'a' -SimpleMatch; Select-String -Pattern 'b' -SimpleMatch.
+
+### Урок B: Select-String находит docstring и сигнатуры
+
+- ПЛОХО: Select-String -Pattern 'bot=True' -SimpleMatch (найдёт docstring L109,
+  сигнатуру L108).
+- ХОРОШО: Select-String -Pattern 'bot=True)' -SimpleMatch (только вызовы).
+
+### Урок C: [System.IO.File]::ReadAllBytes/WriteAllText — только абсолютные пути
+
+- ПЛОХО: $p = 'EXCHANGE\INBOX\file.md'; ReadAllBytes($p) → DirectoryNotFoundException.
+- ХОРОШО: $p = (Resolve-Path -LiteralPath 'EXCHANGE\INBOX\file.md').Path; ReadAllBytes($p).
+
+### Урок D: вложенные ``` ломают разметку при Text Copy Download
+
+- При копировании .md-задания через Text Copy Download вложенные блоки кода
+  ломают разметку.
+- Решение: плоский формат — отступы (4 пробела) вместо блоков кода.
+- Зафиксировано в DS_STANDARD.md §3.2.
+
+### Урок E: INBOX-гигиена при ручном выполнении DS
+
+- При ручном выполнении DS (без KODA) — файл задания из INBOX ОБЯЗАТЕЛЬНО
+  удалять (или перемещать в PROCESSED).
+- Причина: KODA ориентируется на имя INBOX-файла (урок чата 19).
+- Проверка: Get-ChildItem EXCHANGE\INBOX → пусто.
+- Замечание: tools\close_ds.ps1 v2 создаёт PROCESSED/OUTBOX с нуля,
+  но НЕ чистит INBOX — надо вручную.
+- Зафиксировано в AGENTS.md L624.
+
+### Урок F: Простые DS — без KODA
+
+- Если DS — простое одношаговое действие (правка конфига, удаление файла,
+  замена строки) — выполняется вручную PowerShell, без KODA.
+- Порядок:
+  1. DeepSeek формирует PS-блок.
+  2. Vitaly запускает в PS.
+  3. DeepSeek формирует файлы задания/отчёта постфактум (после выполнения).
+  4. Запись в bot.log, коммит, push.
+- KODA не запускается.
+- Последняя строка PS-блока:
+  Write-Host "В KODA DS_XXX_описание.md запускать не нужно. Задачу закроем в PowerShell"
+- Зафиксировано в AGENTS.md L610.
+
+### Урок G (новый, чат 21): -Filter не поддерживает regex-классы
+
+- ПЛОХО: Get-ChildItem -Filter 'DS_12[1-5]*' → не работает (Filter не понимает [1-5]).
+- ХОРОШО: Get-ChildItem -Filter 'DS_12*' → работает (wildcard).
+- Либо: Get-ChildItem | Where-Object { $_.Name -match '^DS_12[1-5]' }.
+- КАНДИДАТ В DS_126 (или расширение §6.2.1).
+
+## Открытые проблемы (актуально на старт чата 22)
+
+1. DS_126 — Расширение правила E + доработка close_ds.ps1 (параметр -InboxFile).
+   Приоритет: СРЕДНИЙ.
+   - Проблема: в блок закрытия ручного DS надо ВСЕГДА включать удаление
+     INBOX-файла (если он там есть). Дважды нарушено: DS_122, DS_125.
+   - Решение: доработать close_ds.ps1 — параметр -InboxFile,
+     авто-удаление из INBOX после создания PROCESSED-версии.
+
+2. DS_127 — DS_086 пишет 450 записей в bot.log.
+   Приоритет: СРЕДНИЙ.
+   - Источник: gui_app.py L547 — self._bot_log(f"DS_086 GUI height: before={h_before}, after={h_after}")
+   - Проблема: пишется при каждом запуске GUI (или resize), засоряет bot.log.
+   - 450 записей накопилось.
+   - Аналог DS_082b (тот был в ai_local_worker).
+   - Решение: проверить — нужно ли писать? Ограничить?
+
+3. DS_119 — CLI-сканер run_scanner.py отсутствует.
+   Приоритет: НИЗКИЙ.
+
+4. DS_120 — Массовая замена messagebox (12 showinfo).
+   Приоритет: НИЗКИЙ/СРЕДНИЙ.
+
+5. Отзыв API-ключа DeepSeek sk-11c1...2ec3 (замаскировано) —
+   ОСТАВЛЯЕМ (решение Vitaly, ключ не используется).
+
+## План DS на чат 22
+
+### DS_126 (рекомендуется первым) — close_ds.ps1 + правило E
+
+Тема: доработка close_ds.ps1 — параметр -InboxFile + авто-очистка INBOX.
+
+Что делать:
+1. Прочитать tools\close_ds.ps1 (текущий API v2).
+2. Добавить параметр -InboxFile (путь к INBOX-файлу).
+3. Если -InboxFile задан и файл существует — удалить после создания PROCESSED.
+4. Проверить: после запуска с -InboxFile INBOX пуст.
+5. Обновить AGENTS.md L576 — добавить описание -InboxFile.
+
+### DS_127 (вторым) — DS_086 в bot.log
+
+Тема: разобраться, почему DS_086 пишет 450 записей, ограничить.
+
+Что делать:
+1. Прочитать gui_app.py L540-L555 (контекст DS_086 GUI height).
+2. Понять — когда пишется (при старте? при resize?).
+3. Решить: отключить / ограничить / оставить (если легитимно).
+4. Проверить: после правки bot.log не растёт при запуске GUI.
+
+### DS_119, DS_120 — по остаточному принципу
+
+Низкий приоритет. Брать, если останется время.
+
+## AI-инфраструктура
+
+- Ollama: http://localhost:11434, работает (model=qwen2.5-coder:7b).
+- Модель: qwen2.5-coder:7b (основная).
+- LM Studio: закрыт.
+- Мок-сервер: tools\mock_ollama_invalid.py, порт 11500.
+- ai_local_worker.py --check: OK (available).
+- KODA: 1.2.2 (откат с 1.2.3), автообновление ОТКЛЮЧЕНО (DS_124).
+- KODA запускается БЕЗ Karing (опровергнут урок 33).
+- Karing: НЕ используется, процесс не запущен.
+- DNS api.kodacode.ru: 161.104.57.9 (резолвится штатно).
+
+## Реальный путь и имена (важно!)
+
+- Проект: F:\TO_DBI\ (SRC\ — исходники, tools\ — утилиты).
+- Класс GUI: DBIMigrationApp.
+- Тесты: F:\TO_DBI\SRC\tests\ — pytest exit code 0.
+- Python 3.11 в PATH. pytest 8.3.4.
+- pytest.ini в корне — testpaths = SRC/tests, addopts = --capture=no.
+- BOM — критичная тема. Out-File -Encoding UTF8 / Set-Content
+  -Encoding UTF8 (PS 5.1) добавляют BOM → Python/pytest падают.
+  Правило в DS_STANDARD.md §6.1.
+- ВАЖНО: путь D:\RUBRICATOR\SRC и F:\ARM\STR — НЕ существуют.
+- Task Scheduler TO_DBI_CNT_NightlyPipeline — LogonType = S4U,
+  daily 01:00. Работает штатно.
+- AI-контур: tools\ai_local_worker.py, конфиг
+  tools\ai_local_worker_config.json.
+- Мок-сервер: tools\mock_ollama_invalid.py (порт 11500).
+- PATCH_IN: F:\TO_DBI\PATCH_IN\patch_PSH_DEP_PRIV_GO — существует.
+- AI_REQUEST: EXCHANGE\AI_IN\AI_REQUEST_PSH_DEP_PRIV_GO_20260930_071636.md
+  (33 763 B, 36 issues).
+- Новый инструмент: tools\close_ds.ps1 — универсальный скрипт
+  закрытия DS (см. чат 20, обновлён в чате 21).
+
+## Инфраструктура версионирования (после DS_104)
+
+- EXCHANGE\INBOX\ — игнор (рабочие задания).
+- EXCHANGE\OUTBOX\ — в git (отчёты KODA).
+- EXCHANGE\PROCESSED\ — в git (исполненные DS).
+- EXCHANGE\bot.log — в git (лог операций).
+- EXCHANGE\AI_IN\, AI_OUT\, AI_IN_PROCESSED\, AI_OUT_PROCESSED\ — игнор.
+
+## Регламент имён отчётов KODA (DS_109, действует)
+
+- Отчёты: EXCHANGE\OUTBOX\DS_XXX_<краткое_описание>_report.md.
+- Задания: EXCHANGE\PROCESSED\DS_XXX_<краткое_описание>.md
+  (без суффикса _report).
+- Запрещено: DS_XXX_report.md, транслит (DS_XXX_отчет.md), пробелы.
+- Исторические отчёты (DS_100a … DS_125) — не переименовываются.
+
+## Регламент работы
+
+- DS — в обёртке Text Copy Download (ДВА блока: имя файла + содержимое).
+- Имя DS-файла: DS_xxx_краткая_тема.md.
+- Имя файла DS помещать в отдельный блок для копирования одной кнопкой.
+- Сводный блок для PowerShell — обязателен, если формируется
+  несколько команд. Формат заголовка:
+  Сводный блок для PowerShell (ручной запуск) — <ПОМЕТКА>.
+  Пометки: ДО DS / ПОСЛЕ DS / ДО И ПОСЛЕ DS / ВМЕСТО DS / ОПЦИОНАЛЬНО /
+  ПАРАЛЛЕЛЬНО / ОТ АДМИНИСТРАТОРА.
+- Обязательные элементы:
+  0. Set-Location -LiteralPath 'F:\TO_DBI' — первой командой
+     после chcp. Плюс Write-Host "Текущий каталог: $(Get-Location)".
+  1. Команда 0 — кодировка:
+     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+     $OutputEncoding = [System.Text.Encoding]::UTF8
+     chcp 65001
+  2. Секции с заголовками: # --- N. <назначение> ---.
+  3. Готовность к одной кнопке.
+  4. Ожидание — таблицей вне блока.
+  5. Кодировка — -Encoding UTF8 для чтения; UTF8Encoding($false) для
+     записи .py/.ini/.json/.md.
+  6. Прогноз KODA — НЕ запрашиваем.
+  7. Не трогать SRC без явного указания в DS.
+  8. Логи — только EXCHANGE\bot.log.
+  9. Отчёты KODA — в EXCHANGE\OUTBOX\, UTF-8 без BOM, русский
+     (DS_STANDARD.md §3.1).
+  10. GIT / PUSH / GP — по запросу.
+  11. Ограничения — DS_STANDARD.md раздел 2 + раздел 6.1 (BOM).
+  12. Не открывать LM Studio одновременно с Ollama.
+  13. KODA пишет отчёты на русском. Транслит не использовать.
+  14. Git-гигиена: .gitignore содержит *.bak_*, *.broken_*,
+      *.before_*, *.lnk.
+  15. Перед GP — проверить git status (clean).
+  16. После GP — проверить git branch -vv (синхронизация).
+  17. §5 (Проверка) обязателен.
+  18. Прямые слэши в git add.
+  19. Никаких return в ручных блоках PowerShell.
+  20. Никаких @"..."@ (here-string) с бэктиками/кавычками/кириллицей.
+  21. Get-ChildItem + Format-Table — отложенный вывод.
+  22. $LASTEXITCODE после Select-String — не работает.
+  23. Дробить большие блоки на маленькие шаги.
+  24. BOM-check — только из корня проекта.
+  25. Читать фактический git diff, не пересказ KODA.
+  26. Проверять, не занят ли номер DS_XXX.
+  27. Проверочный блок запускать только ПОСЛЕ выполнения DS.
+  28. Не доверять описанию состояния в стартовом файле — предполётная
+      проверка Select-String / BOM / git status перед формированием DS.
+  29. bot.log пишется ДО коммита, не после.
+  30. KODA работает по имени INBOX-файла, а не по содержимому.
+  31. Koda 1.2.3 имела баги Agent-режима — откат до 1.2.2.
+  32. DS_082b писал в bot.log при dry-run — исправлено в DS_121.
+  33. [ОПРОВЕРГНУТ в чате 21] Karing нужна для Koda.
+  34. api.kodacode.ru может отдавать 429 service_busy.
+  35. Koda.gallerycdn.vsassets.io может блокироваться DPI.
+  36. Простые DS — вручную PS, без KODA.
+  37. close_ds.ps1 — универсальный скрипт закрытия DS.
+  38. Проверять settings.json на plain-text секреты.
+  39. -SimpleMatch не понимает | (DS_125, §6.2.1).
+  40. Select-String находит docstring и сигнатуры (DS_125, §6.2.1).
+  41. [System.IO.File]::ReadAllBytes/WriteAllText — только абсолютные
+      пути (DS_125, §6.2.1).
+  42. Вложенные ``` в Text Copy Download ломают разметку (DS_125, §3.2).
+  43. INBOX-гигиена при ручном выполнении DS (DS_125, AGENTS.md L624).
+  44. -Filter в Get-ChildItem не поддерживает regex-классы (DS_126).
+
+## Справочники (читать перед работой, не задания)
+
+- F:\TO_DBI\AGENTS.md — инструкция KODA (команды DS, GIT, PUSH, GP).
+- F:\TO_DBI\EXCHANGE\DS_STANDARD.md — стандарт оформления DS.
+  §3.1 — язык отчёта. §3.2 — имена отчётов + плоский формат.
+  §6.1 — BOM. §6.2 — сводные блоки. §6.2.1 — грабли PowerShell.
+  §6.3 — порядок завершения DS. §6.4 — типовой результат DS.
+  §6.5 — общие правила завершения. §9.1 — §5 обязателен.
+- F:\TO_DBI\EXCHANGE\DS_CONTEXT.md — общий контекст.
+- F:\TO_DBI\EXCHANGE\DS_FILES.md — карта файлов.
+- F:\TO_DBI\EXCHANGE\CNT_REFERENCE.md — справочник по Continue (CNT).
+
+## Отдельный трек: CNT (Continue) — ЗАКРЫТ
+
+Трек обучения CNT закрыт 07.10.2026.
+Ночной pipeline: TO_DBI_CNT_NightlyPipeline — S4U, daily 01:00,
+LastTaskResult = 0.
+Логи: logs\ds_cnt_007.log, logs\ds_cnt_005c_run.log.
+
+## Первый шаг
+
+1. Прочитать этот стартовый файл (22.Старт.txt).
+2. Проверить Ollama: python tools\ai_local_worker.py --check (БЕЗ точки!).
+3. Проверить DNS: Resolve-DnsName api.kodacode.ru.
+4. Проверить git: git status -sb / git branch -vv.
+5. Проверить INBOX: должен быть пуст.
+6. Запросить у Vitaly приоритет на чат 22:
+   - DS_126 — close_ds.ps1 -InboxFile + правило E — да/нет.
+   - DS_127 — DS_086 450 записей в bot.log — да/нет.
+   - DS_119 / DS_120 — по остаточному принципу.
+7. По приоритету — сформировать DS_126 (или иной) / 23.Старт.txt.
+
+## Команды (справочно)
+
+- ollama list — модели.
+- ollama ps — загруженные модели (RAM).
+- python tools\ai_local_worker.py --check — доступность Ollama.
+- python -m pytest SRC\tests\ -q — регресс.
+- python SRC\gui_app.py — запуск АРМ.
+- python tools\mock_ollama_invalid.py --port 11500 --fail-first.
+- git status -sb — состояние ветки.
+- git branch -vv — синхронизация с origin.
+- .\tools\close_ds.ps1 — закрытие DS (bot.log + git add + commit + push).
+- Resolve-DnsName api.kodacode.ru — DNS Koda (без Karing).
+
+## Перед формированием нового DS_XXX
+
+- Предполётная проверка — git status, Select-String, BOM.
+- Имя файла — в отдельном блоке (Text Copy Download).
+- Прогноз KODA — не запрашивать.
+- Сводный блок PowerShell — с пометкой.
+- Set-Location -LiteralPath 'F:\TO_DBI' — первой командой.
+- Кодировка — -Encoding UTF8 для чтения, UTF8Encoding($false) для записи.
+- Имя DS-файла — DS_XXX_краткое_описание.md.
+- Дробить большие блоки на маленькие шаги с проверкой после каждого.
+- Никаких return / @"..."@ в ручных блоках.
+- Прямые слэши в git add.
+- Читать фактический git diff, не пересказ.
+- Проверять, не занят ли номер DS_XXX.
+- Имя DS — явно отражает действие.
+- Простые одношаговые DS — вручную PowerShell.
+- При ручном выполнении DS — файлы задания/отчёта постфактум.
+- INBOX-гигиена — удалять INBOX-файл после выполнения (DS_125).
+- Плоский формат для тел заданий (без вложенных ```) — DS_STANDARD.md §3.2.

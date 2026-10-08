@@ -5,6 +5,7 @@
 *.py  text eol=lf
 *.js  text eol=lf
 *.ts  text eol=lf
+*.tsx text eol=lf
 
 # Data / config / scripts
 *.json text eol=lf

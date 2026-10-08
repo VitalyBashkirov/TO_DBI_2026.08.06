@@ -244,7 +244,23 @@ Format-Hex -Path F:\TO_DBI\pytest.ini | Select-Object -First 1
 3. Готовность к одной кнопке (без промежуточного ввода).
 4. Ожидание — таблицей **вне** блока.
 5. Чтение — `-Encoding UTF8`; запись .py/.ini/.json/.md —
-   `[System.IO.File]::WriteAllText(..., UTF8Encoding($false))`.
+    `[System.IO.File]::WriteAllText(..., UTF8Encoding($false))`.
+
+**Опциональный элемент (по необходимости):**
+
+6.2.X. **Опциональная проверка кодировки (`$OutputEncoding.BodyName`)** — НЕобязательно
+
+По желанию — после установки кодировок можно вывести фактическое имя
+активной выходной кодировки для диагностики:
+
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+    Write-Host "OutputEncoding.BodyName: $($OutputEncoding.BodyName)"
+
+Ожидаемое значение при корректной настройке: utf-8 (или utf8).
+Данный пункт НЕ является обязательным элементом сводного блока.
+Вставлять его — на усмотрение автора DS. В предполётные и верификационные
+блоки по умолчанию НЕ включать.
 
 **Запреты (проверено практикой, чат 15):**
 

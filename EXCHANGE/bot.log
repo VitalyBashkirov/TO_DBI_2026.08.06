@@ -127,13 +127,9 @@
 [23.09.2026 21:35:00] DS 072e: Выполнено. Группа E зафиксирована (24 NAME, все transform_type ignore-детекторы, note по категориям брифа 4.2): PARSER_SQL 124->148, PROMPT fix_instruction 24 NAME синхронно, SRC не тронут. PlpCheck-аудит DS_071 завершён: 74/74 NAME (20 transform + 54 ignore/AI). Тесты 7/7, регресс 18 suites 0 FAILED. DS_CONTEXT v2.7, DS_FILES v1.9. Отчёт в OUTBOX. Файл перенесён в PROCESSED.
 [23.09.2026 21:42:00] GIT_20260923_2140 Выполнено. Закоммичено 8 файлов в feature/dockerization (коммит 4dc2233).
 [23.09.2026 21:44:00] GIT_20260923_2140 Push. Отправлено в origin/feature/dockerization (f6c37aa..4dc2233).
-[25.09.2026 01:03:34] [������ ���������] DS_NOEXIST_999.md. ���������: in_processed, report_exists, bot_log_updated
-[25.09.2026 01:03:34] DS_043: �������� ������ ���������
 [25.09.2026 01:03:34] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
 [25.09.2026 01:03:34] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
 [25.09.2026 01:03:34] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
-[25.09.2026 01:06:21] [������ ���������] DS_NOEXIST_999.md. ���������: in_processed, report_exists
-[25.09.2026 01:06:21] DS_043: �������� ������ ���������
 [25.09.2026 01:06:21] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
 [25.09.2026 01:06:21] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
 [25.09.2026 01:06:21] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
@@ -323,21 +319,10 @@
 [02.10.2026 17:56:18] DS 082a: Rule-based fixer (batch): запросов=2, fixes=70, skip=62 -> EXCHANGE\AI_OUT
 [02.10.2026 19:02:42] DS 090: Live-прогон CLI завершён. Статус: Частично. Сканер требует GUI (СТОП-развилка). Rule-based: 70/132 issues за 0.4с. AI worker: таймаут на batch 10, валидные батчи (5 issues) — 3s/issue. Resume в CLI недоступен.
 [02.10.2026 18:30:00] DS_090 — Live-прогон CLI (PSH_DEP_PRIV_GO)
-  Статус: ЧАСТИЧНО
-  Целевой файл: PSH_DEP_PRIV_GO.plp (100323 байт, 2161 строк)
-  Issues: 132 (из AI_REQUEST 20260929 + 20260930)
-  Rule-based: 70 fixes / 62 skip за 0.4 сек
-  AI fix (batch 5): 35 fixes за 112 сек
-  AI fix (batch 10): 100% invalid JSON (timeout)
-  Общее время: ~112 сек (частичный прогон)
-  ~28 мин/файл: ЧАСТИЧНО подтверждён (13 сек/fix для batch 5)
-  Resume CLI: НЕдоступен (GUI-only, DS_089b)
-  СТОП-развилки: сканер не CLI, resume не в ai_local_worker.py
-  Отчёт: EXCHANGE\OUTBOX\DS_090_report.md
-  Артефакты: AI_OUT (35 fixes), SRC не изменён
-03.10.2026 03:20:00 DS_CNT_000 COMPLETED EXIT_CODE=0
-03.10.2026 03:20:00 DS_CNT_000 task file moved INBOX->PROCESSED
-03.10.2026 03:20:00 DS_CNT_000 report written OUTBOX
+[2026-10-02 18:30] [DS_090] Статус: ЧАСТИЧНО. Целевой файл: PSH_DEP_PRIV_GO.plp (100323 B, 2161 строк). Issues: 132. Rule-based: 70 fixes / 62 skip. AI fix (batch 5): 35 fixes за 112 сек. AI fix (batch 10): 100% invalid JSON (timeout). Общее время ~112 сек. Resume CLI: недоступен (GUI-only, DS_089b). Отчёт: EXCHANGE\OUTBOX\DS_090_report.md. SRC не изменён.
+[2026-10-03 03:20:00] DS_CNT_000 COMPLETED EXIT_CODE=0
+[2026-10-03 03:20:00] DS_CNT_000 task file moved INBOX->PROCESSED
+[2026-10-03 03:20:00] DS_CNT_000 report written OUTBOX
 [DS_CNT_001] Start 2025-07-09
 [DS_CNT_001] Prev task OK (exit 0). Running main...
 [DS_CNT_001] agents-short.md written: 1949 chars
@@ -370,12 +355,11 @@
 [04.10.2026 12:38:09] DS CNT 018: Выполнено. Pipeline обновлён на qwen2.5-coder:3b. Повтор DS_CNT_007 — RC=0. Качество check-standard/explain-log — осмысленное, без галлюцинаций. Файл перенесён в PROCESSED.
 [04.10.2026 13:04:08] DS CNT 020: CNT-цикл завершён. 25 DS, 22 выполнены, 3 частично, 1 отложен (Task Scheduler). Файл перенесён в PROCESSED.
 [04.10.2026 13:07:52] DS CNT 019: Ожидание ответа пользователя. Register-ScheduledTask — Access Denied (0x80070005). Требуется запуск от администратора. Файл остаётся в INBOX.
-F:\TO_DBI\EXCHANGE\bot.log
 [04.10.2026 13:15] DS_CNT_019: Task Scheduler registration. TO_DBI_CNT_NightlyPipeline (Ready, daily 01:00). First run interrupted (session 0). Regulation p.8. Report RC=0
-04.10.2026 19:18:30 Миграция F: exFAT → NTFS завершена.
-04.10.2026 19:18:30 ACL применены для svc_mcp: rw - logs, PATCH_OUT; ro - DATA, EXCHANGE, PATCH_IN; deny WD,AD - DATA, EXCHANGE, PATCH_IN; нет доступа - SRC, .git.
-04.10.2026 19:18:30 svc_mcp удалён из группы Пользователи. DS_CNT_004a - выполнено. DS_CNT_021 - выполнено.
-04.10.2026 20:45:15 DS_CNT_021a: Убраны остатки exFAT в agents-short.md и DS_CNT_000_regulation.md.
+[2026-10-04 19:18:30] Миграция F: exFAT → NTFS завершена.
+[2026-10-04 19:18:30] ACL применены для svc_mcp: rw - logs, PATCH_OUT; ro - DATA, EXCHANGE, PATCH_IN; deny WD,AD - DATA, EXCHANGE, PATCH_IN; нет доступа - SRC, .git.
+[2026-10-04 19:18:30] svc_mcp удалён из группы Пользователи. DS_CNT_004a - выполнено. DS_CNT_021 - выполнено.
+[2026-10-04 20:45:15] DS_CNT_021a: Убраны остатки exFAT в agents-short.md и DS_CNT_000_regulation.md.
 [04.10.2026 15:30:00] DS 090: Выполнено. Контекст проекта восстановлен. Создан отчёт в OUTBOX. Файл перенесён в PROCESSED.
 [05.10.2026 09:45:10] DS 091b: Vypolneno. 7 faylov testov - sys.stdout obernut v if __name__. pytest 57/57 PASSED. Fayl perenesen v PROCESSED.
 [05.10.2026 09:45:10] DS 092: Vypolneno. E2e GUI resume test (5 testov). Skan+abort+resume, fix+abort+resume. Fayl perenesen v PROCESSED.
@@ -473,8 +457,8 @@ F:\TO_DBI\EXCHANGE\bot.log
 [08.10.2026 16:41:36] DS 082b_AI_REQ: Выполнено. Файл перенесён в PROCESSED. Ollama не запрошена (dry-run).
 [08.10.2026 17:02:14] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [08.10.2026 17:05:00] DS 118-fix2: Выполнено (исправлено). Файл перенесён в PROCESSED. Порядок завершения и кодировка bot.log применены.
-DS_118: Task file moved to PROCESSED. Branch: feature/dockerization. Push: 1424514..17057ef
-DS_118: Task file created in PROCESSED. Branch: feature/dockerization. Push: 1424514..17057ef
+[2026-10-08 17:38] DS_118: Task file moved to PROCESSED. Branch: feature/dockerization. Push: 1424514..17057ef
+[2026-10-08 17:38] DS_118: Task file created in PROCESSED. Branch: feature/dockerization. Push: 1424514..17057ef
 [08.10.2026 17:50:58] DS 118-fix3: Выполнено. Отчёт DS_118-fix2 перезаписан без BOM. Файл перенесён в PROCESSED.
 [09.10.2026 00:06:40] DS_CNT_007: Ночной pipeline обновил отчёт (Index 163->253 chunks, 27->32 files). BOM снят (был True). Коммит отдельным сообщением.
 [09.10.2026 00:21:19] DS 122: Выполнено. AGENTS.md — добавлен подраздел 'Запрещено при выполнении DS (DS_122)' перед '### Что не делать'. Без BOM.
@@ -483,3 +467,4 @@ DS_118: Task file created in PROCESSED. Branch: feature/dockerization. Push: 142
 [09.10.2026 01:31:33] DS_125: .gitattributes + *.log eol=lf; AGENTS.md + 'Простые DS без KODA' + 'INBOX-гигиена'; DS_STANDARD.md §6.2.1 + плоский формат. BOM=False.
 [09.10.2026 02:14:20] DS 126: close_ds.ps1: добавлен -InboxFile + авто-очистка INBOX. AGENTS.md, DS_STANDARD.md обновлены (Уроки G, H, I).
 [09.10.2026 02:21:14] DS 127: bot.log очищен от 448 DS_086 + 488 пустых; L547 в gui_app.py удалена. Аудит остатков — кандидаты в DS_128.
+[2026-10-09 02:35] DS_128: bot.log нормализован — DS_090 слит (12->1), 3 DS_CNT + 4 ACL + 2 DS_118 переформатированы, артефакт удалён, 4 U+FFFD удалены. .gitignore + *Старт*.txt (без дубля). 469 строк. pytest 65 passed.

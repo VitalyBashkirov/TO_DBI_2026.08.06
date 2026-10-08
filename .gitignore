@@ -99,3 +99,6 @@ cleanup_report.csv
 # Test artifacts — scanner reports (DS_117-fix)
 format/
 lang/
+
+# Стартовые файлы чатов (не часть репозитория)
+*Старт*.txt

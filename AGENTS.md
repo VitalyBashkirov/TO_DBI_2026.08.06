@@ -181,6 +181,29 @@ Start-Process -FilePath "f:\TO_DBI\.venv\Scripts\python.exe" -ArgumentList "F:\T
 
 Ничего после `-= Задание выполнил =-` не выводится. Звук — **до** этой строки.
 
+
+### Порядок завершения DS-задания
+
+При завершении задачи DS_XXX соблюдать **жёсткую последовательность**:
+
+1. Выполнить правки по заданию DS.
+2. Создать отчёт KODA в `EXCHANGE\OUTBOX\` (UTF-8 без BOM).
+3. Перенести задание из `EXCHANGE\INBOX\` в `EXCHANGE\PROCESSED\`.
+4. Записать строку в `EXCHANGE\bot.log` (формат DS_050, см. §6.1 DS_STANDARD.md).
+5. `git add` всех изменённых и новых файлов, включая:
+   - файлы правок по заданию,
+   - `EXCHANGE/bot.log`,
+   - `EXCHANGE/PROCESSED/<задание>.md`,
+   - `EXCHANGE/OUTBOX/<отчёт>.md`.
+6. `git commit -m "<метка> Выполнено"`.
+7. `git status -sb` → ожидается clean (кроме файлов из игнора).
+8. `git push origin feature/dockerization`.
+9. `git status -sb` → clean, ahead 0.
+
+ЗАПРЕЩЕНО: создавать отчёт, переносить задание в PROCESSED или
+писать в bot.log ПОСЛЕ `git add` / `git commit`. Любая из этих операций
+после коммита оставляет хвост в рабочем дереве.
+
 ### Задание выполнено успешно
 
 1. **Выведи** технические сообщения и результат. При необходимости — техническое сообщение `-= DS XXX успешно выполнен =-` (см. «Команда DS»).
@@ -335,6 +358,17 @@ Add-Content -Path "F:\TO_DBI\EXCHANGE\bot.log" -Value "[ДД.ММ.ГГГГ ЧЧ:
 [15.09.2026 15:45:30] DS 049: Выполнено. Протокол завершения Koda. Файл перенесён в PROCESSED.
 ```
 
+
+**Правило кодировки bot.log:**
+
+**Запись** — UTF-8 без BOM. PowerShell 5.1: `Add-Content -Encoding UTF8` или
+`[System.IO.File]::AppendAllText` с `UTF8Encoding($false)`.
+
+**Чтение** — всегда `-Encoding UTF8`. Без `-Encoding UTF8` кириллица
+отображается как «?????».
+
+**Чтение (диагностика, проверки):** `Get-Content -Path 'F:\TO_DBI\EXCHANGE\bot.log' -Tail N -Encoding UTF8`.
+
 ### 4. Финальная проверка
 
 - INBOX — пуст.
@@ -392,6 +426,32 @@ Add-Content -Path "F:\TO_DBI\EXCHANGE\bot.log" -Value "[ДД.ММ.ГГГГ ЧЧ:
 ```
 
 **ВАЖНО**: параметр `-Encoding UTF8` — **обязателен**.
+
+
+**Правило кодировки (DS_050):**
+
+**Запись:**
+```powershell
+Add-Content -Path "F:\TO_DBI\EXCHANGE\bot.log" `
+            -Value $line -Encoding UTF8
+```
+или (предпочтительно, без BOM-нюансов):
+```powershell
+[System.IO.File]::AppendAllText(
+    "F:\TO_DBI\EXCHANGE\bot.log",
+    $line + [Environment]::NewLine,
+    [System.Text.UTF8Encoding]::new($false))
+```
+
+**Чтение:**
+```powershell
+Get-Content -Path "F:\TO_DBI\EXCHANGE\bot.log" -Encoding UTF8 -Tail N
+```
+
+**ВАЖНО:** без `-Encoding UTF8` при чтении PowerShell 5.1 интерпретирует
+файл как CP866/CP1251, кириллица отображается как кракозябры.
+Это дефект **ЧТЕНИЯ**, не порча файла. Не «чинить» файл —
+перечитать с `-Encoding UTF8`.
 
 ## Git-процедуры (DS_051)
 

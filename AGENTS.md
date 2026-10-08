@@ -359,8 +359,6 @@ Add-Content -Path "F:\TO_DBI\EXCHANGE\bot.log" -Value "[ДД.ММ.ГГГГ ЧЧ:
 ```
 
 
-**Правило кодировки bot.log:**
-
 **Запись** — UTF-8 без BOM. PowerShell 5.1: `Add-Content -Encoding UTF8` или
 `[System.IO.File]::AppendAllText` с `UTF8Encoding($false)`.
 

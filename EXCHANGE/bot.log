@@ -68,17 +68,11 @@
 [19.09.2026 15:32:26] GIT_20260919_1529 Push. Отправлено в origin/feature/dockerization (b24a167..b774189).
 [19.09.2026 16:10:30] DS 056: Выполнено. Разведка _is_in_comment_or_string — 3 определения, 10 кейсов (4 бага), документация PlpCheck собрана. Файл перенесён в PROCESSED.
 [19.09.2026 18:39:50] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
-
 [19.09.2026 18:39:50] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
-
 [19.09.2026 18:39:50] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
-
 [19.09.2026 18:58:06] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
-
 [19.09.2026 18:58:06] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
-
 [19.09.2026 18:58:06] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
-
 [19.09.2026 19:12:30] DS 056A: Выполнено. Унификация _is_in_comment_or_string: создан SRC\analyzer\lexer_state.py (LexerState, is_in_comment_or_string, advance_lexer_state, is_line_fully_in_comment_or_string), три потребителя делегируют. Тесты: 15/15. Регресс DS_032-055: падения только из-за отсутствия входных данных (patch_WORK пуст, PSH_SLIB.plp отсутствует) и исторического bot.log, не связаны с изменениями. Файл перенесён в PROCESSED.
 [19.09.2026 19:35:25] DS 056A_Уточнение_кейс_1: Опечатка автора зафиксирована. Код корректен. Файл перенесён в PROCESSED.
 [19.09.2026 19:48:51] DS 058: Разведка выполнена. Отчёт: EXCHANGE\OUTBOX\DS_058_report.md. Файл перенесён в PROCESSED.
@@ -134,25 +128,15 @@
 [23.09.2026 21:42:00] GIT_20260923_2140 Выполнено. Закоммичено 8 файлов в feature/dockerization (коммит 4dc2233).
 [23.09.2026 21:44:00] GIT_20260923_2140 Push. Отправлено в origin/feature/dockerization (f6c37aa..4dc2233).
 [25.09.2026 01:03:34] [������ ���������] DS_NOEXIST_999.md. ���������: in_processed, report_exists, bot_log_updated
-
 [25.09.2026 01:03:34] DS_043: �������� ������ ���������
-
 [25.09.2026 01:03:34] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
-
 [25.09.2026 01:03:34] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
-
 [25.09.2026 01:03:34] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
-
 [25.09.2026 01:06:21] [������ ���������] DS_NOEXIST_999.md. ���������: in_processed, report_exists
-
 [25.09.2026 01:06:21] DS_043: �������� ������ ���������
-
 [25.09.2026 01:06:21] DS_999_Тест_протокола.md: Выполнено. Файл перенесён в PROCESSED.
-
 [25.09.2026 01:06:21] DS_998_Тест_ожидания.md: Ожидание ответа пользователя. Файл остаётся в INBOX.
-
 [25.09.2026 01:06:21] DS_997_Тест_регресс.md: Задача не завершена. Файл остаётся в INBOX.
-
 [25.09.2026 07:17:02] DS 075: Выполнено. Счётчики «Прогноз исправлений / Исправлено / В AI» и блок топ-файлов в scan_report_* и scan_VVxVVx_*; настройка report_stats_min_files (GUI + settings.json). Тесты 14/14 PASSED, регресс без падений. Отчёт в OUTBOX, файл перенесён в PROCESSED.
 [25.09.2026 07:24:12] GIT_20260925_0725 Выполнено. Закоммичено 5 файлов в feature/dockerization.
 [25.09.2026 07:25:00] GIT_20260925_0725 Push. Отправлено в origin/feature/dockerization.
@@ -301,817 +285,43 @@
 [29.09.2026 12:04:57] GIT_20260929_1204 Выполнено. Закоммичено 2 файлов в feature/dockerization (4b5d7f8, DS_085: batch 10 + fallback).
 [29.09.2026 12:04:57] GIT_20260929_1204 Push. Отправлено в origin/feature/dockerization (bb58d09..4b5d7f8).
 [29.09.2026 12:38:00] Отправлено 96 issues из 285 (фильтр: needs_ai_fix). AI-запросов: 1.
-
-[29.09.2026 16:47:07] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 16:48:28] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 16:48:30] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 16:48:30] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 16:48:30] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 16:48:30] DS_086 GUI height: before=650, after=650
-
-[29.09.2026 16:48:30] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 16:48:30] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 16:48:30] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 16:48:30] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 16:49:10] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 16:49:11] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 16:49:11] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 16:49:11] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 16:49:11] DS_086 GUI height: before=650, after=650
-
-[29.09.2026 16:49:11] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 16:49:11] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 16:49:11] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 16:49:11] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 16:53:18] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 16:59:43] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:05:04] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:07:09] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:13:46] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:14:45] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:14:45] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:15:19] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:15:19] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:15:21] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:15:21] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:15:21] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:15:56] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:15:56] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:15:58] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:18:20] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:18:21] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 17:18:21] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:18:21] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 17:18:21] DS_086 GUI height: before=650, after=650
-
-[29.09.2026 17:18:21] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:18:21] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 17:18:21] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 17:18:21] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 18:45:58] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 18:47:11] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 18:47:13] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 18:47:13] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 18:51:06] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 18:51:09] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 18:51:09] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 18:51:09] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 18:51:09] DS_086 GUI height: before=650, after=650
-
-[29.09.2026 18:51:09] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 18:51:09] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 18:51:09] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 18:51:09] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 18:51:50] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 18:51:52] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 18:51:52] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 18:51:52] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 18:51:52] DS_086 GUI height: before=650, after=650
-
-[29.09.2026 18:51:52] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 18:51:52] DS_086 GUI height: before=441, after=650
-
-[29.09.2026 18:51:52] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 18:51:52] DS_086 GUI height: before=441, after=650
-
 [29.09.2026 20:00:11] DS 086: Выполнено. Скрытие 4 элементов GUI (btn_show_sql, btn_send_koda, btn_from_ai, changelog_frame) через pack_forget + меню «Вид»; высота окна 650→441; состояние в settings.json (ui_hidden_elements). Тесты DS_086 15/15 PASSED, регресс DS_036/038/039/054/054c/056/057/058/075/076/077 — PASSED. Отчёт EXCHANGE\OUTBOX\DS_086_report.md. Файл перенесён в PROCESSED.
-[29.09.2026 20:06:02] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 20:06:02] DS_086 GUI height: before=441, after=441
-
-[29.09.2026 20:13:04] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 20:13:04] DS_086 GUI height: before=441, after=441
-
 [29.09.2026 20:13:20] GIT_20260929_2013 Выполнено. Закоммичено 2 файлов в feature/dockerization (SRC/gui_app.py +202, SRC/tests/test_ds086_ui_hide.py новый). Коммит d9c57cf.
 [29.09.2026 20:14:21] GIT_20260929_2014 Выполнено. PUSH в origin/feature/dockerization, коммит d9c57cf.
-[29.09.2026 20:33:17] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 20:33:17] DS_086 GUI height: before=441, after=441
-
-[29.09.2026 20:35:18] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 20:35:18] DS_086 GUI height: before=441, after=441
-
-[29.09.2026 20:51:35] DS_086 GUI height: before=650, after=441
-
-[29.09.2026 20:51:35] DS_086 GUI height: before=441, after=441
-
-[29.09.2026 22:05:40] DS_086 GUI height: before=800, after=591
-
-[29.09.2026 22:05:42] DS_086 GUI height: before=600, after=800
-
-[29.09.2026 22:05:42] DS_086 GUI height: before=800, after=591
-
-[29.09.2026 22:05:42] DS_086 GUI height: before=600, after=800
-
-[29.09.2026 22:05:42] DS_086 GUI height: before=800, after=800
-
-[29.09.2026 22:05:42] DS_086 GUI height: before=800, after=591
-
-[29.09.2026 22:05:42] DS_086 GUI height: before=600, after=800
-
-[29.09.2026 22:05:43] DS_086 GUI height: before=800, after=591
-
-[29.09.2026 22:05:43] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 02:18:49] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 02:18:49] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 02:22:39] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 02:22:41] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 02:22:41] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 02:22:41] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 02:22:41] DS_086 GUI height: before=800, after=800
-
-[30.09.2026 02:22:41] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 02:22:41] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 02:22:41] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 02:22:41] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 02:24:20] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 02:24:21] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 02:25:55] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 02:25:55] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 02:26:25] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 02:26:27] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 02:26:27] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 02:26:27] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 02:26:27] DS_086 GUI height: before=800, after=800
-
-[30.09.2026 02:26:27] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 02:26:27] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 02:26:27] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 02:26:27] DS_086 GUI height: before=600, after=800
-
 [30.09.2026 02:27:01] DS 087: Выполнено. Переименование кнопок 1/2/3, активация workflow, layout, реестр DS_086. Файл перенесён в PROCESSED.
-[30.09.2026 06:57:29] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 06:57:29] DS_086 GUI height: before=600, after=591
-
 [30.09.2026 07:08:00] GIT_20260930_0708 Выполнено. Закоммичено 3 файлов в feature/dockerization.
 [30.09.2026 07:08:00] GIT_20260930_0708 Push. Отправлено в origin/feature/dockerization.
 [30.09.2026 07:16:36] Отправлено 36 issues из 121 (фильтр: needs_ai_fix). AI-запросов: 1.
-
-[30.09.2026 09:09:46] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 09:09:46] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 09:10:18] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 09:10:18] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 09:11:09] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 09:11:09] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 09:11:34] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 09:11:34] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 09:11:39] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 09:11:41] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 09:11:41] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 09:11:41] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 09:11:41] DS_086 GUI height: before=800, after=800
-
-[30.09.2026 09:11:41] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 09:11:41] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 09:11:41] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 09:11:41] DS_086 GUI height: before=600, after=800
-
 [30.09.2026 09:12:05] DS 088a: Выполнено. Автоматизация цикла «3. В Ai» (send_to_ai → воркеры → ожидание AI_RESPONSE → receive_from_ai). Файл перенесён в PROCESSED.
 [30.09.2026 09:18:23] DS 082b: AI_REQUEST_sample_20260930_091802.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [30.09.2026 09:19:38] DS 082b: AI_REQUEST_sample_20260930_091802.md: итог 1 из 1 (100%), batch=1, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=53.6с, avg_conf=0.95, class={'auto': 1, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_sample_20260930_091802.md
 [30.09.2026 09:22:25] DS 088a_DIAG: Выполнено. Разведка LLM-детекта (READ-ONLY): воркер только Ollama, LM Studio не поддержан. Файл перенесён в PROCESSED.
-[30.09.2026 10:04:56] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 10:04:56] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 10:25:31] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 10:25:31] DS_086 GUI height: before=600, after=591
-
 [30.09.2026 10:57:13] DS 088a_fix: Ожидание ответа пользователя. Пороги confidence в ai_exchange.py (C) — СТОП по §2.1. Файл остаётся в INBOX.
-[30.09.2026 11:56:38] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 11:56:38] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 11:59:13] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 11:59:13] DS_086 GUI height: before=600, after=591
-
 [30.09.2026 11:59:14] needs_manual: 0
-
-[30.09.2026 11:59:49] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 11:59:49] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 11:59:53] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 11:59:53] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 11:59:57] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 11:59:59] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 11:59:59] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 11:59:59] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 11:59:59] DS_086 GUI height: before=800, after=800
-
-[30.09.2026 11:59:59] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 11:59:59] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 11:59:59] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 11:59:59] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 12:00:45] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 12:00:45] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 12:40:28] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 12:40:28] DS_086 GUI height: before=600, after=591
-
 [30.09.2026 12:40:30] needs_manual: 0
-
-[30.09.2026 12:40:54] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 12:40:55] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 12:40:55] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 12:40:55] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 12:40:55] DS_086 GUI height: before=800, after=800
-
-[30.09.2026 12:40:55] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 12:40:55] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 12:40:55] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 12:40:55] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 12:40:56] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 12:40:56] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 12:41:24] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 12:41:24] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 12:42:41] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 12:42:41] DS_086 GUI height: before=600, after=591
-
 [30.09.2026 12:43:05] DS 088a_fix: Выполнено. Формат ЖВ, пороги confidence, layout. Файл перенесён в PROCESSED.
-[30.09.2026 12:50:00] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 12:50:00] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 13:30:44] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 13:30:44] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 13:31:08] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 13:31:09] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 13:31:09] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 13:31:09] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 13:31:10] DS_086 GUI height: before=800, after=800
-
-[30.09.2026 13:31:10] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 13:31:10] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 13:31:10] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 13:31:10] DS_086 GUI height: before=600, after=800
-
-[30.09.2026 13:31:11] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 13:31:11] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 13:31:28] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 13:31:28] DS_086 GUI height: before=600, after=591
-
-[30.09.2026 13:31:33] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 13:31:33] DS_086 GUI height: before=600, after=591
-
 [30.09.2026 13:31:35] needs_manual: 0
-
 [30.09.2026 13:32:58] DS 088b: Выполнено. Звуки, контекстное меню, «Только Ai», tooltip. Файл перенесён в PROCESSED.
-[30.09.2026 14:00:20] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 14:00:20] DS_086 GUI height: before=600, after=591
-
 [30.09.2026 14:03:53] GIT_20260930_1403 Выполнено. Закоммичено 5 файлов в feature/dockerization.
 [30.09.2026 14:03:53] PUSH_20260930_1403 Выполнено. Отправлено в origin/feature/dockerization.
 [30.09.2026 16:50:00] DS 089_DIAG: Выполнено. Пробный запуск в temp\diag_ds089 (20 проверок, 16 OK, 4 FAIL=подтверждение гипотез). Отчёт в OUTBOX\DS_089_DIAG_report.md. Файл перенесён в PROCESSED.
-[30.09.2026 19:02:15] DS_086 GUI height: before=800, after=591
-
-[30.09.2026 19:02:15] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:03:00] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:03:04] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:03:04] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:03:04] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:03:04] DS_086 GUI height: before=800, after=800
-
-[01.10.2026 18:03:04] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:03:04] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:03:04] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:03:04] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:03:59] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:03:59] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:04:06] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:04:06] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:04:11] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:04:11] DS_086 GUI height: before=600, after=591
-
 [01.10.2026 18:04:13] needs_manual: 0
-
-[01.10.2026 18:04:15] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:04:15] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:04:57] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:04:57] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:05:02] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:05:02] DS_086 GUI height: before=600, after=591
-
 [01.10.2026 18:05:04] needs_manual: 0
-
-[01.10.2026 18:05:05] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:05:05] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:05:48] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:05:49] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:45:09] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:45:09] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:46:48] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:46:48] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:47:28] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:47:31] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:47:31] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:47:31] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:47:31] DS_086 GUI height: before=800, after=800
-
-[01.10.2026 18:47:31] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:47:31] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:47:31] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:47:31] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:47:33] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:47:33] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:47:39] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:47:39] DS_086 GUI height: before=600, after=591
-
 [01.10.2026 18:47:42] needs_manual: 0
-
-[01.10.2026 18:48:24] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:48:26] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:48:26] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:48:26] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:48:26] DS_086 GUI height: before=800, after=800
-
-[01.10.2026 18:48:26] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:48:26] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:48:26] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:48:26] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:48:28] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:48:28] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:48:34] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:48:34] DS_086 GUI height: before=600, after=591
-
 [01.10.2026 18:48:36] needs_manual: 0
-
-[01.10.2026 18:49:05] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:49:07] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:49:08] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:49:08] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:49:08] DS_086 GUI height: before=800, after=800
-
-[01.10.2026 18:49:08] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:49:08] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:49:08] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:49:08] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:49:09] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:49:09] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:49:16] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:49:16] DS_086 GUI height: before=600, after=591
-
 [01.10.2026 18:49:19] needs_manual: 0
-
-[01.10.2026 18:50:02] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:50:04] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:50:04] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:50:04] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:50:04] DS_086 GUI height: before=800, after=800
-
-[01.10.2026 18:50:04] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:50:04] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:50:04] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:50:04] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:50:59] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:51:01] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:51:01] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:51:01] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:51:01] DS_086 GUI height: before=800, after=800
-
-[01.10.2026 18:51:01] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:51:01] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:51:01] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:51:01] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:51:02] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:51:03] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:51:10] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:51:10] DS_086 GUI height: before=600, after=591
-
 [01.10.2026 18:51:14] needs_manual: 0
-
-[01.10.2026 18:51:55] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:51:56] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:51:57] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:51:57] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:51:57] DS_086 GUI height: before=800, after=800
-
-[01.10.2026 18:51:57] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:51:57] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:51:57] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:51:57] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:51:58] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:51:58] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:52:03] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:52:03] DS_086 GUI height: before=600, after=591
-
 [01.10.2026 18:52:06] needs_manual: 0
-
-[01.10.2026 18:52:48] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:52:50] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:52:50] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:52:50] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:52:50] DS_086 GUI height: before=800, after=800
-
-[01.10.2026 18:52:50] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:52:50] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:52:50] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:52:51] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:52:53] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:52:54] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:53:01] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:53:01] DS_086 GUI height: before=600, after=591
-
 [01.10.2026 18:53:04] needs_manual: 0
-
-[01.10.2026 18:53:06] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:53:07] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:53:13] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:53:13] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:55:07] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:55:09] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:55:09] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:55:09] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:55:09] DS_086 GUI height: before=800, after=800
-
-[01.10.2026 18:55:09] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:55:10] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:55:10] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:55:10] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 18:55:12] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:55:12] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:55:18] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:55:18] DS_086 GUI height: before=600, after=591
-
 [01.10.2026 18:55:20] needs_manual: 0
-
-[01.10.2026 18:55:22] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:55:22] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 18:55:28] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 18:55:28] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 21:53:29] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 21:53:29] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 21:54:04] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 21:54:04] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 21:54:42] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 21:54:42] DS_086 GUI height: before=600, after=591
-
 [01.10.2026 21:54:44] needs_manual: 0
-
-[01.10.2026 21:55:44] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 21:55:44] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 21:56:20] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 21:56:22] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 21:56:22] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 21:56:22] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 21:56:22] DS_086 GUI height: before=800, after=800
-
-[01.10.2026 21:56:22] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 21:56:22] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 21:56:22] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 21:56:22] DS_086 GUI height: before=600, after=800
-
 [01.10.2026 22:00:00] DS 089a: Выполнено. Прерывание/продолжение UI. Тесты 13/13 PASSED. Файл перенесён в PROCESSED.
-[01.10.2026 23:40:03] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 23:40:04] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 23:40:04] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 23:40:04] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 23:40:04] DS_086 GUI height: before=800, after=800
-
-[01.10.2026 23:40:04] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 23:40:04] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 23:40:04] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 23:40:04] DS_086 GUI height: before=600, after=800
-
-[01.10.2026 23:40:05] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 23:40:05] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 23:40:08] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 23:40:08] DS_086 GUI height: before=600, after=591
-
-[01.10.2026 23:40:11] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 23:40:11] DS_086 GUI height: before=600, after=591
-
 [01.10.2026 23:40:12] needs_manual: 0
-
-[01.10.2026 23:40:14] DS_086 GUI height: before=800, after=591
-
-[01.10.2026 23:40:14] DS_086 GUI height: before=600, after=591
-
-[02.10.2026 06:09:03] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 06:09:05] DS_086 GUI height: before=600, after=800
-
-[02.10.2026 06:09:05] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 06:09:05] DS_086 GUI height: before=600, after=800
-
-[02.10.2026 06:09:05] DS_086 GUI height: before=800, after=800
-
-[02.10.2026 06:09:05] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 06:09:05] DS_086 GUI height: before=600, after=800
-
-[02.10.2026 06:09:05] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 06:09:05] DS_086 GUI height: before=600, after=800
-
-[02.10.2026 06:09:07] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 06:09:07] DS_086 GUI height: before=600, after=591
-
-[02.10.2026 06:09:13] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 06:09:13] DS_086 GUI height: before=600, after=591
-
-[02.10.2026 06:09:16] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 06:09:17] DS_086 GUI height: before=600, after=591
-
 [02.10.2026 06:09:18] needs_manual: 0
-
-[02.10.2026 06:09:20] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 06:09:20] DS_086 GUI height: before=600, after=591
-
 [02.10.2026 06:10:40] DS 089: Выполнено. Resume по ключу (скан/фикс) + идемпотентность. Тесты 15/15, регресс 88/88. Файл перенесён в PROCESSED.
 [02.10.2026 17:56:17] DS 090: Запуск live-прогона CLI на patch_PSH_DEP_PRIV_GO. Начало прогона.
 [02.10.2026 17:56:18] DS 082a: Rule-based fixer (batch): запросов=2, fixes=70, skip=62 -> EXCHANGE\AI_OUT
 [02.10.2026 19:02:42] DS 090: Live-прогон CLI завершён. Статус: Частично. Сканер требует GUI (СТОП-развилка). Rule-based: 70/132 issues за 0.4с. AI worker: таймаут на batch 10, валидные батчи (5 issues) — 3s/issue. Resume в CLI недоступен.
-
 [02.10.2026 18:30:00] DS_090 — Live-прогон CLI (PSH_DEP_PRIV_GO)
   Статус: ЧАСТИЧНО
   Целевой файл: PSH_DEP_PRIV_GO.plp (100323 байт, 2161 строк)
@@ -1125,106 +335,6 @@
   СТОП-развилки: сканер не CLI, resume не в ai_local_worker.py
   Отчёт: EXCHANGE\OUTBOX\DS_090_report.md
   Артефакты: AI_OUT (35 fixes), SRC не изменён
-[02.10.2026 20:36:45] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 20:36:45] DS_086 GUI height: before=600, after=591
-
-[02.10.2026 20:39:36] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 20:39:36] DS_086 GUI height: before=600, after=591
-
-[02.10.2026 20:42:38] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 20:42:38] DS_086 GUI height: before=600, after=591
-
-[02.10.2026 20:44:00] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 20:44:00] DS_086 GUI height: before=600, after=591
-
-[02.10.2026 22:20:16] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 22:20:16] DS_086 GUI height: before=600, after=591
-
-[02.10.2026 22:24:39] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 22:24:39] DS_086 GUI height: before=600, after=591
-
-[02.10.2026 22:48:06] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 22:48:06] DS_086 GUI height: before=600, after=591
-
-[02.10.2026 23:54:24] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 23:54:24] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 23:57:28] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 23:57:28] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 23:58:43] DS_086 GUI height: before=800, after=591
-
-[02.10.2026 23:58:43] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 00:48:14] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 00:48:15] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 00:48:41] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 00:48:41] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 00:49:50] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 00:49:50] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:00:56] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:00:56] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:04:52] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:04:52] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:05:17] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:05:17] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:07:39] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:07:39] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:12:04] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:12:04] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:12:26] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:12:27] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:12:50] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:12:50] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:16:58] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:16:58] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:17:45] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:17:45] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:19:49] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 01:19:49] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 02:00:51] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 02:00:52] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 02:10:04] DS_086 GUI height: before=800, after=591
-
-[03.10.2026 02:10:05] DS_086 GUI height: before=800, after=591
-
 03.10.2026 03:20:00 DS_CNT_000 COMPLETED EXIT_CODE=0
 03.10.2026 03:20:00 DS_CNT_000 task file moved INBOX->PROCESSED
 03.10.2026 03:20:00 DS_CNT_000 report written OUTBOX
@@ -1266,14 +376,6 @@ F:\TO_DBI\EXCHANGE\bot.log
 04.10.2026 19:18:30 ACL применены для svc_mcp: rw - logs, PATCH_OUT; ro - DATA, EXCHANGE, PATCH_IN; deny WD,AD - DATA, EXCHANGE, PATCH_IN; нет доступа - SRC, .git.
 04.10.2026 19:18:30 svc_mcp удалён из группы Пользователи. DS_CNT_004a - выполнено. DS_CNT_021 - выполнено.
 04.10.2026 20:45:15 DS_CNT_021a: Убраны остатки exFAT в agents-short.md и DS_CNT_000_regulation.md.
-[04.10.2026 21:10:37] DS_086 GUI height: before=800, after=591
-
-[04.10.2026 21:10:37] DS_086 GUI height: before=800, after=591
-
-[04.10.2026 21:10:37] DS_086 GUI height: before=600, after=591
-
-[04.10.2026 21:10:37] DS_086 GUI height: before=600, after=591
-
 [04.10.2026 15:30:00] DS 090: Выполнено. Контекст проекта восстановлен. Создан отчёт в OUTBOX. Файл перенесён в PROCESSED.
 [05.10.2026 09:45:10] DS 091b: Vypolneno. 7 faylov testov - sys.stdout obernut v if __name__. pytest 57/57 PASSED. Fayl perenesen v PROCESSED.
 [05.10.2026 09:45:10] DS 092: Vypolneno. E2e GUI resume test (5 testov). Skan+abort+resume, fix+abort+resume. Fayl perenesen v PROCESSED.
@@ -1320,43 +422,18 @@ F:\TO_DBI\EXCHANGE\bot.log
 [07.10.2026 04:45:00] DS 102: Выполнено. GUI передаёт --resume в ai_local_worker. Тест test_ds102_gui_resume.py (3 теста). Регресс 60 PASSED. Файл перенесён в PROCESSED.
 [07.10.2026 04:51:14] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [07.10.2026 04:55:00] DS 105: Выполнено. Правило «русский язык отчётов» — DS_STANDARD.md §3.1 + AGENTS.md (2 ссылки). Файл перенесён в PROCESSED.
-[07.10.2026 09:27:58] DS_086 GUI height: before=800, after=591
-
-[07.10.2026 09:27:58] DS_086 GUI height: before=600, after=591
-
 [07.10.2026 09:37:00] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [07.10.2026 09:43:54] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [07.10.2026 09:44:01] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [07.10.2026 05:10:00] DS 107: Выполнено. Диалог _check_log_size расширен (settings.json, каталоги, расширения). Регресс 60 PASSED. Файл перенесён в PROCESSED.
-[07.10.2026 09:48:26] DS_086 GUI height: before=800, after=591
-
-[07.10.2026 09:48:26] DS_086 GUI height: before=600, after=591
-
-[07.10.2026 09:50:34] DS_086 GUI height: before=800, after=591
-
-[07.10.2026 09:50:34] DS_086 GUI height: before=600, after=591
-
-[07.10.2026 10:01:41] DS_086 GUI height: before=800, after=591
-
-[07.10.2026 10:01:41] DS_086 GUI height: before=600, after=591
-
-[07.10.2026 10:03:41] DS_086 GUI height: before=800, after=591
-
-[07.10.2026 10:03:41] DS_086 GUI height: before=600, after=591
-
 [07.10.2026 10:37:45] Нет issues, требующих AI (фильтр «только Ai»).
-
 [07.10.2026 10:37:45] DS 082a: Rule-based fixer (batch): запросов=2, fixes=70, skip=62 -> F:\TO_DBI\EXCHANGE\AI_OUT
 [07.10.2026 11:09:23] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260929_123800.md: итог 96 из 96 (100%), batch=10, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=189.6с, avg_conf=0.95, class={'auto': 80, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260929_123800.md
 [07.10.2026 11:21:05] DS 082b: AI_REQUEST_PSH_DEP_PRIV_GO_20260930_071636.md: итог 36 из 36 (100%), batch=4, invalid_json=0, skip_batch=0, fallback=0 (0/0 ok, 0.0с), avg_time=175.5с, avg_conf=0.95, class={'auto': 36, 'medium': 0, 'manual': 0, 'noop': 0}, response=AI_RESPONSE_PSH_DEP_PRIV_GO_20260930_071636.md
 [07.10.2026 11:21:16] Rescan PSH_DEP_PRIV_GO.plp: было 4757, стало 4757
-
 [07.10.2026 11:21:26] Rescan PSH_DEP_PRIV_GO.plp: было 4757, стало 4757
-
 [07.10.2026 11:21:26] Rescan: 2 файлов; было 9514, стало 9514
-
 [07.10.2026 11:21:26] needs_manual: 0
-
 [07.10.2026 12:08:45] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [07.10.2026 12:10:45] DS 108: Выполнено. Фиксы GUI: 108a (сброс UI), 108b (дедуп rescan + фильтр бэкапов). 65/65 PASSED. Файл перенесён в PROCESSED.
 [07.10.2026 12:10:45] DS 106: Выполнено. GP: коммит 4bd51b3 (6 файлов), push в origin/feature/dockerization. Файл перенесён в PROCESSED.
@@ -1381,14 +458,6 @@ F:\TO_DBI\EXCHANGE\bot.log
 [07.10.2026 16:38:06] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [2026-10-07 22:59] [DS/KODA->Vitaly] DS_116 zavershen: 6.2 otkat podmeny + CWD-punkt + audit showinfo. DS_116 zadanie pereneseno v PROCESSED.
 [07.10.2026 16:48:55] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
-[07.10.2026 19:42:49] DS_086 GUI height: before=761, after=591
-
-[07.10.2026 19:42:49] DS_086 GUI height: before=600, after=591
-
-[07.10.2026 19:49:35] DS_086 GUI height: before=761, after=591
-
-[07.10.2026 19:49:35] DS_086 GUI height: before=600, after=591
-
 [2026-10-08 12:53:53] [INFO] [DS_117_gitattributes_tsx_bodyname.md] commit=ad8f368
 [08.10.2026 12:57:03] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [08.10.2026 13:23:12] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
@@ -1397,7 +466,6 @@ F:\TO_DBI\EXCHANGE\bot.log
 [2026-10-08 13:31:24] [INFO] [DS_117-fix2] bot.log + PROCESSED DS_117-fix. PUSH cb4ba6f..<new>.
 [08.10.2026 13:35:55] DS 082b: AI_REQUEST_test.md: dry-run — 1 батч(ов), Ollama не запрошена, AI_RESPONSE не создан
 [08.10.2026 13:49:26] GIT_20261008_1349 GP. Выполнено. Закоммичено 2 файлов, отправлено в origin/feature/dockerization.
-
 [18.09.2026 17:11:00] DS 052: Выполнено. Git-команды GIT и PUSH добавлены в AGENTS.md. Протестированы. Файл перенесён в PROCESSED.
 [08.10.2026 14:49:35] DS 118: Выполнено. Порядок завершения DS и кодировка bot.log. Файл перенесён в PROCESSED.
 [08.10.2026 15:15:59] DS 118-fix: Выполнено. Устранение дефектов DS_118 (части B, C, D, E). Файл перенесён в PROCESSED.
@@ -1413,6 +481,5 @@ DS_118: Task file created in PROCESSED. Branch: feature/dockerization. Push: 142
 [09.10.2026 01:24:55] DS_121: ai_local_worker.py L757 bot=True -> bot=False. dry-run больше не пишет в bot.log. pytest test_ds094_resume.py: 8 passed.
 [09.10.2026 01:24:55] DS_124: settings.json — extensions.autoUpdate=false, extensions.autoCheckUpdates=false. JSON валиден.
 [09.10.2026 01:31:33] DS_125: .gitattributes + *.log eol=lf; AGENTS.md + 'Простые DS без KODA' + 'INBOX-гигиена'; DS_STANDARD.md §6.2.1 + плоский формат. BOM=False.
-[09.10.2026 01:41:49] DS_086 GUI height: before=800, after=591
-[09.10.2026 01:41:49] DS_086 GUI height: before=600, after=591
 [09.10.2026 02:14:20] DS 126: close_ds.ps1: добавлен -InboxFile + авто-очистка INBOX. AGENTS.md, DS_STANDARD.md обновлены (Уроки G, H, I).
+[09.10.2026 02:21:14] DS 127: bot.log очищен от 448 DS_086 + 488 пустых; L547 в gui_app.py удалена. Аудит остатков — кандидаты в DS_128.

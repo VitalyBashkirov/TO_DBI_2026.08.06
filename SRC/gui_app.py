@@ -544,7 +544,6 @@ class DBIMigrationApp:
         h_after = self._adjust_window_height()
         if persist:
             self._autosave_ui_visibility()
-        self._bot_log(f"DS_086 GUI height: before={h_before}, after={h_after}")
     
     def _adjust_window_height(self):
         """DS_086 §2.3: высота окна = базовая минус высота скрытых блоков.

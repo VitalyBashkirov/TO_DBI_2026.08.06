@@ -26,15 +26,6 @@ for folder in [INBOX, OUTBOX, PROCESSED]:
     folder.mkdir(parents=True, exist_ok=True)
 
 
-def write_log(message: str):
-    """Write message to log file (2 MB limit)"""
-    if LOG_FILE.exists() and LOG_FILE.stat().st_size > 2 * 1024 * 1024:
-        print(f"[INFO] Log file too large. Stopping logging.")
-        return
-    # ВАЖНО: используем newline='\r\n' для Windows CR LF
-    with open(LOG_FILE, 'w', encoding='utf-8', newline='\r\n') as f:
-        f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n")
-
 
 # ==================== DS 048: протокол завершения задач ====================
 
@@ -130,7 +121,7 @@ def process_task(task_file: Path, content: str):
     Pure courier: save a copy of the task to OUTBOX and archive the original.
     """
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Processing task: {task_file.name}")
-    write_log(f"[{datetime.now().strftime('%H:%M:%S')}] Processing task: {task_file.name}")
+    _log_bot(f"Processing task: {task_file.name}")
     
     # Save copy of task to OUTBOX
     response_filename = f"response_{task_file.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -149,12 +140,12 @@ def process_task(task_file: Path, content: str):
         json.dump(response, f, ensure_ascii=False, indent=2)
     
     print(f"[+] Response saved: {response_path}")
-    write_log(f"[+] Response saved: {response_path}")
+    _log_bot(f"[+] Response saved: {response_path}")
     
     # Move task to archive
     shutil.move(str(task_file), str(PROCESSED / task_file.name))
     print(f"[+] Task moved to archive: {PROCESSED / task_file.name}")
-    write_log(f"[+] Task moved to archive: {PROCESSED / task_file.name}")
+    _log_bot(f"[+] Task moved to archive: {PROCESSED / task_file.name}")
 
 
 def _read_text_safe(path: Path) -> str:
@@ -206,7 +197,7 @@ def main():
     print(f"[INFO] Log file: {LOG_FILE}")
     print(f"[INFO] Press Ctrl+C to stop\n")
 
-    write_log("[INFO] Exchange Courier started (continuous mode)")
+    _log_bot("[INFO] Exchange Courier started (continuous mode)")
 
     while True:
         # Check INBOX for tasks
@@ -214,7 +205,7 @@ def main():
 
         if tasks:
             print(f"[INFO] Found {len(tasks)} task(s).")
-            write_log(f"[INFO] Found {len(tasks)} task(s).")
+            _log_bot(f"[INFO] Found {len(tasks)} task(s).")
 
             for task_file in tasks:
                 try:
@@ -234,7 +225,7 @@ def main():
 
                 except Exception as e:
                     print(f"[ERROR] Error processing {task_file.name}: {e}")
-                    write_log(f"[ERROR] Error processing {task_file.name}: {e}")
+                    _log_bot(f"[ERROR] Error processing {task_file.name}: {e}")
 
                     # Save error to OUTBOX
                     error_response = {

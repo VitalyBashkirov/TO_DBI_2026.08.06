@@ -371,6 +371,37 @@ Get-Content -Path 'F:\TO_DBI\EXCHANGE\bot.log' -Encoding UTF8 |
    ПРОВЕРКА: $bytes = [IO.File]::ReadAllBytes($path)
              BOM = ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
 
+### п.7 (Урок J, DS_128): $matches в PowerShell — Hashtable, не массив
+
+- $matches[0] — вся строка.
+- $matches[1..n] — нумерованные группы (нумерация с 1).
+- $matches[3] в -f-форматировании — НЕ работает как индекс группы.
+- ПРАВИЛЬНО: именованные группы (?<name>...) + $($matches['name']).
+- Или: "{0}-{1}" -f $matches[1], $matches[2] (индексы -f с 0,
+  значения из $matches — с 1).
+- ОПАСНОСТЬ: при ошибке форматирования внутри ForEach-Object строка
+  может бесследно исчезнуть из потока. Всегда проверять
+  «Строк до / после».
+
+Пример:
+  ПЛОХО: "[{3}-{2}-{1}]" -f $matches[3], $matches[2], $matches[1]
+  ХОРОШО: "[$($matches['y'])-$($matches['m'])-$($matches['d'])]"
+
+Получено на DS_128: первая попытка потеряла 7 строк из-за FormatError.
+Диагностика выявила расхождение (462 вместо 469), файл восстановлен
+из бэкапа и переделан.
+
+### п.8 (Урок K, DS_128): аудит источника, не только симптома
+
+Перед «нормализацией» данных (например, bot.log) — найти всех
+писателей. Если источник жив, аномалии накапливаются снова.
+
+Пример DS_128: план «нормализовать 35 строк без timestamp» был
+неполным. Аудит выявил 8 мест в 6 файлах, которые до сих пор пишут
+старым форматом. Миграция источника — в DS_129.
+
+
+
 ### 6.3. Порядок завершения DS
 
 При завершении задачи DS_XXX соблюдать **жёсткую последовательность**
@@ -591,3 +622,45 @@ pytest -q
 Стандартный (`DS_STANDARD.md` → раздел 3).
 ```
 **Итого:** 3–5× сокращение объёма задач без потери качества.
+
+
+
+### 6.6. Логирование выполнения PS-блоков (DS_129)
+
+Каждый сводный блок PowerShell запускается с Start-Transcript.
+Лог пишется в F:\TO_DBI\PS\ (каталог не отслеживается git).
+Файл перетаскивается в чат DeepSeek вместо копирования вывода.
+
+- Каталог PS\ — в .gitignore (проверено в DS_129).
+- Имя файла: ds<XXX>_<before|instead|after>_<YYYYMMDD_HHMMSS>.log.
+- После успешного закрытия DS — логи можно удалять (не критичны).
+- Правило 8 («Логи — только EXCHANGE\bot.log») относится к РАБОЧИМ
+  логам, не к ОТЛАДОЧНЫМ транскриптам PS. Разделение явное.
+
+Шаблон начала блока:
+  $logDir = 'F:\TO_DBI\PS'
+  if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
+  $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
+  $logFile = Join-Path $logDir "ds<XXX>_<этап>_$ts.log"
+  Start-Transcript -Path $logFile -Force | Out-Null
+  # ... команды ...
+  Stop-Transcript | Out-Null
+
+
+#### Стандартная шапка блока PS (DS_129)
+
+Каждый блок начинается с:
+
+    cls
+    Set-Location -LiteralPath 'F:\TO_DBI'
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+    chcp 65001 | Out-Null
+    cls
+
+Первый cls — затирает предыдущий вывод PS ДО старта блока.
+Второй cls — затирает «Active code page» от chcp.
+Экран чистый: пользователь видит задание + лог выполнения.
+
+Примечание: правило 0 регламента («Set-Location — первой командой»)
+уточнено: cls идёт ПЕРЕД Set-Location.

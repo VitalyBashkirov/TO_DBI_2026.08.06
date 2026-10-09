@@ -25,7 +25,7 @@ BOT_LOG = BASE_DIR / 'bot.log'
 
 def _log(message: str):
     """DS 050: запись в bot.log (UTF-8, формат ДД.ММ.ГГГГ ЧЧ:ММ:СС)."""
-    timestamp = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
     line = f"[{timestamp}] {message}\n"
     with open(BOT_LOG, 'a', encoding='utf-8', errors='replace') as f:
         f.write(line)

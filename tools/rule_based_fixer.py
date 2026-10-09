@@ -63,7 +63,7 @@ def _log(msg: str, to_bot: bool = False) -> None:
     if not to_bot:
         return
     try:
-        ts = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M')
         with open(BOT_LOG, 'a', encoding='utf-8', newline='') as f:
             f.write(f"[{ts}] DS 082a: {msg}\r\n")
     except Exception:

@@ -41,7 +41,7 @@ def write_log(message: str):
 def _log_bot(message: str):
     """DS 048/DS_050: запись в bot.log (UTF-8 без BOM, формат [ДД.ММ.ГГГГ ЧЧ:ММ:СС] <Сообщение>)."""
     try:
-        line = '[%s] %s\r\n' % (datetime.now().strftime('%d.%m.%Y %H:%M:%S'), message)
+        line = '[%s] %s\r\n' % (datetime.now().strftime('%Y-%m-%d %H:%M'), message)
         with open(LOG_FILE, 'a', encoding='utf-8', errors='replace') as f:
             f.write(line)
     except Exception as e:

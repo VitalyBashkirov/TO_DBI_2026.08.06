@@ -5310,7 +5310,7 @@ class DBIMigrationApp:
         try:
             log_path = Path(__file__).parent.parent / 'EXCHANGE' / 'bot.log'
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            ts = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+            ts = datetime.now().strftime('%Y-%m-%d %H:%M')
             with open(log_path, 'a', encoding='utf-8') as f:
                 f.write(f"[{ts}] {message}\r\n")
         except Exception:

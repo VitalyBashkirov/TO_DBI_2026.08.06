@@ -468,3 +468,4 @@
 [09.10.2026 02:14:20] DS 126: close_ds.ps1: добавлен -InboxFile + авто-очистка INBOX. AGENTS.md, DS_STANDARD.md обновлены (Уроки G, H, I).
 [09.10.2026 02:21:14] DS 127: bot.log очищен от 448 DS_086 + 488 пустых; L547 в gui_app.py удалена. Аудит остатков — кандидаты в DS_128.
 [2026-10-09 02:35] DS_128: bot.log нормализован — DS_090 слит (12->1), 3 DS_CNT + 4 ACL + 2 DS_118 переформатированы, артефакт удалён, 4 U+FFFD удалены. .gitignore + *Старт*.txt (без дубля). 469 строк. pytest 65 passed.
+[2026-10-09 03:00] DS_129: мигрированы 5 логгеров bot.log на %Y-%m-%d %H:%M (exchange_bot, process_inbox, gui_app, ai_local_worker, rule_based_fixer). DS_STANDARD.md: Уроки J,K + §6.6. .gitignore: PS/. pytest 65 passed.

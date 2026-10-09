@@ -119,7 +119,7 @@ def log(msg, bot=False):
         pass
     if bot:
         # DS_050 §2: формат [ДД.ММ.ГГГГ ЧЧ:ММ:СС] DS XXX: <описание>, UTF-8.
-        stamp = datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+        stamp = datetime.now().strftime('%Y-%m-%d %H:%M')
         try:
             with io.open(str(BOT_LOG), 'a', encoding='utf-8', newline='') as fh:
                 fh.write(f'[{stamp}] DS 082b: {text}\r\n')

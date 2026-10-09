@@ -2400,7 +2400,7 @@ def save_scan_only_log(logs_dir: Path, source_name: str, flags: Dict[str, bool],
                        timestamp: Optional[str] = None,
                        log_level: str = 'Минимальный',
                        report_stats_min_files: int = 10) -> Optional[Path]:
-    """DS_053_Уточнение_4 (задача A): лог scan_VVxVVx_<source>_<ts>.md при
+    r"""DS_053_Уточнение_4 (задача A): лог scan_VVxVVx_<source>_<ts>.md при
     «Сканировать» — ПРОГНОЗ исправлений (симуляция конвейера без записи).
 
     - issues сканера прогоняются через тот же детерминированный конвейер,

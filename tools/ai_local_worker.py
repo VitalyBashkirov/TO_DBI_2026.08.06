@@ -862,8 +862,8 @@ def build_parser():
         prog='ai_local_worker.py',
         description='DS_082b: закрыть AI-issues через локальную LLM (Ollama), '
                     'батчами, с записью AI_RESPONSE в контрактном формате DS_054.')
-    p.add_argument('--request', help='AI_REQUEST_*.md (EXCHANGE\AI_IN\...)')
-    p.add_argument('--out', help='Каталог для AI_RESPONSE (default EXCHANGE\AI_OUT)')
+    p.add_argument('--request', help=r'AI_REQUEST_*.md (EXCHANGE\AI_IN\...)')
+    p.add_argument('--out', help=r'Каталог для AI_RESPONSE (default EXCHANGE\AI_OUT)')
     p.add_argument('--in-dir', help='Пакетный режим: каталог с AI_REQUEST_*.md')
     p.add_argument('--out-dir', help='Пакетный режим: каталог для AI_RESPONSE')
     p.add_argument('--config', default=None,

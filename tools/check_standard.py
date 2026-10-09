@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""DS_CNT_007: check-standard.
+r"""DS_CNT_007: check-standard.
 
 Проверка файла на соответствие EXCHANGE\DS_STANDARD.md (раздел 2)
 через локальную Ollama (qwen2.5-coder:3b). Заменяет slash-команду

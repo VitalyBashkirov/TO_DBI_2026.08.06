@@ -1235,7 +1235,7 @@ class DBIMigrationApp:
     # DS_054_Уточнение_C: состояние кнопки «От AI» по содержимому AI_OUT
     # ------------------------------------------------------------------
     def _ai_out_files(self) -> list:
-        """Файлы-ответы AI (AI_RESPONSE_*.md/json) в EXCHANGE\AI_OUT."""
+        r"""Файлы-ответы AI (AI_RESPONSE_*.md/json) в EXCHANGE\AI_OUT."""
         try:
             out_dir = Path(__file__).parent.parent / 'EXCHANGE' / 'AI_OUT'
             if not out_dir.exists():
@@ -1286,7 +1286,7 @@ class DBIMigrationApp:
             return False
 
     def _ai_in_request_files(self) -> list:
-        """Файлы-запросы AI_REQUEST_*.md в EXCHANGE\AI_IN (маска из DS_087 §2.3)."""
+        r"""Файлы-запросы AI_REQUEST_*.md в EXCHANGE\AI_IN (маска из DS_087 §2.3)."""
         try:
             in_dir = Path(__file__).parent.parent / 'EXCHANGE' / 'AI_IN'
             if not in_dir.exists():
@@ -5317,7 +5317,7 @@ class DBIMigrationApp:
             pass
 
     def send_to_ai(self):
-        """DS 054: сформировать файл-запрос для AI в EXCHANGE\AI_IN.
+        r"""DS 054: сформировать файл-запрос для AI в EXCHANGE\AI_IN.
 
         DS_080 §2.2: при галке «Только Ai» (по умолчанию включена) отбираются
         issues, реально требующие AI: (а) правило transform_type == "ignore"
@@ -5404,9 +5404,9 @@ class DBIMigrationApp:
                 self._bot_log(
                     f"Отправлено {len(issues)} issues из {total} "
                     f"(фильтр: {filter_mode}). AI-запросов: {len(written)}.")
-            self.log(f"Сформировано AI-запросов: {len(written)} → EXCHANGE\AI_IN", 'highlight')
+            self.log(rf"Сформировано AI-запросов: {len(written)} → EXCHANGE\AI_IN", 'highlight')
             self.log("Отправьте файл(ы) в AI, затем положите ответ "
-                     "AI_RESPONSE_<source>_<ts>.md в EXCHANGE\AI_OUT и нажмите «От AI».", 'info')
+                     r"AI_RESPONSE_<source>_<ts>.md в EXCHANGE\AI_OUT и нажмите «От AI».", 'info')
             # DS_054_Уточнение_C: «От AI» включается только при наличии
             # файлов-ответов в AI_OUT (перепроверка после отправки).
             self._update_ai_button_state()
@@ -5414,7 +5414,7 @@ class DBIMigrationApp:
             messagebox.showinfo(
                 "AI-запрос сформирован",
                 f"Файлов-запросов: {len(written)}\n\nКаталог: {ai_in}\n\n"
-                "Отправьте их в AI и верните ответы в EXCHANGE\AI_OUT.")
+                r"Отправьте их в AI и верните ответы в EXCHANGE\AI_OUT.")
         except Exception as e:
             self.log(f"Ошибка формирования AI-запроса: {e}", 'error')
             messagebox.showerror("Ошибка", f"Не удалось сформировать AI-запрос:\n{e}")
@@ -5528,7 +5528,7 @@ class DBIMigrationApp:
         return stats
 
     def receive_from_ai(self):
-        """DS 054: обработать файлы-ответы из EXCHANGE\AI_OUT."""
+        r"""DS 054: обработать файлы-ответы из EXCHANGE\AI_OUT."""
         try:
             import ai_exchange
             dirs = ai_exchange.ensure_dirs()

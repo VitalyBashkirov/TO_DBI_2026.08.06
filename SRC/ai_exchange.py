@@ -671,7 +671,7 @@ def summarize(results: List[Dict[str, object]],
 def _md_cell(value: object, code: bool = False) -> str:
     """Значение ячейки Markdown-таблицы: без переводов строк и вертикальных черт."""
     text = str(value if value is not None else '')
-    text = text.replace('\r', ' ').replace('\n', ' ').replace('|', '\|').strip()
+    text = text.replace('\r', ' ').replace('\n', ' ').replace('|', r'\|').strip()
     if code:
         text = text.replace('`', "'")
         return f'`{text}`' if text else '``'
@@ -680,7 +680,7 @@ def _md_cell(value: object, code: bool = False) -> str:
 
 def save_needs_manual(summary: Dict[str, object],
                       base: Optional[Path] = None) -> Optional[Path]:
-    """DS_081 §2.3: артефакт needs_manual_<YYYYMMDD_HHMMSS>.md в EXCHANGE\OUTBOX.
+    r"""DS_081 §2.3: артефакт needs_manual_<YYYYMMDD_HHMMSS>.md в EXCHANGE\OUTBOX.
 
     summary — результат summarize(results, structured=True). Если корзина
     manual пуста — файл НЕ создаётся, возвращается None (GUI пишет в bot.log

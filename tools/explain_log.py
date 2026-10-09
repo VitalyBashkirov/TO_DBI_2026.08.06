@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""DS_CNT_007: explain-log.
+r"""DS_CNT_007: explain-log.
 
 Разбор последних N строк EXCHANGE\bot.log через локальную Ollama
 (qwen2.5-coder:3b). Заменяет slash-команду /explain-log.

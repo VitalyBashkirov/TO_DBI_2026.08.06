@@ -1396,7 +1396,7 @@ class DBIMigrationApp:
                                     pass
                 
                 self.log(f"Удалено файлов логов: {deleted_count}", 'info')
-                messagebox.showinfo("Очистка завершена", f"Удалено файлов логов: {deleted_count}")
+                self._show_copyable_dialog("Очистка завершена", f"Удалено файлов логов: {deleted_count}")
             else:
                 self.log(f"Предупреждение о размере логов проигнорировано ({size_mb:.2f} МБ)", 'warning')
     
@@ -3657,6 +3657,11 @@ class DBIMigrationApp:
         kind: "info" | "warning" | "error" — влияет на иконку/заголовок.
         Нативный messagebox не поддерживает копирование — используется tk.Toplevel.
         """
+
+        # DS_120: подавление в автономном режиме (AI-цикл).
+        if getattr(self, '_ai_cycle_running', False):
+            self.log(f"[диалог подавлен] {title}: {text}", 'info')
+            return
         dialog = tk.Toplevel(self.root)
         dialog.title(title)
         dialog.transient(self.root)
@@ -4134,7 +4139,7 @@ class DBIMigrationApp:
                 final_results_str = final_results_str[0].upper() + final_results_str[1:]
             
             self.root.after(0, 
-                lambda: messagebox.showinfo("Исправление завершено", 
+                lambda: self._show_copyable_dialog("Исправление завершено", 
                           f"Обработано файлов: {scan_results.get('files_scanned', 0)}\n"
                           f"Исправлено конструкций: {scan_results.get('total_issues', 0)}\n"
                           f"Создано файлов: {files_modified}\n\n"
@@ -4196,7 +4201,7 @@ class DBIMigrationApp:
             
             self.root.after(0, lambda: self.log(f"\nАрхив создан: {archive_str}", 'success'))
             self.root.after(0, 
-                lambda: messagebox.showinfo("Архивация завершена", 
+                lambda: self._show_copyable_dialog("Архивация завершена", 
                           f"Архив создан:\n{archive_str}"))
             
         except Exception as e:
@@ -4572,7 +4577,7 @@ class DBIMigrationApp:
                     self.root.after(0, lambda: self.set_status("Готово"))
                     
                     self.root.after(0, 
-                        lambda: messagebox.showinfo("Генерация завершена", 
+                        lambda: self._show_copyable_dialog("Генерация завершена", 
                                   f"Создан сводный файл: {file_path.name}\n\n"
                                   f"Правил: {total}\n\n"
                                   f"Каталог: {test_dir}"))
@@ -4814,7 +4819,7 @@ class DBIMigrationApp:
             issues = self.scan_results.get('issues', [])
             
             if not issues:
-                messagebox.showinfo("Нет проблем", "Проблемных конструкций не найдено")
+                self._show_copyable_dialog("Нет проблем", "Проблемных конструкций не найдено")
                 return
             
             # Создаём временный файл
@@ -5151,7 +5156,7 @@ class DBIMigrationApp:
         if filepath:
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(changelog_content)
-            messagebox.showinfo("Успех", f"Журнал сохранен в:\n{filepath}")
+            self._show_copyable_dialog("Успех", f"Журнал сохранен в:\n{filepath}")
             self.log(f"Журнал сохранен: {filepath}", 'success')
     
     def process_koda_response(self, response: str, clean_mode: bool = False):
@@ -5223,7 +5228,7 @@ class DBIMigrationApp:
             
             self.log(f"Задание отправлено в Koda: {task_file.name}", 'success')
             self.log(f"Файл: {task_file}", 'info')
-            messagebox.showinfo("Успех", f"Задание отправлено в Koda!\n\nФайл: {task_file.name}")
+            self._show_copyable_dialog("Успех", f"Задание отправлено в Koda!\n\nФайл: {task_file.name}")
             
             # Активируем кнопку получения ответа
             self.btn_receive_koda.state(['!disabled'])
@@ -5242,7 +5247,7 @@ class DBIMigrationApp:
             
             files = sorted(exchange_dir.glob('*.md')) + sorted(exchange_dir.glob('*.json'))
             if not files:
-                messagebox.showinfo("Информация", "Нет ответов в OUTBOX")
+                self._show_copyable_dialog("Информация", "Нет ответов в OUTBOX")
                 return
             
             # Берём последний файл
@@ -5266,7 +5271,7 @@ class DBIMigrationApp:
             shutil.move(str(last_file), str(processed_dir / last_file.name))
             
             self.log(f"Файл перемещен в PROCESSED: {last_file.name}", 'info')
-            messagebox.showinfo("Успех", f"Ответ получен из:\n{last_file.name}\n\nРазмещён в Журнале изменений")
+            self._show_copyable_dialog("Успех", f"Ответ получен из:\n{last_file.name}\n\nРазмещён в Журнале изменений")
             
         except Exception as e:
             self.log(f"Ошибка получения ответа: {e}", 'error')
@@ -5333,7 +5338,7 @@ class DBIMigrationApp:
             return
         issues = self.scan_results.get('issues', [])
         if not issues:
-            messagebox.showinfo("Нет проблем", "Проблемных конструкций не найдено")
+            self._show_copyable_dialog("Нет проблем", "Проблемных конструкций не найдено")
             return
         try:
             import ai_exchange
@@ -5411,7 +5416,7 @@ class DBIMigrationApp:
             # файлов-ответов в AI_OUT (перепроверка после отправки).
             self._update_ai_button_state()
             ai_in = Path(__file__).parent.parent / 'EXCHANGE' / 'AI_IN'
-            messagebox.showinfo(
+            self._show_copyable_dialog(
                 "AI-запрос сформирован",
                 f"Файлов-запросов: {len(written)}\n\nКаталог: {ai_in}\n\n"
                 r"Отправьте их в AI и верните ответы в EXCHANGE\AI_OUT.")
@@ -5536,7 +5541,7 @@ class DBIMigrationApp:
             files = sorted(list(out_dir.glob(ai_exchange.RESPONSE_PREFIX + '*.md')) +
                            list(out_dir.glob(ai_exchange.RESPONSE_PREFIX + '*.json')))
             if not files:
-                messagebox.showinfo("Нет ответов",
+                self._show_copyable_dialog("Нет ответов",
                                     f"В каталоге нет файлов-ответов:\n{out_dir}")
                 return
 

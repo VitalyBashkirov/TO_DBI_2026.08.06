@@ -4331,6 +4331,9 @@ class DBIMigrationApp:
             if len(archive_str) >= 2 and archive_str[1] == ':':
                 archive_str = archive_str[0].upper() + archive_str[1:]
             
+            # DS_137: сброс прогресса до диалога «Архивация завершена»
+            self.root.after(0, self._reset_progress)
+
             self.root.after(0, lambda: self.log(f"\nАрхив создан: {archive_str}", 'success'))
             self.root.after(0, 
                 lambda: self._show_copyable_dialog("Архивация завершена", 
@@ -4339,6 +4342,9 @@ class DBIMigrationApp:
         except Exception as e:
             error_msg = str(e)
             self.root.after(0, lambda: self.log(f"[!] Ошибка архивации: {error_msg}", 'error'))
+        finally:
+            # DS_137: гарантированный сброс прогресса (в т.ч. при исключении)
+            self.root.after(0, self._reset_progress)
     
     def start_archive(self):
         """Запуск архивации вручную"""

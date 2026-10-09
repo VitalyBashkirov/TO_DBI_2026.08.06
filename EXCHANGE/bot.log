@@ -490,3 +490,7 @@
 [2026-10-09 16:00] DS_135_report: EXCHANGE\OUTBOX\DS_135_temporary_marks_report.md (145 строк, BOM=False).
 [2026-10-09 16:00] DS_136_report: EXCHANGE\OUTBOX\DS_136_gui_patchout_k2_activation_report.md (212 строк, BOM=False). Задание перемещено INBOX → PROCESSED. Отступления B1/B2 задокументированы. FAIL #8 закрыт через DS_136a.
 [2026-10-09 16:00] Отложено в чат 30: DS_137 (прогресс 100% после архивации); test_ds086_ui_hide.py #10 (сломан после DS_134); pytest-миграция test_ds133_buttons_state.py и test_ds086_ui_hide.py (N12); deep_scanner.py фильтр временных; удаление 25 .bak_ в SRC; «Только Ai» по умолчанию.
+[2026-10-09 16:11] Отправлено 65 issues из 285 (фильтр: needs_ai_fix). AI-запросов: 1.
+[2026-10-09 16:11] DS 082a: Rule-based fixer (batch): запросов=1, fixes=10, skip=55 -> F:\TO_DBI\EXCHANGE\AI_OUT
+[2026-10-09 16:15] DS_137: сброс прогресса после архивации. _run_archive: after(_reset_progress) перед диалогом + finally. Правка +6 строк gui_app.py. Бэкап .bak_ds137. pytest 77 passed; ds133 18/18. Ручной smoke: 0% после диалогов. Задание+отчёт созданы.
+[2026-10-09 16:15] Отложено в чат 30 (обновлено): test_ds086_ui_hide.py #10 (сломан после DS_134); pytest-миграция test_ds133_buttons_state.py и test_ds086_ui_hide.py (N12); deep_scanner.py фильтр временных; удаление 26 .bak_ в SRC; «Только Ai» по умолчанию; кириллица в ЖВ из ai_local_worker.py (U+FFFD).

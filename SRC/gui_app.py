@@ -53,7 +53,7 @@ MAX_LOG_SIZE_MB = 2  # Максимальный размер логов в МБ 
 
 # DS 036 (ревизия 2): Категории PlpCheck из 2.RUBRICATOR_CATEGORIES v5.md (№31-37) + OTHER
 # DS 037: константа перенесена в scanner.py (Вариант A) — доступна и сканеру, и GUI
-from analyzer.scanner import PLPCHECK_CATEGORIES
+from analyzer.scanner import PLPCHECK_CATEGORIES, is_temporary_filename
 
 # DS_058+DS_057: тултипы для кнопок и чекбоксов GUI
 RUBRICATOR_TOOLTIPS = {
@@ -73,11 +73,11 @@ RUBRICATOR_PREFIXES = {
 
 # DS_086: элементы GUI, не участвующие в workflow «Сканировать → Исправить код →
 # В AI». Скрываются через pack_forget (обратимо, НЕ destroy) по одному или все
-# сразу — меню «Вид». journal_frame («Журнал выполнения») в реестр НЕ входит.
+# сразу — меню «Вид». journal_frame («Журнал выполнения») и
+# кнопка «4. Из Ai» в реестр не входят (обе — часть workflow 1→2→3→4).
 UI_HIDEABLE_ELEMENTS = (
     ('btn_show_sql', 'Показать SQL для ручного исправления'),
     ('btn_send_koda', 'Отправить в Koda'),
-    ('btn_from_ai', 'От AI'),
     ('changelog_frame', 'Журнал изменений'),
     # DS_087 §2.4: скрыть по умолчанию кнопки вне workflow 1→2→3.
     # В ТЗ имена btn_get_answer / btn_history_rk — фактические переменные
@@ -88,11 +88,11 @@ UI_HIDEABLE_ELEMENTS = (
 )
 # DS_086 §2.2: по умолчанию все элементы реестра скрыты (требование задачи).
 UI_HIDE_DEFAULT = tuple(key for key, _label in UI_HIDEABLE_ELEMENTS)
-# DS_087: состав UI_HIDE_DEFAULT до расширения реестра (для миграции
-# сохранённого состояния: если в settings.json лежит ровно старый дефолт —
-# пользователь меню «Вид» не трогал → мигрируем на новый дефолт, новые
-# кнопки тоже скрыты).
-UI_HIDE_DEFAULT_V1 = ('btn_show_sql', 'btn_send_koda', 'btn_from_ai', 'changelog_frame')
+# DS_134: актуальный дефолт (btn_from_ai убран, = UI_HIDE_DEFAULT).
+# Используется для миграции сохранённого состояния: если в settings.json
+# лежит ровно этот дефолт — пользователь меню «Вид» не трогал →
+UI_HIDE_DEFAULT_V1 = ('btn_show_sql', 'btn_send_koda', 'changelog_frame',
+                      'btn_receive_koda', 'btn_result_history')
 # DS_086 §2.3: нижняя граница высоты окна при скрытии «Журнала изменений».
 UI_MIN_WINDOW_HEIGHT = 400
 
@@ -241,6 +241,9 @@ class DBIMigrationApp:
         self._rubricator_rules_by_file = {}
         # Тултипы дерева правил (item_id -> Tooltip-like текст)
         self._tree_tooltips = {}
+        # DS_135-2e: инициализация тултипа дерева (без этого — AttributeError при Motion)
+        self._tree_tooltip = None
+        self._tree_tooltip_text = None
         self.rubricator_dir = Path(__file__).parent.parent / 'DATA' / 'Рубрикатор v5'
         self.rubricator_files = {}  # Код файла: Полное имя из 1.RUBRICATOR_FILES v5.md
         
@@ -1278,13 +1281,27 @@ class DBIMigrationApp:
             p = Path(result)
             if not p.exists() or not p.is_dir():
                 return False
-            if '**' in pattern:
-                gen = p.glob(pattern)
-            elif self.scan_recursive_var.get():
-                gen = p.rglob(pattern)
-            else:
-                gen = p.glob(pattern)
-            return any(True for _ in gen)
+            # DS_135-2d: всегда искать рекурсивно (в т.ч. подкаталоги)
+            # — надёжнее, чем glob('**/*.plp') в Python 3.11.
+            gen = p.rglob(pattern if '*' not in pattern else pattern.replace('**/', '').replace('**', '*'))
+            return any(True for f in gen if not is_temporary_filename(f.name))
+        except Exception:
+            return False
+
+    def _source_dir_has_pattern_files(self) -> bool:
+        """DS_136: есть ли файлы по Шаблону в исходном каталоге."""
+        source = self.source_dir_var.get().strip()
+        pattern = self.file_pattern_var.get().strip()
+        if not source or not pattern:
+            return False
+        try:
+            p = Path(source)
+            if not p.exists() or not p.is_dir():
+                return False
+            # DS_135-2d: всегда искать рекурсивно (в т.ч. подкаталоги)
+            # — надёжнее, чем glob('**/*.plp') в Python 3.11.
+            gen = p.rglob(pattern if '*' not in pattern else pattern.replace('**/', '').replace('**', '*'))
+            return any(True for f in gen if not is_temporary_filename(f.name))
         except Exception:
             return False
 
@@ -1315,6 +1332,10 @@ class DBIMigrationApp:
         if getattr(self, 'scan_running', False):
             return
 
+        # DS_135-2g: защита от вызова до инициализации (тесты, ранние вызовы)
+        if not hasattr(self, 'source_dir_var') or not hasattr(self, 'result_dir_var'):
+            return
+
         source = self.source_dir_var.get().strip()
         result = self.result_dir_var.get().strip()
         pattern = self.file_pattern_var.get().strip()
@@ -1328,7 +1349,8 @@ class DBIMigrationApp:
         # К2: каталог результатов доступен + есть файлы по шаблону
         result_ok = bool(result) and os.path.exists(result) and os.access(result, os.W_OK)
         has_plp = result_ok and self._result_dir_has_pattern_files()
-        k2_normal = has_plp
+        source_has_plp = source_ok and self._source_dir_has_pattern_files()
+        k2_normal = source_has_plp and result_ok
 
         # К3: как К2 + в AI_IN нет незавершённых запросов
         ai_in_empty = not self._ai_in_request_files()
@@ -1352,7 +1374,8 @@ class DBIMigrationApp:
         self._update_main_buttons_tooltips(
             k1_normal=k1_normal, k2_normal=k2_normal, k3_normal=k3_normal,
             source_ok=source_ok, pattern_ok=pattern_ok, rule_ok=rule_ok,
-            result_ok=result_ok, has_plp=has_plp, ai_in_empty=ai_in_empty)
+            result_ok=result_ok, has_plp=has_plp, ai_in_empty=ai_in_empty,
+            source_has_plp=source_has_plp)
 
         # К4 — единая точка пересчёта (state + тултип)
         self._update_ai_button_state()
@@ -1360,7 +1383,8 @@ class DBIMigrationApp:
 
     def _update_main_buttons_tooltips(self, k1_normal, k2_normal, k3_normal,
                                         source_ok, pattern_ok, rule_ok,
-                                        result_ok, has_plp, ai_in_empty):
+                                        result_ok, has_plp, ai_in_empty,
+                                        source_has_plp=False):
         """DS_133: динамические тултипы К1/К2/К3 — объясняют причину disabled."""
         # К1
         if not source_ok:
@@ -1374,10 +1398,12 @@ class DBIMigrationApp:
                       "по выбранным рубрикаторам.")
 
         # К2
-        if not result_ok:
-            k2_tip = "Каталог результатов недоступен или недоступен на запись."
-        elif not has_plp:
-            k2_tip = "В каталоге результатов нет файлов по шаблону."
+        if not source_ok:
+            k2_tip = "Укажите существующий исходный каталог."
+        elif not source_has_plp:
+            k2_tip = "В исходном каталоге нет файлов по шаблону."
+        elif not result_ok:
+            k2_tip = "Каталог результатов не создан. Запустите <1.Сканировать>"
         else:
             k2_tip = "Автоматически исправить найденные проблемы."
 
@@ -1928,6 +1954,10 @@ class DBIMigrationApp:
         except Exception as e:
             logger.debug(f"[DS_108a] Ошибка сброса progress: {e}")
     
+        # DS_135-2f: пересчёт кнопок после сброса scan_running
+        # (иначе _update_main_buttons выходит по scan_running=True)
+        self._update_main_buttons()
+
     def _play_result_sound(self, success: bool, duration: float):
         """DS_088b §2.2: звук завершения операции (Windows-only).
 
@@ -3278,6 +3308,16 @@ class DBIMigrationApp:
         if not source_dir.exists():
             messagebox.showerror("Ошибка", f"Исходный каталог не найден:\n{source_dir}")
             return
+
+        # DS_136: создать пустой PATCH_OUT (прогноз результата) сразу при К1
+        auto_result = self._auto_fill_result_dir(source_dir)
+        if auto_result and not auto_result.exists():
+            try:
+                auto_result.mkdir(parents=True, exist_ok=True)
+                self.result_dir_var.set(str(auto_result))
+                self.log(f"Создан пустой каталог результатов (прогноз): {auto_result}", 'info')
+            except Exception as e:
+                self.log(f"Не удалось создать каталог результатов: {e}", 'warning')
         
         # Отключение кнопок на время сканирования
         self.btn_scan.state(['disabled'])
@@ -3478,6 +3518,11 @@ class DBIMigrationApp:
             
             # Сканирование
             scan_results = scanner.scan_directory(log_callback=scan_log)
+            # DS_135: отметить пропущенные временные файлы в ЖВ
+            _n_temp = scan_results.get('skipped_temporary', 0)
+            if _n_temp > 0:
+                self.root.after(0, lambda n=_n_temp: self.log(
+                    f'[i] Пропущено файлов с временными метками: {n} (не обрабатываются)','info'))
             
             # DS_089b §2.3: resume скана — если есть состояние прерванного
             # скана, исключить из результатов issues с ранее обработанными
@@ -3629,7 +3674,8 @@ class DBIMigrationApp:
                     issues_count=scan_results.get('total_issues', 0),
                     report_path=output_path,
                     forecast_path=_scan_log_path,
-                    html_report_path=html_report_path)
+                    html_report_path=html_report_path,
+                    skipped_temporary=scan_results.get('skipped_temporary', 0))
             )
             
         except Exception as e:
@@ -3649,7 +3695,8 @@ class DBIMigrationApp:
             self.root.after(0, self._finish_abortable_operation)
     
     def _show_scan_result_dialog(self, files_count, issues_count, report_path,
-                                 forecast_path=None, html_report_path=None):
+                                 forecast_path=None, html_report_path=None,
+                                 skipped_temporary=0):
         """DS 040: окно результата сканирования (обычное или прерванное).
         Нативный messagebox не поддерживает смену фона — используется tk.Toplevel.
 
@@ -3700,6 +3747,8 @@ class DBIMigrationApp:
             f"  Прогноз:   {forecast_path if forecast_path else 'не сформирован'}\n"
             f"  PlpCheck:  {html_report_path if html_report_path else 'не сформирован'}"
         )
+        if skipped_temporary > 0:
+            body_text += f"\n[i] Пропущено файлов с временными метками: {skipped_temporary} (не обрабатываются)"
         if is_aborted:
             body_text += f"\n\n⚠ Прервано пользователем на {abort_percent:.2f} %"
 
@@ -4195,8 +4244,6 @@ class DBIMigrationApp:
                 'fix_done': bool(scanner.issues),
             }
             
-            # Обновить состояние кнопок после исправления
-            self.root.after(0, self._update_buttons_state)
             
             # Проверка условий для архивации
             should_archive = (
@@ -4219,6 +4266,10 @@ class DBIMigrationApp:
             if len(final_results_str) >= 2 and final_results_str[1] == ':':
                 final_results_str = final_results_str[0].upper() + final_results_str[1:]
             
+            # DS_134: сброс прогресс-бара до показа модального диалога
+            self.root.after(0, lambda: self.progress.config(value=0))
+            self.root.after(0, lambda: self.progress_label.config(text="0%"))
+
             self.root.after(0, 
                 lambda: self._show_copyable_dialog("Исправление завершено", 
                           f"Обработано файлов: {scan_results.get('files_scanned', 0)}\n"

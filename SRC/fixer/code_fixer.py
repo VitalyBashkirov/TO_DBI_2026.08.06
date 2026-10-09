@@ -2710,11 +2710,11 @@ def save_scan_only_log(logs_dir: Path, source_name: str, flags: Dict[str, bool],
                                     result_text = new_text
                                 else:
                                     result_text = (
-                                        '[AI] Требуется AI-анализ: <не реализовано>')
+                                        '[AI] Требуется AI-анализ: <3.В Ai>')
                             else:
                                 # d. заглушка AI (§5.1).
                                 result_text = ('[AI] Требуется AI-анализ: '
-                                               '<не реализовано>')
+                                               '<3.В Ai>')
                     # Строка N: <[код][пробелы]> [пробел]<итоговый текст> (§4.2).
                     pad = max(mkr - 1 - len(code), 0)
                     lines.append(f"<{code}{' ' * pad}> {result_text}")
@@ -2757,6 +2757,14 @@ def save_scan_only_log(logs_dir: Path, source_name: str, flags: Dict[str, bool],
             lines.append(f"Всего файлов: {_files_total}")
         lines.append(f"Файлов с проблемами: {_files_issues}")
         lines.append(f"Файлов с изменениями: {_files_changed}")
+        # DS_135-2: общая статистика по всем найденным кодам (dedup)
+        total_stats: Dict[str, int] = {}
+        for _iss in dedup_issues:
+            total_stats[_iss.issue_type] = total_stats.get(_iss.issue_type, 0) + 1
+        lines.append("Общая статистика по всем найденным кодам рубрикаторов:")
+        for _code, _cnt in sorted(total_stats.items(), key=lambda x: (-x[1], x[0])):
+            lines.append(f"  {_code}: {_cnt}")
+        lines.append(f"  Всего кодов: {len(total_stats)}, Всего проблем: {sum(total_stats.values())}")
         lines.append("")
         # DS_075 §3.2: топ-файлы (2 лидера) при «Подробный» + файлов >= порог.
         try:

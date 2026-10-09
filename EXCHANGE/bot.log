@@ -474,3 +474,13 @@
 [2026-10-09 03:26] DS_120: 12 messagebox.showinfo в gui_app.py -> self._show_copyable_dialog (кастомный диалог с копированием). Подавление в автономном режиме (_ai_cycle_running). 5918->5923 строк, +335 B. pytest exit=0.
 [2026-10-09 04:19] DS_132: удалены legacy gui_app_OLD/NEW/v25_backup (tracked, не импортировались с 02ca385). .dockerignore: -4 строки (78-81). Очищены 9 __pycache__ (ignored). pytest 65 passed.
 2026-10-09 09:44 | DS_133 | Завершён | Кнопки 1/2/3/4: активация по артефактам (DS_087 отменён)
+[2026-10-09 09:49] Отправлено 46 issues из 216 (фильтр: needs_ai_fix). AI-запросов: 2.
+
+[2026-10-09 09:49] DS 082a: Rule-based fixer (batch): запросов=2, fixes=44, skip=2 -> f:\TO_DBI\EXCHANGE\AI_OUT
+[2026-10-09 12:31] needs_manual: 0
+
+[2026-10-09 15:36:59] DS_134: GUI-фиксы — К4 «4. Из Ai» показана, К3 активируется после К2 (_update_main_buttons в _finish_abortable_operation), tooltip _tree_tooltip_text инициализирован.
+[2026-10-09 15:36:59] DS_135: временные метки _YYYYMMDD_HHMMSS_ исключены из сканирования; отметка в ЖВ и диалоге; <3.В Ai> в прогнозе; блок общей статистики (dedup_issues); rglob в _result_dir_has_pattern_files.
+[2026-10-09 15:36:59] DS_136: PATCH_OUT создаётся при К1; критерий К2 = source_has_plp AND result_ok.
+[2026-10-09 15:36:59] Тесты: test_ds135_temporary.py (12 passed); полный регресс 77 passed.
+[2026-10-09 15:36:59] Отложено в чат 29: прогресс 100% после архивации; отчёты DS_134/135/136 в OUTBOX; deep_scanner.py; pytest-миграция test_ds133_buttons_state.py.

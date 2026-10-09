@@ -11,6 +11,20 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional, Set
 
+
+# DS_135: временные метки в именах файлов (_YYYYMMDD_HHMMSS_) — пропускать.
+# Признак — сама метка, без привязки к _real или другим суффиксам.
+_TEMP_MARKER_RE = re.compile(r"_\d{8}_\d{6}_")
+
+
+def is_temporary_filename(name: str) -> bool:
+    """DS_135: True, если в имени файла есть метка _YYYYMMDD_HHMMSS_.
+
+    Такие файлы — артефакты бэкапа/копий, не подлежат сканированию/фиксу/AI.
+    """
+    if not name:
+        return False
+    return bool(_TEMP_MARKER_RE.search(name))
 # Импорт AI-анализатора для сложных правил
 try:
     from analyzer.ai_analyzer import PLPlusAIAnalyzer, AIAnalysisResult
@@ -1670,7 +1684,11 @@ class PLPlusScanner:
         else:
             file_finder = source_dir.glob
         
-        all_files = [f for f in file_finder(file_pattern) if not self._should_exclude(f)]
+        # DS_135: собрать все файлы по шаблону, отдельно посчитать временные (пропускаем)
+        _all_candidates = list(file_finder(file_pattern))
+        _temp_candidates = [f for f in _all_candidates if is_temporary_filename(f.name)]
+        self.skipped_temporary = len(_temp_candidates)
+        all_files = [f for f in _all_candidates if not self._should_exclude(f)]
         total_files = len(all_files)
         # DS_076: метрики файлов для отчётов (Всего файлов / Файлов с проблемами /
         # Файлов с изменениями)
@@ -1774,7 +1792,8 @@ class PLPlusScanner:
         return {
             'files_scanned': files_scanned,
             'total_issues': len(self.issues),
-            'by_type': stats
+            'by_type': stats,
+            'skipped_temporary': getattr(self, 'skipped_temporary', 0)
         }
     
     def _should_exclude(self, file_path: Path) -> bool:
@@ -1788,6 +1807,10 @@ class PLPlusScanner:
         for pattern in self.config['scan']['exclude_patterns']:
             if pattern in file_path_str:
                 return True
+
+        # DS_135: пропускать файлы с временными метками в имени
+        if is_temporary_filename(file_path.name):
+            return True
         return False
     
     def get_issues_by_file(self) -> Dict[str, List[Issue]]:

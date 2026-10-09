@@ -494,3 +494,4 @@
 [2026-10-09 16:11] DS 082a: Rule-based fixer (batch): запросов=1, fixes=10, skip=55 -> F:\TO_DBI\EXCHANGE\AI_OUT
 [2026-10-09 16:15] DS_137: сброс прогресса после архивации. _run_archive: after(_reset_progress) перед диалогом + finally. Правка +6 строк gui_app.py. Бэкап .bak_ds137. pytest 77 passed; ds133 18/18. Ручной smoke: 0% после диалогов. Задание+отчёт созданы.
 [2026-10-09 16:15] Отложено в чат 30 (обновлено): test_ds086_ui_hide.py #10 (сломан после DS_134); pytest-миграция test_ds133_buttons_state.py и test_ds086_ui_hide.py (N12); deep_scanner.py фильтр временных; удаление 26 .bak_ в SRC; «Только Ai» по умолчанию; кириллица в ЖВ из ai_local_worker.py (U+FFFD).
+2026-10-09  DS_138b  Обновление DS_STANDARD.md §6.6.1-6.6.7 (7 подразделов): Уроки FF/GG/HH/II, уточнение правила 19, обязательное логирование PS-блоков. Файл: 32228->40219 B.

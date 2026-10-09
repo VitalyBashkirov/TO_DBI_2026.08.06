@@ -484,3 +484,9 @@
 [2026-10-09 15:36:59] DS_136: PATCH_OUT создаётся при К1; критерий К2 = source_has_plp AND result_ok.
 [2026-10-09 15:36:59] Тесты: test_ds135_temporary.py (12 passed); полный регресс 77 passed.
 [2026-10-09 15:36:59] Отложено в чат 29: прогресс 100% после архивации; отчёты DS_134/135/136 в OUTBOX; deep_scanner.py; pytest-миграция test_ds133_buttons_state.py.
+[2026-10-09 16:00] DS_136a: test_ds133_buttons_state.py обновлён под критерий К2 (DS_136) — шапка L6, тест #8 (source+result с *.plp), новые #8b (source без *.plp → disabled), #8c (тултип К2). Бэкап .bak_ds136a. Скрипт 18/18 PASSED, pytest 77 passed.
+[2026-10-09 16:00] DS_134_report: EXCHANGE\OUTBOX\DS_134_gui_smoke_fixes_report.md (165 строк, BOM=False). Задание перемещено INBOX → PROCESSED.
+[2026-10-09 16:00] DS_135_task: задание восстановлено по факту — EXCHANGE\PROCESSED\DS_135_temporary_marks.md (88 строк, BOM=False). Оригинал утерян.
+[2026-10-09 16:00] DS_135_report: EXCHANGE\OUTBOX\DS_135_temporary_marks_report.md (145 строк, BOM=False).
+[2026-10-09 16:00] DS_136_report: EXCHANGE\OUTBOX\DS_136_gui_patchout_k2_activation_report.md (212 строк, BOM=False). Задание перемещено INBOX → PROCESSED. Отступления B1/B2 задокументированы. FAIL #8 закрыт через DS_136a.
+[2026-10-09 16:00] Отложено в чат 30: DS_137 (прогресс 100% после архивации); test_ds086_ui_hide.py #10 (сломан после DS_134); pytest-миграция test_ds133_buttons_state.py и test_ds086_ui_hide.py (N12); deep_scanner.py фильтр временных; удаление 25 .bak_ в SRC; «Только Ai» по умолчанию.

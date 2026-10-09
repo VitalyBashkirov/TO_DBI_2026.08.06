@@ -3,7 +3,7 @@
 
 Проверяет логику `_update_main_buttons`:
   К1 = source_ok AND pattern_ok AND rule_ok
-  К2 = result_ok AND has_plp
+  К2 = source_has_plp AND result_ok  (DS_136)
   К3 = result_ok AND has_plp AND ai_in_empty
   К4 = ai_out_has (управляется `_update_ai_button_state`)
 
@@ -146,12 +146,32 @@ def main():
         check(7, "К2 disabled без *.plp в result",
               not btn_state(app, 'btn_fix'), f"state={app.btn_fix.state()}")
 
-        # 8. result с *.plp — К2 normal
+        # 8. result с *.plp + source с *.plp — К2 normal (DS_136)
         with open(os.path.join(empty_dst, 'test.plp'), 'w') as f:
             f.write('x')
+        src_plp = os.path.join(tmp_src, 'src_test.plp')
+        with open(src_plp, 'w') as f:
+            f.write('x')
         app._update_main_buttons()
-        check(8, "К2 normal при наличии *.plp в result",
+        check(8, "К2 normal при *.plp в result и source",
               btn_state(app, 'btn_fix'), f"state={app.btn_fix.state()}")
+
+        # 8b. DS_136: result с *.plp, но source без *.plp — К2 disabled
+        os.remove(src_plp) if os.path.exists(src_plp) else None
+        app._update_main_buttons()
+        check(8, "К2 disabled, если source без *.plp (DS_136)",
+              not btn_state(app, 'btn_fix'), f"state={app.btn_fix.state()}")
+
+        # 8c. DS_136: тултип К2 при source без *.plp
+        tt_k2 = getattr(app, '_tooltip_fix', None)
+        check(8, "Тултип К2: нет *.plp в source (DS_136)",
+              tt_k2 is not None and 'нет файлов по шаблону' in (tt_k2.text or '').lower(),
+              f"tip={tt_k2.text if tt_k2 else None!r}")
+
+        # Восстанавливаем source с *.plp для К3
+        with open(src_plp, 'w') as f:
+            f.write('x')
+        app._update_main_buttons()
 
         # ─── К3 ─────────────────────────────────────────────
         # 9. К3 disabled, если в AI_IN есть AI_REQUEST_*.md

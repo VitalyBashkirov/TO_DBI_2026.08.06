@@ -497,3 +497,4 @@
 [2026-10-09 16:15] Отложено в чат 30 (обновлено): test_ds086_ui_hide.py #10 (сломан после DS_134); pytest-миграция test_ds133_buttons_state.py и test_ds086_ui_hide.py (N12); deep_scanner.py фильтр временных; удаление 26 .bak_ в SRC; «Только Ai» по умолчанию; кириллица в ЖВ из ai_local_worker.py (U+FFFD).
 [2026-10-09 16:41] DS_138b: обновление DS_STANDARD.md §6.6.1-6.6.7 (7 подразделов): Уроки FF/GG/HH/II, уточнение правила 19, обязательное логирование PS-блоков. Файл: 32228->40219 B.
 [2026-10-09 16:44] DS_138c: правка формата строки DS_138b в bot.log + §6.6.8 (Урок JJ). bot.log: 100614->100622 B; DS_STANDARD.md: 40219->41278 B.
+[2026-10-09 16:52] DS_139: починка test_ds086_ui_hide.py после DS_134 (btn_from_ai убран из hideable). #7: 6→5 checkbutton; #10: changelog_frame/btn_from_ai → btn_show_sql/changelog_frame; #3, #13, docstring — актуализированы. Baseline 13/15 → 15/15 PASSED; pytest 77 passed; DS_133 18/18.

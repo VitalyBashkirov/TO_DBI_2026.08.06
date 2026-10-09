@@ -4,7 +4,8 @@ DS_086 — тесты скрытия элементов GUI (меню «Вид»
 
 Скрытые по умолчанию элементы реестра (workflow «1. Сканировать →
 2. Исправить код → 3. В AI»):
-  btn_show_sql, btn_send_koda, btn_from_ai, changelog_frame («Журнал изменений»).
+  btn_show_sql, btn_send_koda, changelog_frame, btn_receive_koda, btn_result_history.
+  (btn_from_ai видим по DS_134 — вне реестра скрытия.)
 
 НЕ ТРОГАТЬ: journal_frame («Журнал выполнения») — проверка #4.
 
@@ -97,7 +98,7 @@ def main():
 
         # --- 3: элементы реестра скрыты по умолчанию ---
         managers = {k: getattr(app, k).winfo_manager() for k in HIDE_KEYS}
-        check(3, "скрыты btn_show_sql / btn_send_koda / btn_from_ai / changelog_frame",
+        check(3, "скрыты 5 элементов реестра (без btn_from_ai — видим по DS_134)",
               all(is_hidden(app, k) for k in HIDE_KEYS), str(managers))
 
         # --- 4: «Журнал выполнения» НЕ ТРОНУТ ---
@@ -134,8 +135,8 @@ def main():
                 t = vm.type(i)
                 n_check += t == 'checkbutton'
                 n_cmd += t == 'command'
-        check(7, "меню «Вид»: 6 checkbutton + 2 команды",
-              vm is not None and n_check == 6 and n_cmd == 2,
+        check(7, "меню «Вид»: 5 checkbutton + 2 команды (DS_134: btn_from_ai убран)",
+              vm is not None and n_check == 5 and n_cmd == 2,
               f"checkbutton={n_check} command={n_cmd}")
 
         # --- 8: «Показать все» — все видны, высота восстановлена ---
@@ -155,13 +156,13 @@ def main():
               f"h={h_hide}")
 
         # --- 10: индивидуальное переключение одного элемента ---
-        app.ui_visible_vars['changelog_frame'].set(True)
-        app.toggle_ui_element('changelog_frame')
+        app.ui_visible_vars['btn_show_sql'].set(True)
+        app.toggle_ui_element('btn_show_sql')
         root.update_idletasks()
-        check(10, "toggle changelog_frame → он виден, кнопки скрыты",
-              is_shown(app, 'changelog_frame') and is_hidden(app, 'btn_from_ai'),
-              f"changelog={app.changelog_frame.winfo_manager()!r} "
-              f"from_ai={app.btn_from_ai.winfo_manager()!r}")
+        check(10, "toggle btn_show_sql → он виден, changelog_frame скрыт",
+              is_shown(app, 'btn_show_sql') and is_hidden(app, 'changelog_frame'),
+              f"show_sql={app.btn_show_sql.winfo_manager()!r} "
+              f"changelog={app.changelog_frame.winfo_manager()!r}")
 
         # --- 11: порядок кнопок в панели сохранён после show/hide циклов ---
         for visible in (True, False, True):
@@ -187,7 +188,7 @@ def main():
         root.update_idletasks()
         with open(SETTINGS, encoding='utf-8') as f:
             saved = json.load(f).get('ui_hidden_elements')
-        check(13, "settings.json → ui_hidden_elements содержит 4 ключа",
+        check(13, "settings.json → ui_hidden_elements содержит 5 ключей",
               isinstance(saved, list) and sorted(saved) == sorted(HIDE_KEYS), str(saved))
 
         # --- 14: восстановление из settings.json (пустой список = всё видно) ---

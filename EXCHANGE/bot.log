@@ -472,3 +472,4 @@
 [2026-10-09 03:09] DS_130: удалён дубль-логгер write_log в exchange_bot.py (режим 'w' сносил bot.log). 6 вызовов -> _log_bot. Удалено 9 строк (268->259), BOM=False. pytest 65 passed.
 [2026-10-09 03:18] DS_131: устранены 14 invalid escape sequence в 6 файлах (code_fixer, ai_exchange, gui_app, ai_local_worker, check_standard, explain_log) — raw-string. ast.parse warnings 0. py_compile x6 OK. pytest 65 passed.
 [2026-10-09 03:26] DS_120: 12 messagebox.showinfo в gui_app.py -> self._show_copyable_dialog (кастомный диалог с копированием). Подавление в автономном режиме (_ai_cycle_running). 5918->5923 строк, +335 B. pytest exit=0.
+[2026-10-09 04:19] DS_132: удалены legacy gui_app_OLD/NEW/v25_backup (tracked, не импортировались с 02ca385). .dockerignore: -4 строки (78-81). Очищены 9 __pycache__ (ignored). pytest 65 passed.

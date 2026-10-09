@@ -75,10 +75,6 @@ test_scanner*.py
 ПРОМТы/
 DATA/
 
-# Старые версии GUI
-gui_app_OLD.py
-gui_app_NEW.py
-gui_app_v25_backup.py
 
 # Docker
 docker/

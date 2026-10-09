@@ -180,7 +180,7 @@ def main():
 
         # --- 8. Активация «3. В Ai» после цикла → disabled ---
         app._ai_in_request_files = lambda: []
-        app._update_workflow_buttons()
+        app._update_main_buttons()
         check(8, "После цикла «3. В Ai» disabled",
               'disabled' in app.btn_to_ai.state(),
               f"state={app.btn_to_ai.state()}")

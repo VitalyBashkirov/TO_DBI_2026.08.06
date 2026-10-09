@@ -92,7 +92,7 @@ class TestDS092_ScenarioA_Scan(unittest.TestCase):
             app.log = MagicMock()
             app._bot_log = MagicMock()
             app._log_to_journal = MagicMock()
-            app._update_workflow_buttons = MagicMock()
+            app._update_main_buttons = MagicMock()
             app._play_result_sound = MagicMock()
             app._start_operation = MagicMock()
             app._finish_operation = MagicMock()

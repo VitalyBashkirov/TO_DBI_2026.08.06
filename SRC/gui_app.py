@@ -962,7 +962,7 @@ class DBIMigrationApp:
         self.btn_scan = ttk.Button(control_frame, text="1. Сканировать", command=self.start_scan, width=20)
         self.btn_scan.pack(side=tk.LEFT, padx=3)
         
-        # DS_087 §2.3: стили для логики активации 1→2→3 — активная кнопка
+        # DS_133: стили для main-кнопок — normal (жирный) и disabled (тонкий).
         # жирная, остальные обычные. ('Fix.TButton' оставлен для совместимости
         # тестов, но шрифт btn_fix управляется workflow-стилями.)
         style = ttk.Style()
@@ -988,7 +988,7 @@ class DBIMigrationApp:
             self.btn_to_ai,
             "Использовать LLM для корректировки ошибок, требующих Ai-анализа.")
         
-        self.btn_from_ai = ttk.Button(control_frame, text="От AI", command=self.receive_from_ai, width=10)
+        self.btn_from_ai = ttk.Button(control_frame, text="4. Из Ai", command=self.receive_from_ai, width=10)
         self.btn_from_ai.pack(side=tk.LEFT, padx=3)
         # DS_054_Уточнение_C: «От AI» активна только при наличии файлов-ответов
         # в EXCHANGE\AI_OUT (обновление — _update_ai_button_state, таймер 5 сек).
@@ -1191,12 +1191,6 @@ class DBIMigrationApp:
     def _apply_button_tooltips(self):
         """DS_058+DS_057: тултипы для всех кнопок GUI (1–2 предложения)."""
         tooltips = [
-            (self.btn_scan, "Запустить сканирование исходных PLPlus-файлов "
-                            "по выбранным рубрикаторам."),
-            (self.btn_fix, "Автоматически исправить найденные проблемы "
-                           "(детерминированный фикс + AI-fallback)."),
-        (self.btn_to_ai, "Сформировать файл-запрос для AI "
-                         "(проблемы, требующие AI-анализа)."),
         (getattr(self, 'chk_ai_only', None),
          "Отправлять только issues, требующие AI "
          "(transform_type=ignore + needs_ai_fix>0)."),
@@ -1224,6 +1218,15 @@ class DBIMigrationApp:
         for widget, text in tooltips:
             if widget is not None:
                 Tooltip(widget, text)
+        # DS_133: сохраняем инстансы тултипов К1/К2 для динамического обновления
+        self._tooltip_scan = Tooltip(
+            self.btn_scan,
+            "Запустить сканирование исходных PLPlus-файлов "
+            "по выбранным рубрикаторам.")
+        self._tooltip_fix = Tooltip(
+            self.btn_fix,
+            "Автоматически исправить найденные проблемы "
+            "(детерминированный фикс + AI-fallback).")
         # DS_054_Уточнение_C: тултип «От AI» — динамический (сохраняем ссылку,
         # текст обновляется в _update_ai_button_state по наличию файлов в AI_OUT).
         self._tooltip_from_ai = Tooltip(
@@ -1264,7 +1267,7 @@ class DBIMigrationApp:
         if tooltip is not None:
             tooltip.text = tip
 
-    # ── DS_087 §2.3: workflow «Скан → Фикс → Ai» ──────────────────────────
+    # ── DS_133: main-кнопки 1/2/3/4 — активация по артефактам ──────────────────────────
     def _result_dir_has_pattern_files(self) -> bool:
         """Есть ли файлы по Шаблону в каталоге результатов (включая подкаталоги)."""
         result = self.result_dir_var.get().strip()
@@ -1286,7 +1289,7 @@ class DBIMigrationApp:
             return False
 
     def _ai_in_request_files(self) -> list:
-        r"""Файлы-запросы AI_REQUEST_*.md в EXCHANGE\AI_IN (маска из DS_087 §2.3)."""
+        r"""Файлы-запросы AI_REQUEST_*.md в EXCHANGE\AI_IN."""
         try:
             in_dir = Path(__file__).parent.parent / 'EXCHANGE' / 'AI_IN'
             if not in_dir.exists():
@@ -1295,38 +1298,116 @@ class DBIMigrationApp:
         except Exception:
             return []
 
-    def _update_workflow_buttons(self):
-        """DS_087 §2.3: активация workflow 1→2→3 (условия, жирный шрифт).
+    def _update_main_buttons(self):
+        """DS_133: активация кнопок 1/2/3 по артефактам на диске.
 
-        Ровно одна кнопка активна (state NORMAL + жирный), остальные
-        disabled + обычный шрифт. Во время операции (scan_running) — не
-        пересчитывать: их отключает/включает сам процесс operations.
+        Единственный источник правды — артефакты на диске (не scan_results):
+          К1 = source_ok AND pattern_ok AND rule_ok
+          К2 = result_ok AND has_plp
+          К3 = result_ok AND has_plp AND ai_in_empty
+          К4 = ai_out_has (управляется _update_ai_button_state)
+
+        Во время операции (scan_running) — не пересчитывать: кнопки
+        отключает/включает сам процесс операции.
+
+        Жирный шрифт = кнопка доступна (normal); тонкий = недоступна.
         """
         if getattr(self, 'scan_running', False):
             return
+
         source = self.source_dir_var.get().strip()
         result = self.result_dir_var.get().strip()
         pattern = self.file_pattern_var.get().strip()
-        any_rule = any(var.get() for var in self.selected_rules.values())
-        scan_done = self.scan_results is not None
-        fix_done = bool(scan_done and self.scan_results.get('fix_done'))
-        cond_ai = fix_done and bool(self._ai_in_request_files())
-        cond_fix = scan_done and self._result_dir_has_pattern_files()
-        cond_scan = bool(source) and bool(result) and bool(pattern) and any_rule
-        # Приоритет у позднего шага: workflow идёт 1→2→3.
-        active = 'ai' if cond_ai else ('fix' if cond_fix else ('scan' if cond_scan else None))
-        self._workflow_active = active
-        for btn, key in ((getattr(self, 'btn_scan', None), 'scan'),
-                         (getattr(self, 'btn_fix', None), 'fix'),
-                         (getattr(self, 'btn_to_ai', None), 'ai')):
+
+        # К1: исходный каталог + шаблон + хотя бы одно правило
+        source_ok = bool(source) and os.path.exists(source) and os.access(source, os.R_OK)
+        pattern_ok = bool(pattern)
+        rule_ok = any(var.get() for var in self.selected_rules.values())
+        k1_normal = source_ok and pattern_ok and rule_ok
+
+        # К2: каталог результатов доступен + есть файлы по шаблону
+        result_ok = bool(result) and os.path.exists(result) and os.access(result, os.W_OK)
+        has_plp = result_ok and self._result_dir_has_pattern_files()
+        k2_normal = has_plp
+
+        # К3: как К2 + в AI_IN нет незавершённых запросов
+        ai_in_empty = not self._ai_in_request_files()
+        k3_normal = has_plp and ai_in_empty
+
+        for btn, normal in (
+            (getattr(self, 'btn_scan', None), k1_normal),
+            (getattr(self, 'btn_fix', None), k2_normal),
+            (getattr(self, 'btn_to_ai', None), k3_normal),
+        ):
             if btn is None:
                 continue
-            if key == active:
+            if normal:
                 btn.state(['!disabled'])
                 btn.configure(style='WorkflowActive.TButton')
             else:
                 btn.state(['disabled'])
                 btn.configure(style='WorkflowNormal.TButton')
+
+        # Динамические тултипы для К1/К2/К3
+        self._update_main_buttons_tooltips(
+            k1_normal=k1_normal, k2_normal=k2_normal, k3_normal=k3_normal,
+            source_ok=source_ok, pattern_ok=pattern_ok, rule_ok=rule_ok,
+            result_ok=result_ok, has_plp=has_plp, ai_in_empty=ai_in_empty)
+
+        # К4 — единая точка пересчёта (state + тултип)
+        self._update_ai_button_state()
+
+
+    def _update_main_buttons_tooltips(self, k1_normal, k2_normal, k3_normal,
+                                        source_ok, pattern_ok, rule_ok,
+                                        result_ok, has_plp, ai_in_empty):
+        """DS_133: динамические тултипы К1/К2/К3 — объясняют причину disabled."""
+        # К1
+        if not source_ok:
+            k1_tip = "Укажите существующий исходный каталог."
+        elif not pattern_ok:
+            k1_tip = "Укажите шаблон файлов (например, **/*.plp)."
+        elif not rule_ok:
+            k1_tip = "Выберите хотя бы одно правило в рубрикаторе."
+        else:
+            k1_tip = ("Запустить сканирование исходных PLPlus-файлов "
+                      "по выбранным рубрикаторам.")
+
+        # К2
+        if not result_ok:
+            k2_tip = "Каталог результатов недоступен или недоступен на запись."
+        elif not has_plp:
+            k2_tip = "В каталоге результатов нет файлов по шаблону."
+        else:
+            k2_tip = "Автоматически исправить найденные проблемы."
+
+        # К3
+        from_ai_label = "4. Из Ai"
+        try:
+            if getattr(self, "btn_from_ai", None) is not None:
+                from_ai_label = self.btn_from_ai.cget("text")
+        except Exception:
+            pass
+        if not result_ok:
+            k3_tip = "Каталог результатов недоступен."
+        elif not has_plp:
+            k3_tip = "В каталоге результатов нет файлов по шаблону."
+        elif not ai_in_empty:
+            k3_tip = (f"Запрос AI уже сформирован. Дождитесь ответа "
+                      f"и нажмите «{from_ai_label}».")
+        else:
+            k3_tip = ("Отправить запрос в AI и запустить цикл "
+                      "генерации ответа.")
+
+        for attr, tip in (
+            ("_tooltip_scan", k1_tip),
+            ("_tooltip_fix", k2_tip),
+            ("_tooltip_to_ai", k3_tip),
+        ):
+            tt = getattr(self, attr, None)
+            if tt is not None:
+                tt.text = tip
+
 
     def _poll_ai_out(self):
         """Таймер (5 сек): периодическая проверка AI_OUT (DS_054_Уточнение_C)."""
@@ -2026,19 +2107,19 @@ class DBIMigrationApp:
         self.file_pattern_var.trace_add('write', lambda *args: self._update_buttons_state())
         # DS 54 §2: полный набор триггеров пересчёта активации кнопок —
         # любые изменения в боксах 1-3 должны переключать «Сканировать»/«В Ai».
-        self.file_pattern_var.trace_add('write', lambda *args: self._update_workflow_buttons())
-        self.scan_recursive_var.trace_add('write', lambda *args: self._update_workflow_buttons())
-        self.log_level_var.trace_add('write', lambda *args: self._update_workflow_buttons())
-        self.report_stats_min_files_var.trace_add('write', lambda *args: self._update_workflow_buttons())
-        self.only_modified_var.trace_add('write', lambda *args: self._update_workflow_buttons())
-        self.preserve_structure_var.trace_add('write', lambda *args: self._update_workflow_buttons())
-        self.plpcheck_enabled_var.trace_add('write', lambda *args: self._update_workflow_buttons())
-        self.priority_high_var.trace_add('write', lambda *args: self._update_workflow_buttons())
-        self.priority_medium_var.trace_add('write', lambda *args: self._update_workflow_buttons())
-        self.priority_low_var.trace_add('write', lambda *args: self._update_workflow_buttons())
-        self.clean_output_var.trace_add('write', lambda *args: self._update_workflow_buttons())
-        self.fix_only_found_var.trace_add('write', lambda *args: self._update_workflow_buttons())
-        self.archive_result_var.trace_add('write', lambda *args: self._update_workflow_buttons())
+        self.file_pattern_var.trace_add('write', lambda *args: self._update_main_buttons())
+        self.scan_recursive_var.trace_add('write', lambda *args: self._update_main_buttons())
+        self.log_level_var.trace_add('write', lambda *args: self._update_main_buttons())
+        self.report_stats_min_files_var.trace_add('write', lambda *args: self._update_main_buttons())
+        self.only_modified_var.trace_add('write', lambda *args: self._update_main_buttons())
+        self.preserve_structure_var.trace_add('write', lambda *args: self._update_main_buttons())
+        self.plpcheck_enabled_var.trace_add('write', lambda *args: self._update_main_buttons())
+        self.priority_high_var.trace_add('write', lambda *args: self._update_main_buttons())
+        self.priority_medium_var.trace_add('write', lambda *args: self._update_main_buttons())
+        self.priority_low_var.trace_add('write', lambda *args: self._update_main_buttons())
+        self.clean_output_var.trace_add('write', lambda *args: self._update_main_buttons())
+        self.fix_only_found_var.trace_add('write', lambda *args: self._update_main_buttons())
+        self.archive_result_var.trace_add('write', lambda *args: self._update_main_buttons())
         
         # Привязка события изменения выбора в рубрикаторе
         self.root.after(100, self._update_buttons_state)
@@ -2296,11 +2377,11 @@ class DBIMigrationApp:
         # 2. Указан каталог результатов (для исправления)
         # 3. Выбран хотя бы один файл в рубрикаторе
         
-        # DS_087 §2.3: кнопки 1/2/3 («Сканировать»/«Исправить код»/«В Ai»)
-        # управляются единой логикой активации workflow — ровно одна активна
-        # и жирная. Старшие условия (источник/результат/рубрикатор) входят в
-        # cond_scan; см. _update_workflow_buttons().
-        self._update_workflow_buttons()
+        # DS_133: кнопки 1/2/3 («Сканировать»/«Исправить код»/«В Ai»)
+        # управляются _update_main_buttons по артефактам на диске.
+        # Активация: источник+шаблон+правило (К1), result+*.plp (К2),
+        # AI_IN пуст (К3). См. _update_main_buttons().
+        self._update_main_buttons()
     
         # Кнопка "Показать SQL для ручного исправления" - активна после сканирования
         show_sql_enabled = self.scan_results is not None
@@ -2313,8 +2394,8 @@ class DBIMigrationApp:
         # DS 054: «В AI» активна после сканирования (есть проблемы для запроса).
         # DS_054_Уточнение_C: «От AI» — по наличию файлов-ответов в AI_OUT
         # (не включаем безусловно; обновление — _update_ai_button_state).
-        # DS_087 §2.3: state btn_to_ai («3. В Ai») больше НЕ ставится здесь —
-        # им управляет _update_workflow_buttons (ровно одна активна из 1/2/3).
+        # DS_133: state btn_to_ai («3. В Ai») НЕ ставится здесь —
+        # им управляет _update_main_buttons (по артефактам AI_IN/AI_OUT).
         self._update_ai_button_state()
     
 # Кнопка "Архивировать" - активируется при установленном флаге "Сохранить структуру"
@@ -2514,7 +2595,7 @@ class DBIMigrationApp:
         if hasattr(self, 'update_status_indicators'):
             self.update_status_indicators()
         # DS 54 §2: статусы кнопок пересчитываются и при смене индикации
-        self._update_workflow_buttons()
+        self._update_main_buttons()
     
     def _load_rules(self) -> dict:
         """Загрузка списка правил из рубрикатора"""
@@ -3536,7 +3617,7 @@ class DBIMigrationApp:
                 'issues_before_dedup': scanner.issues_before_dedup,
                 'stats': scan_results,
                 'remaining_by_rule': {},
-                # DS_087 §2.3: чистый скан — фикса ещё не было.
+                # DS_133: чистый скан — фикса ещё не было.
                 'fix_done': False,
             }
             
@@ -4109,7 +4190,7 @@ class DBIMigrationApp:
                 'stats': scan_results,
                 'remaining_by_rule': dict(
                     (getattr(fixer, 'verify_stats', None) or {}).get('remaining_by_rule', {})),
-                # DS_087 §2.3: «фикс завершён, есть что проверить через Ai» —
+                # DS_133: «фикс завершён, есть что проверить через Ai» —
                 # состояние кнопки «От Ai» (btn_to_ai) до активации чекбокса.
                 'fix_done': bool(scanner.issues),
             }
@@ -5609,8 +5690,8 @@ class DBIMigrationApp:
     # ------------------------------------------------------------------
     # DS_088a: автоматизация цикла «3. В Ai»
     #   send_to_ai → rule_based_fixer → ai_local_worker (Ollama) →
-    #   ожидание AI_RESPONSE (timeout 35 мин) → receive_from_ai.
-    # Логика send_to_ai()/receive_from_ai() не меняется (§1).
+    #   ожидание AI_RESPONSE (timeout 35 мин). Применение — «4. Из Ai».
+    # Логика send_to_ai()/receive_from_ai() не меняется.
     # ------------------------------------------------------------------
     def _log_to_journal(self, message: str):
         """DS_088a §2.1: запись в ЖВ (log_text) с учётом потока.
@@ -5785,9 +5866,9 @@ class DBIMigrationApp:
         """DS_088a §2.2: полный AI-цикл (фоновый поток).
 
         Шаги: send_to_ai → rule_based_fixer → ai_local_worker (если Ollama) →
-        ожидание AI_RESPONSE (35 мин) → receive_from_ai. Все шаги — в ЖВ.
+        ожидание AI_RESPONSE (35 мин). Применение — отдельно, «4. Из Ai».
         messagebox на время цикла подавляются (автономный режим), методы
-        send_to_ai()/receive_from_ai() не изменяются.
+        send_to_ai() не изменяется; receive_from_ai() — обработчик К4.
         """
         root = Path(__file__).parent.parent
         tools = root / 'tools'
@@ -5857,9 +5938,7 @@ class DBIMigrationApp:
                     self._log_to_journal("Timeout: AI_RESPONSE не получен")
                 return
             # 4. Автоматический приём ответов.
-            self._log_to_journal("Применение AI_RESPONSE...")
-            self._call_in_main(self.receive_from_ai)
-            self._log_to_journal("AI-цикл завершён")
+            self._log_to_journal("AI_RESPONSE получен, ожидайте применения через «4. Из Ai»")
             _ai_ok = True
         except Exception as exc:
             self._log_to_journal(f"AI-цикл: ошибка {exc}")
@@ -5883,7 +5962,7 @@ class DBIMigrationApp:
             # DS_088a тест 8: после цикла пересчитать активацию workflow
             # (AI_REQUEST заархивированы → «3. В Ai» снова disabled).
             try:
-                self._call_in_main(self._update_workflow_buttons)
+                self._call_in_main(self._update_main_buttons)
             except Exception:
                 pass
 

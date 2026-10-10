@@ -499,3 +499,4 @@
 [2026-10-09 16:44] DS_138c: правка формата строки DS_138b в bot.log + §6.6.8 (Урок JJ). bot.log: 100614->100622 B; DS_STANDARD.md: 40219->41278 B.
 [2026-10-09 16:52] DS_139: починка test_ds086_ui_hide.py после DS_134 (btn_from_ai убран из hideable). #7: 6→5 checkbutton; #10: changelog_frame/btn_from_ai → btn_show_sql/changelog_frame; #3, #13, docstring — актуализированы. Baseline 13/15 → 15/15 PASSED; pytest 77 passed; DS_133 18/18.
 [2026-10-10 16:20] DS_141: кириллица U+FFFD в ЖВ. ai_local_worker.py: sys.stdout/stderr → UTF-8 (TextIOWrapper). gui_app.py: 2× Popen с env PYTHONIOENCODING=utf-8. rule_based_fixer.py уже корректен. pytest 77; DS_133 18/18; DS_086 15/15.
+[2026-10-10 16:24] DS_141b: §6.6.9 в DS_STANDARD.md — Урок JJJ (-like в PS — wildcard, для подстроки использовать .Contains()). DS_STANDARD.md: 41278->43444 B.

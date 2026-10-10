@@ -5952,11 +5952,13 @@ class DBIMigrationApp:
             # 2a. rule_based_fixer (детерминированные правила) — DS_089a §2.5: Popen + мониторинг.
             self._log_to_journal("Запуск rule_based_fixer...")
             try:
+                # DS_141: PYTHONIOENCODING=utf-8 — воркеры пишут UTF-8 (см. Урок EE).
+                env_ai = dict(os.environ, PYTHONIOENCODING='utf-8')
                 proc = subprocess.Popen(
                     [sys.executable, str(tools / 'rule_based_fixer.py'),
                      '--in-dir', str(ai_in), '--out-dir', str(ai_out)],
                     cwd=str(root), stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT)
+                    stderr=subprocess.STDOUT, env=env_ai)
                 self._monitor_worker(proc, batch_size=0)
             except Exception as exc:
                 self._log_to_journal(f"rule_based_fixer: ошибка {exc}")
@@ -5965,12 +5967,14 @@ class DBIMigrationApp:
                 self._log_to_journal("Запуск ai_local_worker...")
                 bs = self._ai_batch_size()
                 try:
+                    # DS_141: PYTHONIOENCODING=utf-8 — воркеры пишут UTF-8 (см. Урок EE).
+                    env_ai = dict(os.environ, PYTHONIOENCODING='utf-8')
                     proc = subprocess.Popen(
                         [sys.executable, str(tools / 'ai_local_worker.py'),
                          '--in-dir', str(ai_in), '--out-dir', str(ai_out),
                          '--resume'],
                         cwd=str(root), stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT)
+                        stderr=subprocess.STDOUT, env=env_ai)
                     self._monitor_worker(proc, bs)
                 except Exception as exc:
                     self._log_to_journal(f"ai_local_worker: ошибка {exc}")

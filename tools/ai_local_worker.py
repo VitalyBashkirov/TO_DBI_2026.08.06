@@ -45,6 +45,15 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+# DS_141: принудительный UTF-8 для stdout/stderr, чтобы кириллица не
+# превращалась в U+FFFD при чтении GUI (см. Урок EE).
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8',
+                                  errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8',
+                                  errors='replace')
+
 ROOT = Path(__file__).resolve().parent.parent          # TO_DBI
 TOOLS_DIR = Path(__file__).resolve().parent            # TO_DBI\tools
 SRC_DIR = ROOT / 'SRC'                                 # ai_exchange (DS_054)

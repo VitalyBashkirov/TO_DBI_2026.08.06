@@ -559,7 +559,7 @@ def _meta_of(request_path, section):
     return ''
 
 
-def write_response(request, fixes, out_dir):
+def write_response(request, fixes, out_dir, only_ai='V'):
     """AI_RESPONSE_<tail>.md — формат rule_based_fixer (DS_082a §5.1).
 
     request — dict от parse_request ({path, source, issues}); имя ответа
@@ -584,6 +584,7 @@ def write_response(request, fixes, out_dir):
         f'- request: {req_path.name}',
         f'- rubricator: {_meta_of(req_path, "rubricator")}',
         f'- model: {request.get("model", "")}',
+        f'- only_ai: {only_ai}',
         f'- generated_at: {datetime.now().isoformat(timespec="seconds")}',
         '',
         '## Фиксы',
@@ -830,7 +831,7 @@ def run_request(request_path, out_dir, cfg, skip_rule_codes=None, limit=None,
             f'merged_lines={merge_stats["merged_lines"]}, '
             f'skipped_in_merge={merge_stats["skipped_in_merge"]}')
 
-    resp = write_response(request, fixes_all, out_dir)
+    resp = write_response(request, fixes_all, out_dir, only_ai=cfg.get('only_ai', 'V'))
     stats['response'] = resp.name if resp else None
     stats['classification'] = classify_distribution(fixes_all)
     stats['merge'] = {
@@ -914,6 +915,8 @@ def build_parser():
                    help='Списать модели Ollama (/api/tags) и выйти')
     p.add_argument('--verbose', action='store_true',
                    help='Печатать prompt каждого батча')
+    p.add_argument('--only-ai', choices=['V', 'x'], default='V',
+                   help='DS_143: значение only_ai в шапке AI_RESPONSE')
     return p
 
 
@@ -941,6 +944,7 @@ def main(argv=None):
         cfg['ollama_url'] = args.ollama_url.rstrip('/')
     if args.no_merge:
         cfg['merge_same_line'] = False
+    cfg['only_ai'] = args.only_ai
 
     if args.list_models:
         try:

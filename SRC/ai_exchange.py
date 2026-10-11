@@ -94,6 +94,11 @@ def flags_line(flags: Dict[str, bool]) -> str:
     for name in FLAG_ORDER:
         on = bool(flags.get(name, False)) if flags else False
         parts.append(f"{name}={'V' if on else 'x'}")
+    # DS_143: only_ai — отдельный фильтр issues (не флаг замены).
+    # Печатается только если передан в flags (обратная совместимость).
+    if flags and 'only_ai' in flags:
+        on = bool(flags.get('only_ai', False))
+        parts.append(f"only_ai={'V' if on else 'x'}")
     return ', '.join(parts)
 
 

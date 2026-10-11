@@ -1177,6 +1177,9 @@ class DBIMigrationApp:
         # DS_054_Уточнение_C: таймер проверки AI_OUT (5 сек) — кнопка «От AI».
         self.root.after(5000, self._poll_ai_out)
 
+        # DS_144: таймер проверки КР (10 сек) — индикаторы + доступность кнопок.
+        self.root.after(10000, self._poll_result_dir)
+
         # Логируем загруженные файлы рубрикатора (после создания log_text)
         if self.rubricator_files:
             for code, name in self.rubricator_files.items():
@@ -1350,7 +1353,7 @@ class DBIMigrationApp:
         result_ok = bool(result) and os.path.exists(result) and os.access(result, os.W_OK)
         has_plp = result_ok and self._result_dir_has_pattern_files()
         source_has_plp = source_ok and self._source_dir_has_pattern_files()
-        k2_normal = source_has_plp and result_ok
+        k2_normal = result_ok and has_plp
 
         # К3: как К2 + в AI_IN нет незавершённых запросов
         ai_in_empty = not self._ai_in_request_files()
@@ -1369,6 +1372,14 @@ class DBIMigrationApp:
             else:
                 btn.state(['disabled'])
                 btn.configure(style='WorkflowNormal.TButton')
+
+        # DS_143: галка «Только Ai» — state как K3 (btn_to_ai)
+        chk = getattr(self, 'chk_ai_only', None)
+        if chk is not None:
+            if k3_normal:
+                chk.state(['!disabled'])
+            else:
+                chk.state(['disabled'])
 
         # Динамические тултипы для К1/К2/К3
         self._update_main_buttons_tooltips(
@@ -1398,14 +1409,12 @@ class DBIMigrationApp:
                       "по выбранным рубрикаторам.")
 
         # К2
-        if not source_ok:
-            k2_tip = "Укажите существующий исходный каталог."
-        elif not source_has_plp:
-            k2_tip = "В исходном каталоге нет файлов по шаблону."
-        elif not result_ok:
+        if not result_ok:
             k2_tip = "Каталог результатов не создан. Запустите <1.Сканировать>"
+        elif not has_plp:
+            k2_tip = "В каталоге результатов нет файлов по шаблону."
         else:
-            k2_tip = "Автоматически исправить найденные проблемы."
+            k2_tip = "Автоматически исправить файлы в каталоге результатов."
 
         # К3
         from_ai_label = "4. Из Ai"
@@ -1445,6 +1454,27 @@ class DBIMigrationApp:
             return
         try:
             self.root.after(5000, self._poll_ai_out)
+        except Exception:
+            pass
+
+    def _poll_result_dir(self):
+        """DS_144: таймер (10 сек) — пересчёт индикаторов КР и кнопок.
+
+        Сканирует result_dir и подкаталоги (через _update_dir_indicators
+        -> _update_main_buttons -> _result_dir_has_pattern_files),
+        обновляет индикаторы «доступен»/«будет создан», цвета полей,
+        доступность K1/K2/K3 и галки «Только Ai».
+
+        K4 не затронута — обновляется отдельным таймером _poll_ai_out.
+        """
+        try:
+            if not self.root.winfo_exists():
+                return
+            self._update_dir_indicators()
+        except Exception:
+            return
+        try:
+            self.root.after(10000, self._poll_result_dir)
         except Exception:
             pass
 
@@ -2881,12 +2911,14 @@ class DBIMigrationApp:
         корзинах правил, поэтому добавляется только сюда (settings.json и
         AI_REQUEST остаются без изменений).
         """
-        flags = dict(self._current_fix_flags())
+        return dict(self._current_fix_flags())
+
+    def _only_ai_flag(self) -> dict:
+        """DS_143: только флаг only_ai для точечной вставки в K3/K4."""
         try:
-            flags['only_ai'] = bool(self.ai_only_var.get())
+            return {'only_ai': bool(self.ai_only_var.get())}
         except Exception:
-            flags['only_ai'] = True
-        return flags
+            return {'only_ai': True}
 
     def _append_only_ai_flag_line(self, report_path) -> None:
         """DS_080 §0: строка only_ai в блоке «Флаги замены» уже записанного .md.
@@ -3588,11 +3620,9 @@ class DBIMigrationApp:
                 _min_files = int(self.report_stats_min_files_var.get() or 10)
             except (ValueError, TypeError):
                 _min_files = 10
-            output_path = Path(config['paths']['logs_dir']) / f'scan_report_{source_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.md'
+            output_path = Path(config['paths']['logs_dir']) / f'scan_report_{source_name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.md'  # DS_143 C.2 done: call removed
             scanner.generate_report(output_path, mode='scan', fixed_count=0,
                                     log_level=_log_level, report_stats_min_files=_min_files)
-            # DS_080 §0: строка only_ai в «Флаги замены» заголовка scan_report_*.md.
-            self._append_only_ai_flag_line(output_path)
             
             # DS 025: дополнительно HTML-отчёт в формате дистрибутивного PlpCheck
             html_report_path = Path(config['paths']['logs_dir']) / f'plpcheck_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.html'
@@ -5482,6 +5512,8 @@ class DBIMigrationApp:
             import ai_exchange
             ai_exchange.ensure_dirs()
             flags = self._current_fix_flags()
+            # DS_143: only_ai — отдельный фильтр, передаём в шапку AI_REQUEST.
+            flags.update(self._only_ai_flag())
             rubs = self._ai_rubricators()
             ts = datetime.now().strftime('%Y%m%d_%H%M%S')
 
@@ -5954,9 +5986,12 @@ class DBIMigrationApp:
             try:
                 # DS_141: PYTHONIOENCODING=utf-8 — воркеры пишут UTF-8 (см. Урок EE).
                 env_ai = dict(os.environ, PYTHONIOENCODING='utf-8')
+                # DS_143: значение галки only_ai пробрасываем в воркеры.
+                only_ai_arg = 'V' if self.ai_only_var.get() else 'x'
                 proc = subprocess.Popen(
                     [sys.executable, str(tools / 'rule_based_fixer.py'),
-                     '--in-dir', str(ai_in), '--out-dir', str(ai_out)],
+                     '--in-dir', str(ai_in), '--out-dir', str(ai_out),
+                     '--only-ai', only_ai_arg],
                     cwd=str(root), stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT, env=env_ai)
                 self._monitor_worker(proc, batch_size=0)
@@ -5972,7 +6007,7 @@ class DBIMigrationApp:
                     proc = subprocess.Popen(
                         [sys.executable, str(tools / 'ai_local_worker.py'),
                          '--in-dir', str(ai_in), '--out-dir', str(ai_out),
-                         '--resume'],
+                         '--resume', '--only-ai', only_ai_arg],
                         cwd=str(root), stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT, env=env_ai)
                     self._monitor_worker(proc, bs)

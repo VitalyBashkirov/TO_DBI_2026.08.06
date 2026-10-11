@@ -128,13 +128,13 @@ def test_08a_k2_normal_plp_in_result_and_source(app, isolated_ai, tmp_path):
     assert btn_state(app, 'btn_fix'), f"state={app.btn_fix.state()}"
 
 
-def test_08b_k2_disabled_source_no_plp(app, isolated_ai, tmp_path):
+def test_08b_k2_disabled_result_no_plp(app, isolated_ai, tmp_path):
+    """DS_144: K2 disabled, если в КР нет файлов по шаблону."""
     src = tmp_path / 'src'
     src.mkdir()
+    (src / 'src_test.plp').write_text('x')     # в ИК файл ЕСТЬ
     empty_dst = tmp_path / 'empty_dst'
-    empty_dst.mkdir()
-    (empty_dst / 'test.plp').write_text('x')
-    # source без *.plp
+    empty_dst.mkdir()                            # в КР файлов НЕТ
 
     app.source_dir_var.set(str(src))
     app.result_dir_var.set(str(empty_dst))
@@ -144,12 +144,13 @@ def test_08b_k2_disabled_source_no_plp(app, isolated_ai, tmp_path):
     assert not btn_state(app, 'btn_fix'), f"state={app.btn_fix.state()}"
 
 
-def test_08c_k2_tooltip_source_no_plp(app, isolated_ai, tmp_path):
+def test_08c_k2_tooltip_result_no_plp(app, isolated_ai, tmp_path):
+    """DS_144: тултип K2, если в КР нет файлов по шаблону."""
     src = tmp_path / 'src'
     src.mkdir()
+    (src / 'src_test.plp').write_text('x')     # в ИК файл ЕСТЬ
     empty_dst = tmp_path / 'empty_dst'
-    empty_dst.mkdir()
-    (empty_dst / 'test.plp').write_text('x')
+    empty_dst.mkdir()                            # в КР файлов НЕТ
 
     app.source_dir_var.set(str(src))
     app.result_dir_var.set(str(empty_dst))

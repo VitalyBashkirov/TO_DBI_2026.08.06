@@ -292,7 +292,8 @@ def build_fixes(request: dict, rules_cfg: dict,
     return fixes, skipped
 
 
-def write_response(request: dict, fixes: list[dict], out_dir: Path) -> Path:
+def write_response(request: dict, fixes: list[dict], out_dir: Path,
+                   only_ai: str = 'V') -> Path:
     """AI_RESPONSE_<source>_<ts>.md — Markdown + ```json [...]``` (формат DS_054)."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -303,7 +304,8 @@ def write_response(request: dict, fixes: list[dict], out_dir: Path) -> Path:
     text = (f"# AI-ответ (rule-based, DS_082a)\n\n"
             f"- Источник: {request['source']}\n"
             f"- Дата: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
-            f"- Исправлений: {len(fixes)} (confidence=0.99, rule-based)\n\n"
+            f"- Исправлений: {len(fixes)} (confidence=0.99, rule-based)\n"
+            f"- only_ai: {only_ai}\n\n"
             f"```json\n{body}\n```\n")
     resp.write_text(text.replace('\r\n', '\n').replace('\n', '\r\n'),
                     encoding='utf-8', newline='')
@@ -314,14 +316,14 @@ def write_response(request: dict, fixes: list[dict], out_dir: Path) -> Path:
 # Обработка одного запроса / каталога
 # ----------------------------------------------------------------------
 def process_request(req_path: Path, out_dir: Path, rules_path: Path,
-                    log=_log) -> dict:
+                    log=_log, only_ai: str = 'V') -> dict:
     rules_cfg = json.loads(Path(rules_path).read_text(encoding='utf-8'))
     request = parse_request(Path(req_path))
     if not request['issues']:
         log(f"skip {Path(req_path).name}: не разобрано ни одного issue")
         return {'request': str(req_path), 'fixes': 0, 'skipped': 0, 'response': None}
     fixes, skipped = build_fixes(request, rules_cfg, log=log)
-    resp = write_response(request, fixes, out_dir) if fixes else None
+    resp = write_response(request, fixes, out_dir, only_ai=only_ai) if fixes else None
     if not fixes:
         log(f"skip {Path(req_path).name}: 0 fixes (все issues нетривиальные)")
     log(f"{Path(req_path).name}: issues={len(request['issues'])}, "
@@ -340,6 +342,8 @@ def main(argv=None) -> int:
     ap.add_argument('--out', help='каталог для AI_RESPONSE (по умолчанию EXCHANGE\\AI_OUT)')
     ap.add_argument('--in-dir', help='каталог с AI_REQUEST_* (batch, glob внутри Python)')
     ap.add_argument('--out-dir', help='каталог для AI_RESPONSE в batch-режиме')
+    ap.add_argument('--only-ai', choices=['V', 'x'], default='V',
+                    help='DS_143: значение only_ai в шапке AI_RESPONSE')
     ap.add_argument('--rules', default=str(DEFAULT_RULES),
                     help='путь к rule_based_rules.json')
     args = ap.parse_args(argv)
@@ -351,7 +355,7 @@ def main(argv=None) -> int:
 
     if args.request:
         out = Path(args.out) if args.out else ROOT / 'EXCHANGE' / 'AI_OUT'
-        r = process_request(Path(args.request), out, rules_path)
+        r = process_request(Path(args.request), out, rules_path, only_ai=args.only_ai)
         _log(f"Rule-based fixer: {Path(args.request).name}: fixes={r['fixes']}, "
              f"skip={r['skipped']}, response={r['response']}", to_bot=True)
         return 0
@@ -366,7 +370,7 @@ def main(argv=None) -> int:
             return 1
         total_f = total_s = 0
         for req in requests:
-            r = process_request(req, out, rules_path)
+            r = process_request(req, out, rules_path, only_ai=args.only_ai)
             total_f += r['fixes']
             total_s += r['skipped']
         _log(f"Rule-based fixer (batch): запросов={len(requests)}, "

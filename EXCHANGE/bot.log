@@ -502,3 +502,5 @@
 [2026-10-10 16:24] DS_141b: §6.6.9 в DS_STANDARD.md — Урок JJJ (-like в PS — wildcard, для подстроки использовать .Contains()). DS_STANDARD.md: 41278->43444 B.
 [2026-10-11 06:10] DS_140: pytest-миграция legacy-тестов завершена. 110 passed (77+18+15). Legacy → .py.txt.
 [2026-10-11 06:24] DS_142: §6.6.10-§6.6.17 в DS_STANDARD.md — 8 уроков чата 31 (LLL/MMM/NNN/OOO/PPP/QQQ/RRR-SSS/TTT). 43444->50575 B.
+[2026-10-11 16:11] DS_143 CLOSED. Галка «Только Ai» = поведение K3 + only_ai в шапки AI_REQUEST/AI_RESPONSE.
+[2026-10-11 16:11] DS_144 CLOSED. Периодический пересчёт КР (10 сек) + K2 = result_ok AND has_plp.

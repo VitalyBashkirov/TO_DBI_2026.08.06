@@ -998,3 +998,49 @@ stderr от внешнего процесса, даже если блок 2 на
 Инцидент: DS_142 Шаг 6 — блок с §6.6.15 (внутри которого был
 Markdown-код с обратными апострофами) завис на >>.
 
+### §6.6.18 — Урок UUU: N7 v6 — очистка PS\ с сохранением persist\
+
+N7 v2 чистил только файлы в корне PS\ (флаг -File), не подпапки.
+Из-за этого PS\write_ds143.py (корень) сносился при старте
+следующего блока (LASTEXITCODE=2, can't open file), а PS\work\
+(подпапка) выживал случайно, что не было задумано.
+
+N7 v4 чистил только *.log — .py-скрипты начали копиться (инцидент
+11.10.2026: в PS\ 6 элементов, 5 мусорных).
+
+N7 v5 чистил всё PS\ рекурсивно — рабочие скрипты между блоками
+приходилось выносить в tools\, что засоряло проект.
+
+Решение — N7 v6: очистка PS\ рекурсивно, кроме активного лога и
+PS\persist\. Рабочие скрипты между блоками — в PS\persist\,
+одноразовые — в корень PS\.
+
+Шаблон N7 v6:
+
+    $logName    = 'DS_XXX_stepN_...log'
+    $logPath    = Join-Path 'F:\TO_DBI\PS' $logName
+    $persistDir = 'F:\TO_DBI\PS\persist'
+
+    if (-not (Test-Path $persistDir)) {
+        New-Item -ItemType Directory -Path $persistDir -Force | Out-Null
+    }
+
+    Get-ChildItem 'F:\TO_DBI\PS' -Force -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -ne $logName -and
+            $_.FullName -ne $persistDir
+        } |
+        ForEach-Object {
+            try { Remove-Item $_.FullName -Force -Recurse -ErrorAction Stop } catch {}
+        }
+
+Правило размещения: файлы, переживающие очистку между блоками
+одного DS — в PS\persist\; одноразовые скрипты и логи — в корень
+PS\; рабочие утилиты проекта — в tools\ (N7 их не трогает).
+
+Правило гигиены: в PS\persist\ — файлы не более одного активного
+DS; чистить persist\ при закрытии DS или в начале следующего DS.
+
+Инцидент: DS_143, B.1 → B.2 — write_ds143.py в корне PS\ был
+удалён N7 v2 при старте B.2 (LASTEXITCODE=2).
+

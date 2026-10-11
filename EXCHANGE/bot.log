@@ -501,3 +501,4 @@
 [2026-10-10 16:20] DS_141: кириллица U+FFFD в ЖВ. ai_local_worker.py: sys.stdout/stderr → UTF-8 (TextIOWrapper). gui_app.py: 2× Popen с env PYTHONIOENCODING=utf-8. rule_based_fixer.py уже корректен. pytest 77; DS_133 18/18; DS_086 15/15.
 [2026-10-10 16:24] DS_141b: §6.6.9 в DS_STANDARD.md — Урок JJJ (-like в PS — wildcard, для подстроки использовать .Contains()). DS_STANDARD.md: 41278->43444 B.
 [2026-10-11 06:10] DS_140: pytest-миграция legacy-тестов завершена. 110 passed (77+18+15). Legacy → .py.txt.
+[2026-10-11 06:24] DS_142: §6.6.10-§6.6.17 в DS_STANDARD.md — 8 уроков чата 31 (LLL/MMM/NNN/OOO/PPP/QQQ/RRR-SSS/TTT). 43444->50575 B.

@@ -1066,3 +1066,45 @@ f"{raw[:3] == b'\xef\xbb\xbf'}" падает с SyntaxError ещё до
 Инцидент: DS_143 — трижды: шаг A (BOM-check), шаг E
 (insert_6618.py), шаг «проверка задания» (check_ds143_task.py).
 
+### §6.6.20 — Урок WWW: Add-Content -Encoding UTF8 в PS 5.1 = BOM
+
+Add-Content -Path <file> -Value <text> -Encoding UTF8 в PS 5.1
+пишет UTF-8 с BOM (ef bb bf). Для файла, который уже в UTF-8
+без BOM, это добавляет BOM, что ломает формат.
+
+Решение: для UTF-8 без BOM использовать Python
+(open(path, 'a', encoding='utf-8')) или .NET:
+
+    [System.IO.File]::AppendAllText($path, $text, [Text.UTF8Encoding]::new($false))
+
+Инцидент: DS_143/DS_144 закрытие — попытка добавить записи в
+EXCHANGE\bot.log через Add-Content -Encoding UTF8. Откат:
+git checkout -- EXCHANGE\bot.log, потом Python-дозапись.
+
+### §6.6.21 — Урок XXX: Python print с кириллицей — кракозябры в Start-Transcript
+
+Python print с русским текстом в Start-Transcript PS 5.1 попадает
+как «??????» (кодировка транскрипта — cp1251/cp866, вывод — UTF-8).
+При этом LASTEXITCODE = 0, файл записан корректно.
+
+Решение: критичные проверки — ASCII-only (%-форматирование без
+кириллицы). Результаты читать через Get-Content -Encoding UTF8
+или через файл-посредник.
+
+Инцидент: DS_143 шаг C.1, DS_144 шаг D.6 — print("OK: правка...")
+попадал в лог как «OK: ?????? ...».
+
+### §6.6.22 — Урок YYY: write_text(newline='\n') нормализует весь файл
+
+Path.write_text(text, newline='\n') в Python применяет newline-
+преобразование ко всему тексту, а не только к вставленному
+фрагменту. Если исходный файл был смешанный (часть CRLF, часть LF),
+после записи весь файл станет LF.
+
+Это безопасно для Git — Git нормализует .py до LF при коммите
+(core.autocrlf / .gitattributes), diff чистый. Но на диске файл
+меняется больше, чем «на N строк» — убираются все \r в CRLF-строках.
+
+Инцидент: DS_143 шаг C.1 — gui_app.py уменьшился с 355148 B до
+349231 B при git diff +22/-9.
+

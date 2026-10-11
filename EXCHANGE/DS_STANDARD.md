@@ -1044,3 +1044,25 @@ DS; чистить persist\ при закрытии DS или в начале с
 Инцидент: DS_143, B.1 → B.2 — write_ds143.py в корне PS\ был
 удалён N7 v2 при старте B.2 (LASTEXITCODE=2).
 
+### §6.6.19 — Урок VVV: backslash в f-string {...} -> SyntaxError
+
+Python < 3.12 не позволяет использовать обратный слэш внутри
+фигурных скобок f-string. Строка вида f"{raw.count(b'\r\n')}" или
+f"{raw[:3] == b'\xef\xbb\xbf'}" падает с SyntaxError ещё до
+выполнения; при этом ошибка идёт в stderr и в Start-Transcript
+не попадает (см. §6.6.1). В PS-логе виден только LASTEXITCODE = 1
+и пустота.
+
+Решение: вычислять значение с backslash-литералом в отдельной
+переменной до f-string:
+
+    crlf = raw.count(b"\r\n")
+    has_bom = raw[:3] == b"\xef\xbb\xbf"
+    print(f"CRLF = {crlf}, BOM = {has_bom}")
+
+Альтернативы: %-форматирование, .format(), конкатенация —
+любой способ без backslash внутри {...}.
+
+Инцидент: DS_143 — трижды: шаг A (BOM-check), шаг E
+(insert_6618.py), шаг «проверка задания» (check_ds143_task.py).
+

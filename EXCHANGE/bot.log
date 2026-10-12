@@ -509,3 +509,10 @@
   SRC/gui_app.py: _run_archive arcname relative_to(results_dir)
   SRC/tests/test_ds144a_archive_pytest.py: 4 теста.
   pytest: 122 passed.
+
+[2026-10-12 11:56] DS_144b CLOSED. K2: копирование ИК -> КР по шаблону.
+  SRC/gui_app.py: _copy_files_to_result + _matches_pattern + _run_fix
+    (вызов после скана, aborted -> прерывание) + галка переименована
+    + тултипы секции 3 (_apply_section3_tooltips).
+  SRC/tests/test_ds144b_copy_pattern_pytest.py: 14 тестов.
+  pytest: 136 passed. gui_app.py: 350909 -> 356907 B.

@@ -770,7 +770,7 @@ class DBIMigrationApp:
         options_frame.grid_columnconfigure(6, weight=1)
         
         # Опции вывода
-        ttk.Checkbutton(options_frame, text="Только модифицированные файлы", 
+        ttk.Checkbutton(options_frame, text="Только файлы по шаблону", 
                        variable=self.only_modified_var).grid(row=0, column=0, sticky=tk.W, padx=3)
         ttk.Checkbutton(options_frame, text="Сохранить структуру каталогов", 
                        variable=self.preserve_structure_var).grid(row=0, column=1, sticky=tk.W, padx=10)
@@ -1239,6 +1239,7 @@ class DBIMigrationApp:
             self.btn_from_ai,
             "Загрузить и применить ответы AI из каталога AI_OUT.")
         self._update_ai_button_state()
+        self._apply_section3_tooltips()
 
     # ------------------------------------------------------------------
     # DS_054_Уточнение_C: состояние кнопки «От AI» по содержимому AI_OUT
@@ -1253,6 +1254,65 @@ class DBIMigrationApp:
                           list(out_dir.glob('AI_RESPONSE_*.json')))
         except Exception:
             return []
+
+    def _apply_section3_tooltips(self):
+        """DS_144b: тултипы для 4 галок секции 3 (программный поиск по тексту)."""
+        import tkinter.ttk as _ttk
+        chk_map = {}
+        try:
+            children = self.options_frame.winfo_children()
+        except Exception:
+            children = []
+        for child in children:
+            if not isinstance(child, _ttk.Checkbutton):
+                continue
+            try:
+                txt = child.cget("text") or ""
+            except Exception:
+                continue
+            if "Только файлы по шаблону" in txt:
+                chk_map["only_pattern"] = child
+            elif "Сохранить структуру каталогов" in txt:
+                chk_map["preserve"] = child
+            elif "Исправить код" in txt and "только пометить" in txt:
+                chk_map["fix_only"] = child
+
+        self._tooltip_only_pattern = None
+        self._tooltip_preserve_structure = None
+        self._tooltip_fix_only_found = None
+        self._tooltip_archive = None
+
+        if chk_map.get("only_pattern") is not None:
+            self._tooltip_only_pattern = Tooltip(
+                chk_map["only_pattern"],
+                "Что копировать в каталог результатов.\n"
+                "Вкл. — только файлы, в которые нужно внести правки по шаблону\n"
+                "(это могут быть .plp;.pck;.mcs;.mp и др.).\n"
+                "Выкл. — все файлы, соответствующие шаблону (поле «Шаблон» в секции 1).\n"
+                "(это могут быть .plp;.pck;.mcs;.mp и др.) копируются всегда\n"
+                "для контекста."
+            )
+        if chk_map.get("preserve") is not None:
+            self._tooltip_preserve_structure = Tooltip(
+                chk_map["preserve"],
+                "В каталоге результатов сохранять структуру подкаталогов исходного "
+                "каталога. Если выключено — все файлы плоско, а при коллизии имён "
+                "операция прерывается."
+            )
+        if chk_map.get("fix_only") is not None:
+            self._tooltip_fix_only_found = Tooltip(
+                chk_map["fix_only"],
+                "Не применять детерминированные исправления, только добавлять "
+                "маркеры --NEW YYYY-MM-DD к найденным проблемам."
+            )
+        arch = getattr(self, "archive_result_check", None)
+        if arch is not None:
+            self._tooltip_archive = Tooltip(
+                arch,
+                "После исправления упаковать каталог результатов в ZIP с именем "
+                "последнего уровня исходного каталога. Внутри архива — сразу "
+                "содержимое, без обёртки ИППУ."
+            )
 
     def _update_ai_button_state(self):
         """«От AI» disabled при пустом AI_OUT, normal — при наличии ответов.
@@ -2384,45 +2444,113 @@ class DBIMigrationApp:
         
         return len(source_files) > 0
     
-    def _copy_directory_structure(self, source_dir: Path, result_dir: Path) -> int:
+    def _matches_pattern(self, rel_path: Path, masks: list) -> bool:
+        """DS_144b: соответствует ли относительный путь хотя бы одной маске.
+
+        Маска с '**/' или '**' -> любой уровень вложенности.
+        Маска без '**'        -> только корень (rel_path.parent == '.').
         """
-        Копирование недостающих подкаталогов и всех файлов (кроме .plp) из source_dir в result_dir.
-        Возвращает количество скопированных файлов.
-        Создаёт недостающие подкаталоги и копирует недостающие файлы.
+        import fnmatch as _fnmatch
+        for mask in masks:
+            if "**/" in mask or "**" in mask:
+                clean = mask.replace("**/", "").replace("**", "")
+                if _fnmatch.fnmatch(rel_path.name, clean):
+                    return True
+            else:
+                if rel_path.parent == Path(".") and _fnmatch.fnmatch(rel_path.name, mask):
+                    return True
+        return False
+
+    def _copy_files_to_result(self, source_dir: Path, result_dir: Path,
+                              pattern: str, preserve_structure: bool,
+                              only_edited: bool,
+                              edited_files=None) -> dict:
+        """DS_144b: копирование файлов ИК -> КР с учётом шаблона и галок.
+
+        Копирует:
+          - не-.plp файлы (тексты, конфиги) — всегда, для контекста;
+          - .plp файлы:
+              only_edited=True  — только из edited_files (файлы, в которые
+                                   нужно внести правки);
+              only_edited=False — все .plp, соответствующие pattern.
+
+        pattern            — glob-маски через ';' (например, '**/*.plp;*.sql').
+        preserve_structure — True: зеркалим отн. путь; False: плоско.
+        edited_files       — set абсолютных путей (из scanner.get_issues_by_file()).
+
+        Возвращает {'copied': int, 'skipped': int, 'errors': int,
+                    'aborted': str | None}.
+        - pattern пуст -> aborted='Не указаны шаблоны файлов'.
+        - Коллизия при preserve_structure=False -> aborted='Коллизия имён: <name>'.
         """
-        files_copied = 0
-        dirs_created = 0
-        
-        # Создаем все подкаталоги из исходного каталога (если их нет в результате)
-        for dir_path in source_dir.rglob('*'):
-            if dir_path.is_dir():
-                target_dir = result_dir / dir_path.relative_to(source_dir)
-                if not target_dir.exists():
-                    target_dir.mkdir(parents=True, exist_ok=True)
-                    dirs_created += 1
-                    self.root.after(0, lambda d=target_dir.name: self.log(f"  Создан подкаталог: {d}", 'info'))
-                else:
-                    self.root.after(0, lambda d=target_dir.name: self.log(f"  Подкаталог существует: {d}", 'debug'))
-        
-        # Копируем все файлы (кроме .plp), если их нет в результате
+        result = {'copied': 0, 'skipped': 0, 'errors': 0, 'aborted': None}
+
+        if not pattern or not pattern.strip():
+            result['aborted'] = 'Не указаны шаблоны файлов'
+            return result
+
+        masks = [m.strip() for m in pattern.split(';') if m.strip()]
+        if not masks:
+            result['aborted'] = 'Не указаны шаблоны файлов'
+            return result
+
+        edited = set(edited_files or [])
+        seen_targets = set()
+
         for file_path in source_dir.rglob('*'):
-            if file_path.is_file() and file_path.suffix.lower() != '.plp':
-                target_file = result_dir / file_path.relative_to(source_dir)
-                if not target_file.exists():
-                    try:
-                        # Гарантируем, что родительский каталог существует
-                        target_file.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(file_path, target_file)
-                        files_copied += 1
-                        self.root.after(0, lambda f=file_path.name: self.log(f"  Скопирован файл: {f}", 'info'))
-                    except Exception as e:
-                        self.root.after(0, lambda f=file_path.name, err=e: self.log(f"  Ошибка копирования {f}: {err}", 'error'))
+            if not file_path.is_file():
+                continue
+            try:
+                rel = file_path.relative_to(source_dir)
+            except ValueError:
+                continue
+
+            is_plp = file_path.suffix.lower() == '.plp'
+
+            # .plp — фильтр (по edited_files или по маскам)
+            if is_plp:
+                if only_edited:
+                    if str(file_path) not in edited:
+                        result['skipped'] += 1
+                        continue
                 else:
-                    self.root.after(0, lambda f=file_path.name: self.log(f"  Файл существует, пропущен: {f}", 'debug'))
-        
-        self.root.after(0, lambda: self.log(f"  Создано подкаталогов: {dirs_created}, скопировано файлов: {files_copied}", 'info'))
-        return files_copied
-    
+                    if not self._matches_pattern(rel, masks):
+                        result['skipped'] += 1
+                        continue
+            # не-.plp — всегда копируем
+
+            # Целевой путь
+            if preserve_structure:
+                target = result_dir / rel
+            else:
+                target = result_dir / file_path.name
+
+            # Коллизия (только при плоской раскладке)
+            key = str(target).lower()
+            if not preserve_structure and key in seen_targets:
+                result['aborted'] = f"Коллизия имён: {file_path.name}"
+                return result
+            seen_targets.add(key)
+
+            if target.exists():
+                result['skipped'] += 1
+                continue
+
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                import shutil as _shutil
+                _shutil.copy2(file_path, target)
+                result['copied'] += 1
+            except Exception as e:
+                result['errors'] += 1
+                try:
+                    self.root.after(0, lambda f=file_path.name, err=e:
+                                    self.log(f"  Ошибка копирования {f}: {err}", 'error'))
+                except Exception:
+                    pass
+
+        return result
+
     def _update_buttons_state(self):
         """Обновление доступности кнопок в зависимости от параметров"""
         source_dir = self.source_dir_var.get()
@@ -3964,19 +4092,6 @@ class DBIMigrationApp:
             self.root.after(0, lambda: self.set_status("Исправление кода..."))
             self.root.after(0, lambda: self._log_separator("НАЧАЛО ИСПРАВЛЕНИЯ КОДА"))
             
-            # Проверка условий для предварительного копирования структуры
-            file_pattern = self.file_pattern_var.get()
-            should_copy_structure = (
-                self.preserve_structure_var.get()
-            )
-            
-            if should_copy_structure:
-                # Копируем структуру каталогов и все файлы (кроме .plp) из исходного в результат
-                self.root.after(0, lambda: self.log("\n[0/5] Копирование структуры каталогов и файлов...", 'info'))
-                files_copied = self._copy_directory_structure(source_dir, result_dir)
-                self.root.after(0, lambda: self.log(f"  Скопировано файлов: {files_copied}", 'info'))
-                self._progress_update(5)
-            
             # Подготовка конфигурации
             config = {
                 'paths': {
@@ -4109,6 +4224,31 @@ class DBIMigrationApp:
             # Сканирование
             scan_results = scanner.scan_directory(log_callback=scan_log)
             
+            # DS_144b: копирование файлов ИК -> КР по шаблону (после скана, до фиксера)
+            edited_files = set(scanner.get_issues_by_file().keys())
+            self.root.after(0, lambda: self.log("\n[0/5] Копирование файлов ИК -> КР по шаблону...", 'info'))
+            _copy_res = self._copy_files_to_result(
+                source_dir=source_dir,
+                result_dir=result_dir,
+                pattern=self.file_pattern_var.get(),
+                preserve_structure=self.preserve_structure_var.get(),
+                only_edited=self.only_modified_var.get(),
+                edited_files=edited_files,
+            )
+            if _copy_res.get('aborted'):
+                _abort_msg = _copy_res['aborted']
+                self.log(f"[!] Копирование прервано: {_abort_msg}", 'error')
+                self.root.after(0,
+                    lambda m=_abort_msg: self._show_copyable_dialog(
+                        "Ошибка", m, kind="error"))
+                self.root.after(0, lambda: self.set_status("Готово"))
+                self.root.after(0, lambda: self.btn_scan.state(['!disabled']))
+                self.root.after(0, lambda: self.btn_fix.state(['!disabled']))
+                return
+            self.root.after(0, lambda c=_copy_res: self.log(
+                f"  Скопировано: {c['copied']}, пропущено: {c['skipped']}, ошибок: {c['errors']}",
+                'info'))
+
             self._progress_update(40)
             
             # Завершение работы Парсера SQL

@@ -3495,6 +3495,9 @@ class DBIMigrationApp:
         
         Args:
             deep_mode: Если True - использовать углублённое сканирование
+
+        DS_145: deep_mode здесь НЕ используется — DeepScanner не подключён.
+        См. DS_146 (интеграция DeepScanner в GUI).
         """
         # DS_088b §2.2: замер длительности для звука завершения.
         _op_start = time.time()

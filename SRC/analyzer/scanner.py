@@ -16,15 +16,31 @@ from typing import List, Dict, Tuple, Optional, Set
 # Признак — сама метка, без привязки к _real или другим суффиксам.
 _TEMP_MARKER_RE = re.compile(r"_\d{8}_\d{6}_")
 
+# DS_145: расширенные признаки временных/служебных файлов.
+_TEMP_SUFFIXES = ('.bak', '.tmp', '.temp', '.swp', '.swo', '.plp~', '.~plp')
+_TEMP_PREFIXES = ('~$',)
+_TEMP_EXACT = {'.DS_Store', 'Thumbs.db', 'desktop.ini'}
+
 
 def is_temporary_filename(name: str) -> bool:
-    """DS_135: True, если в имени файла есть метка _YYYYMMDD_HHMMSS_.
+    """DS_135 + DS_145: True, если файл временный/служебный.
 
-    Такие файлы — артефакты бэкапа/копий, не подлежат сканированию/фиксу/AI.
+    DS_135: метка _YYYYMMDD_HHMMSS_ в имени.
+    DS_145: расширения .bak/.tmp/.temp/.swp/.swo/.plp~/.~plp,
+            префикс ~$, точные имена .DS_Store/Thumbs.db/desktop.ini.
     """
     if not name:
         return False
-    return bool(_TEMP_MARKER_RE.search(name))
+    if _TEMP_MARKER_RE.search(name):
+        return True
+    if name in _TEMP_EXACT:
+        return True
+    if name.startswith(_TEMP_PREFIXES):
+        return True
+    low = name.lower()
+    if low.endswith(_TEMP_SUFFIXES):
+        return True
+    return False
 # Импорт AI-анализатора для сложных правил
 try:
     from analyzer.ai_analyzer import PLPlusAIAnalyzer, AIAnalysisResult

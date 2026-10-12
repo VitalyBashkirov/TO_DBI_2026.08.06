@@ -468,7 +468,7 @@ class DeepScanner:
             'scan': {
                 'recursive': self.recursive,
                 'file_pattern': self.file_pattern,
-                'exclude_patterns': ['.v????', '.bak', '.tmp']
+                'exclude_patterns': ['.v????', '.bak', '.tmp', '\\__pycache__\\', '\\.git\\', '\\node_modules\\']
             },
             'logging': {
                 'level': self.log_level
@@ -489,6 +489,7 @@ class DeepScanner:
 
         # Импорт здесь, чтобы модуль можно было импортировать без зависимостей
         from analyzer.scanner import PLPlusScanner
+        from analyzer.scanner import is_temporary_filename  # DS_145
         
         # Создаём сканер с пользовательскими паттернами
         scanner = PLPlusScanner(config, list(patterns.keys()))
@@ -519,6 +520,7 @@ class DeepScanner:
             file_finder = self.source_dir.glob
         
         files_scanned = 0
+        skipped_temporary = 0  # DS_145
         total_issues = 0
         issues_by_type = {}
         issues_list = []
@@ -528,6 +530,11 @@ class DeepScanner:
             if plp_file.suffix.lower() != '.plp':
                 continue
             
+            # DS_145: пропуск временных/служебных файлов
+            if is_temporary_filename(plp_file.name):
+                skipped_temporary += 1
+                continue
+
             # Проверка исключений
             exclude = False
             for pattern in config['scan']['exclude_patterns']:
@@ -553,6 +560,8 @@ class DeepScanner:
         self.log(f"\n[Deep 1/3] Сканирование файлов...", 'info')
         self.log(f"  Найдено *.plp файлов: {files_scanned}", 'info')
         self.log(f"  Проблемных конструкций: {total_issues}", 'info')
+        if skipped_temporary > 0:  # DS_145
+            self.log(f"  Пропущено временных/служебных файлов: {skipped_temporary}", 'info')
         
         if self.deep_think and total_issues > 0:
             self.log_deep_think(f"\n=== ДЕТАЛИ НАЙДЕННЫХ ПРОБЛЕМ ===")
@@ -598,7 +607,7 @@ class DeepScanner:
         self._log_separator("СКАНИРОВАНИЕ (Алгоритм Deep) ЗАВЕРШЕНО УСПЕШНО")
         self.set_status("Готово")
 
-        return {'files_scanned': files_scanned, 'total_issues': total_issues, 'by_type': issues_by_type}, output_path
+        return {'files_scanned': files_scanned, 'total_issues': total_issues, 'by_type': issues_by_type, 'skipped_temporary': skipped_temporary}, output_path  # DS_145
 
 
 # ═══════════════════════════════════════════════════

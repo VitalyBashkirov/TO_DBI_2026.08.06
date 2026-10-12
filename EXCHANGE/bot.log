@@ -533,3 +533,4 @@
 
 [2026-10-12 14:00] DS_144c+N7 v7: §6.6.23 в DS_STANDARD.md (N7 v7 —
   очистка PS\ в КАЖДОМ блоке, не только в первом). +1672 B.
+[2026-10-12 15:15:51] DS_145 closed: deep_scanner filter + is_temporary_filename extended. Files: scanner.py, deep_scanner.py, gui_app.py, test_ds145. DS_146 queued (DeepScanner GUI integration).

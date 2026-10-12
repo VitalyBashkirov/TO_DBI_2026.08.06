@@ -1108,3 +1108,33 @@ Path.write_text(text, newline='\n') в Python применяет newline-
 Инцидент: DS_143 шаг C.1 — gui_app.py уменьшился с 355148 B до
 349231 B при git diff +22/-9.
 
+
+### §6.6.23 — Урок ZZZ: N7 v7 — очистка PS\ в КАЖДОМ блоке
+
+N7 v6 требует очистки `F:\TO_DBI\PS\` с сохранением `PS\persist\`
+перед новым логом. Уточнение N7 v7: очистка выполняется **в начале
+каждого** PS-блока, который пишет в `PS\` (Start-Transcript, dump,
+.py-файл). Не только в первом блоке чата.
+
+Обоснование: если очистка только в первом блоке, последующие блоки
+накапливают файлы (`.log`, `.py`, `.txt`) — превращают `PS\` в свалку.
+Правило N7 v6 было сформулировано в чате 32, но в чате 34 применялось
+только к первому блоку — это и привело к накоплению 7+ файлов за один
+диалог (`chat34_preflight.log`, `chat34_recon.*`, `chat34_run_fix.*`).
+
+Типовой фрагмент (вставлять в начало каждого PS-блока):
+
+~~~powershell
+if (Test-Path "$proj\PS") {
+    Get-ChildItem "$proj\PS" -Exclude 'persist' -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+} else {
+    New-Item -ItemType Directory -Path "$proj\PS" | Out-Null
+}
+if (-not (Test-Path "$proj\PS\persist")) {
+    New-Item -ItemType Directory -Path "$proj\PS\persist" | Out-Null
+}
+~~~
+
+Инцидент: чат 34, DS_144c — 7 файлов в PS\ от трёх блоков
+(preflight, recon, run_fix), обнаружено при визуальном осмотре.

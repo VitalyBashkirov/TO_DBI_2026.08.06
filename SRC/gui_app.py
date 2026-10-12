@@ -3498,6 +3498,8 @@ class DBIMigrationApp:
         """
         # DS_088b §2.2: замер длительности для звука завершения.
         _op_start = time.time()
+        # DS_144c2: сброс флага «K1 прерван по aborted» при новом запуске.
+        self._k1_copy_aborted = False
         # DS_089a §2.7: сохранение начала операции для прогноза времени.
         self._op_start_time = _op_start
         self._op_files_done = 0
@@ -3735,6 +3737,36 @@ class DBIMigrationApp:
             else:
                 self._progress_update(50)
             
+            # DS_144c: зеркало ИК -> КР (только если скан не прерван).
+            # K2 использует готовое зеркало и не делает повторный скан.
+            if not self.scan_aborted:
+                self.root.after(0, lambda: self.log(
+                    "\n[ЗЕРКАЛО] Копирование ИК -> КР...", 'info'))
+                self._progress_update(90)
+                _copy_res = self._copy_files_to_result(
+                    source_dir=Path(config['paths']['source_dir']),
+                    result_dir=Path(config['paths']['results_dir']),
+                    pattern=self.file_pattern_var.get(),
+                    preserve_structure=self.preserve_structure_var.get(),
+                    only_edited=False,
+                    edited_files=None,
+                )
+                if _copy_res.get('aborted'):
+                    _abort_msg = _copy_res['aborted']
+                    # DS_144c2: пометить, что K1 прерван по aborted (для звука в finally).
+                    self._k1_copy_aborted = True
+                    self._progress_update(100)
+                    self.root.after(0, lambda m=_abort_msg: self.log(
+                        f"[!] K1 прерван: {m}", 'error'))
+                    self.root.after(0,
+                        lambda m=_abort_msg: self._show_copyable_dialog(
+                            "Ошибка", m, kind="error"))
+                    return
+                self._progress_update(98)
+                self.root.after(0, lambda c=_copy_res: self.log(
+                    f"  Скопировано: {c['copied']}, пропущено: {c['skipped']}, "
+                    f"ошибок: {c['errors']}", 'info'))
+            
             # Завершение работы Парсера SQL
             self.root.after(0, lambda: self.log(f"\n[ПАРСЕР SQL] Завершено:", 'highlight'))
             self.root.after(0, lambda: self.log(f"  Найдено файлов: {scan_results.get('files_scanned', 0)}", 'info'))
@@ -3845,7 +3877,9 @@ class DBIMigrationApp:
             self.root.after(0, lambda: self.btn_scan.state(['!disabled']))
             self.root.after(0, lambda: self.btn_fix.state(['!disabled']))
             # DS_088b §2.2: звук завершения (scan_aborted ещё не сброшен).
-            _sound_ok = not self.scan_aborted
+            # DS_144c2: при aborted копирования в K1 — тоже звук ошибки.
+            _sound_ok = (not self.scan_aborted) and (
+                not getattr(self, '_k1_copy_aborted', False))
             _sound_dur = time.time() - _op_start
             self.root.after(0, lambda s=_sound_ok, d=_sound_dur:
                             self._play_result_sound(s, d))
@@ -4209,47 +4243,22 @@ class DBIMigrationApp:
             self.log(f"  Правила: {len(selected_rules)}", 'debug')
             self.root.update_idletasks()  # Принудительное обновление GUI
             
-            # Создание сканера
-            from analyzer.scanner import PLPlusScanner
-            scanner = PLPlusScanner(config, selected_rules, self.rubricator_prompts,
-                                    plpcheck_categories=getattr(self, 'plpcheck_categories_filter', []),
-                                    abort_callback=self._abort_requested,  # DS 038
-                                    stop_event=self._stop_event,            # DS_089b
-                                    fix_flags=self._current_header_flags())  # DS_053_Уточнение_2 (задача A), DS_080 §0
+            # DS_144c: K2 без повторного скана — используем scanner из K1.
+            _k1 = getattr(self, 'scan_results', None) or {}
+            scanner = _k1.get('scanner')
+            if scanner is None:
+                _msg = "Сначала выполните сканирование (K1)."
+                self.log(f"[!] {_msg}", 'error')
+                self.root.after(0, lambda m=_msg: self._show_copyable_dialog(
+                    "Ошибка", m, kind="error"))
+                return
+            scan_results = _k1.get('stats') or {}
             
             # Callback для вывода в журнал
             def scan_log(message, level='info'):
                 self.root.after(0, lambda m=message, l=level: self.log(m, l))
             
-            # Сканирование
-            scan_results = scanner.scan_directory(log_callback=scan_log)
-            
-            # DS_144b: копирование файлов ИК -> КР по шаблону (после скана, до фиксера)
-            edited_files = set(scanner.get_issues_by_file().keys())
-            self.root.after(0, lambda: self.log("\n[0/5] Копирование файлов ИК -> КР по шаблону...", 'info'))
-            _copy_res = self._copy_files_to_result(
-                source_dir=source_dir,
-                result_dir=result_dir,
-                pattern=self.file_pattern_var.get(),
-                preserve_structure=self.preserve_structure_var.get(),
-                only_edited=self.only_modified_var.get(),
-                edited_files=edited_files,
-            )
-            if _copy_res.get('aborted'):
-                _abort_msg = _copy_res['aborted']
-                self.log(f"[!] Копирование прервано: {_abort_msg}", 'error')
-                self.root.after(0,
-                    lambda m=_abort_msg: self._show_copyable_dialog(
-                        "Ошибка", m, kind="error"))
-                self.root.after(0, lambda: self.set_status("Готово"))
-                self.root.after(0, lambda: self.btn_scan.state(['!disabled']))
-                self.root.after(0, lambda: self.btn_fix.state(['!disabled']))
-                return
-            self.root.after(0, lambda c=_copy_res: self.log(
-                f"  Скопировано: {c['copied']}, пропущено: {c['skipped']}, ошибок: {c['errors']}",
-                'info'))
-
-            self._progress_update(40)
+            # DS_144c: скан и копирование сделаны в K1.
             
             # Завершение работы Парсера SQL
             self.log(f"\n[ПАРСЕР SQL] Завершено:", 'highlight')
@@ -4289,14 +4298,8 @@ class DBIMigrationApp:
             
             self._progress_update(50)
             
-            # Определение каталога результатов
-            if config['output']['preserve_structure']:
-                # Сохраняем структуру каталогов
-                final_results_dir = result_dir
-            else:
-                # Создаём подкаталог с меткой версии
-                final_results_dir = result_dir / f"{source_name}_v{iteration}"
-                final_results_dir.mkdir(parents=True, exist_ok=True)
+            # DS_144c K2a: зеркало уже сделано в K1 -> работаем поверх result_dir.
+            final_results_dir = result_dir
             
             self.root.after(0, lambda: self.log(f"\n[2/5] Применение исправлений...", 'info'))
             self.root.after(0, lambda: self.log(f"  Каталог результатов: {final_results_dir}", 'info'))

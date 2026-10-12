@@ -516,3 +516,20 @@
     + тултипы секции 3 (_apply_section3_tooltips).
   SRC/tests/test_ds144b_copy_pattern_pytest.py: 14 тестов.
   pytest: 136 passed. gui_app.py: 350909 -> 356907 B.
+
+[2026-10-12 14:00] DS_144c CLOSED. K1=скан+зеркало; K2 без повторного скана.
+  SRC/gui_app.py: _run_scan — зеркало ИК->КР (only_edited=False);
+    aborted -> прогресс 100 + диалог + return.
+  K2: scanner берётся из scan_results K1 (fail-fast без K1);
+    scan_directory и _copy_files_to_result удалены;
+    final_results_dir = result_dir (K2a).
+  SRC/tests/test_ds144c_k1_k2_pytest.py: 8 тестов.
+  pytest: 144 passed (136 + 8). gui_app.py: 356907 -> 356566 B.
+
+[2026-10-12 14:00] DS_144c2 CLOSED. Звук при aborted в K1.
+  SRC/gui_app.py: флаг _k1_copy_aborted (3 правки);
+    _sound_ok = (not scan_aborted) and (not _k1_copy_aborted).
+  test_ds144c2_k1_aborted_flag_set: 9 passed; регресс 145 passed.
+
+[2026-10-12 14:00] DS_144c+N7 v7: §6.6.23 в DS_STANDARD.md (N7 v7 —
+  очистка PS\ в КАЖДОМ блоке, не только в первом). +1672 B.

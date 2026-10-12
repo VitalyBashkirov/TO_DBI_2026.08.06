@@ -4326,7 +4326,9 @@ class DBIMigrationApp:
             self.root.after(0, self._finish_abortable_operation)
     
     def _run_archive(self, results_dir: Path, source_dir: Path):
-        """Рабочая функция архивации (вызывается в отдельном потоке)"""
+        """Рабочая функция архивации (вызывается в отдельном потоке).
+        DS_144a: внутри архива — сразу содержимое ИППУ (без обёртки
+        patch_XXX/); arcname считается от results_dir."""
         try:
             self.root.after(0, lambda: self.log("\n[5/5] Архивация результатов...", 'info'))
             self._progress_update(95)
@@ -4339,7 +4341,7 @@ class DBIMigrationApp:
                 for root, dirs, files in os.walk(results_dir):
                     for file in files:
                         file_path = Path(root) / file
-                        arcname = file_path.relative_to(results_dir.parent)
+                        arcname = file_path.relative_to(results_dir)
                         zipf.write(file_path, arcname)
                         self.root.after(0, lambda f=file: self.log(f"  Добавлен: {f}", 'debug'))
             

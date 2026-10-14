@@ -533,4 +533,12 @@
 
 [2026-10-12 14:00] DS_144c+N7 v7: §6.6.23 в DS_STANDARD.md (N7 v7 —
   очистка PS\ в КАЖДОМ блоке, не только в первом). +1672 B.
-[2026-10-12 15:15:51] DS_145 closed: deep_scanner filter + is_temporary_filename extended. Files: scanner.py, deep_scanner.py, gui_app.py, test_ds145. DS_146 queued (DeepScanner GUI integration).
+[2026-10-12 15:15:51] DS_145 closed: deep_scanner filter + is_temporary_filename extended. Files: scanner.py, deep_scanner.py, gui_app.py, test_ds145. DS_146 queued (DeepScanner GUI integration).[14.10.2026 13:27:59] DS_146: DS_146 closed: DeepScanner удалён из GUI (меню + Ctrl+F5 + start_deep_scan).
+  Оставлен как CLI (legacy-рубрикатор 1.RUBRICATOR_FILES.md + 3.RUBRICATOR_FIXES.md,
+  несовместим с 4.RUBRICATOR_PROMPT v5.json).
+  SRC/gui_app.py: удалены меню/Ctrl+F5/метод; _run_scan.deep_mode — для совместимости.
+  SRC/analyzer/deep_scanner.py: docstring CLI-only.
+  EXCHANGE/DS_STANDARD.md: §6.6.26 (DS_146), §6.6.27 (CRLF-safe .py).
+  SRC/tests/test_ds146_deep_scan_removed_pytest.py: 12 AST-only тестов.
+  Commits: 5483ba2 (N3b), 41677e2 (N3c).
+  pytest: 181 passed. gui_app.py: 357231 -> ~355647 B.

@@ -4588,7 +4588,7 @@ class DBIMigrationApp:
                         continue
                     
                     # Ищем правила: для v50 — все начинающиеся с v50., для остальных — содержащих код
-                    matching = [code for code in all_rules if code.startswith(file_code + '.') or file_code in code]
+                    matching = [code for code in all_rules if code.lower().startswith(file_code.lower() + '.') or file_code.lower() in code.lower()]
                     if matching:
                         matched_rules.extend(matching)
                         self.root.after(0, lambda fc=file_code, m=len(matching): self.log(f"  Найдено правил: {m}", 'info'))
@@ -4631,7 +4631,11 @@ class DBIMigrationApp:
                             continue
                         
                         # Ищем правила: для v50 — все начинающиеся с v50., для остальных — содержащих код
-                        matching = [code for code in all_rules if code.startswith(file_code + '.') or file_code in code]
+                        # DS_147 (C3): регистронезависимый маппинг (PlpCheck -> plpcheck)
+                        _fc_lower = file_code.lower()
+                        matching = [code for code in all_rules
+                                    if code.lower().startswith(_fc_lower + '.')
+                                    or _fc_lower in code.lower()]
                         if matching:
                             matched_rules.extend(matching)
                             self.root.after(0, lambda fc=file_code, m=len(matching): self.log(f"  Найдено правил: {m}", 'info'))
@@ -4655,223 +4659,39 @@ class DBIMigrationApp:
                     return
                 self.root.after(0, lambda t=total: self.log(f"Сводный файл: {t} правил v5.0.0", 'info'))
                 
-                # Генерируем один сводный файл
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                file_name = f"test_all_{timestamp}.plp"
-                file_path = test_dir / file_name
-                
-                self.root.after(0, lambda: self.log(f"Создание сводного файла: {file_name}", 'info'))
-                
-                lines = []
-                
-                # Заголовок со списком всех правил
-                lines.append('-- ============================================================================')
-                lines.append(f'-- СВОДНЫЙ ТЕСТОВЫЙ ФАЙЛ: ВСЕ ПРАВИЛА v5.0.0 ({total} правил)')
-                lines.append(f'-- Дата генерации: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
-                lines.append(f'-- Описание: Тестовые файлы для всех правил PLPlus адаптации')
-                
-                # Добавляем информацию о выбранных приоритетах (DS 018: HIGH/MEDIUM/LOW)
-                selected_priorities = list(getattr(self, '_selected_priorities', []))
-                if selected_priorities:
-                    lines.append(f'-- Приоритеты: {", ".join(selected_priorities)}')
-                
-                lines.append('-- ============================================================================')
-                lines.append('-- Список всех правил (HIGH, ' + str(total) + ' шт.):')
-                lines.append('-- ============================================================================')
-                
-                for i, rule_code in enumerate(sorted_rules, 1):
-                    rule = all_rules[rule_code]
-                    short_desc = rule.short_description[:50] if rule.short_description else '...'
-                    desc_padded = short_desc.ljust(55)
-                    lines.append(f'-- {i:2d}.  {rule_code:45s} - {desc_padded}')
-                
-                lines.append('-- ============================================================================')
-                lines.append('')
-                
-                # Секции для каждого правила
-                aborted = False
-                processed_rules = 0
-                for i, rule_code in enumerate(sorted_rules, 1):
-                    # DS 038 (доработка): проверка прерывания в цикле генерации —
-                    # кнопка «Прервать» останавливает генерацию между правилами
-                    if self.scan_aborted:
-                        aborted = True
-                        self.root.after(0, lambda n=processed_rules, t=total: self.log(
-                            f"[ПРЕРВАНО] Генерация тестовых .plp остановлена пользователем. "
-                            f"Обработано правил: {n} из {t}", 'warning'))
-                        self.root.after(0, lambda: self.set_status("Прервано"))
-                        break
-                    
-                    processed_rules = i
-                    rule = all_rules[rule_code]
-                    short_desc = rule.short_description[:60] if rule.short_description else '...'
-                    
-                    lines.append('-- ============================================================================')
-                    lines.append(f'-- {i:2d}: {rule_code} - {short_desc}')
-                    lines.append('-- ============================================================================')
-                    
-                    # Метаданные
-                    lines.append('-- 3.RUBRICATOR_FIXES v5.md:')
-                    lines.append(f'--   Короткое описание: {rule.short_description}')
-                    lines.append(f'--   Подробное описание: {rule.documentation_text}')
-                    
-                    bad_main = rule.code_example_bad[0] if rule.code_example_bad else ''
-                    extra_bads = rule.code_example_bad[1:] if rule.code_example_bad else []
-                    
-                    if bad_main:
-                        lines.append(f'--   Пример кода (плохой): {bad_main}')
-                    for idx, bad in enumerate(extra_bads, 2):
-                        lines.append(f'--   Пример кода {idx} (плохой): {bad}')
-                    
-                    # Хорошие примеры из JSON
-                    json_rule = json_data.get('rules', {}).get(rule_code, {})
-                    examples = json_rule.get('examples', {})
-                    good = ''
-                    if examples:
-                        good = examples.get('simple', {}).get('good', '')
-                        if not good:
-                            good = examples.get('simple_case', {}).get('good', '')
-                        if not good:
-                            for ex_name, ex_data in examples.items():
-                                if ex_data.get('good'):
-                                    good = ex_data['good']
-                                    break
-                    
-                    if good:
-                        lines.append(f'--   Пример кода (исправленный): {good}')
-                    
-                    parts = rule_code.split('.')
-                    tags = ', '.join(parts) if len(parts) >= 2 else rule.priority
-                    lines.append(f'--   Теги: {tags}')
-                    
-                    # JSON metadata
-                    lines.append('-- 4.RUBRICATOR_PROMPT v5.json (расширенный):')
-                    lines.append(f'--   documentation_text: {rule.documentation_text}')
-                    lines.append(f'--   plplus_materials_note: {rule.plplus_materials_note}')
-                    lines.append(f'--   search_prompt: {rule.search_prompt}')
-                    
-                    patterns_str = []
-                    for p in rule.regex_patterns_search:
-                        desc = p.get('description', p.get('pattern', ''))
-                        patterns_str.append(f'({len(patterns_str)+1}) {desc}')
-                    if patterns_str:
-                        lines.append(f'--   regex_patterns.for_search: {"; ".join(patterns_str)}')
-                    
-                    if bad_main:
-                        lines.append(f'--   code_example_bad: {bad_main}')
-                    for idx, bad in enumerate(extra_bads, 2):
-                        lines.append(f'--   code_example_bad{idx}: {bad}')
-                    
-                    if rule.fix_instruction:
-                        lines.append(f'--   fix_instruction: {rule.fix_instruction}')
-                    
-                    lines.append(f'--   test_generation_prompt: Сгенерировать тестовый PLPlus файл для проверки правила \'{rule_code}\' с проблемными конструкциями.')
-                    lines.append(f'--   examples.simple.bad: {bad_main if bad_main else "(нет примера)"}')
-                    lines.append(f'--   examples.simple.good: {good if good else "(нет примера)"}')
-                    
-                    # Дополнительные примеры из JSON
-                    if examples:
-                        for ex_name in ['simple_case', 'parametrized_collection', 'parametrized_ref', 'with_order', 'between']:
-                            if ex_name in examples:
-                                ex = examples[ex_name]
-                                ex_bad = ex.get('bad', ex.get('bad2', ''))
-                                ex_good = ex.get('good', '')
-                                lines.append(f'--   examples.{ex_name}.bad: {ex_bad}')
-                                lines.append(f'--   examples.{ex_name}.good: {ex_good}')
-                    
-                    lines.append(f'--   priority: {rule.priority}')
-                    lines.append(f'--   category: {rule.category}')
-                    lines.append(f'--   subcategory: {rule.subcategory}')
-                    lines.append(f'--   source_files: v50.docx')
-                    lines.append(f'--   source_sections: {rule_code.split(".")[-1] if len(rule_code.split(".")) > 2 else "N/A"}')
-                    lines.append('-- ============================================================================')
-                    
-# Блок кода PROCEDURE
-                    proc_name = rule_code.replace('.', '_').replace('(', '').replace(')', '').replace(',', '')
-                    # Транслитерация кириллицы в латиницу для имени процедуры
-                    _CYR_TO_LAT = {
-                        'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e',
-                        'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
-                        'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
-                        'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch',
-                        'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
-                        'А': 'A', 'Б': 'B', 'В': 'V', 'Г': 'G', 'Д': 'D', 'Е': 'E', 'Ё': 'E',
-                        'Ж': 'Zh', 'З': 'Z', 'И': 'I', 'Й': 'Y', 'К': 'K', 'Л': 'L', 'М': 'M',
-                        'Н': 'N', 'О': 'O', 'П': 'P', 'Р': 'R', 'С': 'S', 'Т': 'T', 'У': 'U',
-                        'Ф': 'F', 'Х': 'H', 'Ц': 'Ts', 'Ч': 'Ch', 'Ш': 'Sh', 'Щ': 'Sch',
-                        'Ъ': '', 'Ы': 'Y', 'Ь': '', 'Э': 'E', 'Ю': 'Yu', 'Я': 'Ya',
-                    }
-                    proc_name = ''.join(_CYR_TO_LAT.get(ch, ch) for ch in proc_name)
-                    lines.append(f'PROCEDURE {proc_name} IS')
-                    
-                    if bad_main:
-                        lines.append('	-- Объявления переменных из примеров')
-                    
-                    lines.append('BEGIN')
-                    
-                    # [-] Неправильный код
-                    lines.append('	-- [-] Неправильный код')
-                    if bad_main:
-                        lines.append('	-- begin pl/sql')
-                        for line in bad_main.strip().split('\n'):
-                            lines.append(f'		{line.strip()}')
-                        if extra_bads:
-                            for extra in extra_bads:
-                                lines.append(f'		-- Дополнительный пример:')
-                                for line in extra.strip().split('\n'):
-                                    lines.append(f'		{line.strip()}')
-                        lines.append('	-- end pl/sql')
-                    else:
-                        lines.append('		-- (нет примера плохого кода)')
-                    
-                    lines.append('')
-                    
-                    # [+] Исправленный код
-                    lines.append('	-- [+] Исправленный код')
-                    if good:
-                        lines.append('	-- begin pl/sql')
-                        for line in good.strip().split('\n'):
-                            lines.append(f'		{line.strip()}')
-                        lines.append('	-- end pl/sql')
-                    elif rule.fix_instruction:
-                        lines.append('	-- begin pl/sql')
-                        lines.append(f'		-- Исправление: {rule.fix_instruction}')
-                        lines.append('	-- end pl/sql')
-                    else:
-                        lines.append('		-- (нет примера исправленного кода)')
-                    
-                    lines.append('END;')
-                    lines.append('')
-                    lines.append('')
-                
-                # Футер
-                lines.append('-- ============================================================================')
-                lines.append(f'-- КОНЕЦ ФАЙЛА: {total} правил v5.0.0')
-                lines.append(f'-- Дата генерации: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
-                lines.append('-- ============================================================================')
-                
-                # DS 038 (доработка): при прерывании файл НЕ сохраняется
-                if aborted:
-                    self.root.after(0, lambda n=processed_rules: self.log(
-                        f"[ПРЕРВАНО] Сводный файл не создан (обработано правил: {n}). "
-                        f"Повторите генерацию без прерывания для полного файла.", 'warning'))
+                # DS_147: генерация через TestGeneratorV2
+                from analyzer.test_generator_v2 import TestGeneratorV2
+
+                # DS 038: проверка прерывания до генерации
+                if self.scan_aborted:
+                    self.root.after(0, lambda n=processed_rules, t=total: self.log(
+                        f"[ПРЕРВАНО] Генерация тестовых .plp остановлена пользователем. "
+                        f"Обработано правил: {n} из {t}", 'warning'))
+                    self.root.after(0, lambda: self.set_status("Прервано"))
                 else:
-                    # Записываем файл
-                    content = '\n'.join(lines)
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(content)
-                    
-                    self.root.after(0, lambda fp=file_path: self.log(f"  ✅ Создан: {fp.name}", 'success'))
-                    self.root.after(0, lambda t=total: self.log(f"\nСоздано сводных файлов: 1 ({t} правил)", 'info'))
-                    
-                    self.root.after(0, lambda: self._log_separator("ГЕНЕРАЦИЯ ЗАВЕРШЕНА"))
-                    self.root.after(0, lambda: self.set_status("Готово"))
-                    
-                    self.root.after(0, 
-                        lambda: self._show_copyable_dialog("Генерация завершена", 
-                                  f"Создан сводный файл: {file_path.name}\n\n"
-                                  f"Правил: {total}\n\n"
-                                  f"Каталог: {test_dir}"))
+                    gen = TestGeneratorV2(
+                        rubricator_dir=self.rubricator_dir,
+                        sources=selected_file_codes if selected_file_codes else None,
+                        priorities=list(getattr(self, '_selected_priorities', [])) or None,
+                    )
+                    p = gen.generate(
+                        rule_codes=sorted_rules,
+                        mode='single',
+                        out_dir=test_dir,
+                    )
+                    if p:
+                        self.root.after(0, lambda pp=p: self.log(
+                            f"  [OK] Создан: {pp.name}", 'success'))
+                        self.root.after(0, lambda: self.log(
+                            f"\nСоздано сводных файлов: 1 ({total} правил)", 'info'))
+                        self.root.after(0, lambda: self._log_separator("ГЕНЕРАЦИЯ ЗАВЕРШЕНА"))
+                        self.root.after(0, lambda: self.set_status("Готово"))
+                        self.root.after(0,
+                            lambda pp=p: self._show_copyable_dialog(
+                                "Генерация завершена",
+                                f"Создан сводный файл: {pp.name}\n\n"
+                                f"Правил: {total}\n\n"
+                                f"Каталог: {test_dir}"))
                 
             except ImportError as e:
                 self.root.after(0, lambda: self.log(f"[!] Ошибка импорта TestGenerator: {e}", 'error'))

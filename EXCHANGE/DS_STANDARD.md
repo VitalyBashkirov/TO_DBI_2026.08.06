@@ -1211,3 +1211,72 @@ ast.parse(src2)                         # заново распарсить
 
 **Не полагаться** на `ast.parse` до записи — файл на диске уже другой.
 
+
+
+---
+
+## §6.6.28 — DS_147: TestGeneratorV2
+
+**Решение:** создан SRC/analyzer/test_generator_v2.py — генератор тестовых .plp в стиле TestDeepSeek.plp. Работает по DATA/Рубрикатор v5/4.RUBRICATOR_PROMPT v5.json (332 правила).
+
+**Класс TestGeneratorV2:**
+- конструктор: rubricator_dir, sources, priorities, categories;
+- метод generate(rule_codes, mode='single'|'per-rule', out_dir);
+- режимы: single — один сводный файл, per-rule — по файлу на правило;
+- фильтры: sources (plpcheck/v53/тдс20240828/тклоик20240828), priorities (HIGH/MEDIUM/LOW);
+- categories — ОТКЛЮЧЁН (маппинг PLPCHECK_CATEGORIES <-> subcategory в v5.json отсутствует).
+
+**Схема имён single:** test_<src>_<prio>_<cat>_<sel|all>_single_<YYYYMMDD_HHMMSS>.plp.
+
+**Схема имён per-rule:** test_<safe_name>_<YYYYMMDD_HHMMSS>.plp.
+
+**GUI-интеграция:** _run_test_generation (gui_app.py) делегирует в TestGeneratorV2.generate(...). selected_file_codes -> sources, _selected_priorities -> priorities.
+
+**Тесты:** SRC/tests/test_ds147_gen_v2.py (16 тестов). Регресс: 197 passed.
+
+**Почему:** старые генераторы (test_generator.py, test_generator_v50.py, generate_comprehensive_test.py) — исторические, не поддерживают v5.3.0 (332 правила) или хардкодят 14 правил.
+
+---
+
+## §6.6.29 — Уроки чата 37: PS here-string + Python
+
+**Решение:** при записи Python-модулей через PS here-string:
+
+1. Никогда не использовать обратный слэш перед кавычкой внутри here-string — в файл попадёт буквально, будет SyntaxError.
+2. Не использовать тройные кавычки внутри here-string — конфликт с Python docstring.
+3. Правильно: f-строка с одинарными кавычками внутри.
+4. Или: писать Python-скрипт-правку, который делает Path.write_text() — без here-string.
+5. Обязательно после записи — ast.parse (через отдельный Python-скрипт, не в PS).
+6. Не читать .log через Get-Content в PS 5.1 — только Python с utf-8.
+
+**Инцидент чата 37:** в блоке A1b при попытке записать test_generator_v2.py через PS here-string попали литеральные обратные слэши — SyntaxError. Исправлено через Python-скрипт правки (A1c) с splitlines(keepends=True).
+
+---
+
+## §6.6.30 — _split_declare: внешние begin/end/declare
+
+**Решение:** при извлечении деклараций из code_example_bad / code_example_good:
+
+1. Если пример начинается с declare — декларации до begin, тело между begin и end.
+2. Внешние begin/end убирать (через re.sub).
+3. Нормализовать отступы тела (min indent по непустым строкам).
+4. Снимать префикс declare с каждой строки decl_lines — если declare на одной строке с type, простая проверка d.lower()=='declare' НЕ срабатывает.
+
+**Правильно:** использовать re.sub с шаблоном для каждой строки.
+
+**Инцидент чата 37:** в тдс20240828.VARRAY_NESTED.стр.25 good начинался с declare type t_tbl1 ... — declare на одной строке. Проверка d.lower() != 'declare' не сработала. Исправлено через re.sub (C4c).
+
+---
+
+## §6.6.31 — pytest Test* class: __test__ = False
+
+**Решение:** если в модуле есть класс с именем Test* (например, TestGeneratorV2), pytest попытается его собрать и выдаст PytestCollectionWarning.
+
+**Пометка в классе:**
+- class TestGeneratorV2:
+-     __test__ = False
+-     ...
+
+**Почему:** pytest по умолчанию собирает классы Test*. TestGeneratorV2 — не тест, а наш модуль. __test__ = False исключает его из коллекции.
+
+**Инцидент чата 37:** после создания test_generator_v2.py pytest выдавал warning. Исправлено в B1b.

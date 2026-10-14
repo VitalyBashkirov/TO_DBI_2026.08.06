@@ -1165,4 +1165,49 @@ if (-not (Test-Path "$proj\PS\persist")) {
 Итоговое содержимое `PS\` после блока — только `<имя_блока>.log` и `persist\`.
 
 **Инцидент чата 35:** после блока №8а в `PS\` накопилось 8 временных
-файлов + 2 лога. Обнаружено пользователем.
+файлов + 2 лога. Обнаружено пользователем.### §6.6.26 — DS_146: DeepScanner удалён из GUI
+
+**Решение (вариант C+D):** пункт меню «Сканировать. Алгоритм Deep», Ctrl+F5
+и метод `start_deep_scan` удалены из `gui_app.py`. Параметр `deep_mode`
+в `_run_scan` оставлен для совместимости. См. §6.6.24 — историческая постановка.
+
+**Почему:** `DeepScanner` (`SRC/analyzer/deep_scanner.py`) — **не «глубокий»
+алгоритм**, а **обёртка над `PLPlusScanner`** (вызывает `scanner.scan_file()`).
+Никакого AST, цепочек вызовов, контекстных зависимостей нет. В GUI `deep_mode`
+всё равно не использовался — Deep Scan давал тот же результат, что и К1.
+
+**Legacy-рубрикатор:** DeepScanner использует `1.RUBRICATOR_FILES.md` +
+`3.RUBRICATOR_FIXES.md` — **отличный** от основного пайплайна
+(`4.RUBRICATOR_PROMPT v5.json`). Результаты сканов могут отличаться —
+не потому что «глубже», а потому что **другой набор правил**.
+
+**Формат отчёта:** `logs_Deep/Deep_scan_report_*.md` — **несовместим**
+с K2 (fixer). DeepScanner — CLI-инструмент (`analyzer/deep_scanner.py`),
+не GUI-функция. Паспорт — в `EXCHANGE/OUTBOX/DS_146_report.md`.
+
+### §6.6.27 — CRLF-safe правки .py: splitlines, не replace
+
+**Правило:** для правок `.py` **НЕ использовать** `str.replace(anchor + "\n", "")`.
+
+**Инцидент чата 36 (N3a):** в CRLF-файле после `anchor` идёт `\r\n`, а не `\n`.
+`replace` «находит» `anchor + "\n"` частично, **удаляет `\n`, оставляя `\r`** —
+`\r` прилипает к следующей строке, **удваивает отступ** → `IndentationError`.
+
+**Правильно:**
+
+```python
+lines = src.splitlines(keepends=True)   # сохраняет \r\n или \n
+lines.pop(idx)                          # или del lines[a:b]
+new_src = "".join(lines)
+p.write_text(new_src, encoding="utf-8")
+```
+
+**Обязательно после записи:**
+
+```python
+src2 = p.read_text(encoding="utf-8")   # перечитать
+ast.parse(src2)                         # заново распарсить
+```
+
+**Не полагаться** на `ast.parse` до записи — файл на диске уже другой.
+

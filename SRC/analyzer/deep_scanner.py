@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Deep Scanner — Альтернативный алгоритм сканирования для АРМ "Адаптация под DBI"
-Полностью независимый модуль. Может запускаться:
-  • Из командной строки:  python analyzer/deep_scanner.py -s <каталог>
-  • Из АРМ:               DeepScanner(...).run()
+"""Deep Scanner — CLI-инструмент с альтернативным (legacy) рубрикатором.
 
-Режим DeepThink: при включении выводит детальную информацию о поиске паттернов
+Применение:
+  • ТОЛЬКО CLI:  python analyzer/deep_scanner.py -s <каталог>
+  • В GUI НЕ подключён (DS_146, §6.6.26).
+
+Факты (разведка DS_146, N2):
+  • DeepScanner НЕ сканирует сам — вызывает PLPlusScanner.scan_file().
+  • Не «глубокий» алгоритм: нет AST, цепочек вызовов, контекста.
+  • Использует legacy-рубрикатор: 1.RUBRICATOR_FILES.md + 3.RUBRICATOR_FIXES.md,
+    ОТЛИЧНЫЙ от основного пайплайна (4.RUBRICATOR_PROMPT v5.json).
+  • Отчёт: logs_Deep/Deep_scan_report_*.md — формат НЕсовместим с K2 (fixer).
+
+Режим DeepThink (--deep-think): подробный лог поиска паттернов.
 """
 import argparse
 import sys

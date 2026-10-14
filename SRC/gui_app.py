@@ -441,7 +441,6 @@ class DBIMigrationApp:
         actions_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Действия", menu=actions_menu)
         actions_menu.add_command(label="Сканировать", command=self.start_scan, accelerator="F5")
-        actions_menu.add_command(label="Сканировать. Алгоритм Deep", command=self.start_deep_scan, accelerator="Ctrl+F5")
         actions_menu.add_separator()
         actions_menu.add_command(label="Исправить код", command=self.start_fix, accelerator="F6")
         
@@ -460,7 +459,6 @@ class DBIMigrationApp:
         self.root.bind('<Control-r>', lambda e: self.browse_result())
         self.root.bind('<Control-s>', lambda e: self.save_settings())
         self.root.bind('<F5>', lambda e: self.start_scan())
-        self.root.bind('<Control-F5>', lambda e: self.start_deep_scan())
         self.root.bind('<F6>', lambda e: self.start_fix())
     
     # ------------------------------------------------------------------
@@ -3492,12 +3490,14 @@ class DBIMigrationApp:
     
     def _run_scan(self, deep_mode=False):
         """Рабочая функция сканирования (вызывается в отдельном потоке)
-        
-        Args:
-            deep_mode: Если True - использовать углублённое сканирование
 
-        DS_145: deep_mode здесь НЕ используется — DeepScanner не подключён.
-        См. DS_146 (интеграция DeepScanner в GUI).
+        Args:
+            deep_mode: Оставлен для совместимости. НЕ используется (DS_146).
+
+        DS_146: Deep Scan удалён из GUI (меню + Ctrl+F5 + start_deep_scan).
+        DeepScanner доступен только как CLI (analyzer/deep_scanner.py),
+        использует legacy-рубрикатор (1.RUBRICATOR_FILES.md + 3.RUBRICATOR_FIXES.md).
+        См. DS_STANDARD.md §6.6.26.
         """
         # DS_088b §2.2: замер длительности для звука завершения.
         _op_start = time.time()
@@ -4017,31 +4017,6 @@ class DBIMigrationApp:
         y = self.root.winfo_rooty() + (self.root.winfo_height() - dialog.winfo_height()) // 2
         dialog.geometry(f"+{max(x, 0)}+{max(y, 0)}")
 
-    def start_deep_scan(self):
-        """Запуск глубокого сканирования в отдельном потоке"""
-        if not self.source_dir_var.get():
-            messagebox.showerror("Ошибка", "Укажите исходный каталог!")
-            return
-        
-        # Проверка: выбран ли хотя бы один файл в рубрикаторе
-        any_rule_selected = any(var.get() for var in self.selected_rules.values())
-        if not any_rule_selected:
-            messagebox.showerror("Ошибка", "Выберите хотя бы один файл в рубрикаторе!")
-            return
-        
-        # Отключаем кнопку на время сканирования
-        self.btn_scan.state(['disabled'])
-        self.btn_fix.state(['disabled'])
-        
-        # Логирование начала глубокого сканирования
-        self.log("\n" + "="*80, 'highlight')
-        self.log("НАЧАЛО ГЛУБОКОГО СКАНИРОВАНИЯ (Deep Scan)", 'highlight')
-        self.log("="*80, 'highlight')
-        
-        # Запускаем сканирование в отдельном потоке с флагом deep_mode
-        thread = threading.Thread(target=self._run_scan, args=(True,), daemon=True)
-        thread.start()
-    
     def start_fix(self):
         """Запуск исправления кода"""
         # DS 036: проверка выбранных категорий PlpCheck

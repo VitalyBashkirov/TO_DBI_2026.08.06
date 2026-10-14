@@ -542,3 +542,4 @@
   SRC/tests/test_ds146_deep_scan_removed_pytest.py: 12 AST-only тестов.
   Commits: 5483ba2 (N3b), 41677e2 (N3c).
   pytest: 181 passed. gui_app.py: 357231 -> ~355647 B.
+[14.10.2026 17:40:20] DS_147: TestGeneratorV2 (single/per-rule) + 16 pytest + GUI-интеграция + DS_STANDARD §6.6.28-31. Коммит 49ea292. Регресс: 197 passed.

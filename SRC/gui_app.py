@@ -750,6 +750,22 @@ class DBIMigrationApp:
         # Размещаем Treeview и скроллы
         # DS_087 §2.6.2: таблица растягивается по ширине бокса 2, скроллбары
         # (верт./гориз.) остаются в зоне видимости и не уходят за край.
+        # DS_149: toolbar над деревом — «Выделить все» / «Сбросить все»
+        # ВАЖНО: pack toolbar ДО scroll/treeview, иначе он не виден.
+        rules_toolbar = ttk.Frame(rules_frame)
+        rules_toolbar.pack(side=tk.TOP, fill=tk.X, padx=5, pady=(0, 2))
+        self.btn_select_all = ttk.Button(rules_toolbar, text="Выделить все",
+                   command=self._select_all_current_rubricator)
+        self.btn_select_all.pack(side=tk.LEFT, padx=2)
+        self.btn_deselect_all = ttk.Button(rules_toolbar, text="Сбросить все",
+                   command=self._deselect_all_current_rubricator)
+        self.btn_deselect_all.pack(side=tk.LEFT, padx=2)
+        # DS_149: тултипы на кнопки (короткие)
+        self._tooltip_select_all = Tooltip(self.btn_select_all,
+            "Выделить все правила рубрикатора")
+        self._tooltip_deselect_all = Tooltip(self.btn_deselect_all,
+            "Сбросить все правила рубрикатора")
+
         tree_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
         tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
         self.rules_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
@@ -1804,6 +1820,54 @@ class DBIMigrationApp:
         sign = '✓' if all_on else ('◐' if enabled else '✗')
         self.rules_tree.set(parent_id, 'selected', sign)
     
+    # DS_149: «Выделить все» / «Сбросить все» для текущего рубрикатора
+    def _get_current_rubricator_file_code(self):
+        # DS_149: вернуть file_code выделенного в дереве рубрикатора.
+        sel = self.rules_tree.selection()
+        if not sel:
+            return None
+        item_id = sel[0]
+        if item_id in self._rubricator_parent_items:
+            return self._rubricator_parent_items[item_id]
+        if item_id in self._rule_item_map:
+            rule_code = self._rule_item_map[item_id]
+            for file_code, codes in self._rubricator_rules_by_file.items():
+                if rule_code in codes:
+                    return file_code
+        return None
+
+    def _set_all_rules_for_current_rubricator(self, value):
+        # DS_149: установить все правила текущего рубрикатора в value.
+        file_code = self._get_current_rubricator_file_code()
+        if not file_code:
+            self.log("[DS_149] Не выбран рубрикатор в дереве", 'warning')
+            return
+        rule_codes = self._rubricator_rules_by_file.get(file_code, [])
+        child_by_code = {}
+        for child_id, rc in self._rule_item_map.items():
+            child_by_code[rc] = child_id
+        n_changed = 0
+        for rc in rule_codes:
+            if rc in self._rubricator_rule_vars:
+                var = self._rubricator_rule_vars[rc]
+                if var.get() != value:
+                    var.set(value)
+                    n_changed += 1
+                cid = child_by_code.get(rc)
+                if cid:
+                    self.rules_tree.set(cid, 'selected', '\u2713' if value else '\u2717')
+        self._update_rubricator_parent_state(file_code)
+        action = "Выделено" if value else "Сброшено"
+        self.log(f"[DS_149] {action} правил: {len(rule_codes)} ({file_code})", 'info')
+
+    def _select_all_current_rubricator(self):
+        # DS_149: Выделить все для текущего рубрикатора.
+        self._set_all_rules_for_current_rubricator(True)
+
+    def _deselect_all_current_rubricator(self):
+        # DS_149: Сбросить все для текущего рубрикатора.
+        self._set_all_rules_for_current_rubricator(False)
+
     def _load_rubricator_prompts(self):
         """Загрузка расширенного рубрикатора 4.RUBRICATOR_PROMPT v5.json"""
         try:
@@ -4681,7 +4745,7 @@ class DBIMigrationApp:
                     )
                     if p:
                         self.root.after(0, lambda pp=p: self.log(
-                            f"  [OK] Создан: {pp.name}", 'success'))
+                            f"  [OK] Создан: {pp}", 'success'))
                         self.root.after(0, lambda: self.log(
                             f"\nСоздано сводных файлов: 1 ({total} правил)", 'info'))
                         self.root.after(0, lambda: self._log_separator("ГЕНЕРАЦИЯ ЗАВЕРШЕНА"))

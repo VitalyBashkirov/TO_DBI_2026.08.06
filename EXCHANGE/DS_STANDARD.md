@@ -1280,3 +1280,32 @@ ast.parse(src2)                         # заново распарсить
 **Почему:** pytest по умолчанию собирает классы Test*. TestGeneratorV2 — не тест, а наш модуль. __test__ = False исключает его из коллекции.
 
 **Инцидент чата 37:** после создания test_generator_v2.py pytest выдавал warning. Исправлено в B1b.
+---
+
+## §6.6.32 — DS_149: кнопки «Выделить все» / «Сбросить все» в дереве рубрикатора
+
+**Решение:** в GUI над деревом рубрикатора добавлены две кнопки:
+- «Выделить все» — установить все правила текущего рубрикатора;
+- «Сбросить все» — снять все правила текущего рубрикатора.
+
+Текущий рубрикатор — выделенный в дереве узел (родитель или дочерний).
+Метод _get_current_rubricator_file_code() возвращает file_code.
+
+**Реализация в gui_app.py:**
+- _select_all_current_rubricator() / _deselect_all_current_rubricator() — обёртки;
+- _set_all_rules_for_current_rubricator(value) — установка всех правил;
+- _get_current_rubricator_file_code() — определение рубрикатора;
+- toolbar над rules_tree с двумя ttk.Button;
+- тултипы через class Tooltip: «Выделить все правила рубрикатора» / «Сбросить все правила рубрикатора».
+
+**Порядок pack в rules_frame (важно):**
+1. toolbar (TOP);
+2. tree_scroll_y (RIGHT);
+3. tree_scroll_x (BOTTOM);
+4. rules_tree (LEFT, expand).
+
+Иначе toolbar не виден (перекрывается Treeview).
+
+**В логе генерации:** [OK] Создан: <полный путь к .plp> — pp, не pp.name.
+
+**Регресс:** 197 passed.

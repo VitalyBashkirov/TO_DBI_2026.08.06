@@ -204,7 +204,7 @@ class DBIMigrationApp:
         # DS_087 §2.5: размер окна 1600×900; если экран меньше — во весь экран;
         # центрирование. _ui_base_geometry (DS_086) синхронизируется с фактическим
         # размером — от него считается высота при скрытии элементов реестра.
-        W, H = 1600, 900
+        W, H = 1127, 1027  # DS_149g5: W=1127, H=1027
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         if sw < W or sh < H:
@@ -216,7 +216,9 @@ class DBIMigrationApp:
         # считается от него — см. _adjust_window_height().
         self._ui_base_geometry = (W, H)
         # DS_087 §2.5: minsize согласован с UI_MIN_WINDOW_HEIGHT = 400 (DS_086).
-        self.root.minsize(1200, 600)
+        self.root.minsize(900, 600)  # DS_149g2: min width 1200 -> 900
+
+
         
         # Переменные
         self.source_dir_var = tk.StringVar()
@@ -258,6 +260,7 @@ class DBIMigrationApp:
         
         # Выбранные правила
         self.selected_rules = {}
+        self._current_rubricator = None  # DS_149a
         self.rule_checkboxes = {}  # Для доступа к виджетов
         
         # Сохранённые правила из предыдущего запуска
@@ -762,9 +765,9 @@ class DBIMigrationApp:
         self.btn_deselect_all.pack(side=tk.LEFT, padx=2)
         # DS_149: тултипы на кнопки (короткие)
         self._tooltip_select_all = Tooltip(self.btn_select_all,
-            "Выделить все правила рубрикатора")
+            "Выбрать все правила текущего рубрикатора")
         self._tooltip_deselect_all = Tooltip(self.btn_deselect_all,
-            "Сбросить все правила рубрикатора")
+            "Сбросить все правила текущего рубрикатора")
 
         tree_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
         tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
@@ -1646,6 +1649,7 @@ class DBIMigrationApp:
         for item in self.rules_tree.get_children():
             self.rules_tree.delete(item)
         self._rubricator_rule_vars = {}
+        self._populating_tree = True  # DS_149b-fix: suppress _sync during populate
         self._rubricator_parent_items = {}
         self._rule_item_map = {}
         self._rubricator_rules_by_file = {}
@@ -1679,9 +1683,11 @@ class DBIMigrationApp:
             self.selected_rules[code] = var
 
             # Родительский элемент (рубрикатор)
+            all_on = all(rule_states.get(rc, False) for rc in rule_codes)
+            sign = '✓' if all_on else ('◐' if enabled else '✗')
             parent_id = self.rules_tree.insert(
                 '', tk.END, text=code, open=False,
-                values=('✓' if enabled else '✗', code, name))
+                values=(sign, code, name))
             self.rule_checkboxes[code] = (parent_id, var)
             self._rubricator_parent_items[parent_id] = code
             self._tree_tooltips[parent_id] = RUBRICATOR_TOOLTIPS.get(
@@ -1711,6 +1717,7 @@ class DBIMigrationApp:
         self.rules_tree.bind('<Leave>', lambda e: self._hide_tree_tooltip())
         self._update_buttons_state()
 
+        self._populating_tree = False  # DS_149b-fix: restore
     def _on_tree_motion(self, event):
         """DS_058+DS_057: тултип для строки дерева правил (код + описание)."""
         item = self.rules_tree.identify_row(event.y)
@@ -1805,15 +1812,15 @@ class DBIMigrationApp:
                 print(f"Не удалось дополнить rubricator_selected_rules: {e}")
         return states
 
-    def _update_rubricator_parent_state(self, file_code):
-        """Пересчёт состояния родительского чекбокса по дочерним правилам."""
+    def _update_rubricator_parent_state(self, file_code, update_var=True):
+        """Пересчёт родительского чекбокса (update_var=False — не менять var, DS_149a)."""
         if file_code not in self.rule_checkboxes:
             return
         parent_id, var = self.rule_checkboxes[file_code]
         rule_codes = self._rubricator_rules_by_file.get(file_code, [])
         enabled = any(self._rubricator_rule_vars[rc].get()
                       for rc in rule_codes if rc in self._rubricator_rule_vars)
-        if var.get() != enabled:
+        if update_var and var.get() != enabled:
             var.set(enabled)
         all_on = all(self._rubricator_rule_vars[rc].get()
                      for rc in rule_codes if rc in self._rubricator_rule_vars)
@@ -1822,7 +1829,14 @@ class DBIMigrationApp:
     
     # DS_149: «Выделить все» / «Сбросить все» для текущего рубрикатора
     def _get_current_rubricator_file_code(self):
-        # DS_149: вернуть file_code выделенного в дереве рубрикатора.
+        # DS_149a: сначала явный текущий рубрикатор
+        if self._current_rubricator:
+            return self._current_rubricator
+        # DS_149h: fallback на первый выбранный рубрикатор
+        for _code, _var in self.selected_rules.items():
+            if _var.get():
+                self._current_rubricator = _code
+                return _code
         sel = self.rules_tree.selection()
         if not sel:
             return None
@@ -1835,7 +1849,6 @@ class DBIMigrationApp:
                 if rule_code in codes:
                     return file_code
         return None
-
     def _set_all_rules_for_current_rubricator(self, value):
         # DS_149: установить все правила текущего рубрикатора в value.
         file_code = self._get_current_rubricator_file_code()
@@ -1856,9 +1869,10 @@ class DBIMigrationApp:
                 cid = child_by_code.get(rc)
                 if cid:
                     self.rules_tree.set(cid, 'selected', '\u2713' if value else '\u2717')
-        self._update_rubricator_parent_state(file_code)
+        self._update_rubricator_parent_state(file_code, update_var=False)
         action = "Выделено" if value else "Сброшено"
         self.log(f"[DS_149] {action} правил: {len(rule_codes)} ({file_code})", 'info')
+        self._update_select_deselect_tooltips()
 
     def _select_all_current_rubricator(self):
         # DS_149: Выделить все для текущего рубрикатора.
@@ -1868,6 +1882,30 @@ class DBIMigrationApp:
         # DS_149: Сбросить все для текущего рубрикатора.
         self._set_all_rules_for_current_rubricator(False)
 
+
+    def _update_select_deselect_tooltips(self):
+        # DS_149c: динамический тултип N/M для кнопок выбора правил.
+        fc = getattr(self, '_current_rubricator', None)
+        # DS_149c-fix: fallback to first selected rubricator
+        if not fc:
+            for _code, _var in self.selected_rules.items():
+                if _var.get():
+                    fc = _code
+                    break
+        if not fc or fc not in self._rubricator_rules_by_file:
+            n, m = 0, 0
+        else:
+            codes = self._rubricator_rules_by_file.get(fc, [])
+            m = len(codes)
+            n = sum(1 for rc in codes
+                    if rc in self._rubricator_rule_vars
+                    and self._rubricator_rule_vars[rc].get())
+        if getattr(self, chr(95)+chr(116)+chr(111)+chr(111)+chr(108)+chr(116)+chr(105)+chr(112)+chr(95)+chr(115)+chr(101)+chr(108)+chr(101)+chr(99)+chr(116)+chr(95)+chr(97)+chr(108)+chr(108), None) is not None:
+            self._tooltip_select_all.text = (
+                f"Выбрать все правила текущего рубрикатора ({n}/{m})")
+        if getattr(self, chr(95)+chr(116)+chr(111)+chr(111)+chr(108)+chr(116)+chr(105)+chr(112)+chr(95)+chr(100)+chr(101)+chr(115)+chr(101)+chr(108)+chr(101)+chr(99)+chr(116)+chr(95)+chr(97)+chr(108)+chr(108), None) is not None:
+            self._tooltip_deselect_all.text = (
+                f"Сбросить все правила текущего рубрикатора ({n}/{m})")
     def _load_rubricator_prompts(self):
         """Загрузка расширенного рубрикатора 4.RUBRICATOR_PROMPT v5.json"""
         try:
@@ -1892,6 +1930,16 @@ class DBIMigrationApp:
         # Колонка "Выбрано" (индекс 1)
         if column != '#1':
             return
+
+        # DS_149a: запомнить текущий рубрикатор по клику
+        if item in self._rubricator_parent_items:
+            self._current_rubricator = self._rubricator_parent_items[item]
+        elif item in self._rule_item_map:
+            _rc = self._rule_item_map[item]
+            for _fc, _codes in self._rubricator_rules_by_file.items():
+                if _rc in _codes:
+                    self._current_rubricator = _fc
+                    break
 
         # Клик по родительскому чекбоксу рубрикатора
         if item in self._rubricator_parent_items:
@@ -1933,15 +1981,16 @@ class DBIMigrationApp:
         for file_code, prefix in RUBRICATOR_PREFIXES.items():
             if rc.startswith(prefix):
                 self._update_rubricator_parent_state(file_code)
-                if file_code == 'PlpCheck':
-                    self.plpcheck_enabled_var.set(
-                        self.rule_checkboxes['PlpCheck'][1].get())
+                # DS_149b-fix: plpcheck_enabled_var не меняем при клике по правилу
+                # (иначе trace _sync_plpcheck_checkbox включит все правила PlpCheck)
                 break
         # Обновляем доступность кнопок
         self._update_buttons_state()
 
     def _sync_plpcheck_checkbox(self):
         """Синхронизация флага PlpCheck с чекбоксами правил plpcheck.* в дереве"""
+        if getattr(self, '_populating_tree', False):
+            return  # DS_149b-fix: skip sync during populate
         rule_codes = self._rubricator_rules_by_file.get('PlpCheck', [])
         new_state = self.plpcheck_enabled_var.get()
         for rc in rule_codes:
@@ -2632,6 +2681,7 @@ class DBIMigrationApp:
         # Активация: источник+шаблон+правило (К1), result+*.plp (К2),
         # AI_IN пуст (К3). См. _update_main_buttons().
         self._update_main_buttons()
+        self._update_select_deselect_tooltips()
     
         # Кнопка "Показать SQL для ручного исправления" - активна после сканирования
         show_sql_enabled = self.scan_results is not None
@@ -4605,6 +4655,9 @@ class DBIMigrationApp:
         _op_start = time.time()
         # DS_089a §2.7: сохранение начала операции для прогноза времени.
         self._op_start_time = _op_start
+        # DS_149d: инициализация до try - иначе NameError при прерывании
+        processed_rules = set()
+        total = 0
         try:
             # Очистить журнал перед генерацией
             self.root.after(0, lambda: self.clear_log())
@@ -4652,15 +4705,39 @@ class DBIMigrationApp:
                         continue
                     
                     # Ищем правила: для v50 — все начинающиеся с v50., для остальных — содержащих код
-                    matching = [code for code in all_rules if code.lower().startswith(file_code.lower() + '.') or file_code.lower() in code.lower()]
+                    # DS_149d: только правила, выбранные Пользователем (уровень 2)
+                    _all_matching = [code for code in all_rules if code.lower().startswith(file_code.lower() + '.') or file_code.lower() in code.lower()]
+                    matching = [
+                        code for code in _all_matching
+                        if code in self._rubricator_rule_vars and self._rubricator_rule_vars[code].get()
+                    ]
                     if matching:
                         matched_rules.extend(matching)
                         self.root.after(0, lambda fc=file_code, m=len(matching): self.log(f"  Найдено правил: {m}", 'info'))
                     else:
-                        self.root.after(0, lambda fc=file_code: self.log(f"  ⚠️ Правил не найдено для файла: {fc}", 'warning'))
+                        if _all_matching:
+                            self.root.after(0, lambda fc=file_code, n=len(_all_matching): self.log(f"  ⚠️ Для {fc}: найдено {n} правил, но ни одно не выбрано", 'warning'))
+                        else:
+                            self.root.after(0, lambda fc=file_code: self.log(f"  ⚠️ Правил не найдено для файла: {fc}", 'warning'))
                 
                 if not matched_rules:
-                    self.root.after(0, lambda: self.log("Нет подходящих правил для генерации", 'warning'))
+                    # DS_149d: различаем "нет правил в рубрикаторе" и "не выбрано Пользователем"
+                    _any_in_rubricator = any(
+                        code.lower().startswith(fc.lower() + '.') or fc.lower() in code.lower()
+                        for fc in selected_file_codes for code in all_rules
+                    )
+                    if _any_in_rubricator:
+                        self.root.after(0, lambda: self.log("Не выбрано ни одного правила", 'warning'))
+                        self.root.after(0, lambda: messagebox.showwarning(
+                            "Генерация тестовых .plp",
+                            "Не выбрано ни одного правила. Выберите хотя бы одно правило в дереве правил выбранных рубрикаторов."
+                        ))
+                    else:
+                        self.root.after(0, lambda: self.log("Нет подходящих правил для генерации", 'warning'))
+                        self.root.after(0, lambda: messagebox.showwarning(
+                            "Генерация тестовых .plp",
+                            "Для выбранных рубрикаторов не найдено правил в v5.json."
+                        ))
                     self.root.after(0, lambda: self.set_status("Готово"))
                     return
                 
@@ -4671,42 +4748,8 @@ class DBIMigrationApp:
                     with open(json_path, 'r', encoding='utf-8-sig') as f:
                         json_data = json.load(f)
                 
-                # Получаем выбранные приоритеты для фильтрации правил (DS 018: HIGH/MEDIUM/LOW)
-                from rubricator_priority_mapping import PRIORITY_RULES
-                priority_mapping = {'HIGH': 'Приоритет 1', 'MEDIUM': 'Приоритет 2', 'LOW': 'Приоритет 3'}
-                selected_priorities = [priority_mapping.get(p, p) for p in getattr(self, '_selected_priorities', [])]
-                
-                # Если приоритеты выбраны — используем только правила из выбранных приоритетов
-                if selected_priorities:
-                    matched_rules = set()
-                    for prio in selected_priorities:
-                        if prio in PRIORITY_RULES:
-                            matched_rules.update(PRIORITY_RULES[prio])
-                    matched_rules = sorted(matched_rules)
-                    self.root.after(0, lambda: self.log(f"Фильтрация по приоритетам: {', '.join(selected_priorities)}", 'info'))
-                    self.root.after(0, lambda: self.log(f"  Найдено правил по приоритетам: {len(matched_rules)}", 'info'))
-                else:
-                    # Приоритеты не выбраны — используем все правила из выбранных файлов рубрикатора
-                    matched_rules = []
-                    for file_code in selected_file_codes:
-                        self.root.after(0, lambda fc=file_code: self.log(f"Поиск правил для файла: {fc}", 'info'))
-                        if file_code == 'README':
-                            self.root.after(0, lambda fc=file_code: self.log(f"  ⚠️ README — документация, правил нет", 'warning'))
-                            continue
-                        
-                        # Ищем правила: для v50 — все начинающиеся с v50., для остальных — содержащих код
-                        # DS_147 (C3): регистронезависимый маппинг (PlpCheck -> plpcheck)
-                        _fc_lower = file_code.lower()
-                        matching = [code for code in all_rules
-                                    if code.lower().startswith(_fc_lower + '.')
-                                    or _fc_lower in code.lower()]
-                        if matching:
-                            matched_rules.extend(matching)
-                            self.root.after(0, lambda fc=file_code, m=len(matching): self.log(f"  Найдено правил: {m}", 'info'))
-                        else:
-                            self.root.after(0, lambda fc=file_code: self.log(f"  ⚠️ Правил не найдено для файла: {fc}", 'warning'))
-                    matched_rules = sorted(set(matched_rules))
-                
+                # DS_149d-доп: PRIORITY_RULES больше не применяется — источник истины
+                # = выбор Пользователя (matched_rules из блока DS_149d выше)
 # Формируем отсортированный список правил
                 # DS 038 (доработка): фильтруем правила, отсутствующие в
                 # generator.rubricator_v3.rules (например, коды PRIORITY_RULES

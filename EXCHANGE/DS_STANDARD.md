@@ -1309,3 +1309,49 @@ ast.parse(src2)                         # заново распарсить
 **В логе генерации:** [OK] Создан: <полный путь к .plp> — pp, не pp.name.
 
 **Регресс:** 197 passed.
+
+### §6.6.34 — PS-строки с Python-кодом (критично)
+
+
+**6a-v2.** `$p.ExitCode` после `$p.WaitForExit()` в PS 5.1 может быть `$null`,
+если handle закрыт раньше, чем прочитан `ExitCode`. Надёжно:
+- `$p.WaitForExit(); Start-Sleep -Milliseconds 50; $p.Refresh(); $code = $p.ExitCode`.
+- Fallback: если `$null` — парсить stdout (`\d+ passed` без `failed`).
+
+**6b.** `python $pyPath` без `| Out-Host` в PS 5.1 — вывод Python **не попадает**
+в `Start-Transcript`. Всегда: `python $pyPath 2>&1 | Out-Host`.
+
+**6c.** Очистка `PS\` — в `try/finally`, **до** любого `return`/`exit`,
+а не после патча. Иначе при раннем `return` временные файлы остаются.
+
+**6d.** Проверка `indent == ' ' * N` хрупкая. Заменять на
+`indent != '' and '\t' not in indent` + логировать `repr(indent)`.
+
+**6e.** Якорь в нескольких местах → искать **внутри области метода**:
+найти `def X` → `m_start`, поиск якоря только после `m_start`.
+
+**6f.** `src.replace(old, new, 1)` в here-string хрупок: `old` должен точно
+совпадать, включая docstring `"""..."""` и отступы. Надёжнее — `splitlines`
++ поиск по префиксу `def ` (или `# `), замена диапазона.
+
+**6g.** В `PS\` не оставлять файлы с расширениями, которые не загружаются в чат:
+разрешены `.log`, `.txt`, `.md`, `.json`, `.ini`, `.py`, `.ps1`, `.csv`, `.sql`,
+`*.bak_*`. Запрещены `.out`, `.err`, `.tmp`, `.bin`, `.dat`. Причина: Vitaly
+прикладывает лог, а `.out`/`.err` не читаются. **pytest stdout/stderr → `PS\pytest_*.log`**.
+
+### §6.6.35 — Семантика значков дерева правил
+
+- ✓ — все правила выбраны (`all_on`).
+- ◐ — хотя бы одно, но не все (`enabled`).
+- ✗ — ни одного (not enabled).
+
+Значок рубрикатора не зависит от `var` (`selected_rules[file_code]`) — только от
+состояния правил. `var` остаётся `True` при «Сбросить все» (вариант B), но значок ✗.
+
+### §6.6.36 — `_populating_tree` — защита от рекурсии
+
+При `_populate_rules_tree` устанавливается `_populating_tree = True`.
+`_sync_plpcheck_checkbox` проверяет флаг (`getattr(self, "_populating_tree", False)`) и
+выходит — иначе `trace plpcheck_enabled_var` → все 152 правила PlpCheck.
+Флаг снимается в конце `_populate_rules_tree`.
+

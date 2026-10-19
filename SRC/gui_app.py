@@ -3713,7 +3713,7 @@ class DBIMigrationApp:
                 
                 if priority_rules:
                     # DS 024: регистронезависимое сопоставление кодов
-                    # PRIORITY_RULES использует 'PlpCheck.DBI.*.п.1', рубрикатор - 'plpcheck.ACCESS_STATIC'
+                    # DS 024: сравнение старых кодов 'PlpCheck.DBI.*.п.1' с новыми 'plpcheck.ACCESS_STATIC' (DS_147c)
                     pr_lower = {r.lower(): r for r in priority_rules}
                     filtered_rules = []
                     for r in selected_rules:
@@ -3736,7 +3736,7 @@ class DBIMigrationApp:
                         # DS 024: НЕ обнуляем selected_rules — используем все правила выбранных файлов
                         self.root.after(0, lambda: self.log(f"\n⚠ Для выбранных файлов нет правил с приоритетами {', '.join(getattr(self, '_selected_priorities', []))}. Используются все правила выбранных файлов ({len(selected_rules)}).", 'warning'))
                 else:
-                    # DS 024: в PRIORITY_RULES нет правил — не трогаем selected_rules
+                    # если по rule.priority нет правил — не трогаем selected_rules
                     self.root.after(0, lambda: self.log("\n⚠ Нет правил по выбранным приоритетам. Используются все правила выбранных файлов.", 'warning'))
             
             self.root.after(0, lambda: self.log(f"\nИСПОЛЬЗУЕМЫЕ ПРАВИЛА ({len(selected_rules)}):", 'info'))
@@ -4300,7 +4300,7 @@ class DBIMigrationApp:
                 
                 if priority_rules:
                     # DS 024: регистронезависимое сопоставление кодов
-                    # PRIORITY_RULES использует 'PlpCheck.DBI.*.п.1', рубрикатор - 'plpcheck.ACCESS_STATIC'
+                    # DS 024: сравнение старых кодов 'PlpCheck.DBI.*.п.1' с новыми 'plpcheck.ACCESS_STATIC' (DS_147c)
                     pr_lower = {r.lower(): r for r in priority_rules}
                     filtered_rules = []
                     for r in selected_rules:
@@ -4323,7 +4323,7 @@ class DBIMigrationApp:
                         # DS 024: НЕ обнуляем selected_rules — используем все правила выбранных файлов
                         self.root.after(0, lambda: self.log(f"\n⚠ Для выбранных файлов нет правил с приоритетами {', '.join(getattr(self, '_selected_priorities', []))}. Используются все правила выбранных файлов ({len(selected_rules)}).", 'warning'))
                 else:
-                    # DS 024: в PRIORITY_RULES нет правил — не трогаем selected_rules
+                    # если по rule.priority нет правил — не трогаем selected_rules
                     self.root.after(0, lambda: self.log("\n⚠ Нет правил по выбранным приоритетам. Используются все правила выбранных файлов.", 'warning'))
             
             self.root.after(0, lambda: self.log(f"\nИСПОЛЬЗУЕМЫЕ ПРАВИЛА ({len(selected_rules)}):", 'info'))
@@ -4758,11 +4758,11 @@ class DBIMigrationApp:
                     with open(json_path, 'r', encoding='utf-8-sig') as f:
                         json_data = json.load(f)
                 
-                # DS_149d-доп: PRIORITY_RULES больше не применяется — источник истины
+                # DS_149d-доп: источник истины — rule.priority из v5.json (DS_147c) + matched_rules (DS_149d)
                 # = выбор Пользователя (matched_rules из блока DS_149d выше)
-# Формируем отсортированный список правил
+                # Формируем отсортированный список правил
                 # DS 038 (доработка): фильтруем правила, отсутствующие в
-                # generator.rubricator_v3.rules (например, коды PRIORITY_RULES
+                # generator.rubricator_v3.rules (например, старые коды
                 # вида 'PlpCheck.DBI.*.п.1') — иначе all_rules[rule_code] даёт KeyError
                 missing = [r for r in matched_rules if r not in all_rules]
                 sorted_rules = [r for r in matched_rules if r in all_rules]

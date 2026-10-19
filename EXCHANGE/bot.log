@@ -553,3 +553,4 @@
 [19.10.2026 11:11:49] 147c: DS_147c: closed
 [19.10.2026 11:46:45] 147d: DS_147d: closed
 [19.10.2026 11:58:14] 147e: DS_147e: closed (закрытие чата 41)
+[19.10.2026 12:46:32] 144d-a: DS_144d-a: разведка gui_app._run_test_generation (sources/priorities/categories/rules) + TestGeneratorV2._passes_filters + PLPCHECK_RULE_TO_CATEGORY в scanner.py. Слепок дефекта E2 (categories PlpCheck протекают на не-plpcheck источники). v5.json: 332 правила, source plpcheck=152/v53=98/тдс=39/тклоик=43, subcategory=61 (plpcheck=34), category=9, priority HIGH=189/MEDIUM=79/LOW=64. 6 passed.

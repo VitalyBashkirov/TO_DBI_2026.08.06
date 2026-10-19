@@ -76,7 +76,7 @@ def test_ds147d_gui_ast_parse():
 
 def test_ds147d_gui_passes_categories():
     src = GUI.read_text(encoding="utf-8")
-    assert "categories=list(getattr(self, " in src
+    assert "categories=_cats," in src, "categories=_cats, not found (DS_144d-e)"
     assert "plpcheck_categories_filter" in src
 
 

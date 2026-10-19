@@ -73,18 +73,17 @@ def test_ds144d_a_plpcheck_rule_to_category_defined_in_scanner():
     assert re.search(r'PLPCHECK_RULE_TO_CATEGORY\s*:\s*Dict\[str,\s*str\]', src)
 
 
-def test_ds144d_a_e2_defect_snapshot():
-    """Слепок дефекта E2 (чинится в DS_144d-e).
+def test_ds144d_a_e2_defect_fixed():
+    """DS_144d-e: defect E2 fixed - categories gated by sources.
 
-    categories=list(plpcheck_categories_filter) передаются в TestGeneratorV2
-    без проверки, что sources ⊆ {plpcheck}. После e — тест будет обновлён.
+    Old: categories=list(getattr(self, PLPCHECK_CATS_FILTER, [])) or None,
+    New: _cats = ...; if _cats: ... _srcs_norm != {PLPCHECK} -> _cats = None;
+         categories=_cats,
     """
     src = _read(GUI)
-    m = re.search(
-        r'categories\s*=\s*list\(getattr\(self,\s*[\x27\x22]plpcheck_categories_filter[\x27\x22]',
-        src,
-    )
-    assert m, "ожидаемая передача categories=... из plpcheck_categories_filter не найдена"
-    line_no = src.count('\n', 0, m.start())
-    line = src.splitlines()[line_no]
-    assert 'sources' not in line, "рядом с categories уже есть проверка sources — обновите слепок"
+    old_marker = "categories=list(getattr(self, " + chr(39) + "plpcheck_categories_filter" + chr(39)
+    assert old_marker not in src
+    new_marker = "_cats = list(getattr(self, " + chr(39) + "plpcheck_categories_filter" + chr(39)
+    assert new_marker in src
+    assert "if _srcs_norm != {" + chr(39) + "plpcheck" + chr(39) + "}:" in src
+    assert "categories=_cats," in src

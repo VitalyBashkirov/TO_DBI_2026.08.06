@@ -4786,11 +4786,21 @@ class DBIMigrationApp:
                         f"Обработано правил: {n} из {t}", 'warning'))
                     self.root.after(0, lambda: self.set_status("Прервано"))
                 else:
+                    # DS_144d-e (E2): categories (PlpCheck) applied only if sources is plpcheck-only.
+                    # Otherwise category filter leaks to v53/tds/tkloik -> all rules become OTHER.
+                    _cats = list(getattr(self, 'plpcheck_categories_filter', [])) or None
+                    if _cats:
+                        if not selected_file_codes:
+                            _cats = None  # no explicit sources - do not apply categories
+                        else:
+                            _srcs_norm = {str(s).split('.', 1)[0].lower() for s in selected_file_codes}
+                            if _srcs_norm != {'plpcheck'}:
+                                _cats = None  # mixed / non-plpcheck - do not apply
                     gen = TestGeneratorV2(
                         rubricator_dir=self.rubricator_dir,
                         sources=selected_file_codes if selected_file_codes else None,
                         priorities=list(getattr(self, '_selected_priorities', [])) or None,
-                        categories=list(getattr(self, 'plpcheck_categories_filter', [])) or None,
+                        categories=_cats,
                     )
                     p = gen.generate(
                         rule_codes=sorted_rules,

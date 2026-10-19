@@ -146,7 +146,7 @@ Start-Process -FilePath "f:\TO_DBI\.venv\Scripts\python.exe" -ArgumentList "F:\T
 - `F:\TO_DBI\SRC\gui_app.py` — основной GUI (Tkinter), класс `DBIMigrationApp`.
 - `F:\TO_DBI\SRC\analyzer\scanner.py` — сканер проблем PLPlus кода (`PLPlusScanner`).
 - `F:\TO_DBI\SRC\rubricator_prompts.py` — загрузка и парсинг `4.RUBRICATOR_PROMPT v5.json`.
-- `F:\TO_DBI\SRC\rubricator_priority_mapping.py` — маппинг приоритетов для фильтрации правил.
+- `F:\TO_DBI\SRC\rubricator_priority_mapping.py` — маппинг приоритетов для фильтрации правил. (удалён в DS_144d-c)
 - `F:\TO_DBI\DATA\Рубрикатор v5\` — файлы правил рубрикатора (v53, тдс, тклоик, PlpCheck).
 - `F:\TO_DBI\EXCHANGE\INBOX\` — входящие задания (промпты).
 - `F:\TO_DBI\EXCHANGE\OUTBOX\` — результаты выполнения.

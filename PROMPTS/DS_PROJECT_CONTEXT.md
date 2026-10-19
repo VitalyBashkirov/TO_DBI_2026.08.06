@@ -23,7 +23,7 @@
 | Сканер | `F:\TO_DBI\SRC\analyzer\scanner.py` | `PLPlusScanner` — поиск проблем по правилам |
 | SQL-парсер | `F:\TO_DBI\SRC\analyzer\sql_parser.py` | Парсинг SQL-конструкций |
 | Загрузчик рубрикатора | `F:\TO_DBI\SRC\rubricator_prompts.py` | Парсинг `4.RUBRICATOR_PROMPT v5.json` |
-| Маппинг приоритетов | `F:\TO_DBI\SRC\rubricator_priority_mapping.py` | HIGH/MEDIUM/LOW → фильтры |
+| Маппинг приоритетов (удалён в DS_144d-c) | ~~`F:\TO_DBI\SRC\rubricator_priority_mapping.py`~~ | HIGH/MEDIUM/LOW → фильтры |
 | Код-фиксер | `F:\TO_DBI\SRC\fixer\code_fixer.py` | Применение исправлений |
 | Генератор отчётов | `F:\TO_DBI\SRC\generate_report.py` | Markdown + HTML (PlpCheck-стиль) |
 | Рубрикатор v5 (332 правила) | `F:\TO_DBI\DATA\Рубрикатор v5\4.RUBRICATOR_PROMPT v5.json` | Источник правил |

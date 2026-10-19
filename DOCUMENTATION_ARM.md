@@ -29,7 +29,7 @@ F:\TO_DBI\
 │   ├── gui_app.py                    # Главный файл GUI (класс DBIMigrationApp, ~2872 строки)
 │   ├── koda_prompts.py              # Шаблоны промптов для KODA (LLM-слой)
 │   ├── rubricator_prompts.py        # Загрузка JSON-рубрикатора 4.RUBRICATOR_PROMPTS.json
-│   ├── rubricator_priority_mapping.py # Маппинг приоритетов → коды правил
+│   ├── rubricator_priority_mapping.py # Маппинг приоритетов → коды правил (удалён в DS_144d-c)
 │   ├── settings.json                # Пользовательские настройки GUI
 │   ├── analyzer/                    # Модуль сканирования
 │   │   ├── scanner.py               #   PLPlusScanner — regex-поиск проблем
@@ -354,7 +354,7 @@ fix_file(file_path, issues)
 - `get_examples(code)` — примеры «было/стало».
 - `generate_test_file(code, output_dir)` — генерация тестового `.plp` файла.
 
-### 7.7. `rubricator_priority_mapping.py`
+### 7.7. rubricator_priority_mapping.py (удалён в DS_144d-c)
 
 - `RUBRICATOR_PRIORITY_MAPPING` — словарь маппинга пунктов приоритизации → коды правил.
 - 4 уровня приоритета (1 — критичный, 4 — низкий).

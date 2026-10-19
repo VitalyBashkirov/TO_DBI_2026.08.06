@@ -736,10 +736,10 @@ class DBIMigrationApp:
 
         # Настройка колонок: Рубрикатор/правило | Выбрано | Код | Название
         # DS_058+DS_057: колонка #0 (tree) — родительские чекбоксы рубрикаторов
-        self.rules_tree.column('#0', width=180, minwidth=140, stretch=False)
+        self.rules_tree.column('#0', width=126, minwidth=126, stretch=False)
         self.rules_tree['columns'] = ('selected', 'code', 'name')
         self.rules_tree.column('selected', width=60, minwidth=60, anchor=tk.CENTER)
-        self.rules_tree.column('code', width=110, minwidth=110, anchor=tk.W)
+        self.rules_tree.column('code', width=164, minwidth=164, anchor=tk.W)
         # DS_087 §2.6.2: stretch=False — длинное имя НЕ сдвигает скроллбары;
         # горизонтальная прокрутка показывает остаток.
         self.rules_tree.column('name', width=750, minwidth=400, anchor=tk.W, stretch=False)
@@ -747,7 +747,7 @@ class DBIMigrationApp:
         # Заголовки
         self.rules_tree.heading('#0', text='Рубрикатор', anchor=tk.W)
         self.rules_tree.heading('selected', text='Выбрано', anchor=tk.CENTER)
-        self.rules_tree.heading('code', text='Код файла', anchor=tk.W)
+        self.rules_tree.heading('code', text='Код файла/правила', anchor=tk.W)
         self.rules_tree.heading('name', text='Полное имя файла', anchor=tk.W)
         
         # Размещаем Treeview и скроллы

@@ -114,7 +114,9 @@ class TestGeneratorV2:
         src_lc = src.lower()
 
         if self.sources:
-            want = {s.lower() for s in self.sources}
+            # DS_147e: sources может содержать и код файла (PlpCheck), и код правила
+            # (PlpCheck.DBI.X). Нормализуем к префиксу (split по первой точке).
+            want = {s.split('.', 1)[0].lower() for s in self.sources}
             if src_lc not in want:
                 return False
 

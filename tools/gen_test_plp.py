@@ -52,6 +52,8 @@ def _build_parser():
                    help="CSV кодов правил. Без флага — все прошедшие фильтры.")
     p.add_argument("--priorities", default=None,
                    help="CSV приоритетов (HIGH,MEDIUM,LOW), опционально.")
+    p.add_argument("--categories", default=None,
+                   help="CSV категорий (набор A или B).")
     p.add_argument("--rubricator-dir", default=str(DEFAULT_RUBRICATOR_DIR),
                    help="Каталог рубрикатора v5 (по умолчанию DATA\\Рубрикатор v5).")
     p.add_argument("--dry-run", action="store_true",
@@ -66,6 +68,7 @@ def main(argv=None):
     rubricator_dir = Path(args.rubricator_dir)
     rules_csv = _parse_csv(args.rules)
     priorities_csv = _parse_csv(args.priorities)
+    categories_csv = _parse_csv(args.categories)
     source = args.source.strip()
     if not source:
         print("[FATAL] -s/--source пустой", file=sys.stderr)
@@ -92,6 +95,7 @@ def main(argv=None):
             rubricator_dir=rubricator_dir,
             sources=[source],
             priorities=priorities_csv,
+            categories=categories_csv,
         )
 
         selected = gen.select_rules(rules_csv)
@@ -102,6 +106,7 @@ def main(argv=None):
         log(f"rubricator  : {rubricator_dir}")
         log(f"rules_arg   : {rules_csv}")
         log(f"priorities  : {priorities_csv}")
+        log(f"categories  : {categories_csv}")
         log(f"dry_run     : {args.dry_run}")
         log(f"rules_total : {len(selected)}")
 

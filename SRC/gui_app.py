@@ -4790,6 +4790,7 @@ class DBIMigrationApp:
                         rubricator_dir=self.rubricator_dir,
                         sources=selected_file_codes if selected_file_codes else None,
                         priorities=list(getattr(self, '_selected_priorities', [])) or None,
+                        categories=list(getattr(self, 'plpcheck_categories_filter', [])) or None,
                     )
                     p = gen.generate(
                         rule_codes=sorted_rules,

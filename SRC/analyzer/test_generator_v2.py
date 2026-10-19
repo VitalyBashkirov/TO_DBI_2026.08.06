@@ -123,9 +123,22 @@ class TestGeneratorV2:
             if prio not in {p.upper() for p in self.priorities}:
                 return False
 
-        # DS_147: categories-фильтр ОТКЛЮЧЁН (маппинг PLPCHECK_CATEGORIES <->
-        # subcategory в v5.json отсутствует). Фильтрация по категориям -
-        # ответственность GUI перед вызовом generate().
+        if self.categories:
+            # DS_147d: гибрид — набор A (PLPCHECK_RULE_TO_CATEGORY, 7 агрегатов)
+            # или набор B (subcategory из v5.json, 33 детальных). Для ВСЕХ источников.
+            try:
+                from analyzer.scanner import PLPCHECK_RULE_TO_CATEGORY
+            except Exception:
+                PLPCHECK_RULE_TO_CATEGORY = {}
+            cat_set = {c.upper() for c in self.categories if c}
+            subcat = (getattr(rule, 'subcategory', '') or '').upper()
+            match_b = bool(subcat) and subcat in cat_set
+            match_a = False
+            if src_lc == 'plpcheck':
+                agg = PLPCHECK_RULE_TO_CATEGORY.get(code, 'OTHER')
+                match_a = (agg or '').upper() in cat_set
+            if not (match_a or match_b):
+                return False
         return True
 
     def select_rules(self, rule_codes: Optional[List[str]] = None) -> List[str]:

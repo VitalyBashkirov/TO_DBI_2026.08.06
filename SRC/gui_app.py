@@ -372,18 +372,18 @@ class DBIMigrationApp:
             for prio in selected_priorities:
                 self.log(f"  ★ {prio}", 'highlight')
             
-            # Показываем количество правил по каждому приоритету
-            try:
-                from rubricator_priority_mapping import PRIORITY_RULES
-                # DS 030: в PRIORITY_RULES ключи - 'Приоритет 1/2/3', а не 'HIGH/MEDIUM/LOW'
-                prio_key_map = {'HIGH': 'Приоритет 1', 'MEDIUM': 'Приоритет 2', 'LOW': 'Приоритет 3'}
+            # DS_147c: количество правил по каждому приоритету из v5.json
+            if self.rubricator_prompts and self.rubricator_prompts.loaded:
                 for prio in selected_priorities:
-                    prio_key = prio_key_map.get(prio, prio)
-                    if prio_key in PRIORITY_RULES:
-                        count = len(PRIORITY_RULES[prio_key])
-                        self.log(f"     Правил в {prio}: {count}", 'info')
-            except ImportError:
-                pass
+                    count = 0
+                    for r in self.rubricator_prompts.get_all_rules():
+                        code = r.get('code') if isinstance(r, dict) else None
+                        if not code:
+                            continue
+                        rd = self.rubricator_prompts.get_rule(code)
+                        if rd and (rd.get('priority') or '').upper() == prio:
+                            count += 1
+                    self.log(f"     Правил в {prio}: {count}", 'info')
             
             self.log("=" * 60, 'info')
         else:
@@ -3695,16 +3695,21 @@ class DBIMigrationApp:
             # Если выбраны приоритеты — используем правила из выбранных приоритетов (DS 018: HIGH/MEDIUM/LOW)
             # DS 024: защита от пустого результата — если после фильтра не осталось ни одного правила,
             # selected_rules НЕ обнуляется (иначе сканер загрузит ВСЕ правила)
-            from rubricator_priority_mapping import PRIORITY_RULES
-            priority_mapping = {'HIGH': 'Приоритет 1', 'MEDIUM': 'Приоритет 2', 'LOW': 'Приоритет 3'}
-            selected_priorities = [priority_mapping.get(p, p) for p in getattr(self, '_selected_priorities', [])]
+            # DS_147c: фильтр по rule.priority из v5.json (источник истины)
+            selected_priorities = [p.upper() for p in getattr(self, '_selected_priorities', [])]
             
             if selected_priorities:
-                # Собираем правила из выбранных приоритетов (DS 024)
+                # DS_147c: собираем правила, чей rule.priority в selected_priorities
                 priority_rules = set()
-                for prio in selected_priorities:
-                    if prio in PRIORITY_RULES:
-                        priority_rules.update(PRIORITY_RULES[prio])
+                if self.rubricator_prompts and self.rubricator_prompts.loaded:
+                    for r in self.rubricator_prompts.get_all_rules():
+                        code = r.get('code') if isinstance(r, dict) else None
+                        if not code:
+                            continue
+                        rd = self.rubricator_prompts.get_rule(code)
+                        prio = (rd.get('priority') or '').upper() if rd else ''
+                        if prio in selected_priorities:
+                            priority_rules.add(code)
                 
                 if priority_rules:
                     # DS 024: регистронезависимое сопоставление кодов
@@ -3732,7 +3737,7 @@ class DBIMigrationApp:
                         self.root.after(0, lambda: self.log(f"\n⚠ Для выбранных файлов нет правил с приоритетами {', '.join(getattr(self, '_selected_priorities', []))}. Используются все правила выбранных файлов ({len(selected_rules)}).", 'warning'))
                 else:
                     # DS 024: в PRIORITY_RULES нет правил — не трогаем selected_rules
-                    self.root.after(0, lambda: self.log("\n⚠ Нет правил в PRIORITY_RULES. Используются все правила выбранных файлов.", 'warning'))
+                    self.root.after(0, lambda: self.log("\n⚠ Нет правил по выбранным приоритетам. Используются все правила выбранных файлов.", 'warning'))
             
             self.root.after(0, lambda: self.log(f"\nИСПОЛЬЗУЕМЫЕ ПРАВИЛА ({len(selected_rules)}):", 'info'))
             for rule in selected_rules[:30]:
@@ -4277,16 +4282,21 @@ class DBIMigrationApp:
             # Если выбраны приоритеты — используем правила из выбранных приоритетов (DS 018: HIGH/MEDIUM/LOW)
             # DS 024: защита от пустого результата — если после фильтра не осталось ни одного правила,
             # selected_rules НЕ обнуляется (иначе сканер загрузит ВСЕ правила)
-            from rubricator_priority_mapping import PRIORITY_RULES
-            priority_mapping = {'HIGH': 'Приоритет 1', 'MEDIUM': 'Приоритет 2', 'LOW': 'Приоритет 3'}
-            selected_priorities = [priority_mapping.get(p, p) for p in getattr(self, '_selected_priorities', [])]
+            # DS_147c: фильтр по rule.priority из v5.json (источник истины)
+            selected_priorities = [p.upper() for p in getattr(self, '_selected_priorities', [])]
             
             if selected_priorities:
-                # Собираем правила из выбранных приоритетов (DS 024)
+                # DS_147c: собираем правила, чей rule.priority в selected_priorities
                 priority_rules = set()
-                for prio in selected_priorities:
-                    if prio in PRIORITY_RULES:
-                        priority_rules.update(PRIORITY_RULES[prio])
+                if self.rubricator_prompts and self.rubricator_prompts.loaded:
+                    for r in self.rubricator_prompts.get_all_rules():
+                        code = r.get('code') if isinstance(r, dict) else None
+                        if not code:
+                            continue
+                        rd = self.rubricator_prompts.get_rule(code)
+                        prio = (rd.get('priority') or '').upper() if rd else ''
+                        if prio in selected_priorities:
+                            priority_rules.add(code)
                 
                 if priority_rules:
                     # DS 024: регистронезависимое сопоставление кодов
@@ -4314,7 +4324,7 @@ class DBIMigrationApp:
                         self.root.after(0, lambda: self.log(f"\n⚠ Для выбранных файлов нет правил с приоритетами {', '.join(getattr(self, '_selected_priorities', []))}. Используются все правила выбранных файлов ({len(selected_rules)}).", 'warning'))
                 else:
                     # DS 024: в PRIORITY_RULES нет правил — не трогаем selected_rules
-                    self.root.after(0, lambda: self.log("\n⚠ Нет правил в PRIORITY_RULES. Используются все правила выбранных файлов.", 'warning'))
+                    self.root.after(0, lambda: self.log("\n⚠ Нет правил по выбранным приоритетам. Используются все правила выбранных файлов.", 'warning'))
             
             self.root.after(0, lambda: self.log(f"\nИСПОЛЬЗУЕМЫЕ ПРАВИЛА ({len(selected_rules)}):", 'info'))
             for rule in selected_rules[:30]:

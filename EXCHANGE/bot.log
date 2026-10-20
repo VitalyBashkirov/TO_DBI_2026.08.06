@@ -565,3 +565,42 @@
 [19.10.2026 15:53:47] 152a: DS_152-a: покрытие rules_arg (было 0). 4 теста: _parse_csv, --rules с 2 кодами, --rules с несуществующим (WARN), --rules '' (все правила). 4 passed.
 [19.10.2026 15:56:11] 152b: DS_152-b: покрытие matched_rules (было 0). 5 тестов: AST file_prefixes (5 ключей), функциональные (PlpCheck, v53+PlpCheck, fallback без рубрикатора), AST matched_rules в _run_test_generation. 5 passed.
 [19.10.2026 16:03:22] 152: DS_152: закрыт цикл a/b/c/summary. Покрытие К1-К4 и генерации .plp по фильтрам sources/priorities/categories/rules: +13 тестов (a=4, b=5, c=4), 293 passed. Сводный отчёт: EXCHANGE/OUTBOX/DS_152_summary_report.md.
+[2026-10-19 16:09] Отправлено 1074 issues из 1621 (фильтр: needs_ai_fix). AI-запросов: 39.
+[2026-10-19 16:09] DS 082a: Rule-based fixer (batch): запросов=35, fixes=349, skip=440 -> f:\TO_DBI\EXCHANGE\AI_OUT
+[2026-10-19 16:10] Rescan CRED_GET_SUMMA_1.plp: было 83, стало 78
+[2026-10-19 16:10] Rescan EXP_CUR_RC_DIC.plp: было 10, стало 16
+[2026-10-19 16:10] Rescan EXP_RC_GET_CLSWF.plp: было 220, стало 235
+[2026-10-19 16:10] Rescan PSH_1B618045_F.plp: было 12, стало 18
+[2026-10-19 16:10] Rescan PSH_1B618045_S.plp: было 12, стало 18
+[2026-10-19 16:10] Rescan PSH_2_1_1.plp: было 17, стало 18
+[2026-10-19 16:10] Rescan PSH_2_1_2.plp: было 17, стало 18
+[2026-10-19 16:10] Rescan PSH_2_1_3.plp: было 17, стало 17
+[2026-10-19 16:10] Rescan PSH_ADDRECS.plp: было 206, стало 203
+[2026-10-19 16:10] Rescan PSH_BO.plp: было 60, стало 58
+[2026-10-19 16:10] Rescan PSH_BO_MCOM.plp: было 23, стало 26
+[2026-10-19 16:10] Rescan PSH_CALC_PAR.plp: было 34, стало 41
+[2026-10-19 16:10] Rescan PSH_CL.plp: было 19, стало 18
+[2026-10-19 16:11] Rescan PSH_DEP_PRIV_GO.plp: было 285, стало 279
+[2026-10-19 16:11] Rescan PSH_ED_PRC_SCHM.plp: было 15, стало 14
+[2026-10-19 16:11] Rescan PSH_EDIT_AUTO.plp: было 7, стало 6
+[2026-10-19 16:11] Rescan PSH_FIND_ACCS.plp: было 48, стало 50
+[2026-10-19 16:11] Rescan PSH_FULL_COST.plp: было 26, стало 25
+[2026-10-19 16:11] Rescan PSH_HANDLE_PR_CR.plp: было 14, стало 16
+[2026-10-19 16:11] Rescan PSH_INSERT_AUTO.plp: было 6, стало 6
+[2026-10-19 16:11] Rescan PSH_JOB_FTC.plp: было 44, стало 42
+[2026-10-19 16:11] Rescan PSH_L.plp: было 24, стало 23
+[2026-10-19 16:11] Rescan PSH_LIB.plp: было 48, стало 34
+[2026-10-19 16:11] Rescan PSH_MAG.plp: было 25, стало 20
+[2026-10-19 16:11] Rescan PSH_NEED_CHECK.plp: было 5, стало 3
+[2026-10-19 16:11] Rescan PSH_PLHD.plp: было 61, стало 60
+[2026-10-19 16:11] Rescan PSH_PRINT_LIB.plp: было 13, стало 13
+[2026-10-19 16:11] Rescan PSH_PROCESS.plp: было 94, стало 118
+[2026-10-19 16:11] Rescan PSH_PS_DEL.plp: было 4, стало 5
+[2026-10-19 16:11] Rescan PSH_STD_LOAD.plp: было 7, стало 7
+[2026-10-19 16:11] Rescan RC_ZDOG_ACC_1.plp: было 9, стало 13
+[2026-10-19 16:11] Rescan REPORT_0402118_E.plp: было 13, стало 12
+[2026-10-19 16:11] Rescan TO_COMPLETE_EXT.plp: было 19, стало 17
+[2026-10-19 16:11] Rescan UYA_FOR_PATT.plp: было 25, стало 26
+[2026-10-19 16:11] Rescan: 34 файлов; было 1522, стало 1553
+[2026-10-19 16:11] needs_manual: 0
+[20.10.2026 05:21:15] 153a: DS_153a: AST-тесты pre-checks K2 (5)

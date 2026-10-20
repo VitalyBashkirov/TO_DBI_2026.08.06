@@ -150,6 +150,36 @@ Write-Host "[4.x] git status (staged):"
 git status -sb
 
 Write-Host ""
+Write-Host "=== [4.9/8] OQ-2: check staged (only bot.log?) ===" -ForegroundColor Cyan
+
+$stagedRaw = git diff --cached --name-only
+$stagedList = @($stagedRaw | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+$nonBotLog = @($stagedList | Where-Object { $_ -ne 'EXCHANGE/bot.log' })
+
+Write-Host "  staged total : $($stagedList.Count)"
+Write-Host "  non-bot.log  : $($nonBotLog.Count)"
+if ($stagedList.Count -gt 0) {
+    foreach ($s in $stagedList) { Write-Host "    | $s" }
+}
+
+if ($nonBotLog.Count -eq 0) {
+    Write-Host ""
+    Write-Host "[OQ-2] Only EXCHANGE/bot.log (or nothing) is staged." -ForegroundColor Yellow
+    Write-Host "[OQ-2] No meaningful changes -> skip commit (avoid empty dup commit)." -ForegroundColor Yellow
+    Write-Host ""
+
+    $headHash = (git rev-parse --short HEAD).Trim()
+    $headMsg  = (git log -1 --pretty=%s).Trim()
+    Write-Host "  DS:            $DsNumber"
+    Write-Host "  Commit:        $headHash (unchanged)"
+    Write-Host "  Message:       $headMsg"
+    Write-Host "  Branch:        $Branch"
+    Write-Host "  Push:          SKIPPED (nothing to commit)"
+    Write-Host ""
+    Write-Host "DS $DsNumber closed (no-op, bot.log only)." -ForegroundColor Yellow
+    return
+}
+Write-Host ""
 Write-Host "=== [5/8] git commit ===" -ForegroundColor Cyan
 
 git commit -m $CommitMessage

@@ -778,18 +778,11 @@ class PLPlusScanner:
                 return rule_category in self.plpcheck_categories
             return True
         
-        # 3) DS 034: переданы коды правил — совпадение файла-источника
-        #    (selected_rules содержит коды того же файла, например
-        #     'plpcheck.BAD_PREFIX' для rule_code 'plpcheck.NOT_MENTIONED')
-        if any(s.startswith(rule_prefix + '.') for s in selected_lower):
-            # DS 036: фильтр категорий применяется и здесь
-            if rule_prefix == 'plpcheck' and self.plpcheck_categories:
-                rule_category = PLPCHECK_RULE_TO_CATEGORY.get(rule_code, 'OTHER')
-                return rule_category in self.plpcheck_categories
-            return True
-        
+        # 3) DS 154 (OQ-1): removed prefix-widening.
+        #    selected_rules=['plpcheck.BAD_PREFIX'] must NOT include
+        #    'plpcheck.CODE_IN_COMMENT' etc. Exact match is handled in step 2.
         return False
-    
+
     def _check_multiline_when_others(self, lines: List[str]) -> List[Tuple[int, str]]:
         """Многострочный поиск WHEN OTHERS без ROLLBACK/RAISE (тдс20240828.TRANS_ABORTED.стр.29)"""
         issues = []
@@ -1360,6 +1353,10 @@ class PLPlusScanner:
                             tags=tags,
                             match_fragment=(matched_text or '')[:200]
                         )
+                        # DS 154 (OQ-1): post-filter regex issues by full rule code
+                        # selected_rules=['plpcheck.BAD_PREFIX'] must not include other plpcheck.*
+                        if not self._is_rule_selected(base_issue_type):
+                            continue
                         issues.append(issue)
                         issues_found_on_line += 1
                         

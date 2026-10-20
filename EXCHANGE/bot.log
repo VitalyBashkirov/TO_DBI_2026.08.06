@@ -609,3 +609,4 @@
 [20.10.2026 05:59:19] 153d: DS_153d: тесты scanner — фактическое поведение фильтрации (6)
 [20.10.2026 06:04:25] 153summary: DS_153 summary: отчёт К2 + OQ-1 (_is_rule_selected)
 [20.10.2026 06:05:00] 153summary: DS_153 summary: отчёт К2 + OQ-1 (_is_rule_selected)
+[20.10.2026 06:30:26] DS_154: DS_154 closed: OQ-1 scanner + OQ-2 close_ds (319 passed)

@@ -69,23 +69,21 @@ def test_scanner_returns_issues_when_empty(plp, rubricator, tmp_path):
 
 # ---------- 2: selected_rules=[<rule>] -> скан работает ----------
 def test_scanner_returns_issues_with_selected_rule(plp, rubricator, tmp_path):
-    sc = _scan(plp, ["plpcheck.BAD_PREFIX"], rubricator, tmp_path)
+    sc = _scan(plp, ["plpcheck.CODE_IN_COMMENT"], rubricator, tmp_path)
     assert len(sc.issues) > 0, \
         "сканер должен вернуть issue и при выбранном правиле"
+    assert all(i.issue_type == "plpcheck.CODE_IN_COMMENT" for i in sc.issues), \
+        "DS 154: при selected_rules только выбранное правило должно попадать в issues"
 
-
-# ---------- 3: multiline-правила НЕ фильтруются по selected_rules ----------
-def test_multiline_not_filtered_by_selected_rules(plp, rubricator, tmp_path):
+def test_multiline_filtered_by_selected_rules(plp, rubricator, tmp_path):
     sc = _scan(plp, ["plpcheck.CODE_IN_COMMENT"], rubricator, tmp_path)
     types = {i.issue_type for i in sc.issues}
     assert "plpcheck.CODE_IN_COMMENT" in types, \
         "CODE_IN_COMMENT должен быть найден (multiline, .plp)"
     others = types - {"plpcheck.CODE_IN_COMMENT"}
-    assert others, \
-        "multiline-правила не фильтруются: должны быть и другие issue"
+    assert not others, \
+        f"DS 154: multiline-правила должны фильтроваться; лишние: {others}"
 
-
-# ---------- 4: get_issues_by_file -> dict по файлам ----------
 def test_get_issues_by_file_returns_dict(plp, rubricator, tmp_path):
     sc = _scan(plp, [], rubricator, tmp_path)
     by_file = sc.get_issues_by_file()
@@ -110,9 +108,9 @@ def test_is_rule_selected_called_in_scan_file():
 
 
 # ---------- 6: известное ограничение — plpcheck.* не сужаются ----------
-def test_selected_rule_does_not_narrow_plpcheck(plp, rubricator, tmp_path):
+def test_selected_rule_narrows_plpcheck(plp, rubricator, tmp_path):
     sc = _scan(plp, ["plpcheck.BAD_PREFIX"], rubricator, tmp_path)
     types = {i.issue_type for i in sc.issues}
-    assert "plpcheck.CODE_IN_COMMENT" in types, \
-        "известное ограничение: plpcheck.* не сужаются по selected_rules"
+    assert "plpcheck.CODE_IN_COMMENT" not in types, \
+        "DS 154: plpcheck.* сужаются по полному коду правила"
 

@@ -688,3 +688,34 @@ INBOX-файл может быть выполнен повторно при сл
 **Зафиксировано:** `SRC/tests/test_ds153d_scanner_selected_rules.py::test_selected_rule_does_not_narrow_plpcheck`.
 
 **Задача чата 45:** доработать `_is_rule_selected` (сравнение по полному коду + фильтрация multiline по `selected_rules`).
+
+
+### OQ-2: close_ds.ps1 — пустой коммит (только bot.log)
+
+**Симптом:** `close_ds.ps1` создаёт **дублирующий** коммит с тем же сообщением, если запустить его повторно, когда содержательных изменений уже нет (кроме `EXCHANGE/bot.log`). Пример: `a50323f` (AGENTS.md + DS_153_summary_report.md + bot.log) и `dd4c933` (только bot.log).
+
+**Причина:** `close_ds.ps1` делает `git add EXCHANGE/bot.log` + `git commit`, **не проверяя**, есть ли в staged что-то, кроме `bot.log`. `bot.log` меняется при каждом запуске (строка `DS_N: ...`), поэтому staged **не пуст** — коммит проходит.
+
+**Влияние:** грязная история (2 одинаковых сообщения), но **не блокер** (ahead 0, origin синхронизирован).
+
+**Задача чата 45:** в `close_ds.ps1` добавить проверку `git diff --cached --quiet -- EXCHANGE/bot.log` (или `git diff --cached --name-only | Where-Object { $_ -ne "EXCHANGE/bot.log" }`) — если **только** `bot.log`, коммит **не делать** (или делать с пометкой `[botlog only]`).
+
+## DS_154 (OQ-1 + OQ-2) — CLOSED
+
+
+
+- OQ-1 (scanner.py): _is_rule_selected now compares by full rule code;
+
+  removed prefix-widening any(s.startswith(rule_prefix + '.'));
+
+  added post-filter in scan_file for regex issues by full rule code.
+
+  Multiline _check_plp_* already guarded by _is_rule_selected (verified by AST test).
+
+- OQ-2 (tools/close_ds.ps1): added guard [4.9/8] OQ-2 — skips commit when
+
+  only EXCHANGE/bot.log is staged (or nothing is staged).
+
+- Tests: 314 -> 319 passed (+3 OQ-2, +2 OQ-1).
+
+- DS_154_summary_report.md in EXCHANGE/OUTBOX.

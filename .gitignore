@@ -113,3 +113,5 @@ DATA/generated_plp/
 # DS_155: продукты фиксера (бэкапы), не коммитим
 PATCH_CALC/
 backups/
+chat46_*.py
+chat46_commit_msg.txt

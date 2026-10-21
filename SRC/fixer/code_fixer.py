@@ -542,6 +542,12 @@ class PLPlusFixer:
         self.skipped_details = []  # Детали пропущенных исправлений для подробного лога
         self.fix_only_found = config.get('output', {}).get('fix_only_found', False)  # Флаг режима вывода
         self.clean_output = clean_output  # Флаг чистого вывода (без маркеров)
+        self.log_level = config.get('log_level', 'Минимальный')
+        self.anchor_settings = config.get('anchor_settings', {})
+        self.enable_ai_tag = self.anchor_settings.get('enable_ai_tag', True)
+        self.ai_tag_format = self.anchor_settings.get('ai_tag_format', '<Ai>')
+        self.anchor_templates = self.anchor_settings.get('templates', {})
+        self.old_code_template = self.anchor_settings.get('old_code_template', '{prefix} [AI-REMOVED] {date} | {rule_code} | Было: {old_code}')
         self._abort_flag = False  # DS_089a: флаг прерывания
         self.abort_callback = abort_callback  # DS_089a §3: callback для проверки отмены
         self.stop_event = stop_event  # DS_089b: потокобезопасный Event для graceful stop
@@ -1528,6 +1534,57 @@ class PLPlusFixer:
 
         # 1. Детерминированные исправления по issues (SQL + backup).
         lines, issue_changes = self._apply_issue_fixes(lines, issues)
+        # DS_155: формируем якоря для изменённых строк (перед записью)
+        if issue_changes:
+            new_lines = []
+            changes_by_line = {}
+            for ch in issue_changes:
+                changes_by_line.setdefault(ch['line_number'], []).append(ch)
+            
+            for idx, line in enumerate(lines):
+                line_num = idx + 1
+                if line_num in changes_by_line:
+                    ch_list = changes_by_line[line_num]
+                    rule_parts = []
+                    for ch in ch_list:
+                        rule_code = ch['rule_code']
+                        rule_parts.append(f"{rule_code} [1]")
+                    rule_str = " | ".join(rule_parts)
+                    
+                    date_str = datetime.now().strftime(self.anchor_settings.get('date_format', '%Y.%m.%d %H:%M'))
+                    template = self.anchor_templates.get(self.log_level, "{prefix} {ai_tag} {date} | {rule_code} | Строки: {line_range}")
+                    marker = template.format(
+                        prefix=self.anchor_settings.get('comment_prefix', '--'),
+                        ai_tag="",
+                        date=date_str,
+                        rule_code=rule_str,
+                        line_range=str(line_num)
+                    )
+                    
+                    if self.clean_output:
+                        new_lines.append(line)
+                    else:
+                        old_code = ch_list[0]['before']
+                        old_formatted = self.old_code_template.format(
+                            prefix=self.anchor_settings.get('comment_prefix', '--'),
+                            date=date_str,
+                            rule_code=rule_str,
+                            old_code=old_code
+                        )
+                        leading_ws = line[:len(line) - len(line.lstrip())] if line.strip() else ""
+                        new_lines.append(f"{leading_ws}{marker}\n{leading_ws}{old_formatted}\n{line}")
+                else:
+                    new_lines.append(line)
+            lines = new_lines
+
+
+        # DS_155: отладка — выводим список изменений
+        if issue_changes:
+            logger.debug(f"[DS_155] Файл {file_path.name}: {len(issue_changes)} изменений")
+            for ch in issue_changes:
+                logger.debug(f"  Строка {ch['line_number']}: {ch['rule_code']}")
+                logger.debug(f"    Было: {ch['before']}")
+                logger.debug(f"    Стало: {ch['after']}")
 
         # Сохраняем изменения по issues обратно в файл результата.
         if issue_changes:
@@ -1837,8 +1894,21 @@ class PLPlusFixer:
             
             if results_path.exists():
                 # Файл существует — переименовываем в *_timestamp*
-                backup_path = results_path.parent / f"{results_path.stem}_{timestamp}{results_path.suffix}"
-                results_path.rename(backup_path)
+                # DS_155: бэкап в PATCH_CALC/backups
+                try:
+                    res_dir_str = str(self.config.get('result_dir', results_path.parent))
+                    if 'PATCH_OUT' in res_dir_str:
+                        calc_root = Path(res_dir_str.replace('PATCH_OUT', 'PATCH_CALC'))
+                    else:
+                        calc_root = results_path.parent.parent / 'PATCH_CALC'
+                    rel_path = results_path.relative_to(Path(res_dir_str))
+                    backup_dir = calc_root / "backups" / rel_path.parent
+                    backup_dir.mkdir(parents=True, exist_ok=True)
+                    backup_path = backup_dir / f"{results_path.stem}_{timestamp}{results_path.suffix}"
+                    results_path.rename(backup_path)
+                except Exception as e:
+                    backup_path = results_path.parent / f"{results_path.stem}_{timestamp}{results_path.suffix}"
+                    results_path.rename(backup_path)
                 if log_callback:
                     log_callback(f"  [!] Существующий файл переименован: {backup_path.name}")
             else:

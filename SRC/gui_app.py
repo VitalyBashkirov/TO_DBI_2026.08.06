@@ -809,7 +809,7 @@ class DBIMigrationApp:
         # Стиль для зелёного текста чекбокса
         style = ttk.Style()
         style.configure('Green.TCheckbutton', foreground='green')
-        ttk.Checkbutton(options_frame, text='"Исправить код" — только пометить найденные теги "--NEW YYYY-MM-DD"', 
+        ttk.Checkbutton(options_frame, text='"Исправить код" — применить правки с якорями -- <Ai> YYYY.MM.DD HH:MI | <Правило> | Строки: N', 
                         variable=self.fix_only_found_var, style='Green.TCheckbutton').grid(row=1, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
         
         # Чекбокс PlpCheck — включение/выключение правил стиля кода
@@ -3278,6 +3278,7 @@ class DBIMigrationApp:
                     self.only_modified_var.set(settings.get('only_modified', True))
                     self.preserve_structure_var.set(settings.get('preserve_structure', True))
                     self.clean_output_var.set(settings.get('clean_output', False))
+                    self.fix_only_found_var.set(settings.get('fix_only_found', False))
                     # DS_088a_fix §2.5: пороги confidence из settings.json.
                     if getattr(self, 'conf_low_var', None):
                         _cl = float(settings.get('conf_low', 0.5))
@@ -3374,6 +3375,7 @@ class DBIMigrationApp:
             'only_modified': self.only_modified_var.get(),
             'preserve_structure': self.preserve_structure_var.get(),
             'clean_output': self.clean_output_var.get(),
+            'fix_only_found': self.fix_only_found_var.get(),
             'max_log_size_mb': MAX_LOG_SIZE_MB,
             'selected_priorities': list(getattr(self, '_selected_priorities', []))
         }
@@ -3581,15 +3583,26 @@ class DBIMigrationApp:
             messagebox.showerror("Ошибка", f"Исходный каталог не найден:\n{source_dir}")
             return
 
-        # DS_136: создать пустой PATCH_OUT (прогноз результата) сразу при К1
-        auto_result = self._auto_fill_result_dir(source_dir)
-        if auto_result and not auto_result.exists():
+        # DS_155: принудительное создание PATCH_CALC
+        source_str = str(source_dir)
+        if 'PATCH_IN' in source_str:
+            calc_str = source_str.replace('PATCH_IN', 'PATCH_CALC')
+            calc_path = Path(calc_str)
             try:
-                auto_result.mkdir(parents=True, exist_ok=True)
-                self.result_dir_var.set(str(auto_result))
-                self.log(f"Создан пустой каталог результатов (прогноз): {auto_result}", 'info')
+                calc_path.mkdir(parents=True, exist_ok=True)
+                (calc_path / "stage1_regex").mkdir(exist_ok=True)
+                (calc_path / "stage2_ai").mkdir(exist_ok=True)
+                (calc_path / "backups").mkdir(exist_ok=True)
+                (calc_path / "logs").mkdir(exist_ok=True)
+                self.log(f"📁 [K1] Создан PATCH_CALC: {calc_path}", "info")
             except Exception as e:
-                self.log(f"Не удалось создать каталог результатов: {e}", 'warning')
+                self.log(f"⚠️ [K1] Не удалось создать PATCH_CALC: {e}", "warning")
+        else:
+            self.log(f"ℹ️ [K1] PATCH_IN не найден в пути, PATCH_CALC не создан.", "info")
+
+        # DS_155: PATCH_OUT НЕ создаём на этапе К1.
+        # Все промежуточные результаты идут в PATCH_CALC.
+        self.log("[DS_155] К1: PATCH_OUT не создаётся (только для финальных результатов).", 'info')
         
         # Отключение кнопок на время сканирования
         self.btn_scan.state(['disabled'])
@@ -4385,6 +4398,9 @@ class DBIMigrationApp:
             from fixer.code_fixer import PLPlusFixer
             iteration = datetime.now().strftime("%Y%m%d_%H%M%S")
             source_name = source_dir.name
+            import json as _json_gui
+            config['anchor_settings'] = _json_gui.load(open(r'F:\TO_DBI\SRC\settings.json', encoding='utf-8')).get('anchor_settings', {})
+            config['log_level'] = self.log_level_var.get()
             fixer = PLPlusFixer(config, iteration, clean_output=self.clean_output_var.get(),
                                 abort_callback=self._abort_requested,  # DS 038
                                 stop_event=self._stop_event)           # DS_089b

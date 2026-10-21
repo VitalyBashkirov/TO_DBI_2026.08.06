@@ -696,10 +696,10 @@ class DBIMigrationApp:
         
         # DS_167: USER — имя пользователя для маркировки правок (МПК).
         # Подставляется в якорь как "<USER>". Пусто -> в якорь не попадает.
-        ttk.Label(paths_frame, text="USER:").grid(row=1, column=0, sticky=tk.W, padx=(0,1), pady=(5,0))
-        self.user_entry = ttk.Entry(paths_frame, textvariable=self.user_var, width=40, style='Valid.TEntry')
-        self.user_entry.grid(row=1, column=1, padx=0, sticky=tk.EW, pady=(5,0))
-        Tooltip(self.user_entry, "Имя пользователя для маркировки правок (МПК).\n"
+        ttk.Label(paths_frame, text="USER:").grid(row=1, column=3, sticky=tk.W, padx=(15,1), pady=(5,0))
+        self.user_entry = ttk.Entry(paths_frame, textvariable=self.user_var, width=30, style='Valid.TEntry')
+        self.user_entry.grid(row=1, column=4, padx=0, sticky=tk.W, pady=(5,0))
+        Tooltip(self.user_entry, "Имя пользователя для маркировки правок.\n"
                                  "Подставляется в якорь как <USER>.\n"
                                  "Если пусто — в якорь не попадает.\n"
                                  "Недопустимые символы: | (вертикальная черта), перевод строки.")
@@ -720,7 +720,7 @@ class DBIMigrationApp:
         self.source_status_label.grid(row=2, column=1, sticky=tk.W)
         
         self.result_status_label = ttk.Label(paths_frame, text="", font=("Segoe UI", 9))
-        self.result_status_label.grid(row=2, column=4, sticky=tk.W)
+        self.result_status_label.grid(row=2, column=5, sticky=tk.W)
         
         paths_frame.grid_columnconfigure(1, weight=1)
         paths_frame.grid_columnconfigure(4, weight=1)
@@ -824,7 +824,7 @@ class DBIMigrationApp:
         self.mark_in_code_var = tk.BooleanVar(value=False)
         # DS_157: «Применять правки» (бывш. "Исправить код") — ставит фактические правки
         ttk.Checkbutton(options_frame,
-                        text='Применять правки (бывш. "Исправить код")',
+                        text='Применять правки',
                         variable=self.fix_only_found_var, style='Green.TCheckbutton').grid(
             row=1, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
         # DS_157: «Маркировка правок» (МПК) — якоря-комментарии
@@ -832,7 +832,7 @@ class DBIMigrationApp:
             options_frame,
             text='Маркировка правок (-- YYYY.MM.DD HH:MI|<Правило>[×N][[Ai]]|Строка/Строки NN[-NN])',
             variable=self.mark_in_code_var, style='Green.TCheckbutton')
-        self.mark_in_code_check.grid(row=4, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
+        self.mark_in_code_check.grid(row=6, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
         
         # Чекбокс PlpCheck — включение/выключение правил стиля кода
         # DS 038 (Проблема E): переименовано из "Добавлять PlpCheck-правила (стиль кода)"
@@ -936,7 +936,7 @@ class DBIMigrationApp:
 
         # DS 053: флаги детерминированного фикса (6 чекбоксов).
         # Порядок и подписи соответствуют rule_engine.FLAG_ORDER.
-        flags_frame = ttk.LabelFrame(options_frame, text="Флаги детерминированного фикса (DS_053)", padding="5")
+        flags_frame = ttk.LabelFrame(options_frame, text="Флаги детерминированного фикса", padding="5")
         flags_frame.grid(row=5, column=0, columnspan=5, sticky=tk.W, pady=(6, 0))
         # DS_053_Уточнение_3 (задача C): подпись из трёх строк (точный текст).
         _cap = ttk.Frame(flags_frame)
@@ -1345,14 +1345,14 @@ class DBIMigrationApp:
             self._tooltip_fix_only_found = Tooltip(
                 chk_map["fix_only"],
                 "Применять правки детерминированного фиксера к коду (иначе — только лог)."
-                "Совместимо с МПК: МПК добавляет якоря, Применять вносит правки."
+                "Совместимо с маркировкой правок: маркировка добавляет якоря, Применять вносит правки."
             )
         if chk_map.get("mark_in_code") is not None:
             self._tooltip_mark_in_code = Tooltip(
                 chk_map["mark_in_code"],
-                "Маркировка в коде: К2 вставляет якоря-комментарии "
+                "Маркировка в коде: при исправлении вставляются якоря-комментарии "
                 "перед изменяемыми строками (дата, правило, строки).\n"
-                "С ВТИК — вернуть только исправленный код, маркеры не выводить.\n"
+                "С режимом «Верни только исправленный код» — маркеры не выводятся.\n"
                 "С НеАФ — сухой прогон: только лог, без якорей и правок."
             )
         arch = getattr(self, "archive_result_check", None)
@@ -1400,21 +1400,38 @@ class DBIMigrationApp:
 
     # ── DS_133: main-кнопки 1/2/3/4 — активация по артефактам ──────────────────────────
     def _result_dir_has_pattern_files(self) -> bool:
-        """Есть ли файлы по Шаблону в каталоге результатов (включая подкаталоги)."""
+        """DS_160: .plp есть в PATCH_OUT, либо в PATCH_CALC/<tail>/(k1_copy|stage1_regex|stage2_ai)."""
         result = self.result_dir_var.get().strip()
         pattern = self.file_pattern_var.get().strip()
-        if not result or not pattern:
+        if not pattern:
             return False
-        try:
-            p = Path(result)
-            if not p.exists() or not p.is_dir():
-                return False
-            # DS_135-2d: всегда искать рекурсивно (в т.ч. подкаталоги)
-            # — надёжнее, чем glob('**/*.plp') в Python 3.11.
-            gen = p.rglob(pattern if '*' not in pattern else pattern.replace('**/', '').replace('**', '*'))
-            return any(True for f in gen if not is_temporary_filename(f.name))
-        except Exception:
-            return False
+        # 1) PATCH_OUT (финализированный результат) — если существует
+        candidates = []
+        if result:
+            try:
+                p = Path(result)
+                if p.exists() and p.is_dir():
+                    candidates.append(p)
+            except Exception:
+                pass
+        # 2) PATCH_CALC/<tail>/(k1_copy|stage1_regex|stage2_ai)
+        if result and 'PATCH_OUT' in result:
+            _calc_root = Path(result.replace('PATCH_OUT', 'PATCH_CALC'))
+            for _sub in ('k1_copy', 'stage1_regex', 'stage2_ai'):
+                _cand = _calc_root / _sub
+                try:
+                    if _cand.exists() and _cand.is_dir():
+                        candidates.append(_cand)
+                except Exception:
+                    pass
+        for p in candidates:
+            try:
+                gen = p.rglob(pattern if '*' not in pattern else pattern.replace('**/', '').replace('**', '*'))
+                if any(True for f in gen if not is_temporary_filename(f.name)):
+                    return True
+            except Exception:
+                continue
+        return False
 
     def _source_dir_has_pattern_files(self) -> bool:
         """DS_136: есть ли файлы по Шаблону в исходном каталоге."""
@@ -1474,8 +1491,18 @@ class DBIMigrationApp:
         rule_ok = any(var.get() for var in self.selected_rules.values())
         k1_normal = source_ok and pattern_ok and rule_ok
 
-        # К2: каталог результатов доступен + есть файлы по шаблону
+        # К2: каталог результатов доступен + есть файлы по шаблону.
+        # DS_160: PATCH_OUT может ещё не существовать (создаётся при финализации);
+        # рабочие артефакты — в PATCH_CALC/<tail>/(k1_copy|stage1_regex|stage2_ai).
         result_ok = bool(result) and os.path.exists(result) and os.access(result, os.W_OK)
+        if not result_ok and result and 'PATCH_OUT' in result:
+            # fallback: PATCH_OUT ещё не создан, но PATCH_CALC/<tail> есть
+            _calc = Path(result.replace('PATCH_OUT', 'PATCH_CALC'))
+            try:
+                if _calc.exists() and os.access(_calc, os.W_OK):
+                    result_ok = True
+            except Exception:
+                pass
         has_plp = result_ok and self._result_dir_has_pattern_files()
         source_has_plp = source_ok and self._source_dir_has_pattern_files()
         # DS_167: USER должен быть валиден (нет |, \n, \r), иначе К2/К3/К4 блокируются.
@@ -2814,7 +2841,7 @@ class DBIMigrationApp:
         # Проверка РК
         if result_dir:
             if not os.path.exists(result_dir):
-                warnings.append(f"РК не существует, будет создан: {result_dir}")
+                warnings.append(f"РК не существует, будет создан каталог результатов: {result_dir}")
             elif not os.access(result_dir, os.W_OK):
                 errors.append(f"Нет доступа на запись в РК: {result_dir}")
         else:
@@ -2873,7 +2900,10 @@ class DBIMigrationApp:
                     return "✅ доступен", "#28a745"  # зелёный
             else:
                 if not os.path.exists(path):
-                    return "📁 будет создан", "#b8860b"  # жёлтый
+                    if is_source:
+                        return "📁 каталог-источник доступен", "#b8860b"
+                    else:
+                        return "📁 будет создан каталог результатов", "#b8860b"
                 elif not os.access(path, os.W_OK):
                     return "🔒 нет доступа", "#dc3545"  # красный
                 else:
@@ -3678,7 +3708,7 @@ class DBIMigrationApp:
 
         # DS_155: PATCH_OUT НЕ создаём на этапе К1.
         # Все промежуточные результаты идут в PATCH_CALC.
-        self.log("[DS_155] К1: PATCH_OUT не создаётся (только для финальных результатов).", 'info')
+        self.log("[K1] PATCH_OUT не создаётся (только для финальных результатов).", 'info')
         
         # Отключение кнопок на время сканирования
         self.btn_scan.state(['disabled'])
@@ -3952,12 +3982,21 @@ class DBIMigrationApp:
             # DS_144c: зеркало ИК -> КР (только если скан не прерван).
             # K2 использует готовое зеркало и не делает повторный скан.
             if not self.scan_aborted:
-                self.root.after(0, lambda: self.log(
-                    "\n[ЗЕРКАЛО] Копирование ИК -> КР...", 'info'))
+                # DS_160: копия ИК -> PATCH_CALC/<tail>/k1_copy, НЕ в PATCH_OUT.
+                # PATCH_OUT создаётся только при финализации (DS_159).
+                _kr_str = str(self.result_dir_var.get())
+                if 'PATCH_OUT' in _kr_str:
+                    _calc_root = Path(_kr_str.replace('PATCH_OUT', 'PATCH_CALC'))
+                else:
+                    _calc_root = Path(config['paths']['results_dir']).parent / 'PATCH_CALC'
+                _k1_copy_dir = _calc_root / 'k1_copy'
+                _k1_copy_dir.mkdir(parents=True, exist_ok=True)
+                self.root.after(0, lambda p=str(_k1_copy_dir): self.log(
+                    f"\n[ЗЕРКАЛО] Копирование ИК -> {p}...", 'info'))
                 self._progress_update(90)
                 _copy_res = self._copy_files_to_result(
                     source_dir=Path(config['paths']['source_dir']),
-                    result_dir=Path(config['paths']['results_dir']),
+                    result_dir=_k1_copy_dir,
                     pattern=self.file_pattern_var.get(),
                     preserve_structure=self.preserve_structure_var.get(),
                     only_edited=False,

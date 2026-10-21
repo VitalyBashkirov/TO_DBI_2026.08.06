@@ -527,8 +527,9 @@ class PLPlusFixer:
     def in_block_comment(self, val):
         self.lexer_state.in_block_comment = val
 
-    def __init__(self, config: dict, iteration: str = 'v0001', use_rubricator: bool = True, clean_output: bool = False,
-                 abort_callback=None, stop_event=None):  # DS_089a §3: callback для проверки отмены; DS_089b: Event для graceful stop
+    def __init__(self, config: dict, iteration: str = 'v0001', use_rubricator: bool = True,
+                 clean_output: bool = False, abort_callback=None, stop_event=None,
+                 mark_in_code: bool = False, apply_fixes: bool = True):
         self.config = config
         self.iteration = iteration
         self.changes_log: List[dict] = []
@@ -540,8 +541,13 @@ class PLPlusFixer:
         self.skipped_in_comment = 0  # Счётчик пропущенных из-за комментариев
         self.skipped_in_string = 0  # Счётчик пропущенных из-за строк
         self.skipped_details = []  # Детали пропущенных исправлений для подробного лога
-        self.fix_only_found = config.get('output', {}).get('fix_only_found', False)  # Флаг режима вывода
-        self.clean_output = clean_output  # Флаг чистого вывода (без маркеров)
+        self.fix_only_found = config.get('output', {}).get('fix_only_found', False)  # DEPRECATED alias apply_fixes
+        self.clean_output = clean_output  # ВТИК: чистый вывод без маркеров
+        # DS_156: МПК + Применять + НеАФ. ВТИК отменяет МПК.
+        _flags = config.get('fix_flags', {}) or config.get('output', {}).get('flags', {}) or {}
+        _ignore = bool(_flags.get('ignore', False))
+        self.mark_in_code = bool(mark_in_code) and not bool(clean_output)
+        self.apply_fixes = bool(apply_fixes) and not _ignore
         self.log_level = config.get('log_level', 'Минимальный')
         self.anchor_settings = config.get('anchor_settings', {})
         self.enable_ai_tag = self.anchor_settings.get('enable_ai_tag', True)
@@ -1545,23 +1551,34 @@ class PLPlusFixer:
                 line_num = idx + 1
                 if line_num in changes_by_line:
                     ch_list = changes_by_line[line_num]
-                    rule_parts = []
+                    ch_list = changes_by_line[line_num]
+                    rule_codes = []
+                    used_ai = False
                     for ch in ch_list:
-                        rule_code = ch['rule_code']
-                        rule_parts.append(f"{rule_code} [1]")
-                    rule_str = " | ".join(rule_parts)
-                    
+                        rc = ch['rule_code']
+                        if rc not in rule_codes:
+                            rule_codes.append(rc)
+                        if ch.get('used_ai'):
+                            used_ai = True
+                    n = len(ch_list)
+                    suffix = f"×{n}" if n > 1 else ""
+                    ai_tag = self.ai_tag_format if (self.enable_ai_tag and used_ai) else ""
+                    rule_str = ", ".join(rule_codes) + suffix
+
                     date_str = datetime.now().strftime(self.anchor_settings.get('date_format', '%Y.%m.%d %H:%M'))
-                    template = self.anchor_templates.get(self.log_level, "{prefix} {ai_tag} {date} | {rule_code} | Строки: {line_range}")
+                    lines_nums = [ch['line_number'] for ch in ch_list]
+                    lo, hi = min(lines_nums), max(lines_nums)
+                    line_range = f"Строка {lo}" if lo == hi else f"Строки {lo}-{hi}"
+                    template = self.anchor_templates.get(self.log_level, "{prefix} {ai_tag} {date}|{rule_code}|{line_range}")
                     marker = template.format(
                         prefix=self.anchor_settings.get('comment_prefix', '--'),
-                        ai_tag="",
+                        ai_tag=ai_tag,
                         date=date_str,
                         rule_code=rule_str,
-                        line_range=str(line_num)
-                    )
+                        line_range=line_range,
+                    ).replace("  ", " ").strip()
                     
-                    if self.clean_output:
+                    if self.clean_output or not self.mark_in_code:
                         new_lines.append(line)
                     else:
                         old_code = ch_list[0]['before']
@@ -1587,16 +1604,21 @@ class PLPlusFixer:
                 logger.debug(f"    Стало: {ch['after']}")
 
         # Сохраняем изменения по issues обратно в файл результата.
-        if issue_changes:
+        if issue_changes and self.apply_fixes:
             try:
                 with open(file_path, 'w', encoding=enc, newline='') as f:
                     f.write(''.join(lines))
             except Exception as e:
                 logger.warning(f"[FIXER] Не удалось записать {file_path}: {e}")
-
+        elif issue_changes and not self.apply_fixes:
+            logger.info(f"[НеАФ] Сухой прогон: правки не применены для {file_path} ({len(issue_changes)} шт.)")
         # 2. DeterministicFixer (переименование переменных, неиспользуемые).
         det_fixer = DeterministicFixer()
-        result = det_fixer.fix_file(str(file_path))
+        if self.apply_fixes:
+            result = det_fixer.fix_file(str(file_path))
+        else:
+            logger.info(f"[НеАФ] DeterministicFixer пропущен для {file_path}")
+            result = {'changes': [], 'modified': False}
         det_changes = result.get('changes', [])
 
         # Статистика и changelog по исправлениям issues.

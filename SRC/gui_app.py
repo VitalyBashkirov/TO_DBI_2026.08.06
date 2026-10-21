@@ -225,6 +225,8 @@ class DBIMigrationApp:
         self.result_dir_var = tk.StringVar()
         self.file_pattern_var = tk.StringVar(value="**/*.plp")
         self.log_level_var = tk.StringVar(value="Минимальный")
+        # DS_167: USER для маркировки правок (МПК). Пусто по умолчанию.
+        self.user_var = tk.StringVar(value="")
         # DS_075: минимальный размер выборки для top-файлов (порог «достаточности»)
         self.report_stats_min_files_var = tk.StringVar(value="10")
         self.only_modified_var = tk.BooleanVar(value=True)
@@ -692,6 +694,16 @@ class DBIMigrationApp:
         self.btn_browse_result.grid(row=0, column=5, padx=(0,0))
         Tooltip(self.btn_browse_result, "Выбрать каталог для сохранения результатов.")
         
+        # DS_167: USER — имя пользователя для маркировки правок (МПК).
+        # Подставляется в якорь как "<USER>". Пусто -> в якорь не попадает.
+        ttk.Label(paths_frame, text="USER:").grid(row=1, column=0, sticky=tk.W, padx=(0,1), pady=(5,0))
+        self.user_entry = ttk.Entry(paths_frame, textvariable=self.user_var, width=40, style='Valid.TEntry')
+        self.user_entry.grid(row=1, column=1, padx=0, sticky=tk.EW, pady=(5,0))
+        Tooltip(self.user_entry, "Имя пользователя для маркировки правок (МПК).\n"
+                                 "Подставляется в якорь как <USER>.\n"
+                                 "Если пусто — в якорь не попадает.\n"
+                                 "Недопустимые символы: | (вертикальная черта), перевод строки.")
+        
         # Стили цветовой индикации полей ИК/РК (DS 008)
         entry_style = ttk.Style()
         entry_style.configure('Valid.TEntry', fieldbackground='#d4edda')    # зелёный — доступен
@@ -795,7 +807,7 @@ class DBIMigrationApp:
         # Уровень логирования
         ttk.Label(options_frame, text="Уровень логирования:").grid(row=0, column=2, sticky=tk.W, padx=(15,3))
         ttk.Combobox(options_frame, textvariable=self.log_level_var, 
-                    values=["Минимальный", "Подробный"], 
+                    values=["Минимальный", "Обычный", "Подробный"],   # DS_167: +Обычный (УЛ)
                     state="readonly", width=15).grid(row=0, column=3, sticky=tk.W)
         # DS_075 §3.2: порог вывода топ-файлов (при «Подробный»).
         # DS_087 §2.6.3: метка «Топ-файлов» сохранена (для layout-теста).
@@ -1466,11 +1478,13 @@ class DBIMigrationApp:
         result_ok = bool(result) and os.path.exists(result) and os.access(result, os.W_OK)
         has_plp = result_ok and self._result_dir_has_pattern_files()
         source_has_plp = source_ok and self._source_dir_has_pattern_files()
-        k2_normal = result_ok and has_plp
+        # DS_167: USER должен быть валиден (нет |, \n, \r), иначе К2/К3/К4 блокируются.
+        user_ok = self._validate_user()
+        k2_normal = result_ok and has_plp and user_ok
 
         # К3: как К2 + в AI_IN нет незавершённых запросов
         ai_in_empty = not self._ai_in_request_files()
-        k3_normal = has_plp and ai_in_empty
+        k3_normal = has_plp and ai_in_empty and user_ok
 
         for btn, normal in (
             (getattr(self, 'btn_scan', None), k1_normal),
@@ -1504,6 +1518,21 @@ class DBIMigrationApp:
         # К4 — единая точка пересчёта (state + тултип)
         self._update_ai_button_state()
 
+
+    def _validate_user(self):
+        """DS_167: проверка USER. Возвращает True, если валиден.
+        Недопустимые символы: | (124), \\n (10), \\r (13).
+        Подсвечивает поле красным (Invalid.TEntry) при ошибке.
+        """
+        entry = getattr(self, 'user_entry', None)
+        val = (self.user_var.get() or '')
+        bad = any(c in val for c in ('|', chr(10), chr(13)))
+        if entry is not None:
+            try:
+                entry.configure(style='Invalid.TEntry' if bad else 'Valid.TEntry')
+            except Exception:
+                pass
+        return not bad
 
     def _update_main_buttons_tooltips(self, k1_normal, k2_normal, k3_normal,
                                         source_ok, pattern_ok, rule_ok,
@@ -2388,6 +2417,7 @@ class DBIMigrationApp:
         self.clean_output_var.trace_add('write', lambda *a: self._on_clean_output_toggled())
         self.fix_only_found_var.trace_add('write', lambda *args: self._update_main_buttons())
         self.mark_in_code_var.trace_add('write', lambda *args: self._update_main_buttons())
+        self.user_var.trace_add('write', lambda *args: self._update_main_buttons())   # DS_167
         self.archive_result_var.trace_add('write', lambda *args: self._update_main_buttons())
         
         # Привязка события изменения выбора в рубрикаторе
@@ -3310,6 +3340,11 @@ class DBIMigrationApp:
                     self.result_dir_var.set(settings.get('result_dir', ''))
                     self.file_pattern_var.set(settings.get('file_pattern', '**/*.plp'))
                     self.log_level_var.set(settings.get('log_level', 'Минимальный'))
+                    # DS_167: USER. Невалидное значение из старого settings.json — пусто.
+                    _u = str(settings.get('user', '') or '')
+                    if any(c in _u for c in ('|', chr(10), chr(13))):
+                        _u = ''
+                    self.user_var.set(_u)
                     # DS_075 §3.2: порог вывода топ-файлов.
                     self.report_stats_min_files_var.set(str(settings.get('report_stats_min_files', 10)))
                     self.scan_recursive_var.set(settings.get('recursive', True))
@@ -3409,6 +3444,7 @@ class DBIMigrationApp:
             'result_dir': self.result_dir_var.get(),
             'file_pattern': self.file_pattern_var.get(),
             'log_level': self.log_level_var.get(),
+            'user': self.user_var.get(),   # DS_167
             'report_stats_min_files': int(self.report_stats_min_files_var.get() or 10),
             'recursive': self.scan_recursive_var.get(),
             'only_modified': self.only_modified_var.get(),
@@ -3707,6 +3743,7 @@ class DBIMigrationApp:
                     'results_dir': self.result_dir_var.get(),
                     'logs_dir': str(Path(__file__).parent.parent / 'logs')
                 },
+                'user': self.user_var.get(),   # DS_167
                 'scan': {
                     'recursive': self.scan_recursive_var.get(),
                     'file_pattern': self.file_pattern_var.get(),
@@ -4441,6 +4478,7 @@ class DBIMigrationApp:
             import json as _json_gui
             config['anchor_settings'] = _json_gui.load(open(r'F:\TO_DBI\SRC\settings.json', encoding='utf-8')).get('anchor_settings', {})
             config['log_level'] = self.log_level_var.get()
+            config['user'] = self.user_var.get()   # DS_167
             fixer = PLPlusFixer(config, iteration, clean_output=self.clean_output_var.get(),
                                 mark_in_code=self.mark_in_code_var.get(),
                                 abort_callback=self._abort_requested,  # DS 038

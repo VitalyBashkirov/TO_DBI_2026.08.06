@@ -554,6 +554,29 @@ class PLPlusFixer:
         self.ai_tag_format = self.anchor_settings.get('ai_tag_format', '<Ai>')
         self.anchor_templates = self.anchor_settings.get('templates', {})
         self.old_code_template = self.anchor_settings.get('old_code_template', '{prefix} [AI-REMOVED] {date} | {rule_code} | Было: {old_code}')
+        # DS_166: USER для маркировки правок (МПК). Пусто -> в якорь не попадает.
+        _raw_user = (config.get('user') or '').strip()
+        _bad = any(c in _raw_user for c in ('|', chr(10), chr(13)))
+        if _bad:
+            _raw_user = _raw_user.replace('|', '').replace(chr(10), '').replace(chr(13), '').strip()
+            logger.warning("[DS_166] USER had invalid chars, stripped: %r", _raw_user)
+        self.user = _raw_user[:64]
+        self.user_tag = (" " + self.user) if self.user else ""
+        # DS_166: три уровня УЛ <-> МПК.
+        #   Минимальный -> УЛМ (сводка на файл)
+        #   Обычный     -> УЛ  (якорь на contiguous-блок правила)
+        #   Подробный   -> УЛП (якорь на блок + на строку)
+        _tpl = self.anchor_templates or {}
+        self.anchor_templates = {
+            'Минимальный': _tpl.get('Минимальный', '{prefix} МПК: {fix_count} правок{user_tag}, правила: {rules_summary}'),
+            'Обычный':     _tpl.get('Обычный',     '{prefix} {date}{user_tag}|{rule_code}|{line_range}'),
+            'Подробный':   _tpl.get('Подробный',   '{prefix} {date}{user_tag}|{rule_code}|{line_range}'),
+        }
+        self._ul_normalized = {
+            'Минимальный': 'Минимальный',
+            'Обычный': 'Обычный',
+            'Подробный': 'Подробный',
+        }
         self._abort_flag = False  # DS_089a: флаг прерывания
         self.abort_callback = abort_callback  # DS_089a §3: callback для проверки отмены
         self.stop_event = stop_event  # DS_089b: потокобезопасный Event для graceful stop
@@ -1541,57 +1564,84 @@ class PLPlusFixer:
         # 1. Детерминированные исправления по issues (SQL + backup).
         lines, issue_changes = self._apply_issue_fixes(lines, issues)
         # DS_155: формируем якоря для изменённых строк (перед записью)
-        if issue_changes:
-            new_lines = []
+        if issue_changes and self.mark_in_code and not self.clean_output:
+            # DS_166: группировка ch_list по (rule_code, contiguous-range).
+            _ul = self._ul_normalized.get(self.log_level, 'Обычный')
+            _prefix = self.anchor_settings.get('comment_prefix', '--')
+            _date_fmt = self.anchor_settings.get('date_format', '%Y.%m.%d %H:%M')
+            _date_str = datetime.now().strftime(_date_fmt)
+
             changes_by_line = {}
             for ch in issue_changes:
                 changes_by_line.setdefault(ch['line_number'], []).append(ch)
-            
+
+            blocks = []
+            for line_num in sorted(changes_by_line.keys()):
+                ch_list = changes_by_line[line_num]
+                rule_codes = []
+                used_ai = False
+                for ch in ch_list:
+                    rc = ch['rule_code']
+                    if rc not in rule_codes:
+                        rule_codes.append(rc)
+                    if ch.get('used_ai'):
+                        used_ai = True
+                if blocks and blocks[-1]['line_end'] + 1 == line_num and \
+                   set(blocks[-1]['rule_codes']) == set(rule_codes) and \
+                   blocks[-1]['used_ai'] == used_ai:
+                    blocks[-1]['lines'].append(line_num)
+                    blocks[-1]['line_end'] = line_num
+                else:
+                    blocks.append({
+                        'rule_codes': rule_codes,
+                        'used_ai': used_ai,
+                        'lines': [line_num],
+                        'line_start': line_num,
+                        'line_end': line_num,
+                        'before_first': ch_list[0]['before'],
+                    })
+
+            anchors_by_line = {}
+            if _ul == 'Минимальный':
+                _rules_summary = {}
+                for b in blocks:
+                    for rc in b['rule_codes']:
+                        _rules_summary[rc] = _rules_summary.get(rc, 0) + 1
+                _rules_txt = ', '.join((rc + (" x" + str(cnt) if cnt > 1 else "")) for rc, cnt in _rules_summary.items())
+                _fix_count = len(issue_changes)
+                tpl = self.anchor_templates['Минимальный']
+                summary = tpl.format(prefix=_prefix, fix_count=_fix_count, user_tag=self.user_tag, rules_summary=_rules_txt).replace("  ", " ").strip()
+                first_line = min(changes_by_line.keys())
+                anchors_by_line.setdefault(first_line, []).append(summary)
+            else:
+                tpl = self.anchor_templates[_ul]
+                for b in blocks:
+                    n = len(b['lines'])
+                    suffix = ("x" + str(n)) if n > 1 else ""
+                    ai_tag = self.ai_tag_format if (self.enable_ai_tag and b['used_ai']) else ""
+                    rule_str = ", ".join(b['rule_codes']) + suffix
+                    lo, hi = b['line_start'], b['line_end']
+                    line_range = ("Строка " + str(lo)) if lo == hi else ("Строки " + str(lo) + "-" + str(hi))
+                    marker = tpl.format(prefix=_prefix, ai_tag=ai_tag, date=_date_str, user_tag=self.user_tag, rule_code=rule_str, line_range=line_range).replace("  ", " ").strip()
+                    anchors_by_line.setdefault(lo, []).append(marker)
+                    if _ul == 'Подробный' and hi > lo:
+                        for ln in b['lines']:
+                            sub = tpl.format(prefix=_prefix, ai_tag=ai_tag, date=_date_str, user_tag=self.user_tag, rule_code=rule_str, line_range=("Строка " + str(ln))).replace("  ", " ").strip()
+                            if ln != lo:
+                                anchors_by_line.setdefault(ln, []).append(sub)
+
+            new_lines = []
             for idx, line in enumerate(lines):
                 line_num = idx + 1
-                if line_num in changes_by_line:
-                    ch_list = changes_by_line[line_num]
-                    ch_list = changes_by_line[line_num]
-                    rule_codes = []
-                    used_ai = False
-                    for ch in ch_list:
-                        rc = ch['rule_code']
-                        if rc not in rule_codes:
-                            rule_codes.append(rc)
-                        if ch.get('used_ai'):
-                            used_ai = True
-                    n = len(ch_list)
-                    suffix = f"×{n}" if n > 1 else ""
-                    ai_tag = self.ai_tag_format if (self.enable_ai_tag and used_ai) else ""
-                    rule_str = ", ".join(rule_codes) + suffix
-
-                    date_str = datetime.now().strftime(self.anchor_settings.get('date_format', '%Y.%m.%d %H:%M'))
-                    lines_nums = [ch['line_number'] for ch in ch_list]
-                    lo, hi = min(lines_nums), max(lines_nums)
-                    line_range = f"Строка {lo}" if lo == hi else f"Строки {lo}-{hi}"
-                    template = self.anchor_templates.get(self.log_level, "{prefix} {ai_tag} {date}|{rule_code}|{line_range}")
-                    marker = template.format(
-                        prefix=self.anchor_settings.get('comment_prefix', '--'),
-                        ai_tag=ai_tag,
-                        date=date_str,
-                        rule_code=rule_str,
-                        line_range=line_range,
-                    ).replace("  ", " ").strip()
-                    
-                    if self.clean_output or not self.mark_in_code:
-                        new_lines.append(line)
-                    else:
-                        old_code = ch_list[0]['before']
-                        old_formatted = self.old_code_template.format(
-                            prefix=self.anchor_settings.get('comment_prefix', '--'),
-                            date=date_str,
-                            rule_code=rule_str,
-                            old_code=old_code
-                        )
-                        leading_ws = line[:len(line) - len(line.lstrip())] if line.strip() else ""
-                        new_lines.append(f"{leading_ws}{marker}\n{leading_ws}{old_formatted}\n{line}")
-                else:
-                    new_lines.append(line)
+                if line_num in anchors_by_line:
+                    leading_ws = line[:len(line) - len(line.lstrip())] if line.strip() else ""
+                    for marker in anchors_by_line[line_num]:
+                        new_lines.append(leading_ws + marker + chr(10))
+                    _block = next((b for b in blocks if line_num in b['lines']), None)
+                    if _block and _block['used_ai']:
+                        _old_fmt = self.old_code_template.format(prefix=_prefix, date=_date_str, rule_code=", ".join(_block['rule_codes']), old_code=_block['before_first'])
+                        new_lines.append(leading_ws + _old_fmt + chr(10))
+                new_lines.append(line)
             lines = new_lines
 
 

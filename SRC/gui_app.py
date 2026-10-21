@@ -809,8 +809,18 @@ class DBIMigrationApp:
         # Стиль для зелёного текста чекбокса
         style = ttk.Style()
         style.configure('Green.TCheckbutton', foreground='green')
-        ttk.Checkbutton(options_frame, text='"Исправить код" — применить правки с якорями -- <Ai> YYYY.MM.DD HH:MI | <Правило> | Строки: N', 
-                        variable=self.fix_only_found_var, style='Green.TCheckbutton').grid(row=1, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
+        self.mark_in_code_var = tk.BooleanVar(value=False)
+        # DS_157: «Применять правки» (бывш. "Исправить код") — ставит фактические правки
+        ttk.Checkbutton(options_frame,
+                        text='Применять правки (бывш. "Исправить код")',
+                        variable=self.fix_only_found_var, style='Green.TCheckbutton').grid(
+            row=1, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
+        # DS_157: «Маркировка правок» (МПК) — якоря-комментарии
+        self.mark_in_code_check = ttk.Checkbutton(
+            options_frame,
+            text='Маркировка правок (-- YYYY.MM.DD HH:MI|<Правило>[×N][[Ai]]|Строка/Строки NN[-NN])',
+            variable=self.mark_in_code_var, style='Green.TCheckbutton')
+        self.mark_in_code_check.grid(row=4, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
         
         # Чекбокс PlpCheck — включение/выключение правил стиля кода
         # DS 038 (Проблема E): переименовано из "Добавлять PlpCheck-правила (стиль кода)"
@@ -1291,12 +1301,15 @@ class DBIMigrationApp:
                 chk_map["only_pattern"] = child
             elif "Сохранить структуру каталогов" in txt:
                 chk_map["preserve"] = child
-            elif "Исправить код" in txt and "только пометить" in txt:
+            elif ("Применять правки" in txt) or ("Исправить код" in txt):
                 chk_map["fix_only"] = child
+            elif "Маркировка правок" in txt:
+                chk_map["mark_in_code"] = child
 
         self._tooltip_only_pattern = None
         self._tooltip_preserve_structure = None
         self._tooltip_fix_only_found = None
+        self._tooltip_mark_in_code = None
         self._tooltip_archive = None
 
         if chk_map.get("only_pattern") is not None:
@@ -1319,8 +1332,16 @@ class DBIMigrationApp:
         if chk_map.get("fix_only") is not None:
             self._tooltip_fix_only_found = Tooltip(
                 chk_map["fix_only"],
-                "Не применять детерминированные исправления, только добавлять "
-                "маркеры --NEW YYYY-MM-DD к найденным проблемам."
+                "Применять правки детерминированного фиксера к коду (иначе — только лог)."
+                "Совместимо с МПК: МПК добавляет якоря, Применять вносит правки."
+            )
+        if chk_map.get("mark_in_code") is not None:
+            self._tooltip_mark_in_code = Tooltip(
+                chk_map["mark_in_code"],
+                "Маркировка в коде: К2 вставляет якоря-комментарии "
+                "перед изменяемыми строками (дата, правило, строки).\n"
+                "С ВТИК — вернуть только исправленный код, маркеры не выводить.\n"
+                "С НеАФ — сухой прогон: только лог, без якорей и правок."
             )
         arch = getattr(self, "archive_result_check", None)
         if arch is not None:
@@ -1330,6 +1351,21 @@ class DBIMigrationApp:
                 "последнего уровня исходного каталога. Внутри архива — сразу "
                 "содержимое, без обёртки ИППУ."
             )
+
+    def _on_clean_output_toggled(self):
+        """DS_157: ВТИК (clean_output) отменяет МПК."""
+        chk = getattr(self, 'mark_in_code_check', None)
+        var = getattr(self, 'mark_in_code_var', None)
+        if chk is None or var is None:
+            return
+        try:
+            if self.clean_output_var.get():
+                var.set(False)
+                chk.state(['disabled'])
+            else:
+                chk.state(['!disabled'])
+        except Exception:
+            pass
 
     def _update_ai_button_state(self):
         """«От AI» disabled при пустом AI_OUT, normal — при наличии ответов.
@@ -2349,7 +2385,9 @@ class DBIMigrationApp:
         self.priority_medium_var.trace_add('write', lambda *args: self._update_main_buttons())
         self.priority_low_var.trace_add('write', lambda *args: self._update_main_buttons())
         self.clean_output_var.trace_add('write', lambda *args: self._update_main_buttons())
+        self.clean_output_var.trace_add('write', lambda *a: self._on_clean_output_toggled())
         self.fix_only_found_var.trace_add('write', lambda *args: self._update_main_buttons())
+        self.mark_in_code_var.trace_add('write', lambda *args: self._update_main_buttons())
         self.archive_result_var.trace_add('write', lambda *args: self._update_main_buttons())
         
         # Привязка события изменения выбора в рубрикаторе
@@ -3279,6 +3317,7 @@ class DBIMigrationApp:
                     self.preserve_structure_var.set(settings.get('preserve_structure', True))
                     self.clean_output_var.set(settings.get('clean_output', False))
                     self.fix_only_found_var.set(settings.get('fix_only_found', False))
+                    self.mark_in_code_var.set(settings.get('mark_in_code', False))
                     # DS_088a_fix §2.5: пороги confidence из settings.json.
                     if getattr(self, 'conf_low_var', None):
                         _cl = float(settings.get('conf_low', 0.5))
@@ -3376,6 +3415,7 @@ class DBIMigrationApp:
             'preserve_structure': self.preserve_structure_var.get(),
             'clean_output': self.clean_output_var.get(),
             'fix_only_found': self.fix_only_found_var.get(),
+            'mark_in_code': self.mark_in_code_var.get(),
             'max_log_size_mb': MAX_LOG_SIZE_MB,
             'selected_priorities': list(getattr(self, '_selected_priorities', []))
         }
@@ -4402,6 +4442,7 @@ class DBIMigrationApp:
             config['anchor_settings'] = _json_gui.load(open(r'F:\TO_DBI\SRC\settings.json', encoding='utf-8')).get('anchor_settings', {})
             config['log_level'] = self.log_level_var.get()
             fixer = PLPlusFixer(config, iteration, clean_output=self.clean_output_var.get(),
+                                mark_in_code=self.mark_in_code_var.get(),
                                 abort_callback=self._abort_requested,  # DS 038
                                 stop_event=self._stop_event)           # DS_089b
             

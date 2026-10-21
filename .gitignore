@@ -115,3 +115,5 @@ PATCH_CALC/
 backups/
 chat46_*.py
 chat46_commit_msg.txt
+chat46_commit_msg_*.py
+chat46_commit_msg_*.txt

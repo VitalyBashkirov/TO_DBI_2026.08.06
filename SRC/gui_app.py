@@ -4256,12 +4256,9 @@ class DBIMigrationApp:
         # Если исходный PATCH_IN/xxx, а результат PATCH_OUT - добавляем подкаталог xxx
         result_path = self._ensure_result_path(source_path, result_path)
         
-        # Создаем каталог результатов если не существует
-        if not result_path.exists():
-            self.log(f"Создание каталога результатов: {result_path}", 'info')
-            result_path.mkdir(parents=True, exist_ok=True)
-            self.result_dir_var.set(str(result_path))
-            self.log(f"Каталог создан успешно", 'success')
+        # DS_158: PATCH_OUT НЕ создаём на K2. Рабочий каталог — PATCH_CALC/<tail>/stage1_regex,
+        # создаётся в _run_fix. result_dir_var остаётся = PATCH_OUT/<tail> (целевой путь).
+        self.log(f"[DS_158] K2: PATCH_OUT не создаётся; рабочий каталог — PATCH_CALC/stage1_regex", 'info')
         
         # Проверка: выбран ли хотя бы один файл в рубрикаторе
         any_rule_selected = any(var.get() for var in self.selected_rules.values())
@@ -4304,11 +4301,20 @@ class DBIMigrationApp:
             source_dir = Path(self.source_dir_var.get())
             result_dir = Path(self.result_dir_var.get())
             
-            # Создание каталога результатов если отсутствует
-            if not result_dir.exists():
-                self.root.after(0, lambda: self.log(f"Создание каталога результатов: {result_dir}", 'info'))
-                result_dir.mkdir(parents=True, exist_ok=True)
-                self.root.after(0, lambda: self.log(f"Каталог создан успешно", 'success'))
+            # DS_158: рабочий каталог K2 — PATCH_CALC/<tail>/stage1_regex.
+            # PATCH_OUT НЕ создаём на K2; он будет создан атомарно
+            # при финализации (DS_159/DS_161) после K2 (без Ai) или K4.
+            _result_str = str(result_dir)
+            if 'PATCH_OUT' in _result_str:
+                _calc_stage1_str = _result_str.replace('PATCH_OUT', 'PATCH_CALC')
+                calc_stage1 = Path(_calc_stage1_str) / 'stage1_regex'
+            else:
+                calc_stage1 = result_dir.parent / 'PATCH_CALC' / 'stage1_regex'
+            calc_stage1.mkdir(parents=True, exist_ok=True)
+            self.root.after(0, lambda p=str(calc_stage1): self.log(
+                f"📁 [K2/DS_158] Рабочий каталог: {p}", 'info'))
+            self.root.after(0, lambda p=str(result_dir): self.log(
+                f"🎯 [K2/DS_158] Целевой PATCH_OUT (будет создан при финализации): {p}", 'info'))
             
             self.root.after(0, lambda: self.set_status("Исправление кода..."))
             self.root.after(0, lambda: self._log_separator("НАЧАЛО ИСПРАВЛЕНИЯ КОДА"))
@@ -4317,7 +4323,7 @@ class DBIMigrationApp:
             config = {
                 'paths': {
                     'source_dir': str(source_dir),
-                    'results_dir': str(result_dir),
+                    'results_dir': str(calc_stage1),   # DS_158: K2 пишет в PATCH_CALC/stage1_regex
                     'logs_dir': str(Path(__file__).parent.parent / 'logs')
                 },
                 'scan': {
@@ -4495,8 +4501,8 @@ class DBIMigrationApp:
             
             self._progress_update(50)
             
-            # DS_144c K2a: зеркало уже сделано в K1 -> работаем поверх result_dir.
-            final_results_dir = result_dir
+            # DS_158: K2 работает в PATCH_CALC/stage1_regex, не в PATCH_OUT.
+            final_results_dir = calc_stage1
             
             self.root.after(0, lambda: self.log(f"\n[2/5] Применение исправлений...", 'info'))
             self.root.after(0, lambda: self.log(f"  Каталог результатов: {final_results_dir}", 'info'))

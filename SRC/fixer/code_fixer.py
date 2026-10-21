@@ -1971,6 +1971,14 @@ class PLPlusFixer:
                     res_dir_str = str(self.config.get('result_dir', results_path.parent))
                     if 'PATCH_OUT' in res_dir_str:
                         calc_root = Path(res_dir_str.replace('PATCH_OUT', 'PATCH_CALC'))
+                    elif 'PATCH_CALC' in res_dir_str:
+                        # DS_158: result_dir уже в PATCH_CALC/<tail>/stage1_regex
+                        # -> calc_root = PATCH_CALC/<tail>
+                        _p = Path(res_dir_str)
+                        if _p.name == 'stage1_regex' or _p.name == 'stage2_ai':
+                            calc_root = _p.parent
+                        else:
+                            calc_root = _p
                     else:
                         calc_root = results_path.parent.parent / 'PATCH_CALC'
                     rel_path = results_path.relative_to(Path(res_dir_str))

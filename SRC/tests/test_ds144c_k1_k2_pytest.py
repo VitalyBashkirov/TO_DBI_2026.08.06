@@ -291,7 +291,8 @@ def test_ds144c_k2_final_dir_is_result_dir(app, monkeypatch, tmp_path):
         pass
 
     assert 'final_dir' in captured, "fix_directory должен быть вызван"
-    assert str(captured['final_dir']) == str(res_dir), \
+    expected_calc = res_dir.parent / 'PATCH_CALC' / 'stage1_regex'
+    assert str(captured['final_dir']) == str(expected_calc), \
         f"final_results_dir должен быть {res_dir}, получено {captured['final_dir']}"
 
 # ---------- 9. K1 при aborted -> флаг _k1_copy_aborted=True ----------

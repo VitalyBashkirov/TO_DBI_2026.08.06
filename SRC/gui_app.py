@@ -4570,7 +4570,39 @@ class DBIMigrationApp:
             except Exception as e:
                 self.root.after(0, lambda e=e: self.log(f"  [!] Ошибка лога scan_*: {e}", 'warning'))
 
-            
+            # DS_159: финализация stage1_regex -> PATCH_OUT при needs_ai==0.
+            # Если есть Ai-остаток — PATCH_OUT не создаём, К3 активируется.
+            try:
+                import shutil as _shutil_159
+                _vs = getattr(fixer, 'verify_stats', None) or {}
+                _need_ai = int(_vs.get('needs_ai_fix', 0) or 0)
+                _need_man = int(_vs.get('needs_manual', 0) or 0)
+                if _need_ai == 0 and _need_man == 0:
+                    _tmp = result_dir.with_name(result_dir.name + '.tmp')
+                    if _tmp.exists():
+                        _shutil_159.rmtree(_tmp)
+                    _shutil_159.copytree(calc_stage1, _tmp)
+                    (_tmp / '.finalized').write_text(
+                        _json_gui.dumps({'ts': datetime.now().isoformat(),
+                                         'source': str(calc_stage1)},
+                                        ensure_ascii=False),
+                        encoding='utf-8')
+                    if result_dir.exists():
+                        _shutil_159.rmtree(result_dir)
+                    _tmp.rename(result_dir)
+                    self.root.after(0, lambda p=str(result_dir): self.log(
+                        f"🎉 [DS_159] PATCH_OUT готов: {p}", 'success'))
+                else:
+                    _msg = (f"🧠 [DS_159] Требуется AI-обработка "
+                            f"(needs_ai_fix={_need_ai}, needs_manual={_need_man}). "
+                            f"PATCH_OUT не создан. Нажмите «3. В Ai».")
+                    self.root.after(0, lambda m=_msg: self.log(m, 'warning'))
+                    self._bot_log(f"DS_159: {_msg}")
+                    self.root.after(0, lambda: self._update_main_buttons())
+            except Exception as e:
+                self.root.after(0, lambda e=e: self.log(
+                    f"[!] DS_159: ошибка финализации: {e}", 'warning'))
+
             self._progress_update(90)
             
             # Вывод результатов
@@ -4580,6 +4612,13 @@ class DBIMigrationApp:
             self.root.after(0, lambda: self.log(f"  Исправлено конструкций: {scan_results.get('total_issues', 0)}", 'info'))
             self.root.after(0, lambda: self.log(f"  Создано файлов: {files_modified}", 'info'))
             self.root.after(0, lambda: self.log(f"  Результаты: {final_results_dir}", 'info'))
+            # DS_159: статус PATCH_OUT
+            if result_dir.exists() and (result_dir / '.finalized').exists():
+                self.root.after(0, lambda p=str(result_dir): self.log(
+                    f"  PATCH_OUT: {p} (готов)", 'success'))
+            else:
+                self.root.after(0, lambda p=str(result_dir): self.log(
+                    f"  PATCH_OUT: {p} (не создан — требуется AI/ручная доработка)", 'warning'))
             # Нормализация пути к логу: буква диска в верхнем регистре
             log_path_str = str(log_path)
             if len(log_path_str) >= 2 and log_path_str[1] == ':':

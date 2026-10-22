@@ -2461,7 +2461,7 @@ def main():
         config['scan'] = {
             'recursive': config.get('recursive', True),
             'file_pattern': config.get('file_pattern', '**/*.plp'),
-            'exclude_patterns': ['.bak', '.tmp']
+            'exclude_patterns': ['.bak', '.tmp', '_preai.']
         }
     if 'output' not in config:
         config['output'] = {

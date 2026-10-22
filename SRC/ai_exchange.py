@@ -494,6 +494,23 @@ def _rule_map_from_request(req_path: Optional[Path]) -> Dict[int, str]:
     return out
 
 
+def _preai_target_dir(source: Path, base: Optional[Path] = None) -> Path:
+    """DS_181: каталог для pre-AI копии: PATCH_CALC/backups/<rel-from-PATCH_IN>.
+
+    PATCH_IN в dirs[] не входит (dirs = AI_IN/AI_OUT/...), поэтому rel-путь
+    вычисляется по подстроке 'PATCH_IN' в source. Fallback — плоско в backups.
+    """
+    repo_root = Path(__file__).resolve().parents[1]  # F:\TO_DBI
+    backups_root = repo_root / 'PATCH_CALC' / 'backups'
+    src_str = str(source).replace('/', '\\')
+    marker = 'PATCH_IN\\'
+    idx = src_str.find(marker)
+    if idx >= 0:
+        rel = src_str[idx + len(marker):]
+        rel_dir = Path(rel).parent
+        return backups_root / rel_dir
+    return backups_root
+
 def process_response(response_path: Path, base: Optional[Path] = None,
                      backup: bool = True,
                      conf_low: float = CONF_MEDIUM,
@@ -543,7 +560,10 @@ def process_response(response_path: Path, base: Optional[Path] = None,
     if backup:
         try:
             ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-            backup_file = source.with_name(f"{source.stem}_{ts}_preai{source.suffix}")
+            # DS_181: pre-AI копия в PATCH_CALC\backups (не в PATCH_IN).
+            _preai_backup_dir = _preai_target_dir(source, base)
+            _preai_backup_dir.mkdir(parents=True, exist_ok=True)
+            backup_file = _preai_backup_dir / f"{source.stem}_{ts}_preai{source.suffix}"
             shutil.copy2(source, backup_file)
             result['backup_path'] = str(backup_file)
         except Exception:

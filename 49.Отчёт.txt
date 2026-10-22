@@ -43,3 +43,31 @@
 - PS\chat49_01..18_*.log — все транскрипты.
 - SRC\tests\test_ds179_suboptimal_wrownum.py — новые тесты (5).
 - SRC\analyzer\scanner.py — DS_179.
+## Дополнение (chat49_21): _preai-копии в PATCH_IN (DS_181)
+
+Найдено: в F:\TO_DBI\PATCH_IN\patch_suboptimal_test_3\ENTITY\DEPN\ лежат
+файлы *_preai.plp (PSH_ED_PRC_SCHM_20261022_115639_preai.plp и др.).
+
+Источник: SRC\ai_exchange.py:546
+    backup_file = source.with_name(f"{source.stem}_{ts}_preai{source.suffix}")
+    shutil.copy2(source, backup_file)
+
+Кто/когда: DS_081 (коммит 57ace3f, 2026-09-28).
+Назначение: снимок «до Ai» для отображения «было/стало» в GUI при К4 и
+           для повторного скана (_rescan_ai_files, gui_app.py:5897-5908).
+
+Почему в PATCH_IN: source = путь из AI_REQUEST (Источник: ...), т.е. исходник
+из PATCH_IN; копия делается через source.with_name(...) — в том же каталоге.
+
+Вердикт:
+- функционально by design (нужна для «было/стало»);
+- гигиенически — нежелательно: PATCH_IN «зарастает» промежуточными файлами.
+  Копии «до Ai» логичнее держать в PATCH_CALC/backups (как code_fixer.py)
+  или в специальном AI_BACKUPS.
+
+План DS_181 (следующий чат):
+1. Перенести _preai-бэкапы в PATCH_CALC/backups/... или AI_BACKUPS,
+   сохранив result['backup_path'] для _rescan_ai_files.
+2. Переместить текущие 4 _preai-файла из PATCH_IN\...\DEPN в PATCH_CALC/backups.
+3. Добавить _preai в exclude_patterns для scan_directory (ИКА), чтобы копии
+   не попадали в files_scanned (сейчас фильтр есть только в _rescan_ai_files).

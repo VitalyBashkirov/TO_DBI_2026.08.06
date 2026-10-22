@@ -211,12 +211,12 @@ class DBIMigrationApp:
             W, H = sw, sh  # во весь экран
         x = (sw - W) // 2
         y = (sh - H) // 2
-        self.root.geometry(f"{W}x{H}+{x}+{y}")
+        self.root.geometry("1080x1000")
         # DS_086 §2.3: базовый размер окна. Высота при скрытии элементов
         # считается от него — см. _adjust_window_height().
         self._ui_base_geometry = (W, H)
         # DS_087 §2.5: minsize согласован с UI_MIN_WINDOW_HEIGHT = 400 (DS_086).
-        self.root.minsize(900, 600)  # DS_149g2: min width 1200 -> 900
+        self.root.minsize(1080, 750)  # DS_149g2: min width 1200 -> 900
 
 
         
@@ -826,13 +826,13 @@ class DBIMigrationApp:
         ttk.Checkbutton(options_frame,
                         text='Применять правки',
                         variable=self.fix_only_found_var, style='Green.TCheckbutton').grid(
-            row=1, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
+            row=1, column=0, columnspan=2, sticky=tk.W, pady=(5,0))
         # DS_157: «Маркировка правок» (МПК) — якоря-комментарии
         self.mark_in_code_check = ttk.Checkbutton(
             options_frame,
-            text='Маркировка правок (-- YYYY.MM.DD HH:MI|<Правило>[×N][[Ai]]|Строка/Строки NN[-NN])',
+            text='Маркировка правок (формат в подсказке)',
             variable=self.mark_in_code_var, style='Green.TCheckbutton')
-        self.mark_in_code_check.grid(row=6, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
+        self.mark_in_code_check.grid(row=1, column=2, columnspan=2, sticky=tk.W, pady=(5,0))
         
         # Чекбокс PlpCheck — включение/выключение правил стиля кода
         # DS 038 (Проблема E): переименовано из "Добавлять PlpCheck-правила (стиль кода)"
@@ -899,7 +899,7 @@ class DBIMigrationApp:
         
         # DS 018: чекбоксы приоритетов HIGH/MEDIUM/LOW (фильтр правил)
         priority_frame = ttk.Frame(options_frame)
-        priority_frame.grid(row=4, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
+        priority_frame.grid(row=1, column=4, columnspan=2, sticky=tk.W, pady=(5,0))
         
         ttk.Label(priority_frame, text="Фильтр по приоритету:", font=('Segoe UI', 9, 'bold')).pack(side=tk.LEFT, padx=(0,10))
         
@@ -920,14 +920,14 @@ class DBIMigrationApp:
         
         # Чекбокс чистого вывода (без маркеров изменений)
         ttk.Checkbutton(options_frame, 
-                       text="Верни только исправленный код без пояснений и маркеров изменений.\nВсе пояснения, изменения, удаления журналируй", 
+                       text="Верни только исправленный код (ВТИК)", 
                        variable=self.clean_output_var).grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
         
         # Чекбокс архивирования
         self.archive_result_var = tk.BooleanVar(value=True)
         self.archive_result_check = ttk.Checkbutton(options_frame, text="Архивировать результат", 
                                                     variable=self.archive_result_var)
-        self.archive_result_check.grid(row=1, column=4, sticky=tk.W, padx=(20,0))
+        self.archive_result_check.grid(row=0, column=6, sticky=tk.W, padx=(15,0))
         # Изначально доступен только если включена сохранность структуры
         self._update_archive_state()
         
@@ -942,9 +942,7 @@ class DBIMigrationApp:
         _cap = ttk.Frame(flags_frame)
         _cap.grid(row=0, column=0, columnspan=6, sticky=tk.W)
         for _i, _line in enumerate([
-            "Имя дополнительного лога: scan_VVxVVx (V — флаг выбран, x — нет)",
-            "Формируется при сканировании и исправлении.",
-            "При отсутствии флагов — пустой, с пометкой «флаги не выбраны».",
+            "Имя дополнительного лога: scan_VVxVVx (V — флаг выбран, x — нет). Формируется при сканировании и исправлении; при отсутствии флагов — пустой, с пометкой «флаги не выбраны».",
         ]):
             ttk.Label(_cap, text=_line,
                       font=('Segoe UI', 8, 'italic'), foreground='#666666').grid(
@@ -1001,7 +999,7 @@ class DBIMigrationApp:
         _btn_bar_scrollx.pack(side=tk.BOTTOM, fill=tk.X)
         self.btn_bar_canvas.pack(fill=tk.X)
         
-        self.btn_scan = ttk.Button(control_frame, text="1. Сканировать", command=self.start_scan, width=20)
+        self.btn_scan = ttk.Button(control_frame, text="1. Сканировать", command=self.start_scan, width=16)
         self.btn_scan.pack(side=tk.LEFT, padx=3)
         
         # DS_133: стили для main-кнопок — normal (жирный) и disabled (тонкий).
@@ -1013,7 +1011,7 @@ class DBIMigrationApp:
         style.configure('WorkflowNormal.TButton', font=('Segoe UI', 9))
         
         # DS_087 §2.2: «2. Исправить код» — нумерованное имя workflow.
-        self.btn_fix = ttk.Button(control_frame, text="2. Исправить код", command=self.start_fix, width=20)
+        self.btn_fix = ttk.Button(control_frame, text="2. Исправить код", command=self.start_fix, width=16)
         self.btn_fix.pack(side=tk.LEFT, padx=3)
         
         # DS 054 / DS_054_Уточнение (задача A): «В AI» / «От AI» — сразу после
@@ -1022,7 +1020,7 @@ class DBIMigrationApp:
         # DS_087 §2.2: переименована в «3. В Ai» + tooltip.
         # DS_088a §1/§2.2: нажатие запускает полный AI-цикл (запрос → воркеры →
         # ожидание AI_RESPONSE → приём). Логика send_to_ai() не изменена.
-        self.btn_to_ai = ttk.Button(control_frame, text="3. В Ai", command=self.start_ai_cycle, width=10)
+        self.btn_to_ai = ttk.Button(control_frame, text="3. В Ai", command=self.start_ai_cycle, width=8)
         self.btn_to_ai.pack(side=tk.LEFT, padx=3)
         self.btn_to_ai.state(['disabled'])
         # DS_087 §2.2: tooltip «3. В Ai» (инстанс сохранён — для тестов).
@@ -1030,7 +1028,7 @@ class DBIMigrationApp:
             self.btn_to_ai,
             "Использовать LLM для корректировки ошибок, требующих Ai-анализа.")
         
-        self.btn_from_ai = ttk.Button(control_frame, text="4. Из Ai", command=self.receive_from_ai, width=10)
+        self.btn_from_ai = ttk.Button(control_frame, text="4. Из Ai", command=self.receive_from_ai, width=8)
         self.btn_from_ai.pack(side=tk.LEFT, padx=3)
         # DS_054_Уточнение_C: «От AI» активна только при наличии файлов-ответов
         # в EXCHANGE\AI_OUT (обновление — _update_ai_button_state, таймер 5 сек).
@@ -1074,10 +1072,10 @@ class DBIMigrationApp:
             _w.bind('<FocusOut>', lambda e: self._on_confidence_change())
             _w.bind('<Return>', lambda e: self._on_confidence_change())
         
-        self.btn_rubricator = ttk.Button(control_frame, text="Открыть рубрикатор", command=self.open_rubricator, width=25)
+        self.btn_rubricator = ttk.Button(control_frame, text="Открыть рубрикатор", command=self.open_rubricator, width=18)
         self.btn_rubricator.pack(side=tk.LEFT, padx=3)
         
-        self.btn_test_gen = ttk.Button(control_frame, text="Генерация тестовых .plp", command=self.start_test_generation, width=30)
+        self.btn_test_gen = ttk.Button(control_frame, text="Генерация тестовых .plp", command=self.start_test_generation, width=22)
         self.btn_test_gen.pack(side=tk.LEFT, padx=3)
         
         self.btn_show_sql = ttk.Button(control_frame, text="Показать SQL для ручного исправления", command=self.show_sql_for_manual_fix, width=35)
@@ -1111,7 +1109,7 @@ class DBIMigrationApp:
                                                   font=('Consolas', 9),
                                                   yscrollcommand=log_scroll_y.set,
                                                   xscrollcommand=log_scroll_x.set,
-                                                  height=8, width=58)
+                                                  height=5, width=58)
         
         log_scroll_y.config(command=self.log_text.yview)
         log_scroll_x.config(command=self.log_text.xview)
@@ -1351,7 +1349,8 @@ class DBIMigrationApp:
             self._tooltip_mark_in_code = Tooltip(
                 chk_map["mark_in_code"],
                 "Маркировка в коде: при исправлении вставляются якоря-комментарии "
-                "перед изменяемыми строками (дата, правило, строки).\n"
+                "перед изменяемыми строками.\n"
+                "Формат: -- YYYY.MM.DD HH:MI|<Правило>[xN][[Ai]]|Строка/Строки NN[-NN]\n"
                 "С режимом «Верни только исправленный код» — маркеры не выводятся.\n"
                 "С НеАФ — сухой прогон: только лог, без якорей и правок."
             )

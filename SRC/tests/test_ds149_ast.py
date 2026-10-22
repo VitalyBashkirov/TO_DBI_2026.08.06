@@ -209,7 +209,7 @@ def test_ds149g_minsize_900_600():
     for node in ast.walk(cls):
         if isinstance(node, ast.Call) and _call_attr(node) == 'minsize':
             args = [a.value for a in node.args if isinstance(a, ast.Constant)]
-            if 1080 in args and 750 in args:
+            if 1026 in args and 1000 in args:
                 found = True
                 break
     assert found, 'DS_149g: нет minsize(900, 600) в DBIMigrationApp'

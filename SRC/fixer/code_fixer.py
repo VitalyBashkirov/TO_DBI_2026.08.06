@@ -1534,12 +1534,158 @@ class PLPlusFixer:
                 result['remaining_count_by_rule'][code] = acount
         return result
 
+    def _det_changes_to_unified(self, det_changes):
+        """DS_180: нормализовать det_changes (DeterministicFixer) в единый формат
+        issue-правок: {line_number, rule_code, bucket, kind, before, after}.
+        Переименования -> по одной записи на каждую строку из 'lines' (DS_180).
+        Удаления -> по одной записи на каждый d['line'] из deleted[].
+        """
+        out = []
+        for ch in det_changes or []:
+            if 'old_name' in ch:
+                rule = 'PlpCheck.STYLE.PREFIX_TYPE.п.4.4'
+                for ln in ch.get('lines', []) or []:
+                    out.append({
+                        'line_number': ln,
+                        'rule_code': rule,
+                        'bucket': 'style',
+                        'kind': 'rename',
+                        'before': ch.get('old_name', ''),
+                        'after': ch.get('new_name', ''),
+                    })
+            elif 'deleted' in ch:
+                rule = 'PlpCheck.STYLE.NOT_MENTIONED.п.4.8'
+                for d in ch.get('deleted', []) or []:
+                    out.append({
+                        'line_number': d.get('line'),
+                        'rule_code': rule,
+                        'bucket': 'style',
+                        'kind': 'delete',
+                        'before': d.get('name', ''),
+                        'after': '',
+                    })
+        return out
+
+    def _predict_det_changes(self, file_path, lines):
+        """DS_180: прогноз det-правок без изменения оригинала.
+        Пишем lines во временный utf-8 (без BOM) файл, гоняем DeterministicFixer,
+        читаем changes, tmp удаляем. Оригинал не трогается.
+        """
+        import tempfile, os
+        fd, tmp = tempfile.mkstemp(suffix='.plp', prefix='ds180_pred_')
+        try:
+            os.close(fd)
+            with open(tmp, 'w', encoding='utf-8', newline='') as f:
+                f.write(''.join(lines))
+            res = DeterministicFixer().fix_file(tmp)
+            return res.get('changes', [])
+        except Exception as e:
+            logger.warning(f'[DS_180] _predict_det_changes failed: {e}')
+            return []
+        finally:
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
+
+    def _insert_anchors(self, lines, all_changes):
+        """DS_180: вставить МПК-якоря по единому списку правок (issue + det).
+        Возвращает новый список lines с якорями. Если якоря не нужны — lines.
+        """
+        if not all_changes or not self.mark_in_code or self.clean_output:
+            return lines
+        _ul = self._ul_normalized.get(self.log_level, 'Обычный')
+        _prefix = self.anchor_settings.get('comment_prefix', '--')
+        _date_fmt = self.anchor_settings.get('date_format', '%Y.%m.%d %H:%M')
+        _date_str = datetime.now().strftime(_date_fmt)
+
+        changes_by_line = {}
+        for ch in all_changes:
+            ln = ch.get('line_number')
+            if ln is None:
+                continue
+            changes_by_line.setdefault(ln, []).append(ch)
+
+        if not changes_by_line:
+            return lines
+
+        blocks = []
+        for line_num in sorted(changes_by_line.keys()):
+            ch_list = changes_by_line[line_num]
+            rule_codes = []
+            used_ai = False
+            for ch in ch_list:
+                rc = ch['rule_code']
+                if rc not in rule_codes:
+                    rule_codes.append(rc)
+                if ch.get('used_ai'):
+                    used_ai = True
+            if blocks and blocks[-1]['line_end'] + 1 == line_num and \
+               set(blocks[-1]['rule_codes']) == set(rule_codes) and \
+               blocks[-1]['used_ai'] == used_ai:
+                blocks[-1]['lines'].append(line_num)
+                blocks[-1]['line_end'] = line_num
+            else:
+                blocks.append({
+                    'rule_codes': rule_codes,
+                    'used_ai': used_ai,
+                    'lines': [line_num],
+                    'line_start': line_num,
+                    'line_end': line_num,
+                    'before_first': ch_list[0].get('before', ''),
+                })
+
+        anchors_by_line = {}
+        if _ul == 'Минимальный':
+            _rules_summary = {}
+            for b in blocks:
+                for rc in b['rule_codes']:
+                    _rules_summary[rc] = _rules_summary.get(rc, 0) + 1
+            _rules_txt = ', '.join((rc + (' x' + str(cnt) if cnt > 1 else '')) for rc, cnt in _rules_summary.items())
+            _fix_count = len(all_changes)
+            tpl = self.anchor_templates['Минимальный']
+            summary = tpl.format(prefix=_prefix, fix_count=_fix_count, user_tag=self.user_tag, rules_summary=_rules_txt).replace('  ', ' ').strip()
+            first_line = min(changes_by_line.keys())
+            anchors_by_line.setdefault(first_line, []).append(summary)
+        else:
+            tpl = self.anchor_templates[_ul]
+            for b in blocks:
+                n = len(b['lines'])
+                suffix = ('x' + str(n)) if n > 1 else ''
+                ai_tag = self.ai_tag_format if (self.enable_ai_tag and b['used_ai']) else ''
+                rule_str = ', '.join(b['rule_codes']) + suffix
+                lo, hi = b['line_start'], b['line_end']
+                line_range = ('Строка ' + str(lo)) if lo == hi else ('Строки ' + str(lo) + '-' + str(hi))
+                marker = tpl.format(prefix=_prefix, ai_tag=ai_tag, date=_date_str, user_tag=self.user_tag, rule_code=rule_str, line_range=line_range).replace('  ', ' ').strip()
+                anchors_by_line.setdefault(lo, []).append(marker)
+                if _ul == 'Подробный' and hi > lo:
+                    for ln in b['lines']:
+                        sub = tpl.format(prefix=_prefix, ai_tag=ai_tag, date=_date_str, user_tag=self.user_tag, rule_code=rule_str, line_range=('Строка ' + str(ln))).replace('  ', ' ').strip()
+                        if ln != lo:
+                            anchors_by_line.setdefault(ln, []).append(sub)
+
+        new_lines = []
+        for idx, line in enumerate(lines):
+            line_num = idx + 1
+            if line_num in anchors_by_line:
+                leading_ws = line[:len(line) - len(line.lstrip())] if line.strip() else ''
+                for marker in anchors_by_line[line_num]:
+                    new_lines.append(leading_ws + marker + chr(10))
+                _block = next((b for b in blocks if line_num in b['lines']), None)
+                if _block and _block['used_ai'] and _block.get('before_first'):
+                    _old_fmt = self.old_code_template.format(prefix=_prefix, date=_date_str, rule_code=', '.join(_block['rule_codes']), old_code=_block['before_first'])
+                    new_lines.append(leading_ws + _old_fmt + chr(10))
+            new_lines.append(line)
+        return new_lines
+
     def fix_file(self, file_path: Path, issues: List[Issue]) -> Tuple[bool, int]:
         """
-        Исправление одного файла (детерминированный конвейер DS_053).
+        Исправление одного файла (детерминированный конвейер DS_053 + DS_180).
 
-        Порядок: issue-fixes (SQL/RuleEngine → backup) → DeterministicFixer
-        (переменные). Возвращает (изменён_ли_файл, количество_исправлений).
+        DS_180: единый anchor pipeline для issue- и det-правок (DeterministicFixer).
+        При apply_fixes=False (НеАФ=on) правки не применяются, но якоря МПК
+        ставятся по прогнозу (issue — на копии, det — через временный файл).
+        Возвращает (изменён_ли_файл, количество_исправлений).
         """
         # Читаем файл с определением кодировки.
         try:
@@ -1551,7 +1697,6 @@ class PLPlusFixer:
             text = ''
 
         # DS_053_Уточнение: BOM на выходе — только если он был на входе.
-        # utf-8-sig при записи всегда добавляет BOM, что ломает файлы без BOM.
         try:
             has_bom = Path(file_path).read_bytes().startswith(b'\xef\xbb\xbf')
         except Exception:
@@ -1561,117 +1706,61 @@ class PLPlusFixer:
 
         lines = text.splitlines(keepends=True)
 
-        # 1. Детерминированные исправления по issues (SQL + backup).
-        lines, issue_changes = self._apply_issue_fixes(lines, issues)
-        # DS_155: формируем якоря для изменённых строк (перед записью)
-        if issue_changes and self.mark_in_code and not self.clean_output:
-            # DS_166: группировка ch_list по (rule_code, contiguous-range).
-            _ul = self._ul_normalized.get(self.log_level, 'Обычный')
-            _prefix = self.anchor_settings.get('comment_prefix', '--')
-            _date_fmt = self.anchor_settings.get('date_format', '%Y.%m.%d %H:%M')
-            _date_str = datetime.now().strftime(_date_fmt)
+        # 1. Issue-правки (в памяти; запись — ниже).
+        _issue_lines, issue_changes = self._apply_issue_fixes(lines, issues)
 
-            changes_by_line = {}
-            for ch in issue_changes:
-                changes_by_line.setdefault(ch['line_number'], []).append(ch)
+        # 2. DeterministicFixer: реальные det-правки или прогноз на копии.
+        det_modified = False
+        if self.apply_fixes:
+            if issue_changes:
+                # Сначала фиксируем issue-правки на диске, чтобы det_fixer
+                # работал уже по исправленному коду.
+                try:
+                    with open(file_path, 'w', encoding=enc, newline='') as f:
+                        f.write(''.join(_issue_lines))
+                except Exception as e:
+                    logger.warning(f"[FIXER] Не удалось записать {file_path}: {e}")
+            det_fixer = DeterministicFixer()
+            result = det_fixer.fix_file(str(file_path))
+            det_modified = bool(result.get('modified', False))
+            det_changes = result.get('changes', [])
+        else:
+            # НеАФ=on: прогноз, оригинал не трогаем.
+            if issue_changes:
+                logger.info(f"[НеАФ] Сухой прогон: правки не применены для {file_path} ({len(issue_changes)} шт.)")
+            det_changes = self._predict_det_changes(file_path, lines)
+            det_modified = bool(det_changes)
 
-            blocks = []
-            for line_num in sorted(changes_by_line.keys()):
-                ch_list = changes_by_line[line_num]
-                rule_codes = []
-                used_ai = False
-                for ch in ch_list:
-                    rc = ch['rule_code']
-                    if rc not in rule_codes:
-                        rule_codes.append(rc)
-                    if ch.get('used_ai'):
-                        used_ai = True
-                if blocks and blocks[-1]['line_end'] + 1 == line_num and \
-                   set(blocks[-1]['rule_codes']) == set(rule_codes) and \
-                   blocks[-1]['used_ai'] == used_ai:
-                    blocks[-1]['lines'].append(line_num)
-                    blocks[-1]['line_end'] = line_num
-                else:
-                    blocks.append({
-                        'rule_codes': rule_codes,
-                        'used_ai': used_ai,
-                        'lines': [line_num],
-                        'line_start': line_num,
-                        'line_end': line_num,
-                        'before_first': ch_list[0]['before'],
-                    })
+        # 3. Единый список правок для якорей: issue + det (нормализованные).
+        det_unified = self._det_changes_to_unified(det_changes)
+        all_changes = list(issue_changes) + list(det_unified)
 
-            anchors_by_line = {}
-            if _ul == 'Минимальный':
-                _rules_summary = {}
-                for b in blocks:
-                    for rc in b['rule_codes']:
-                        _rules_summary[rc] = _rules_summary.get(rc, 0) + 1
-                _rules_txt = ', '.join((rc + (" x" + str(cnt) if cnt > 1 else "")) for rc, cnt in _rules_summary.items())
-                _fix_count = len(issue_changes)
-                tpl = self.anchor_templates['Минимальный']
-                summary = tpl.format(prefix=_prefix, fix_count=_fix_count, user_tag=self.user_tag, rules_summary=_rules_txt).replace("  ", " ").strip()
-                first_line = min(changes_by_line.keys())
-                anchors_by_line.setdefault(first_line, []).append(summary)
+        # 4. Вставка якорей. При apply_fixes=True читаем файл обратно,
+        #    т.к. DeterministicFixer мог сдвинуть строки (удаления).
+        if self.mark_in_code and not self.clean_output and all_changes:
+            if self.apply_fixes:
+                try:
+                    with open(file_path, 'r', encoding=enc, newline='') as f:
+                        current = f.read()
+                except Exception:
+                    current = ''.join(_issue_lines)
+                current_lines = current.splitlines(keepends=True)
             else:
-                tpl = self.anchor_templates[_ul]
-                for b in blocks:
-                    n = len(b['lines'])
-                    suffix = ("x" + str(n)) if n > 1 else ""
-                    ai_tag = self.ai_tag_format if (self.enable_ai_tag and b['used_ai']) else ""
-                    rule_str = ", ".join(b['rule_codes']) + suffix
-                    lo, hi = b['line_start'], b['line_end']
-                    line_range = ("Строка " + str(lo)) if lo == hi else ("Строки " + str(lo) + "-" + str(hi))
-                    marker = tpl.format(prefix=_prefix, ai_tag=ai_tag, date=_date_str, user_tag=self.user_tag, rule_code=rule_str, line_range=line_range).replace("  ", " ").strip()
-                    anchors_by_line.setdefault(lo, []).append(marker)
-                    if _ul == 'Подробный' and hi > lo:
-                        for ln in b['lines']:
-                            sub = tpl.format(prefix=_prefix, ai_tag=ai_tag, date=_date_str, user_tag=self.user_tag, rule_code=rule_str, line_range=("Строка " + str(ln))).replace("  ", " ").strip()
-                            if ln != lo:
-                                anchors_by_line.setdefault(ln, []).append(sub)
+                current_lines = lines
+            anchored = self._insert_anchors(current_lines, all_changes)
+            try:
+                with open(file_path, 'w', encoding=enc, newline='') as f:
+                    f.write(''.join(anchored))
+            except Exception as e:
+                logger.warning(f"[FIXER] Не удалось записать якорей {file_path}: {e}")
 
-            new_lines = []
-            for idx, line in enumerate(lines):
-                line_num = idx + 1
-                if line_num in anchors_by_line:
-                    leading_ws = line[:len(line) - len(line.lstrip())] if line.strip() else ""
-                    for marker in anchors_by_line[line_num]:
-                        new_lines.append(leading_ws + marker + chr(10))
-                    _block = next((b for b in blocks if line_num in b['lines']), None)
-                    if _block and _block['used_ai']:
-                        _old_fmt = self.old_code_template.format(prefix=_prefix, date=_date_str, rule_code=", ".join(_block['rule_codes']), old_code=_block['before_first'])
-                        new_lines.append(leading_ws + _old_fmt + chr(10))
-                new_lines.append(line)
-            lines = new_lines
-
-
-        # DS_155: отладка — выводим список изменений
+        # DS_155: отладка — список изменений.
         if issue_changes:
             logger.debug(f"[DS_155] Файл {file_path.name}: {len(issue_changes)} изменений")
             for ch in issue_changes:
                 logger.debug(f"  Строка {ch['line_number']}: {ch['rule_code']}")
-                logger.debug(f"    Было: {ch['before']}")
-                logger.debug(f"    Стало: {ch['after']}")
 
-        # Сохраняем изменения по issues обратно в файл результата.
-        if issue_changes and self.apply_fixes:
-            try:
-                with open(file_path, 'w', encoding=enc, newline='') as f:
-                    f.write(''.join(lines))
-            except Exception as e:
-                logger.warning(f"[FIXER] Не удалось записать {file_path}: {e}")
-        elif issue_changes and not self.apply_fixes:
-            logger.info(f"[НеАФ] Сухой прогон: правки не применены для {file_path} ({len(issue_changes)} шт.)")
-        # 2. DeterministicFixer (переименование переменных, неиспользуемые).
-        det_fixer = DeterministicFixer()
-        if self.apply_fixes:
-            result = det_fixer.fix_file(str(file_path))
-        else:
-            logger.info(f"[НеАФ] DeterministicFixer пропущен для {file_path}")
-            result = {'changes': [], 'modified': False}
-        det_changes = result.get('changes', [])
-
-        # Статистика и changelog по исправлениям issues.
+        # Статистика и changelog по issue-правкам.
         for ch in issue_changes:
             self.stats[ch['rule_code']] = self.stats.get(ch['rule_code'], 0) + 1
             self.fixed_issues.append({
@@ -1685,15 +1774,15 @@ class PLPlusFixer:
                 'timestamp': datetime.now().isoformat(),
             })
 
-        # Статистика по правкам DeterministicFixer (как раньше).
-        if result.get('modified', False):
+        # Статистика по det-правкам.
+        if det_modified or det_changes:
             for change in det_changes:
                 if 'old_name' in change:
                     self.stats['PlpCheck.STYLE.PREFIX_TYPE.п.4.4'] = self.stats.get('PlpCheck.STYLE.PREFIX_TYPE.п.4.4', 0) + change.get('count', 0)
                 elif 'deleted' in change:
                     self.stats['PlpCheck.STYLE.NOT_MENTIONED.п.4.8'] = self.stats.get('PlpCheck.STYLE.NOT_MENTIONED.п.4.8', 0) + change.get('count', 0)
 
-        if issue_changes or result.get('modified', False):
+        if issue_changes or det_changes:
             self.changes_log.append({
                 'file': str(file_path),
                 'iteration': self.iteration,
@@ -1702,9 +1791,9 @@ class PLPlusFixer:
                 'types': sorted({ch['rule_code'] for ch in issue_changes}),
             })
 
-        return (bool(issue_changes) or result.get('modified', False),
+        return (bool(issue_changes) or bool(det_modified) or bool(det_changes),
                 len(issue_changes) + len(det_changes))
-    
+
     def copy_directory_structure(self, source_dir: Path, results_dir: Path, log_callback=None):
         """Копирование структуры каталогов и файлов (кроме .plp)"""
         if not source_dir.exists():

@@ -252,13 +252,23 @@ class DeterministicFixer:
         rename_map = self._build_rename_map(variables)
         
         for old_name, new_name in rename_map.items():
-            code, count = self._rename_variable(code, old_name, new_name)
+            # DS_180: _rename_variable теперь возвращает (code, count, lines_hit)
+            code, count, lines_hit = self._rename_variable(code, old_name, new_name)
             if count > 0:
-                changes.append({'old_name': old_name, 'new_name': new_name, 'count': count})
+                changes.append({
+                    'old_name': old_name,
+                    'new_name': new_name,
+                    'count': count,
+                    'lines': lines_hit,  # DS_180: 1-based номера строк
+                })
         
         code, deleted = self._remove_unused(code, variables, rename_map)
         if deleted:
-            changes.append({'deleted': deleted, 'count': len(deleted)})
+            changes.append({
+                'deleted': deleted,
+                'count': len(deleted),
+                'lines': [d['line'] for d in deleted],  # DS_180
+            })
         
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(code)
@@ -322,9 +332,11 @@ class DeterministicFixer:
                     break
         return name
     
-    def _rename_variable(self, code: str, old_name: str, new_name: str) -> Tuple[str, int]:
+    def _rename_variable(self, code: str, old_name: str, new_name: str) -> Tuple[str, int, List[int]]:
+        # DS_180: возвращаем ещё и список 1-based номеров строк, где были замены
         lines = code.split('\n')
         count = 0
+        lines_hit: List[int] = []
         state = LexerState()  # DS_056A: лексическое состояние переносим между строками
         for i, line in enumerate(lines):
             in_cmt = is_line_fully_in_comment_or_string(line, state)
@@ -335,8 +347,9 @@ class DeterministicFixer:
             if new_line != line:
                 lines[i] = new_line
                 count += len(re.findall(r'\b' + re.escape(old_name) + r'\b', line))
-        return '\n'.join(lines), count
-    
+                lines_hit.append(i + 1)  # DS_180: 1-based
+        return '\n'.join(lines), count, lines_hit
+
     def _is_in_comment_or_string(self, line: str) -> bool:
         """
         DS_056A: делегирование в единый хелпер (обёртка «строка целиком»).

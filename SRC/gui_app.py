@@ -211,12 +211,12 @@ class DBIMigrationApp:
             W, H = sw, sh  # во весь экран
         x = (sw - W) // 2
         y = (sh - H) // 2
-        self.root.geometry("1080x1000")
+        self.root.geometry("1026x950")
         # DS_086 §2.3: базовый размер окна. Высота при скрытии элементов
         # считается от него — см. _adjust_window_height().
         self._ui_base_geometry = (W, H)
         # DS_087 §2.5: minsize согласован с UI_MIN_WINDOW_HEIGHT = 400 (DS_086).
-        self.root.minsize(1080, 750)  # DS_149g2: min width 1200 -> 900
+        self.root.minsize(1026, 1000)  # DS_149g2: min width 1200 -> 900
 
 
         
@@ -811,10 +811,10 @@ class DBIMigrationApp:
                     state="readonly", width=15).grid(row=0, column=3, sticky=tk.W)
         # DS_075 §3.2: порог вывода топ-файлов (при «Подробный»).
         # DS_087 §2.6.3: метка «Топ-файлов» сохранена (для layout-теста).
-        self.report_stats_label = ttk.Label(options_frame, text="Топ-файлов, мин. файлов:")
+        self.report_stats_label = ttk.Label(options_frame, text="Топ-файлов:")
         self.report_stats_label.grid(row=0, column=4, sticky=tk.W, padx=(15,3))
-        self.report_stats_entry = ttk.Entry(options_frame, textvariable=self.report_stats_min_files_var, width=5)
-        self.report_stats_entry.grid(row=0, column=5, sticky=tk.W)
+        self.report_stats_entry = ttk.Entry(options_frame, textvariable=self.report_stats_min_files_var, width=6)
+        self.report_stats_entry.grid(row=0, column=5, sticky=tk.W, padx=(0,20))
         
 # Чекбокс для режима вывода при исправлении
         self.fix_only_found_var = tk.BooleanVar(value=False)
@@ -826,19 +826,19 @@ class DBIMigrationApp:
         ttk.Checkbutton(options_frame,
                         text='Применять правки',
                         variable=self.fix_only_found_var, style='Green.TCheckbutton').grid(
-            row=1, column=0, columnspan=2, sticky=tk.W, pady=(5,0))
+            row=1, column=0, columnspan=2, sticky=tk.W, pady=(2,0))
         # DS_157: «Маркировка правок» (МПК) — якоря-комментарии
         self.mark_in_code_check = ttk.Checkbutton(
             options_frame,
             text='Маркировка правок (формат в подсказке)',
             variable=self.mark_in_code_var, style='Green.TCheckbutton')
-        self.mark_in_code_check.grid(row=1, column=2, columnspan=2, sticky=tk.W, pady=(5,0))
+        self.mark_in_code_check.grid(row=1, column=2, columnspan=2, sticky=tk.W, pady=(2,0))
         
         # Чекбокс PlpCheck — включение/выключение правил стиля кода
         # DS 038 (Проблема E): переименовано из "Добавлять PlpCheck-правила (стиль кода)"
         # DS_088a_fix §2.7: без columnspan — подфлаги (2 колонки) идут правее.
         ttk.Checkbutton(options_frame, text="2. Рубрикатор PlpCheck", 
-                        variable=self.plpcheck_enabled_var).grid(row=2, column=0, sticky=tk.W, pady=(5,0))
+                        variable=self.plpcheck_enabled_var).grid(row=3, column=0, sticky=tk.W, pady=(5,0))
         # Синхронизация флага PlpCheck с чекбоксом в дереве правил
         self.plpcheck_enabled_var.trace_add('write', lambda *args: self._sync_plpcheck_checkbox())
         
@@ -847,7 +847,7 @@ class DBIMigrationApp:
         # освобождает вертикальное место, «Фильтр по приоритету» и «Флаги
         # DS_053» поднимаются выше автоматически.
         self.frame_plpcheck_categories = ttk.Frame(options_frame)
-        self.frame_plpcheck_categories.grid(row=2, column=1, columnspan=5, sticky=tk.W, padx=(30, 0), pady=(5, 0))
+        self.frame_plpcheck_categories.grid(row=3, column=1, columnspan=5, sticky=tk.W, padx=(30, 0), pady=(5, 0))
         self.frame_plpcheck_categories.grid_columnconfigure(0, weight=0)
         self.frame_plpcheck_categories.grid_columnconfigure(1, weight=0)
         
@@ -899,9 +899,9 @@ class DBIMigrationApp:
         
         # DS 018: чекбоксы приоритетов HIGH/MEDIUM/LOW (фильтр правил)
         priority_frame = ttk.Frame(options_frame)
-        priority_frame.grid(row=1, column=4, columnspan=2, sticky=tk.W, pady=(5,0))
+        priority_frame.grid(row=2, column=0, columnspan=4, sticky=tk.W, padx=(15,0), pady=(2,0))
         
-        ttk.Label(priority_frame, text="Фильтр по приоритету:", font=('Segoe UI', 9, 'bold')).pack(side=tk.LEFT, padx=(0,10))
+        ttk.Label(priority_frame, text="Приоритет:", font=('Segoe UI', 9, 'bold')).pack(side=tk.LEFT, padx=(0,5))
         
         self.priority_high_var = tk.BooleanVar(value=False)
         self.priority_medium_var = tk.BooleanVar(value=False)
@@ -915,19 +915,15 @@ class DBIMigrationApp:
                         command=self._on_priority_filter_change).pack(side=tk.LEFT, padx=5)
         
         # Метка для отображения выбранных приоритетов
-        self.priority_status_label = ttk.Label(priority_frame, text="Все приоритеты", font=('Segoe UI', 9, 'italic'), foreground='gray')
+        self.priority_status_label = ttk.Label(priority_frame, text="H/M/L", font=('Segoe UI', 9, 'italic'), foreground='gray')
         self.priority_status_label.pack(side=tk.LEFT, padx=(10,0))
         
-        # Чекбокс чистого вывода (без маркеров изменений)
-        ttk.Checkbutton(options_frame, 
-                       text="Верни только исправленный код (ВТИК)", 
-                       variable=self.clean_output_var).grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
-        
+
         # Чекбокс архивирования
         self.archive_result_var = tk.BooleanVar(value=True)
         self.archive_result_check = ttk.Checkbutton(options_frame, text="Архивировать результат", 
                                                     variable=self.archive_result_var)
-        self.archive_result_check.grid(row=0, column=6, sticky=tk.W, padx=(15,0))
+        self.archive_result_check.grid(row=1, column=4, sticky=tk.W, padx=(20,0), pady=(2,0))
         # Изначально доступен только если включена сохранность структуры
         self._update_archive_state()
         
@@ -937,7 +933,7 @@ class DBIMigrationApp:
         # DS 053: флаги детерминированного фикса (6 чекбоксов).
         # Порядок и подписи соответствуют rule_engine.FLAG_ORDER.
         flags_frame = ttk.LabelFrame(options_frame, text="Флаги детерминированного фикса", padding="5")
-        flags_frame.grid(row=5, column=0, columnspan=5, sticky=tk.W, pady=(6, 0))
+        flags_frame.grid(row=4, column=0, columnspan=5, sticky=tk.W, pady=(3, 0))
         # DS_053_Уточнение_3 (задача C): подпись из трёх строк (точный текст).
         _cap = ttk.Frame(flags_frame)
         _cap.grid(row=0, column=0, columnspan=6, sticky=tk.W)
@@ -1109,7 +1105,7 @@ class DBIMigrationApp:
                                                   font=('Consolas', 9),
                                                   yscrollcommand=log_scroll_y.set,
                                                   xscrollcommand=log_scroll_x.set,
-                                                  height=5, width=58)
+                                                  height=6, width=58)
         
         log_scroll_y.config(command=self.log_text.yview)
         log_scroll_x.config(command=self.log_text.xview)
@@ -2370,7 +2366,7 @@ class DBIMigrationApp:
         
         # Обновляем статус
         if selected:
-            self.priority_status_label.config(text=f"Активны: {', '.join(selected)}", foreground='green')
+            self.priority_status_label.config(text=f"{', '.join(selected)}", foreground='green')
         else:
             self.priority_status_label.config(text="Все приоритеты", foreground='gray')
         

@@ -118,6 +118,7 @@ PLP_MULTILINE_IMPLEMENTED_RULES: Set[str] = {
     'plpcheck.WRONG_METHOD_SYNTAX',   # _check_plp_wrong_method_syntax
     'plpcheck.CODE_IN_COMMENT',       # _check_plp_code_in_comment
     'plpcheck.OUTER_JOIN',            # точная проверка планируется; regex даёт ложные срабатывания на PL+
+    'plpcheck.SUBOPTIMAL_QUERY_WROWNUM',  # DS_179: _check_plp_suboptimal_wrownum
 }
 
 # ============================================================
@@ -1244,6 +1245,50 @@ class PLPlusScanner:
         issues.extend(block_issues)
         return issues
     
+    def _check_plp_suboptimal_wrownum(self, lines: List[str]) -> List[Tuple[int, str, str, int, int]]:
+        """DS_179: SUBOPTIMAL_QUERY_WROWNUM - exit в for-loop без rownum/offset/fetch.
+
+        Многострочный паттерн (из JSON-рубрикатора):
+            for\s*\(.*select.*\)\s+loop.*\bexit\b
+        Ищется по всему тексту с re.IGNORECASE | re.DOTALL (нежадно).
+        Игнор: если внутри найденного фрагмента есть fetch/rownum/offset.
+        Возвращает 5-ки (start_line, message, bad_code, block_start, block_end),
+        как у _check_plp_code_in_comment (DS_069).
+        """
+        if not lines:
+            return []
+
+        text = '\n'.join(lines)
+        pattern = re.compile(r'for\s*\(.*?select.*?\)\s+loop.*?\bexit\b',
+                             re.IGNORECASE | re.DOTALL)
+        ignore_re = re.compile(r'\b(fetch|rownum|offset)\b', re.IGNORECASE)
+        issues = []
+
+        for m in pattern.finditer(text):
+            fragment = m.group(0)
+            if ignore_re.search(fragment):
+                continue
+            start_line = text.count('\n', 0, m.start()) + 1
+            end_line = text.count('\n', 0, m.end()) + 1
+            tail = text[m.end():]
+            tail_lines = tail.split('\n', 40)
+            block_end = end_line
+            for k, tl in enumerate(tail_lines):
+                if re.search(r'\bend\s+loop\b', tl, re.IGNORECASE):
+                    block_end = end_line + k
+                    break
+            if block_end < start_line:
+                block_end = start_line
+            bad_code = lines[start_line - 1].strip() if start_line <= len(lines) else ''
+            issues.append((
+                start_line,
+                "Использование 'exit' в 'for loop' без 'rownum' или 'offset/fetch'",
+                bad_code,
+                start_line,
+                block_end,
+            ))
+        return issues
+
     def scan_file(self, file_path: Path, log_callback=None) -> List[Issue]:
         """Сканирование одного файла"""
         issues = []
@@ -1603,6 +1648,29 @@ class PLPlusScanner:
                     issues.append(issue)
                     if log_callback:
                         log_callback(f"    [PlpCheck] code_in_comment в строке {line_num}", 'warning')
+
+            # 6. suboptimal_query_wrownum (plpcheck.SUBOPTIMAL_QUERY_WROWNUM) - DS_179
+            if self._is_rule_selected('plpcheck.SUBOPTIMAL_QUERY_WROWNUM'):
+                sw_issues = self._check_plp_suboptimal_wrownum(self.lines)
+                print(f"[DEBUG-DS033] _check_plp_suboptimal_wrownum нашел: {len(sw_issues)}")
+                for line_num, message, bad_code, b_start, b_end in sw_issues:
+                    issue = Issue(
+                        file_path=str(file_path.resolve()),
+                        line_number=line_num,
+                        issue_type='plpcheck.SUBOPTIMAL_QUERY_WROWNUM',
+                        description=message,
+                        original_code=bad_code[:200],
+                        category='DBI',
+                        rubricator_code='plpcheck.SUBOPTIMAL_QUERY_WROWNUM',
+                        rubricator_full_description='exit в for loop без rownum/offset/fetch - Java-слой выдернет 100 строк вместо одной.',
+                        tags=['for_loop', 'exit', 'fetch', 'performance'],
+                        block_start=b_start,
+                        block_end=b_end,
+                        section=file_section_map.get(line_num, 'EXECUTE')
+                    )
+                    issues.append(issue)
+                    if log_callback:
+                        log_callback(f"    [PlpCheck] suboptimal_query_wrownum в строке {line_num}", 'warning')
             
             # ========== ФАЗА 2: AI-АНАЛИЗ СЛОЖНЫХ ПРАВИЛ ==========
             if self.ai_analyzer and hasattr(self, '_rubricator_rules'):

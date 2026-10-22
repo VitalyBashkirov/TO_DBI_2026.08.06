@@ -211,7 +211,7 @@ class DBIMigrationApp:
             W, H = sw, sh  # во весь экран
         x = (sw - W) // 2
         y = (sh - H) // 2
-        self.root.geometry("1026x950")
+        self.root.geometry("1026x840")
         # DS_086 §2.3: базовый размер окна. Высота при скрытии элементов
         # считается от него — см. _adjust_window_height().
         self._ui_base_geometry = (W, H)
@@ -351,11 +351,32 @@ class DBIMigrationApp:
                 rules = [r for r in self.rubricator_prompts.get_all_rules() if r['code'].lower().startswith(code.lower())]
                 if rules:
                     total_rules += len(rules)
-                    self.log(f"      Правил: {len(rules)}", 'debug')
+                    _sel = sum(
+                        1 for r in rules
+                        if r.get('code') in self._rubricator_rule_vars
+                        and self._rubricator_rule_vars[r['code']].get()
+                    )
+                    self.log(f"      Правил: {len(rules)}, выбрано: {_sel}", 'debug')
         
         self.log("=" * 60, 'info')
         if self.rubricator_prompts and self.rubricator_prompts.loaded:
-            self.log(f"Всего правил: {total_rules}", 'info')
+            _sel_rub = [k for k, v in self.selected_rules.items() if v.get()]
+            _n_sel_rules = 0
+            try:
+                if hasattr(self, '_rubricator_rule_vars') and self._rubricator_rule_vars:
+                    _n_sel_rules = sum(1 for _v in self._rubricator_rule_vars.values() if _v.get())
+                elif self.rubricator_prompts and self.rubricator_prompts.loaded:
+                    _all = self.rubricator_prompts.get_all_rules()
+                    _n_sel_rules = sum(
+                        1 for r in _all
+                        if any(r['code'].lower().startswith(c.lower()) for c in _sel_rub)
+                    )
+            except Exception:
+                _n_sel_rules = 0
+            self.log(
+                f"Всего рубрикаторов: {len(self.selected_rules)}. "
+                f"Выбрано рубрикаторов: {len(_sel_rub)}. "
+                f"Всего из рубрикаторов выбрано правил: {_n_sel_rules}", 'info')
         self.log("=" * 60, 'info')
         
         # DS 030: информация о фильтрах по приоритету
@@ -812,9 +833,11 @@ class DBIMigrationApp:
         # DS_075 §3.2: порог вывода топ-файлов (при «Подробный»).
         # DS_087 §2.6.3: метка «Топ-файлов» сохранена (для layout-теста).
         self.report_stats_label = ttk.Label(options_frame, text="Топ-файлов:")
-        self.report_stats_label.grid(row=0, column=4, sticky=tk.W, padx=(15,3))
+        # DS_173: скрыто по просьбе Пользователя
+        self.report_stats_label.grid_remove()
         self.report_stats_entry = ttk.Entry(options_frame, textvariable=self.report_stats_min_files_var, width=6)
-        self.report_stats_entry.grid(row=0, column=5, sticky=tk.W, padx=(0,20))
+        # DS_173: скрыто по просьбе Пользователя
+        self.report_stats_entry.grid_remove()
         
 # Чекбокс для режима вывода при исправлении
         self.fix_only_found_var = tk.BooleanVar(value=False)
@@ -923,7 +946,7 @@ class DBIMigrationApp:
         self.archive_result_var = tk.BooleanVar(value=True)
         self.archive_result_check = ttk.Checkbutton(options_frame, text="Архивировать результат", 
                                                     variable=self.archive_result_var)
-        self.archive_result_check.grid(row=1, column=4, sticky=tk.W, padx=(20,0), pady=(2,0))
+        self.archive_result_check.grid(row=0, column=6, sticky=tk.W, padx=(15,0))
         # Изначально доступен только если включена сохранность структуры
         self._update_archive_state()
         
@@ -1016,7 +1039,7 @@ class DBIMigrationApp:
         # DS_087 §2.2: переименована в «3. В Ai» + tooltip.
         # DS_088a §1/§2.2: нажатие запускает полный AI-цикл (запрос → воркеры →
         # ожидание AI_RESPONSE → приём). Логика send_to_ai() не изменена.
-        self.btn_to_ai = ttk.Button(control_frame, text="3. В Ai", command=self.start_ai_cycle, width=8)
+        self.btn_to_ai = ttk.Button(control_frame, text="3. В Ai", command=self.start_ai_cycle, width=10)
         self.btn_to_ai.pack(side=tk.LEFT, padx=3)
         self.btn_to_ai.state(['disabled'])
         # DS_087 §2.2: tooltip «3. В Ai» (инстанс сохранён — для тестов).
@@ -1024,7 +1047,7 @@ class DBIMigrationApp:
             self.btn_to_ai,
             "Использовать LLM для корректировки ошибок, требующих Ai-анализа.")
         
-        self.btn_from_ai = ttk.Button(control_frame, text="4. Из Ai", command=self.receive_from_ai, width=8)
+        self.btn_from_ai = ttk.Button(control_frame, text="4. Из Ai", command=self.receive_from_ai, width=10)
         self.btn_from_ai.pack(side=tk.LEFT, padx=3)
         # DS_054_Уточнение_C: «От AI» активна только при наличии файлов-ответов
         # в EXCHANGE\AI_OUT (обновление — _update_ai_button_state, таймер 5 сек).
@@ -1068,7 +1091,7 @@ class DBIMigrationApp:
             _w.bind('<FocusOut>', lambda e: self._on_confidence_change())
             _w.bind('<Return>', lambda e: self._on_confidence_change())
         
-        self.btn_rubricator = ttk.Button(control_frame, text="Открыть рубрикатор", command=self.open_rubricator, width=18)
+        self.btn_rubricator = ttk.Button(control_frame, text="Открыть рубрикатор", command=self.open_rubricator, width=25)
         self.btn_rubricator.pack(side=tk.LEFT, padx=3)
         
         self.btn_test_gen = ttk.Button(control_frame, text="Генерация тестовых .plp", command=self.start_test_generation, width=22)
@@ -1499,6 +1522,16 @@ class DBIMigrationApp:
             except Exception:
                 pass
         has_plp = result_ok and self._result_dir_has_pattern_files()
+        # DS_168: fallback для К3 — если PATCH_OUT не создан (needs_ai>0),
+        # но PATCH_CALC/<tail>/stage1_regex содержит *.plp — К3 должна быть активна
+        has_plp_calc = False
+        try:
+            if result and 'PATCH_OUT' in result:
+                _calc_stage1 = Path(result.replace('PATCH_OUT', 'PATCH_CALC')) / 'stage1_regex'
+                if _calc_stage1.exists():
+                    has_plp_calc = any(_calc_stage1.rglob('*.plp'))
+        except Exception:
+            has_plp_calc = False
         source_has_plp = source_ok and self._source_dir_has_pattern_files()
         # DS_167: USER должен быть валиден (нет |, \n, \r), иначе К2/К3/К4 блокируются.
         user_ok = self._validate_user()
@@ -1506,7 +1539,7 @@ class DBIMigrationApp:
 
         # К3: как К2 + в AI_IN нет незавершённых запросов
         ai_in_empty = not self._ai_in_request_files()
-        k3_normal = has_plp and ai_in_empty and user_ok
+        k3_normal = (has_plp or has_plp_calc) and ai_in_empty and user_ok
 
         for btn, normal in (
             (getattr(self, 'btn_scan', None), k1_normal),
@@ -3885,7 +3918,19 @@ class DBIMigrationApp:
             
             # Создание сканера
             from analyzer.scanner import PLPlusScanner
-            scanner = PLPlusScanner(config, selected_rules, self.rubricator_prompts,
+            # DS_177: передача ТОЛЬКО выбранных правил (из _rubricator_rule_vars)
+            _sel_rule_codes = [
+                rc for rc, var in (getattr(self, '_rubricator_rule_vars', {}) or {}).items()
+                if var.get()
+            ]
+            if not _sel_rule_codes:
+                # fallback: если пусто — все правила выбранных рубрикаторов
+                _all_r = self.rubricator_prompts.get_all_rules() if (self.rubricator_prompts and self.rubricator_prompts.loaded) else []
+                _sel_rule_codes = [
+                    r['code'] for r in _all_r
+                    if any(r['code'].lower().startswith(c.lower()) for c in selected_rules)
+                ]
+            scanner = PLPlusScanner(config, _sel_rule_codes, self.rubricator_prompts,
                                     plpcheck_categories=getattr(self, 'plpcheck_categories_filter', []),
                                     abort_callback=self._abort_requested,  # DS 038
                                     stop_event=self._stop_event,            # DS_089b
@@ -4672,6 +4717,11 @@ class DBIMigrationApp:
             
             self._progress_update(100)
             
+            self.root.after(0, lambda: self._log_separator("РАБОТА ЗАВЕРШЕНА"))
+            self.root.after(0, lambda: self.log("", 'info'))
+            self.root.after(0, lambda: self.log(f"  Итоги выгружены в: {final_results_dir}", 'success'))
+            self.root.after(0, lambda: self.log(f"  PATCH_OUT: {'готов' if result_dir.exists() and (result_dir / '.finalized').exists() else 'не создан — требуется К3/ручная доработка'}", 'info'))
+            self.root.after(0, lambda: self.log("", 'info'))
             self.root.after(0, lambda: self._log_separator("ИСПРАВЛЕНИЕ КОДА ЗАВЕРШЕНО УСПЕШНО"))
             self.root.after(0, lambda: self.set_status("Готово"))
             self.root.after(0, lambda: self.btn_scan.state(['!disabled']))
@@ -6009,7 +6059,50 @@ class DBIMigrationApp:
             self._show_copyable_dialog(
                 "AI-ответы обработаны",
                 f"Обработано файлов: {total_ok} из {len(results)}\n\n"
-                "См. Журнал выполнения и Журнал изменений.")
+                "См. Журнал выполнения (и лог-файлы).")
+
+            # DS_170 A.2: регресс-защита (если rescan не уменьшился)
+            n_manual = int((summary or {}).get('needs_manual', 0) or 0)
+            n_before = int((summary or {}).get('before', 0) or 0)
+            n_after = int((summary or {}).get('after', 0) or 0)
+
+            # DS_170 A.3: итоговый блок "AI-ЦИКЛ ЗАВЕРШЁН"
+            _patch_out_ok = False
+            try:
+                if self.result_dir_var and self.result_dir_var.get():
+                    _p = Path(self.result_dir_var.get())
+                    if _p.exists() and any(_p.rglob('*.plp')):
+                        _patch_out_ok = True
+            except Exception:
+                _patch_out_ok = False
+
+            self._log_separator("AI-ЦИКЛ ЗАВЕРШЁН")
+            self.log(f"  Применено AI-правок: {int((summary or {}).get('auto', 0) or 0)} авто, {n_manual} needs_manual", 'info')
+            self.log(f"  Rescan: было {n_before}, стало {n_after}", 'info')
+            self.log(f"  PATCH_OUT: {'создан' if _patch_out_ok else 'не создан'}", 'success' if _patch_out_ok else 'warning')
+            if self.result_dir_var and self.result_dir_var.get():
+                self.log(f"  PATCH_OUT: {self.result_dir_var.get()}", 'info')
+            self.log(f"  PATCH_CALC: F:\\TO_DBI\\PATCH_CALC", 'info')
+            if n_after > 0:
+                self.log(f"  Рекомендация: остались проблемы ({n_after}) — проверьте needs_manual в логе", 'warning')
+            elif _patch_out_ok:
+                self.log(f"  Рекомендация: готово, PATCH_OUT содержит итоговые файлы", 'success')
+            else:
+                self.log(f"  Рекомендация: PATCH_OUT не создан, см. лог", 'warning')
+
+            try:
+                _msg = (
+                    f"AI-цикл завершён.\n\n"
+                    f"Rescan: было {n_before}, стало {n_after}\n\n"
+                    f"PATCH_OUT: {'создан' if _patch_out_ok else 'не создан'}\n"
+                    f"  {self.result_dir_var.get() if self.result_dir_var else ''}\n\n"
+                    f"PATCH_CALC: F:\\TO_DBI\\PATCH_CALC\n\n"
+                    f"Рекомендация: {'готово' if _patch_out_ok and n_after == 0 else 'см. Журнал выполнения'}"
+                )
+                self._show_copyable_dialog("AI-цикл завершён", _msg)
+            except Exception as e:
+                self.log(f"[DS_170] не удалось показать диалог: {e}", 'warning')
+
         except Exception as e:
             self.log(f"Ошибка обработки AI-ответов: {e}", 'error')
             messagebox.showerror("Ошибка", f"Не удалось обработать AI-ответы:\n{e}")

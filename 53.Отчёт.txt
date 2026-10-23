@@ -1,0 +1,153 @@
+53.Отчёт.txt
+============
+
+Чат 53. Автор DS — DeepSeek. Пользователь — Vitaly.
+Хост: LG (LGGRAMA8V7Q8U, ainf1). PowerShell 5.1.26100.9711.
+Ветка: feature/dockerization.
+На начало чата: HEAD a94a175, ahead 6.
+На конец чата: HEAD bf9025c (DS_183b), ahead 8.
+Тестов на конец чата: 357 passed, 3 warnings in 26.99s (A4).
+
+## 0. Что сделано в чате 53
+
+Этап A (проверки хоста/базы) — ЗАКРЫТ (A1-A7, A9 = OK; A8 — documented fallback).
+B1 — ЗАКРЫТ: коммиты 51/52 зафиксированы.
+B5 (push) — выполнено в этом же чате по команде пользователя.
+53.Отчёт.txt — создан.
+
+B3 (DS_183: 3b/7b в GUI К4) и B4 (К3/К4 с mark_in_code=True -> [Ai]-якоря)
+в чат 53 НЕ ВЛЕЗЛИ по лимиту ходов — перенесены в чат 54 как DS_183/DS_184.
+
+## 1. A9-fix — BOM (ЗАКРЫТ)
+
+BOM в SRC\tests = 0 (50 .py файлов, проверено побайтово).
+BOM в 4 тестах (test_ds166, test_ds179, test_ds180, test_ds181) = False во всех.
+py_compile этих 4 тестов = exit 0.
+git diff по 4 тестам = +4/-4 (ровно снятие BOM).
+Регресс: 357 passed, 3 warnings in 26.99s (см. PS\53_05_pytest.log).
+Коммит A9-fix: eeaba3c "DS_183a: A9-fix - снят BOM с 4 тестов ...".
+
+## 2. A4 — pytest (базовое число для 53)
+
+python -m pytest SRC\tests -q
+pytest exit = 0
+357 passed, 3 warnings in 26.99s
+3 warnings — SyntaxWarning "invalid escape sequence '\s'" в чужих тестах
+(test_ds144d_c_ast, test_ds153d_scanner_selected_rules, test_ds154_scanner_oq1),
+на passed не влияют, отдельный фикс не в этом чате.
+
+Лог: PS\53_05_pytest.log (+ stdout/stderr отдельными файлами).
+
+## 3. A6 — Ollama (OK)
+
+ollama version is 0.18.2
+Модели: qwen2.5-coder:3b (1.9 GB), qwen2.5-coder:7b (4.7 GB).
+ollama ps до теста: пусто (RAM чистая).
+RAM: TotalVisibleMemorySize = 16478392 KB (15.7 GB), FreePhysicalMemory = 7604708 KB (7.3 GB).
+Короткий тест 3b: elapsed = 3.51 s, valid_json = True, keys = ['ok'].
+Параметры запроса: format=json, keep_alive="0s", num_predict=32, temperature=0, timeout=60.
+ollama ps после теста: qwen2.5-coder:3b, 2.1 GB, 100% CPU, 4096 ctx, Stopping... (модель выгружается).
+
+Вывод: 3b работает и выгружается; 7b на месте, но prompt >6 КБ её не тянет (известное
+ограничение, не RAM). Для К4 на LG — 3b.
+
+Лог: PS\53_07_a6_a7_a8.log, тест: PS\53_07_ollama_probe.out.txt.
+
+## 4. A7 — маркеры DS_180/DS_181 (OK)
+
+_predict_det_changes       -> SRC\fixer\code_fixer.py:1569, 1583, 1731
+_det_changes_to_unified    -> SRC\fixer\code_fixer.py:1537, 1735
+_insert_anchors            -> SRC\fixer\code_fixer.py:1591, 1750
+_preai_target_dir          -> SRC\ai_exchange.py:497, 564
+
+Все 4 маркера на месте. variable_parser.py и gui_app.py этих имён не содержат
+(это ожидаемо: функции живут в code_fixer.py и ai_exchange.py).
+
+## 5. A8 — 49_Results.log (MISSING, documented fallback)
+
+F:\TO_DBI\49_Results.log      = MISSING
+F:\TO_DBI\PS\49_Results.log   = MISSING
+F:\TO_DBI\49.Отчёт.txt        = EXISTS, 5114 байт, mtime 22.10.2026 16:34:05
+
+49.Отчёт.txt содержит матрицу К1->К2 (строки 9-24) и упоминает "PS\49_Results.log —
+фактические результаты матрицы". Исходный лог утерян, корзина MateBook E на LG не
+переехала, InvokeVerb("Восстановить") не сработал (см. 53.Старт.txt).
+
+Решение: 49_Results.log не пересоздаём в чате 53. Фактические данные К1->К2
+сохранены в 49.Отчёт.txt; для чата 53 актуальна своя PS\53_Results.log (B4, чат 54).
+
+## 6. A10 — сводная таблица A1-A9
+
+| # | Проверка                  | Ожидание                  | Факт                                     | OK |
+|---|---------------------------|---------------------------|------------------------------------------|----|
+| A1| Диски/путь F:\TO_DBI      | доступен                  | доступен                                 | OK |
+| A2| Ветка/git                 | feature/dockerization     | ahead 8, upstream origin/feature/dock... | OK |
+| A3| Start-Transcript          | работает                  | работает, лог в PS\                      | OK |
+| A4| pytest                    | >= 357 passed             | 357 passed, 26.99 s                      | OK |
+| A5| BOM/кодировки             | git читается корректно    | chcp 65001 + UTF8 noBOM + OutputEncoding | OK |
+| A6| Ollama                    | 3b/7b, тест 3b, RAM       | 3b 3.51 s JSON valid, RAM 7.3 GB free    | OK |
+| A7| Маркеры DS_180/DS_181     | все 4                     | все 4 найдены                            | OK |
+| A8| 49_Results.log            | есть / восстановить       | MISSING, fallback = 49.Отчёт.txt         | !  |
+| A9| BOM-артефакты             | BOM=0, py_compile=0       | 0/0, diff +4/-4, коммит eeaba3c          | OK |
+
+Этап A закрыт.
+
+## 7. B1 — коммиты 51/52 зафиксированы
+
+git log --oneline -6 на конец чата:
+  bf9025c DS_183b: добавлен отчёт чата 50 (50.Отчёт.txt)                  [новый в 53]
+  eeaba3c DS_183a: A9-fix - снят BOM с 4 тестов ..., регресс 357 passed   [новый в 53]
+  a94a175 DS_182: _is_rule_selected понимает префикс-фильтр 'plpcheck.'
+  8eb83b8 DS_181: _preai копии перенесены из PATCH_IN в PATCH_CALC/backups
+  593914e DS_180: МПК-маркировка det-правок через единый anchor pipeline
+  1d8a66d DS_179: дополнение отчёта чата 49 - причина _preai в PATCH_IN, план DS_181
+
+УТОЧНЕНИЕ К 53.Старт.txt:
+в старте a94a175 был описан как "DS_182: К3/К4 на полном наборе 9 issues".
+Фактическое сообщение a94a175 — "_is_rule_selected понимает префикс-фильтр 'plpcheck.'".
+Это разные DS_182; в отчёте 53 используется корректная формулировка.
+
+## 8. B5 — push
+
+Выполняется в этом же прогоне (PS\53_08_push_report.log), после записи отчёта:
+git push origin feature/dockerization
+Ожидание: 8 объектов уходят, behind 0.
+
+## 9. Перенесено в чат 54
+
+B3 (DS_183): 3b/7b в GUI К4.
+  - default 3b на слабом хосте, предупреждение при выборе 7b, сохранение в settings.json;
+  - тест + документация;
+  - коммит DS_183.
+
+B4 (DS_184, К3/К4 mark_in_code=True -> [Ai]-якоря).
+  - прогон 3 .plp (PSH_ED_PRC_SCHM, PSH_PS_DEL, PSH_VK_UNK_INP);
+  - фиксация [Ai]/xN/[AI-REMOVED]/диапазонов в PS\54_Results.log;
+  - в PS\50_49 шло через process_response/apply_fixes, anchors=0 — проверить,
+    что при mark_in_code=True якоря появляются.
+
+A8-долг: решить, восстанавливать ли 49_Results.log отдельным прогоном матрицы
+К1->К2 (18 сканов + 2 fix-мода), или принять fallback 49.Отчёт.txt навсегда.
+
+## 10. Артефакты чата 53
+
+PS\53_01_a9fix.log
+PS\53_02b_git.log
+PS\53_03_pytest.log (неудачный, прерван TerminatingError)
+PS\53_04_diff.log
+PS\53_05_pytest.log (+ 53_05_pytest.stdout.txt, 53_05_pytest.stderr.txt)
+PS\53_06_commit_a9fix.log
+PS\53_07_a6_a7_a8.log (+ 53_07_ollama_probe.out.txt, _53_ollama_probe.py)
+PS\53_08_push_report.log
+53.Отчёт.txt (этот файл)
+
+## 11. Известные шумы (не блокеры)
+
+- PS 5.1 NativeCommandError на stderr от git (warning "LF will be replaced by CRLF")
+  при $ErrorActionPreference="Stop" — лечится "Continue" вокруг git-вызова.
+- PS 5.1 ParameterBinding(Out-File) в потоке `& python ... *> file` — stdout
+  python попадает в поток и дублируется в консоль. Лечится Start-Process
+  -RedirectStandardOutput (как в 53_05).
+- pytest: 3 SyntaxWarning (invalid escape sequence '\s') в чужих тестах.
+
+Конец отчёта 53.

@@ -1077,6 +1077,18 @@ class DBIMigrationApp:
         self.conf_high_entry = ttk.Entry(control_frame,
                                          textvariable=self.conf_high_var, width=5)
         self.conf_high_entry.pack(side=tk.LEFT)
+        # DS_183: модель K4 (3b/7b) — после группы confidence.
+        ttk.Label(control_frame, text="K4 модель:").pack(side=tk.LEFT, padx=(10, 3))
+        self.k4_model_var = tk.StringVar(value="qwen2.5-coder:3b")
+        self.k4_model_combo = ttk.Combobox(
+            control_frame, textvariable=self.k4_model_var,
+            values=("qwen2.5-coder:3b", "qwen2.5-coder:7b"),
+            state="readonly", width=22)
+        self.k4_model_combo.pack(side=tk.LEFT)
+        self._tooltip_k4_model = Tooltip(
+            self.k4_model_combo,
+            "3b — рабочая на LG; 7b — только короткие промпты.")
+        self.k4_model_combo.bind("<<ComboboxSelected>>", self._on_k4_model_change)
         # DS_088b §2.5: один tooltip на метку «Пороги confidence:» (не на поля).
         self._tooltip_conf = Tooltip(
             self.conf_label,
@@ -3411,6 +3423,14 @@ class DBIMigrationApp:
                     self.clean_output_var.set(settings.get('clean_output', False))
                     self.fix_only_found_var.set(settings.get('fix_only_found', False))
                     self.mark_in_code_var.set(settings.get('mark_in_code', False))
+                    # DS_183: модель K4 (3b/7b). Валидация: неизвестное -> 3b.
+                    _k4m = str(settings.get('k4_model', 'qwen2.5-coder:3b') or 'qwen2.5-coder:3b')
+                    if _k4m not in ('qwen2.5-coder:3b', 'qwen2.5-coder:7b'):
+                        _k4m = 'qwen2.5-coder:3b'
+                    if getattr(self, 'k4_model_var', None):
+                        self.k4_model_var.set(_k4m)
+                        _lvl = 'warning' if _k4m.endswith(':7b') else 'info'
+                        self.log(f"K4 модель: {_k4m}" + (" (7b — только короткие промпты)" if _k4m.endswith(':7b') else ""), _lvl)
                     # DS_088a_fix §2.5: пороги confidence из settings.json.
                     if getattr(self, 'conf_low_var', None):
                         _cl = float(settings.get('conf_low', 0.5))
@@ -3510,6 +3530,8 @@ class DBIMigrationApp:
             'clean_output': self.clean_output_var.get(),
             'fix_only_found': self.fix_only_found_var.get(),
             'mark_in_code': self.mark_in_code_var.get(),
+            # DS_183: модель K4 (3b/7b) сохраняется между запусками.
+            'k4_model': (self.k4_model_var.get() if getattr(self, 'k4_model_var', None) else 'qwen2.5-coder:3b'),
             'max_log_size_mb': MAX_LOG_SIZE_MB,
             'selected_priorities': list(getattr(self, '_selected_priorities', []))
         }
@@ -5997,6 +6019,24 @@ class DBIMigrationApp:
         self._bot_log(summary)
         return stats
 
+    def _on_k4_model_change(self, event=None):
+        """DS_183: пользователь переключил модель K4. Диалог — только при 7b."""
+        try:
+            m = self.k4_model_var.get()
+        except Exception:
+            return
+        if m.endswith(':7b'):
+            self.log("K4 модель: qwen2.5-coder:7b — только короткие промпты (<6 КБ), иначе таймаут.", 'warning')
+            try:
+                messagebox.showwarning(
+                    "K4 модель",
+                    "qwen2.5-coder:7b на LG не тянет prompt >6 КБ (таймаут ~240 с).\n"
+                    "Для K4 рекомендуется qwen2.5-coder:3b.")
+            except Exception:
+                pass
+        else:
+            self.log("K4 модель: qwen2.5-coder:3b", 'info')
+
     def receive_from_ai(self):
         r"""DS 054: обработать файлы-ответы из EXCHANGE\AI_OUT."""
         try:
@@ -6345,7 +6385,8 @@ class DBIMigrationApp:
                     proc = subprocess.Popen(
                         [sys.executable, str(tools / 'ai_local_worker.py'),
                          '--in-dir', str(ai_in), '--out-dir', str(ai_out),
-                         '--resume', '--only-ai', only_ai_arg],
+                         '--resume', '--only-ai', only_ai_arg,
+                         '--model', (self.k4_model_var.get() if getattr(self, 'k4_model_var', None) else 'qwen2.5-coder:3b')],
                         cwd=str(root), stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT, env=env_ai)
                     self._monitor_worker(proc, bs)

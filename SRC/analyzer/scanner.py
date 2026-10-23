@@ -763,7 +763,9 @@ class PLPlusScanner:
         selected_lower = [s.lower() for s in self.selected_rules]
         
         # 1) Выбран файл рубрикатора целиком (['PlpCheck', ...])
-        if file_code.lower() in selected_lower:
+        # DS_182: также принимаем префикс-фильтр с точкой (['plpcheck.']),
+        # который семантически означает «все правила семейства».
+        if file_code.lower() in selected_lower or (rule_prefix + '.') in selected_lower:
             # DS 036: если задан фильтр категорий, многострочные проверки
             # PlpCheck выполняются только для выбранных категорий
             if rule_prefix == 'plpcheck' and self.plpcheck_categories:
@@ -772,7 +774,9 @@ class PLPlusScanner:
             return True
         
         # 2) DS 034: переданы коды правил — проверяем точный код этого правила
-        if rule_code.lower() in selected_lower:
+        # DS_182: также принимаем префикс-фильтр с точкой (['plpcheck.']),
+        # который семантически означает «все правила семейства».
+        if rule_code.lower() in selected_lower or (rule_prefix + '.') in selected_lower:
             # DS 036: фильтр категорий применяется и здесь
             if rule_prefix == 'plpcheck' and self.plpcheck_categories:
                 rule_category = PLPCHECK_RULE_TO_CATEGORY.get(rule_code, 'OTHER')

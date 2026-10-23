@@ -1,0 +1,155 @@
+﻿50.Отчёт.txt
+============
+
+Чат 50. Автор DS — DeepSeek. Пользователь — Vitaly.
+Ветка: feature/dockerization. На начало чата: HEAD 1d8a66d, ahead 2.
+На конец чата: HEAD 8eb83b8, ahead 5 (после отключения F: счётчик пересчитан).
+Тестов на конец чата: 347 passed.
+
+## 1. DS_180 — МПК-маркировка det-правок (закрыт)
+
+Коммит: 593914e.
+
+Причина: code_fixer.py ставил якоря только при issue_changes; det-правки
+(DeterministicFixer: переименования/удаления) не формировали issue_changes,
+поэтому в матрице К1->К2 case 100/101 давали anchors=0 при fix_count>0.
+
+Сделано:
+- SRC/fixer/variable_parser.py:
+  * _rename_variable возвращает (code, count, lines_hit), lines_hit — 1-based
+    номера строк, где были замены;
+  * changes переименований содержат 'lines': lines_hit; удаления — 'lines':
+    [d['line'] for d in deleted]. Аддитивно, старые ключи сохранены.
+- SRC/fixer/code_fixer.py:
+  * _det_changes_to_unified: det_changes -> единый формат issue-правок
+    (переименования по 'lines', удаления по deleted[].line; rule_code
+    PlpCheck.STYLE.PREFIX_TYPE.п.4.4 и PlpCheck.STYLE.NOT_MENTIONED.п.4.8);
+  * _predict_det_changes: прогноз det на временной копии (utf-8 без BOM),
+    оригинал не трогается; используется при apply_fixes=False (НеАФ=on);
+  * _insert_anchors: вынос anchor pipeline; якоря по issue + det; ветка
+    «line_number is None» не нужна — у det теперь есть строки;
+  * fix_file переписан: issue -> det (реальные/прогноз) -> единый
+    anchor pipeline -> финальная запись. При apply_fixes=False ставятся
+    только якоря, код не меняется.
+- Тест: SRC/tests/test_ds180_mpk_det_anchors.py (6 passed).
+
+Матрица case 100/101 на 3 .plp (PS\50_11_ds180_matrix.log):
+  case 100: anchors total = 17 (files with anchors: 3/3), fix=3/2/5
+  case 101: anchors total = 17 (files with anchors: 3/3), код не изменён
+            (только якорные строки; подтверждено diff в PS\50_12).
+
+Регресс: 337 -> 343 passed.
+
+## 2. DS_181 — _preai в PATCH_CALC\backups (закрыт)
+
+Коммит: 8eb83b8.
+
+Причина: ai_exchange.py:546 писал _preai рядом с исходником в PATCH_IN,
+засоряя ИКА (сканер фильтрует, но физически мусор оставался). В PATCH_IN
+накопилось 43 файла _preai (не 4, как предполагалось на старте чата —
+обнаружено при разведке).
+
+Сделано:
+- SRC/ai_exchange.py:
+  * _preai_target_dir(source, base): PATCH_CALC\backups\<rel-from-PATCH_IN>;
+    fallback — плоско в backups, если источник вне PATCH_IN;
+  * process_response: backup_file пишется в _preai_target_dir;
+    result['backup_path'] указывает на новый путь (GUI К4 и _rescan_ai_files
+    читают по строке — прозрачно).
+- Перенос 43 _preai из PATCH_IN в PATCH_CALC\backups с сохранением
+  структуры от PATCH_IN (3 патча: patch_2026.10.18_X_suboptimal_query_wrownum,
+  patch_PSH_DEP_PRIV_GO, patch_suboptimal_test_3).
+  PS\50_19_ds181_move_preai.log: moved=43 errors=0, remaining in PATCH_IN=0.
+- exclude_patterns (code_fixer.py x1, gui_app.py x2): добавлен '_preai.'
+  как страховка от повторного появления _preai в ИКА.
+- Тест: SRC/tests/test_ds181_preai_location.py (4 passed).
+
+Регресс: 343 -> 347 passed.
+
+## 3. К3/К4 (Ai-цикл) на 3 .plp
+
+Набор (PS\47_InputSet.log):
+  PSH_ED_PRC_SCHM.plp (DEPN), PSH_PS_DEL.plp (PL_US), PSH_VK_UNK_INP.plp (RKO)
+
+К3 (AI_REQUEST) работает: write_request + rubricator PlpCheck v5 (332 правила),
+issues по DS_033-проверкам (NOT_MENTIONED, PREFIX_TYPE_IN_VAR_NAME,
+WRONG_METHOD_SYNTAX, CODE_IN_COMMENT, SUBOPTIMAL_QUERY_WROWNUM):
+  PSH_ED_PRC_SCHM: 7 issues
+  PSH_PS_DEL:      1 issue
+  PSH_VK_UNK_INP:  0 issues
+(на полном наборе 332 правила у PSH_ED_PRC_SCHM 569 issues — фильтр
+только plpcheck-категории даёт 9, но selected_rules=['plpcheck.'] отключает
+DS_033 многострочные проверки; поэтому для К3/К4 взят selected_rules=[]
+с постфильтром по DS033_RULES — 7/1/0.)
+
+К4 (AI_RESPONSE -> apply) выполнен на qwen2.5-coder:3b, батч по 1 проблеме,
+format=json, num_predict=128, keep_alive="0s", timeout=60.
+PS\50_49_night_ds033_stdout.txt (temp=0.1):
+  PSH_ED_PRC_SCHM: fixes=7 status=ok auto=7  (206.6s, ~30s/проблему)
+  PSH_PS_DEL:      fixes=1 status=ok auto=1  (29.4s)
+  PSH_VK_UNK_INP:  fixes=0 status=no_fixes   (0s, 0 проблем)
+DS_181 подтверждён на живом прогоне: PATCH_IN _preai=0, backups=50
+(новые _preai легли в PATCH_CALC\backups\patch_suboptimal_test_3\ENTITY\{DEPN,PL_US}\).
+
+Повторный прогон (PS\50_50, temp=0.0) был прерван отключением диска F:
+на prob 4 из 7 (4/4 +1 до обрыва — 3b стабильна, темп 18–22 с/проблему).
+run3 (temp=0.2) не начинался. Повторять не стали — для отчёта достаточно
+полного прогона 50_49.
+
+## 4. Ollama: 7b vs 3b на MateBook E
+
+- qwen2.5-coder:7b: жива (1 токен — 0.5 с), но prompt 6.5 КБ (569 problems)
+  не укладывается: FAIL after 242s (problems-only, 6 блоков = 6.2 КБ).
+  На 1–2 проблемах — тоже не уложилась в 240 с (PS\50_35).
+- qwen2.5-coder:3b: 1 проблема ~20–30 с, JSON валидный, стабильно
+  (три прогона: 0.1 — 7/7+1/1; 0.0 — 4/4+1 до обрыва; 0.2 — не запускался).
+- Вывод: для К4 на этом железе — 3b, батч по 1 проблеме, keep_alive="0s".
+  7b пригодна только для коротких промптов.
+
+## 5. Отключение диска F: (ночь 23.10, ~06:48)
+
+- F: вернулся, F:\TO_DBI доступен (PS\50_51).
+- .plp в PATCH_IN читаемы (8849/787/3755 байт), обрезания нет (PS\50_52).
+- git status: ahead 5, M EXCHANGE/OUTBOX/DS_CNT_007_pilot_report.md,
+  M EXCHANGE/bot.log (не трогали с начала чата). SRC/* чист.
+- _preai: PATCH_IN=0, PATCH_CALC\backups=50.
+- Потерь нет, коммиты 593914e и 8eb83b8 целы.
+
+## 6. Открытые вопросы / кандидаты в следующий чат
+
+1. DS_182: воспроизвести К3/К4 на полном наборе 9 issues (как в матрице 49),
+   а не на 7/1/0. Для этого нужен scanner с DS_033 + regex-правила plpcheck
+   одновременно (сейчас selected_rules=[] даёт 569, а ['plpcheck.'] отключает
+   DS_033). Решение: либо постфильтр по issue_type (как в 50_49), либо
+   доработка scanner.py для разделения «selected regex» и «DS_033 всегда».
+2. DS_183: 7b на MateBook E — зафиксировать в GUI предупреждение
+   «7b не рекомендуется для К4 на этом хосте» или дефолт 3b для К4.
+3. К3/К4 с mark_in_code=True, чтобы получить [Ai]-якоря в .plp (в 50_49
+   шло через process_response/apply_fixes, без fix_file, поэтому anchors=0).
+4. git push origin feature/dockerization (ahead 5).
+
+## 7. Артефакты чата 50
+
+PS\50_01_git_status.log, 50_01b_git_diag.log, 50_02_pytest_baseline.log,
+50_03*_ds180_recon*.log, 50_04*_ds180_patch_vp*.log, 50_05*_ds180_recon*.log,
+50_06*_ds180_patch_cf*.log, 50_06d_ds180_regress_after_fix_file.log,
+50_08_ds180_test_create.log, 50_09_ds180_test_run.log,
+50_10_ds180_regress_full.log, 50_11_ds180_matrix.log, 50_12_ds180_case101_diag.log,
+50_13_ds180_commit.log, 50_14*_ds181_recon*.log, 50_15_ds181_recon2.log,
+50_16_ds181_dirs.log, 50_17_ds181_patch_ai.log, 50_18_ds181_verify_and_regress.log,
+50_19_ds181_move_preai.log, 50_20_ds181_test_create.log, 50_21_ds181_test_run.log,
+50_22_ds181_exclude_recon.log, 50_23_ds181_exclude_patch.log,
+50_24_ds181_regress_full.log, 50_25_ds181_commit.log,
+50_26_k3k4_recon.log, 50_27_k3k4_recon.log, 50_28_k3k4_signatures.log,
+50_29_k3k4_fix_format.log, 50_30_k3k4_run.log, 50_31_k3k4_run2.log,
+50_32_ollama_check.log, 50_33_ollama_3b_check.log, 50_34_k4_prompt_test.log,
+50_35_k4_prompt_test2.log, 50_36_scanner_rubricator.log,
+50_37_gui_scanner_init.log, 50_38_rubricator_loader.log,
+50_39_k3k4_final.log, 50_40_k3k4_final2.log, 50_41_k3k4_final3.log,
+50_42_ollama_reset.log, 50_43_k3k4_3b.log, 50_44_stop_and_run.log,
+50_45_k3k4_3b_fixed.log, 50_46_diag_steps.log, 50_47_python_stdout.txt,
+50_48_python_stdout.txt, 50_48_k3k4_plpcheck_only.log,
+50_49_night_ds033_stdout.txt, 50_49_night_k3k4_ds033.log,
+50_50_repeat_stdout.txt, 50_50_night_k3k4_repeat.log,
+50_51_disk_check.log (в C:\Users\Виталий\), 50_52_after_disk_check.log,
+50_53_write_report.log, 50_Results.log.

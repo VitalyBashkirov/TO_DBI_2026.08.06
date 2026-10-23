@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """DS_181: pre-AI копии (_preai) должны писаться в PATCH_CALC/backups, не в PATCH_IN."""
 import sys
 from pathlib import Path

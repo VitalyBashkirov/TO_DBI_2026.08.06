@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """DS_179: тесты _check_plp_suboptimal_wrownum (plpcheck.SUBOPTIMAL_QUERY_WROWNUM)."""
 import sys
 from pathlib import Path

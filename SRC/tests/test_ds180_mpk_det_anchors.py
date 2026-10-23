@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """DS_180: МПК-маркировка det-правок (DeterministicFixer) через единый anchor pipeline.
 
 Покрывает:

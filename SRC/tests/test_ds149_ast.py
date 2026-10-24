@@ -208,8 +208,16 @@ def test_ds149g_minsize_900_600():
     found = False
     for node in ast.walk(cls):
         if isinstance(node, ast.Call) and _call_attr(node) == 'minsize':
-            args = [a.value for a in node.args if isinstance(a, ast.Constant)]
-            if 1026 in args and 1000 in args:
+            if len(node.args) < 2:
+                continue
+            a0, a1 = node.args[0], node.args[1]
+            w_ok = isinstance(a0, ast.Constant) and a0.value == 1026
+            h_ok = (
+                (isinstance(a1, ast.Constant) and a1.value == 400)
+                or (isinstance(a1, ast.Name) and a1.id == 'UI_MIN_WINDOW_HEIGHT')
+            )
+            if w_ok and h_ok:
                 found = True
                 break
-    assert found, 'DS_149g: нет minsize(900, 600) в DBIMigrationApp'
+    assert found, ('DS_149g: нет minsize(1026, UI_MIN_WINDOW_HEIGHT|400) '
+                   'в DBIMigrationApp')

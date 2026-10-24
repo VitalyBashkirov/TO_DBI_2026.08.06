@@ -35,6 +35,7 @@ import urllib.error
 
 # Импорт модуля рубрикатора
 from rubricator_prompts import RubricatorPrompts
+from local_settings import apply_local_k4_override  # DS_183b
 
 # Вычисляемые константы версии на основе текущей даты
 _now = datetime.now()
@@ -3424,7 +3425,9 @@ class DBIMigrationApp:
                     self.fix_only_found_var.set(settings.get('fix_only_found', False))
                     self.mark_in_code_var.set(settings.get('mark_in_code', False))
                     # DS_183: модель K4 (3b/7b). Валидация: неизвестное -> 3b.
-                    _k4m = str(settings.get('k4_model', 'qwen2.5-coder:3b') or 'qwen2.5-coder:3b')
+                    _k4m_common = str(settings.get('k4_model', 'qwen2.5-coder:3b') or 'qwen2.5-coder:3b')
+                    # DS_183b: per-host override k4_model (см. SRC/local_settings.py)
+                    _k4m = apply_local_k4_override(_k4m_common, log=self.log)
                     if _k4m not in ('qwen2.5-coder:3b', 'qwen2.5-coder:7b'):
                         _k4m = 'qwen2.5-coder:3b'
                     if getattr(self, 'k4_model_var', None):

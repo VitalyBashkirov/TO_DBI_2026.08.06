@@ -339,9 +339,119 @@ def classify_fix(fix: dict, conf_low: float = CONF_MEDIUM,
     return 'medium'
 
 
+def _build_ai_anchors(applied, log_level, anchor_settings, user):
+    """DS_184: построить якоря для AI-правок (формат CodeFixer._insert_anchors).
+
+    applied: list of detail dicts (kind in auto/medium), keys:
+             line, rule_code, before, used_ai=True.
+    Возвращает dict line_number -> list[str] (маркеры без ведущих пробелов).
+    [AI-REMOVED] не ставится: AI-правки не удаляют строки (DELETED_MARKER
+    остаётся в строке), в отличие от DeterministicFixer.
+    """
+    if not applied:
+        return {}
+    _as = anchor_settings or {}
+    _prefix = _as.get('comment_prefix', '--')
+    _date_fmt = _as.get('date_format', '%Y.%m.%d %H:%M')
+    _date_str = datetime.now().strftime(_date_fmt)
+    _enable_ai_tag = _as.get('enable_ai_tag', True)
+    _ai_tag_fmt = _as.get('ai_tag_format', '<Ai>')
+    _tpl_all = _as.get('templates') or {}
+    _tpl = {
+        'Минимальный': _tpl_all.get('Минимальный', '{prefix} МПК: {fix_count} правок{user_tag}, правила: {rules_summary}'),
+        'Обычный':     _tpl_all.get('Обычный',     '{prefix} {date}{user_tag}|{rule_code}|{line_range}'),
+        'Подробный':   _tpl_all.get('Подробный',   '{prefix} {date}{user_tag}|{rule_code}|{line_range}'),
+    }
+    _ul = log_level if log_level in _tpl else 'Обычный'
+    _raw_user = (user or '').strip().replace('|', '').replace('\n', '').replace('\r', '').strip()[:64]
+    _user_tag = (" " + _raw_user) if _raw_user else ""
+
+    by_line = {}
+    for ch in applied:
+        try:
+            ln = int(ch.get('line') or 0)
+        except (TypeError, ValueError):
+            ln = 0
+        if ln > 0:
+            by_line.setdefault(ln, []).append(ch)
+    if not by_line:
+        return {}
+
+    blocks = []
+    for line_num in sorted(by_line.keys()):
+        rule_codes = []
+        used_ai = False
+        for ch in by_line[line_num]:
+            rc = str(ch.get('rule_code') or '')
+            if rc and rc not in rule_codes:
+                rule_codes.append(rc)
+            if ch.get('used_ai'):
+                used_ai = True
+        if (blocks and blocks[-1]['line_end'] + 1 == line_num
+                and set(blocks[-1]['rule_codes']) == set(rule_codes)
+                and blocks[-1]['used_ai'] == used_ai):
+            blocks[-1]['lines'].append(line_num)
+            blocks[-1]['line_end'] = line_num
+        else:
+            blocks.append({'rule_codes': rule_codes, 'used_ai': used_ai,
+                           'lines': [line_num],
+                           'line_start': line_num, 'line_end': line_num})
+
+    anchors_by_line = {}
+    if _ul == 'Минимальный':
+        rules_summary = {}
+        for b in blocks:
+            for rc in b['rule_codes']:
+                rules_summary[rc] = rules_summary.get(rc, 0) + 1
+        rules_txt = ', '.join((rc + (' x' + str(c) if c > 1 else '')) for rc, c in rules_summary.items())
+        summary = _tpl['Минимальный'].format(prefix=_prefix, fix_count=len(applied),
+                                             user_tag=_user_tag, rules_summary=rules_txt)                                     .replace('  ', ' ').strip()
+        anchors_by_line.setdefault(min(by_line.keys()), []).append(summary)
+    else:
+        tpl = _tpl[_ul]
+        for b in blocks:
+            n = len(b['lines'])
+            suffix = ('x' + str(n)) if n > 1 else ''
+            ai_tag = _ai_tag_fmt if (_enable_ai_tag and b['used_ai']) else ''
+            rule_str = ', '.join(b['rule_codes']) + suffix
+            lo, hi = b['line_start'], b['line_end']
+            line_range = ('Строка ' + str(lo)) if lo == hi else ('Строки ' + str(lo) + '-' + str(hi))
+            marker = tpl.format(prefix=_prefix, ai_tag=ai_tag, date=_date_str,
+                                user_tag=_user_tag, rule_code=rule_str,
+                                line_range=line_range).replace('  ', ' ').strip()
+            if ai_tag and ('{ai_tag}' not in tpl):
+                _tag = '|' + ai_tag
+                for _sep in ('|Строка ', '|Строки '):
+                    if _sep in marker:
+                        marker = marker.replace(_sep, _tag + _sep, 1)
+                        break
+            anchors_by_line.setdefault(lo, []).append(marker)
+            if _ul == 'Подробный' and hi > lo:
+                for ln in b['lines']:
+                    if ln == lo:
+                        continue
+                    _lr = 'Строка ' + str(ln)
+                    sub = tpl.format(prefix=_prefix, ai_tag=ai_tag, date=_date_str,
+                                     user_tag=_user_tag, rule_code=rule_str,
+                                     line_range=_lr).replace('  ', ' ').strip()
+                    if ai_tag and ('{ai_tag}' not in tpl):
+                        _tag = '|' + ai_tag
+                        for _sep in ('|Строка ', '|Строки '):
+                            if _sep in sub:
+                                sub = sub.replace(_sep, _tag + _sep, 1)
+                                break
+                    anchors_by_line.setdefault(ln, []).append(sub)
+    return anchors_by_line
+
+
 def apply_fixes(file_path: Path, fixes: List[dict],
                 conf_low: float = CONF_MEDIUM,
-                conf_high: float = CONF_AUTO) -> Dict[str, object]:
+                conf_high: float = CONF_AUTO,
+                mark_in_code: bool = False,
+                clean_output: bool = False,
+                log_level: str = 'Обычный',
+                anchor_settings: Optional[dict] = None,
+                user: str = '') -> Dict[str, object]:
     """Применить исправления к файлу по порогам confidence.
 
     DS_088a_fix §2.4: conf_low/conf_high — опциональные пороги (по умолчанию
@@ -354,7 +464,7 @@ def apply_fixes(file_path: Path, fixes: List[dict],
     file_path = Path(file_path)
     lines, enc, newline = _read_lines(file_path)
     stats = {'applied_auto': 0, 'applied_medium': 0, 'needs_manual': 0,
-             'skipped': 0, 'changes': []}
+             'skipped': 0, 'changes': [], 'anchors': 0}
 
     # Нормализуем номера строк и сортируем по убыванию, чтобы замены
     # не сдвигали индексы нижних строк.
@@ -418,6 +528,27 @@ def apply_fixes(file_path: Path, fixes: List[dict],
             stats['applied_medium'] += 1
         detail['after'] = new_line
         stats['changes'].append(detail)
+
+    # DS_184: МПК-якоря для AI-правок (аналог CodeFixer._insert_anchors).
+    # Ставятся только для применённых правок; номера строк — исходные (до вставки).
+    if (mark_in_code and not clean_output
+            and (stats['applied_auto'] or stats['applied_medium'])):
+        _applied = [ch for ch in stats['changes']
+                    if ch.get('kind') in ('auto', 'medium')]
+        for _ch in _applied:
+            _ch['used_ai'] = True
+        _anchors = _build_ai_anchors(_applied, log_level, anchor_settings, user)
+        if _anchors:
+            _new_lines = []
+            for _idx, _line in enumerate(lines):
+                _ln = _idx + 1
+                if _ln in _anchors:
+                    _lead = _line[:len(_line) - len(_line.lstrip())] if _line.strip() else ''
+                    for _mk in _anchors[_ln]:
+                        _new_lines.append(_lead + _mk)
+                    stats['anchors'] += len(_anchors[_ln])
+                _new_lines.append(_line)
+            lines = _new_lines
 
     # Запись только если были применения.
     if stats['applied_auto'] or stats['applied_medium']:
@@ -514,7 +645,13 @@ def _preai_target_dir(source: Path, base: Optional[Path] = None) -> Path:
 def process_response(response_path: Path, base: Optional[Path] = None,
                      backup: bool = True,
                      conf_low: float = CONF_MEDIUM,
-                     conf_high: float = CONF_AUTO) -> Dict[str, object]:
+                     conf_high: float = CONF_AUTO,
+                     mark_in_code: bool = False,
+                     clean_output: bool = False,
+                     log_level: str = 'Обычный',
+                     anchor_settings: Optional[dict] = None,
+                     user: str = '',
+                     ignore: bool = False) -> Dict[str, object]:
     """Обработать один файл-ответ: применить исправления, заархивировать.
 
     DS_088a_fix §2.4: conf_low/conf_high — опциональные пороги (дефолты —
@@ -569,7 +706,12 @@ def process_response(response_path: Path, base: Optional[Path] = None,
         except Exception:
             pass
 
-    stats = apply_fixes(Path(source), fixes, conf_low, conf_high)
+    stats = apply_fixes(Path(source), fixes, conf_low, conf_high,
+                        mark_in_code=mark_in_code,
+                        clean_output=clean_output,
+                        log_level=log_level,
+                        anchor_settings=anchor_settings,
+                        user=user)
     # DS_081 §2.3: код правила берём из файла-запроса (в ответе AI его нет).
     rule_by_line = _rule_map_from_request(req_path)
     if rule_by_line:
@@ -591,7 +733,13 @@ def process_response(response_path: Path, base: Optional[Path] = None,
 def process_all_responses(base: Optional[Path] = None,
                           backup: bool = True,
                           conf_low: float = CONF_MEDIUM,
-                          conf_high: float = CONF_AUTO) -> List[Dict[str, object]]:
+                          conf_high: float = CONF_AUTO,
+                          mark_in_code: bool = False,
+                          clean_output: bool = False,
+                          log_level: str = 'Обычный',
+                          anchor_settings: Optional[dict] = None,
+                          user: str = '',
+                          ignore: bool = False) -> List[Dict[str, object]]:
     """Обработать все файлы-ответы в AI_OUT (по возрастанию имён).
 
     DS_088a_fix §2.4: conf_low/conf_high — опциональные пороги (дефолты —
@@ -604,7 +752,12 @@ def process_all_responses(base: Optional[Path] = None,
     results = []
     for f in files:
         results.append(process_response(f, base=base, backup=backup,
-                                        conf_low=conf_low, conf_high=conf_high))
+                                        conf_low=conf_low, conf_high=conf_high,
+                                        mark_in_code=mark_in_code,
+                                        clean_output=clean_output,
+                                        log_level=log_level,
+                                        anchor_settings=anchor_settings,
+                                        user=user, ignore=ignore))
     return results
 
 

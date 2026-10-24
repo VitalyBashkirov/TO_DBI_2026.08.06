@@ -6055,8 +6055,16 @@ class DBIMigrationApp:
             # DS_088a_fix §2.4: пороги confidence из settings.json/полей формы.
             _conf_low, _conf_high = self._confidence_thresholds()
             self.log(f"Пороги confidence: low={_conf_low}, high={_conf_high}", 'info')
+            _fix_flags_now = self._current_fix_flags()
+            _settings_now = self._read_settings_json()
             results = ai_exchange.process_all_responses(
-                backup=True, conf_low=_conf_low, conf_high=_conf_high)
+                backup=True, conf_low=_conf_low, conf_high=_conf_high,
+                mark_in_code=bool(self.mark_in_code_var.get()),
+                clean_output=bool(self.clean_output_var.get()),
+                log_level=self.log_level_var.get(),
+                anchor_settings=_settings_now.get('anchor_settings', {}) or {},
+                user=(_settings_now.get('user') or ''),
+                ignore=bool(_fix_flags_now.get('ignore', False)))
             # DS_081 §2.2: структурированная сводка — строки в журнал +
             # корзины by_confidence для артефакта needs_manual.
             summary = ai_exchange.summarize(results, structured=True)

@@ -217,7 +217,7 @@ class DBIMigrationApp:
         # считается от него — см. _adjust_window_height().
         self._ui_base_geometry = (W, H)
         # DS_087 §2.5: minsize согласован с UI_MIN_WINDOW_HEIGHT = 400 (DS_086).
-        self.root.minsize(1026, 1000)  # DS_149g2: min width 1200 -> 900
+        self.root.minsize(1026, UI_MIN_WINDOW_HEIGHT)  # DS_086_fix: было 1000 (DS_149g2) — конфликт с UI_MIN_WINDOW_HEIGHT=400, скрытие не уменьшало окно
 
 
         

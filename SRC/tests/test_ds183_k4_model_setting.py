@@ -51,16 +51,28 @@ def test_t3_save_settings_roundtrip():
         assert False, "settings.json отсутствует"
     shutil.copy2(SETTINGS, BACKUP)
     try:
+        try:
+            root.update_idletasks()  # проглотить .after до destroy
+        except Exception:
+            pass
         import tkinter as tk
         gui_app.DBIMigrationApp._check_log_size = lambda self: None
         _orig_warn = gui_app.messagebox.showwarning
         gui_app.messagebox.showwarning = lambda *a, **k: None
         root = tk.Tk()
         try:
+            try:
+                root.update_idletasks()  # проглотить .after до destroy
+            except Exception:
+                pass
             root.attributes("-alpha", 0.0)
         except Exception:
             root.withdraw()
         try:
+            try:
+                root.update_idletasks()  # проглотить .after до destroy
+            except Exception:
+                pass
             app = gui_app.DBIMigrationApp(root)
             root.update()
             app.k4_model_var.set("qwen2.5-coder:7b")
@@ -76,7 +88,18 @@ def test_t3_save_settings_roundtrip():
                   ok_save and ok_load,
                   f"save={data.get('k4_model')} load={app.k4_model_var.get()}")
             try:
-                root.destroy()
+                try:
+                    root.update_idletasks()  # проглотить .after до destroy
+                except Exception:
+                    pass
+                try:
+                    try:
+                        root.update_idletasks()  # проглотить .after до destroy
+                    except Exception:
+                        pass
+                    root.destroy()
+                except Exception:
+                    pass  # destroy in try: Tk .after may fire after widgets destroyed
             except Exception:
                 pass
             assert ok_save and ok_load, f"save={data.get('k4_model')} load={app.k4_model_var.get()}"
@@ -86,6 +109,10 @@ def test_t3_save_settings_roundtrip():
         if os.path.exists(BACKUP):
             shutil.copy2(BACKUP, SETTINGS)
             try:
+                try:
+                    root.update_idletasks()  # проглотить .after до destroy
+                except Exception:
+                    pass
                 os.remove(BACKUP)
             except Exception:
                 pass
@@ -101,6 +128,10 @@ def test_t4_load_7b_does_not_show_dialog():
     _orig_warn = gui_app.messagebox.showwarning
     gui_app.messagebox.showwarning = lambda *a, **k: calls.__setitem__("warn", calls["warn"] + 1) or False
     try:
+        try:
+            root.update_idletasks()  # проглотить .after до destroy
+        except Exception:
+            pass
         with io.open(SETTINGS, "r", encoding="utf-8") as f:
             data = json.load(f)
         data["k4_model"] = "qwen2.5-coder:7b"
@@ -110,10 +141,18 @@ def test_t4_load_7b_does_not_show_dialog():
         gui_app.DBIMigrationApp._check_log_size = lambda self: None
         root = tk.Tk()
         try:
+            try:
+                root.update_idletasks()  # проглотить .after до destroy
+            except Exception:
+                pass
             root.attributes("-alpha", 0.0)
         except Exception:
             root.withdraw()
         try:
+            try:
+                root.update_idletasks()  # проглотить .after до destroy
+            except Exception:
+                pass
             app = gui_app.DBIMigrationApp(root)
             root.update()
             app.load_settings()
@@ -121,7 +160,18 @@ def test_t4_load_7b_does_not_show_dialog():
             check(4, "load_settings 7b: var=7b, showwarning НЕ вызван", ok,
                   f"var={app.k4_model_var.get()} warn={calls['warn']}")
             try:
-                root.destroy()
+                try:
+                    root.update_idletasks()  # проглотить .after до destroy
+                except Exception:
+                    pass
+                try:
+                    try:
+                        root.update_idletasks()  # проглотить .after до destroy
+                    except Exception:
+                        pass
+                    root.destroy()
+                except Exception:
+                    pass  # destroy in try: Tk .after may fire after widgets destroyed
             except Exception:
                 pass
             assert ok, f"var={app.k4_model_var.get()} warn={calls['warn']}"
@@ -132,6 +182,10 @@ def test_t4_load_7b_does_not_show_dialog():
         if os.path.exists(BACKUP):
             shutil.copy2(BACKUP, SETTINGS)
             try:
+                try:
+                    root.update_idletasks()  # проглотить .after до destroy
+                except Exception:
+                    pass
                 os.remove(BACKUP)
             except Exception:
                 pass
@@ -146,6 +200,10 @@ def test_t5_argv_has_model():
         if fn is None:
             continue
         try:
+            try:
+                root.update_idletasks()  # проглотить .after до destroy
+            except Exception:
+                pass
             cands.append((name, inspect.getsource(fn)))
         except Exception as e:
             print("  [warn] getsource({}): {}".format(name, e))
@@ -165,9 +223,54 @@ def test_t5_argv_has_model():
     assert ok, detail
 
 
+def test_t6_local_override():
+    """DS_183b: local_settings.apply_local_k4_override читает %APPDATA%\TO_DBI\<HOST>.local.json."""
+    import tempfile
+    from pathlib import Path
+    import local_settings as ls
+    common = "qwen2.5-coder:3b"
+    # 1) нет файла -> fallback на common
+    with tempfile.TemporaryDirectory() as td:
+        got = ls.apply_local_k4_override(common, computer_name="HOST_A", appdata=td)
+        assert got == common, f"no-file: got={got}"
+    # 2) файл с k4_model=7b -> 7b
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td) / "TO_DBI"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "HOST_A.local.json").write_text('{"k4_model": "qwen2.5-coder:7b"}', encoding="utf-8")
+        got = ls.apply_local_k4_override(common, computer_name="HOST_A", appdata=td)
+        assert got == "qwen2.5-coder:7b", f"file-7b: got={got}"
+    # 3) другой хост -> fallback (изоляция per-host)
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td) / "TO_DBI"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "HOST_A.local.json").write_text('{"k4_model": "qwen2.5-coder:7b"}', encoding="utf-8")
+        got = ls.apply_local_k4_override(common, computer_name="HOST_B", appdata=td)
+        assert got == common, f"other-host: got={got}"
+    # 4) битый JSON -> fallback
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td) / "TO_DBI"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "HOST_A.local.json").write_text('{not json}', encoding="utf-8")
+        got = ls.apply_local_k4_override(common, computer_name="HOST_A", appdata=td)
+        assert got == common, f"broken-json: got={got}"
+    # 5) пустой k4_model -> fallback
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td) / "TO_DBI"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "HOST_A.local.json").write_text('{"k4_model": ""}', encoding="utf-8")
+        got = ls.apply_local_k4_override(common, computer_name="HOST_A", appdata=td)
+        assert got == common, f"empty-model: got={got}"
+    check(6, "DS_183b: per-host override (5 сценариев)", True, "ok")
+
+
 def _run(fn):
     """Standalone-раннер: ловит AssertionError, возвращает bool."""
     try:
+        try:
+            root.update_idletasks()  # проглотить .after до destroy
+        except Exception:
+            pass
         fn()
         return True
     except AssertionError as e:
@@ -181,7 +284,8 @@ def main():
     t3 = _run(test_t3_save_settings_roundtrip)
     t4 = _run(test_t4_load_7b_does_not_show_dialog)
     t5 = _run(test_t5_argv_has_model)
-    ok_all = all([t1, t2, t3, t4, t5])
+    ok_all = all([t1, t2, t3, t4, t5, t6])
+    t6 = _run(test_t6_local_override)
     print("\nDS_183 SUMMARY:", "OK" if ok_all else "FAIL")
     return 0 if ok_all else 1
 

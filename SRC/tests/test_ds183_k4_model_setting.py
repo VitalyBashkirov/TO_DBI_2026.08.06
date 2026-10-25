@@ -246,7 +246,7 @@ def test_t5_argv_has_model():
 
 
 def test_t6_local_override():
-    """DS_183b: local_settings.apply_local_k4_override читает %APPDATA%\TO_DBI\<HOST>.local.json."""
+    r"""DS_183b: local_settings.apply_local_k4_override читает %APPDATA%\TO_DBI\<HOST>.local.json."""
     import tempfile
     from pathlib import Path
     import local_settings as ls
@@ -289,10 +289,6 @@ def test_t6_local_override():
 def _run(fn):
     """Standalone-раннер: ловит AssertionError, возвращает bool."""
     try:
-        try:
-            root.update_idletasks()  # проглотить .after до destroy
-        except Exception:
-            pass
         fn()
         return True
     except AssertionError as e:
@@ -306,8 +302,8 @@ def main():
     t3 = _run(test_t3_save_settings_roundtrip)
     t4 = _run(test_t4_load_7b_does_not_show_dialog)
     t5 = _run(test_t5_argv_has_model)
-    ok_all = all([t1, t2, t3, t4, t5, t6])
     t6 = _run(test_t6_local_override)
+    ok_all = all([t1, t2, t3, t4, t5, t6])
     print("\nDS_183 SUMMARY:", "OK" if ok_all else "FAIL")
     return 0 if ok_all else 1
 

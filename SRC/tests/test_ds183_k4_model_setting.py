@@ -97,7 +97,13 @@ def test_t3_save_settings_roundtrip():
                         root.update_idletasks()  # проглотить .after до destroy
                     except Exception:
                         pass
-                    root.destroy()
+                    try:
+                        app.on_close()
+                    except Exception:
+                        try:
+                            root.destroy()
+                        except Exception:
+                            pass
                 except Exception:
                     pass  # destroy in try: Tk .after may fire after widgets destroyed
             except Exception:
@@ -169,7 +175,13 @@ def test_t4_load_7b_does_not_show_dialog():
                         root.update_idletasks()  # проглотить .after до destroy
                     except Exception:
                         pass
-                    root.destroy()
+                    try:
+                        app.on_close()
+                    except Exception:
+                        try:
+                            root.destroy()
+                        except Exception:
+                            pass
                 except Exception:
                     pass  # destroy in try: Tk .after may fire after widgets destroyed
             except Exception:

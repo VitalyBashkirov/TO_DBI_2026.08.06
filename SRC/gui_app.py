@@ -201,6 +201,8 @@ class DBIMigrationApp:
     
     def __init__(self, root):
         self.root = root
+        self._closing = False          # DS_185: флаг закрытия окна
+        self._after_ids = set()        # DS_185: активные root.after-id
         self.root.title(APP_TITLE)
         # DS_087 §2.5: размер окна 1600×900; если экран меньше — во весь экран;
         # центрирование. _ui_base_geometry (DS_086) синхронизируется с фактическим
@@ -2489,7 +2491,30 @@ class DBIMigrationApp:
         self.archive_result_var.trace_add('write', lambda *args: self._update_main_buttons())
         
         # Привязка события изменения выбора в рубрикаторе
-        self.root.after(100, self._update_buttons_state)
+        # DS_185: отложенный вызов через _safe_after (проверка _closing, отмена при on_close)
+        self._safe_after(100, self._update_buttons_state)
+
+    def _safe_after(self, delay_ms, callback):
+        """DS_185: безопасный root.after — не срабатывает после on_close."""
+        holder = {'aid': None}
+        def _wrapper():
+            if holder['aid'] is not None:
+                self._after_ids.discard(holder['aid'])
+            if self._closing:
+                return
+            try:
+                if not self.root.winfo_exists():
+                    return
+            except Exception:
+                return
+            try:
+                callback()
+            except Exception:
+                pass
+        aid = self.root.after(delay_ms, _wrapper)
+        holder['aid'] = aid
+        self._after_ids.add(aid)
+        return aid
 
     def _attach_context_menu(self, widget, is_text=False):
         """DS_088b §2.3: контекстное меню (ПКМ) для Entry/Text.
@@ -5610,6 +5635,14 @@ class DBIMigrationApp:
     
     def on_close(self):
         """Закрытие приложения"""
+        # DS_185: сначала отменяем отложенные after-id, затем destroy.
+        self._closing = True
+        for aid in list(self._after_ids):
+            try:
+                self.root.after_cancel(aid)
+            except Exception:
+                pass
+        self._after_ids.clear()
         self.save_settings()
         self.log("Настройки сохранены. Приложение закрывается...", 'info')
         self.root.destroy()

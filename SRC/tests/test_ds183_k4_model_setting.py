@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """DS_183 — тесты 1–5: K4 модель (3b/7b) в GUI + settings.json + argv воркера.
 
 Без запуска GUI-цикла и без Ollama/сети.
@@ -33,7 +33,7 @@ def test_t1_settings_file_default():
         data = json.load(f)
     ok = "k4_model" in data and data["k4_model"] in ("qwen2.5-coder:3b", "qwen2.5-coder:7b")
     check(1, "settings.json: k4_model присутствует, значение 3b/7b", ok, data.get("k4_model"))
-    return ok
+    assert ok, f"k4_model={data.get('k4_model')}"
 
 
 def test_t2_default_3b():
@@ -41,14 +41,14 @@ def test_t2_default_3b():
     src = inspect.getsource(gui_app.DBIMigrationApp.load_settings)
     ok = "k4_model" in src and "qwen2.5-coder:3b" in src
     check(2, "load_settings: default qwen2.5-coder:3b + валидация", ok)
-    return ok
+    assert ok, "load_settings: default 3b/валидация не найдены"
 
 
 def test_t3_save_settings_roundtrip():
     """save_settings пишет k4_model; load_settings читает его обратно."""
     if not os.path.exists(SETTINGS):
         check(3, "save/load roundtrip", False, "settings.json отсутствует")
-        return False
+        assert False, "settings.json отсутствует"
     shutil.copy2(SETTINGS, BACKUP)
     try:
         import tkinter as tk
@@ -79,7 +79,7 @@ def test_t3_save_settings_roundtrip():
                 root.destroy()
             except Exception:
                 pass
-            return ok_save and ok_load
+            assert ok_save and ok_load, f"save={data.get('k4_model')} load={app.k4_model_var.get()}"
         finally:
             gui_app.messagebox.showwarning = _orig_warn
     finally:
@@ -95,7 +95,7 @@ def test_t4_load_7b_does_not_show_dialog():
     """load_settings с 7b: log(warning), но showwarning НЕ вызывается."""
     if not os.path.exists(SETTINGS):
         check(4, "load 7b без диалога", False, "settings.json отсутствует")
-        return False
+        assert False, "settings.json отсутствует"
     shutil.copy2(SETTINGS, BACKUP)
     calls = {"warn": 0}
     _orig_warn = gui_app.messagebox.showwarning
@@ -124,7 +124,7 @@ def test_t4_load_7b_does_not_show_dialog():
                 root.destroy()
             except Exception:
                 pass
-            return ok
+            assert ok, f"var={app.k4_model_var.get()} warn={calls['warn']}"
         finally:
             pass
     finally:
@@ -165,12 +165,22 @@ def test_t5_argv_has_model():
     assert ok, detail
 
 
+def _run(fn):
+    """Standalone-раннер: ловит AssertionError, возвращает bool."""
+    try:
+        fn()
+        return True
+    except AssertionError as e:
+        print("  [assert]", e)
+        return False
+
+
 def main():
-    t1 = t1_settings_file_default()
-    t2 = t2_default_3b()
-    t3 = t3_save_settings_roundtrip()
-    t4 = t4_load_7b_does_not_show_dialog()
-    t5 = t5_argv_has_model()
+    t1 = _run(test_t1_settings_file_default)
+    t2 = _run(test_t2_default_3b)
+    t3 = _run(test_t3_save_settings_roundtrip)
+    t4 = _run(test_t4_load_7b_does_not_show_dialog)
+    t5 = _run(test_t5_argv_has_model)
     ok_all = all([t1, t2, t3, t4, t5])
     print("\nDS_183 SUMMARY:", "OK" if ok_all else "FAIL")
     return 0 if ok_all else 1

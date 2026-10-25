@@ -49,7 +49,11 @@ def test_t3_save_settings_roundtrip():
     if not os.path.exists(SETTINGS):
         check(3, "save/load roundtrip", False, "settings.json отсутствует")
         assert False, "settings.json отсутствует"
-    shutil.copy2(SETTINGS, BACKUP)
+    try:
+        shutil.copy2(SETTINGS, BACKUP)
+    except Exception as e:
+        check(3, "save/load roundtrip", False, f"backup failed: {e}")
+        raise
     try:
         try:
             root.update_idletasks()  # проглотить .after до destroy
@@ -112,16 +116,17 @@ def test_t3_save_settings_roundtrip():
         finally:
             gui_app.messagebox.showwarning = _orig_warn
     finally:
-        if os.path.exists(BACKUP):
-            shutil.copy2(BACKUP, SETTINGS)
+        if not os.path.exists(BACKUP):
+            raise RuntimeError("DS_186: BACKUP missing in t3 finally")
+        shutil.copy2(BACKUP, SETTINGS)
+        try:
             try:
-                try:
-                    root.update_idletasks()  # проглотить .after до destroy
-                except Exception:
-                    pass
-                os.remove(BACKUP)
+                root.update_idletasks()  # проглотить .after до destroy
             except Exception:
                 pass
+            os.remove(BACKUP)
+        except Exception:
+            pass
 
 
 def test_t4_load_7b_does_not_show_dialog():
@@ -129,7 +134,11 @@ def test_t4_load_7b_does_not_show_dialog():
     if not os.path.exists(SETTINGS):
         check(4, "load 7b без диалога", False, "settings.json отсутствует")
         assert False, "settings.json отсутствует"
-    shutil.copy2(SETTINGS, BACKUP)
+    try:
+        shutil.copy2(SETTINGS, BACKUP)
+    except Exception as e:
+        check(4, "load 7b", False, f"backup failed: {e}")
+        raise
     calls = {"warn": 0}
     _orig_warn = gui_app.messagebox.showwarning
     gui_app.messagebox.showwarning = lambda *a, **k: calls.__setitem__("warn", calls["warn"] + 1) or False
@@ -191,16 +200,17 @@ def test_t4_load_7b_does_not_show_dialog():
             pass
     finally:
         gui_app.messagebox.showwarning = _orig_warn
-        if os.path.exists(BACKUP):
-            shutil.copy2(BACKUP, SETTINGS)
+        if not os.path.exists(BACKUP):
+            raise RuntimeError("DS_186: BACKUP missing in t4 finally")
+        shutil.copy2(BACKUP, SETTINGS)
+        try:
             try:
-                try:
-                    root.update_idletasks()  # проглотить .after до destroy
-                except Exception:
-                    pass
-                os.remove(BACKUP)
+                root.update_idletasks()  # проглотить .after до destroy
             except Exception:
                 pass
+            os.remove(BACKUP)
+        except Exception:
+            pass
 
 
 def test_t5_argv_has_model():

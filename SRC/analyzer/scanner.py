@@ -960,7 +960,7 @@ class PLPlusScanner:
                 # 'ref [CLASS]' — нормализуем к 'ref'
                 if type_str.lower().startswith('ref'):
                     type_str = 'ref'
-                elif type_str.lower() == 'in':
+                elif re.match(r'^in\s*\[', type_str, re.IGNORECASE):
                     type_str = 'in'
                 yield i, var_name, type_str, sections.get(i, 'PRIVATE') == 'EXECUTE'
     

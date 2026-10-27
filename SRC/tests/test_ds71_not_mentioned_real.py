@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """DS_71: NOT_MENTIONED на реальных неиспользуемых объявлениях.
 
 Проверяет расширение _plp_iter_declarations (форма NAME in [TYPE]) и
@@ -48,6 +48,9 @@ def test_iter_declarations_in_type():
     names = {d[1] for d in decls}
     assert "v_unused_in" in names, f"in [TYPE] не распознан; декларации: {decls}"
     assert "r_ref" in names
+    for d in decls:
+        if d[1] in ("v_unused_in", "r_ref"):
+            assert d[2] == "in", f"{d[1]}: type_str={d[2]!r}"
     # базовые типы не должны превращаться в in
     for d in decls:
         if d[1] in ("v_local", "v_m", "v_b", "v_used"):

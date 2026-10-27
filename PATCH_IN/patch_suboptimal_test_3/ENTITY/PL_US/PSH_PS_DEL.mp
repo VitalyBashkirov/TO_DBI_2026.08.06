@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MethodPresentation classId="PL_US" formatVersion="1.2" shortName="PSH_PS_DEL">
+    <Properties>
+        <UserDriven>true</UserDriven>
+    </Properties>
+    <Parameters/>
+    <Variables/>
+    <Controls>
+        <Form>
+            <Properties>
+                <Caption>[ПСБ] Удалить признак счета</Caption>
+                <Height>121</Height>
+                <ValidateName>Form1</ValidateName>
+                <Width>497</Width>
+            </Properties>
+            <Controls>
+                <Object>
+                    <Properties>
+                        <Caption>Признак счета</Caption>
+                        <ClassId>PS$</ClassId>
+                        <Height>24</Height>
+                        <Left>8</Left>
+                        <Qualifier>%PARAM%.P_PS</Qualifier>
+                        <TabIndex>1</TabIndex>
+                        <Tips>Объект: Признак счета</Tips>
+                        <Top>8</Top>
+                        <ValidateName>Object1</ValidateName>
+                        <Width>124</Width>
+                    </Properties>
+                </Object>
+                <Button>
+                    <Properties>
+                        <Caption>OK</Caption>
+                        <Height>24</Height>
+                        <Left>124</Left>
+                        <Qualifier>OK</Qualifier>
+                        <TabIndex>3</TabIndex>
+                        <Tips>Выполнить операцию</Tips>
+                        <Top>80</Top>
+                        <ValidateName>Ok</ValidateName>
+                        <Width>144</Width>
+                    </Properties>
+                </Button>
+                <Button>
+                    <Properties>
+                        <Caption>Отмена</Caption>
+                        <Height>24</Height>
+                        <Left>276</Left>
+                        <Qualifier>CANCEL</Qualifier>
+                        <TabIndex>4</TabIndex>
+                        <Tips>Отказ от выполнения</Tips>
+                        <Top>80</Top>
+                        <ValidateName>Cancel</ValidateName>
+                        <Width>144</Width>
+                    </Properties>
+                </Button>
+                <Text>
+                    <Properties>
+                        <ClassId>STRING_20</ClassId>
+                        <Depend>%PARAM%.P_PS</Depend>
+                        <Height>24</Height>
+                        <Left>136</Left>
+                        <Qualifier>%PARAM%.P_PS.PS_CODE</Qualifier>
+                        <TabIndex>61</TabIndex>
+                        <Tips>Краткое наименование</Tips>
+                        <Top>8</Top>
+                        <ValidateName>Text2</ValidateName>
+                        <Width>352</Width>
+                    </Properties>
+                </Text>
+                <Label>
+                    <Properties>
+                        <Caption>Наименование</Caption>
+                        <Height>24</Height>
+                        <Left>8</Left>
+                        <Qualifier>%PARAM%.P_PS.PS_NAME</Qualifier>
+                        <TabIndex>0</TabIndex>
+                        <Tips>Поясняющая надпись (Наименование)</Tips>
+                        <Top>36</Top>
+                        <ValidateName>Label2</ValidateName>
+                        <Width>124</Width>
+                    </Properties>
+                </Label>
+                <Text>
+                    <Properties>
+                        <ClassId>STRING_100</ClassId>
+                        <Depend>%PARAM%.P_PS</Depend>
+                        <Height>24</Height>
+                        <Left>136</Left>
+                        <Qualifier>%PARAM%.P_PS.PS_NAME</Qualifier>
+                        <TabIndex>63</TabIndex>
+                        <Tips>Наименование</Tips>
+                        <Top>36</Top>
+                        <ValidateName>Text3</ValidateName>
+                        <Width>352</Width>
+                    </Properties>
+                </Text>
+            </Controls>
+        </Form>
+    </Controls>
+</MethodPresentation>

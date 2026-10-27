@@ -1,0 +1,5 @@
+-- sample_bad_prefix.plp
+procedure sample_bad_prefix is
+begin
+    vStr varchar2(10);
+end;

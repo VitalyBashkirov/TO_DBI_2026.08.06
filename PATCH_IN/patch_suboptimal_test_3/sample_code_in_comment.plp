@@ -1,0 +1,5 @@
+-- sample_code_in_comment.plp
+procedure sample_code_in_comment is
+begin
+    null; -- v_x := 1;
+end;

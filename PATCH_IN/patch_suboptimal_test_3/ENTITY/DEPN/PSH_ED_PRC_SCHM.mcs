@@ -1,0 +1,5 @@
+Public Function Main(LastControl)
+	Main = true
+	Execute V_DEST_STR.TEXT
+	V_DEST_STR.TEXT = ""
+End Function

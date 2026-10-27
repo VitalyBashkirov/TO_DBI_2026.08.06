@@ -132,3 +132,11 @@ PS/CHAT_RULES/Скрипты чатов/_w.py
 PS/CHAT_RULES/Скрипты чатов/analysis_results.json
 PS/CHAT_RULES/Скрипты чатов/chat67_03b_results/
 PS/CHAT_RULES/Скрипты чатов/chat67_03c_results/
+# 75_02: долг 1 — не коммитить
+EXCHANGE/
+*.bat
+*.lnk
+SRC/settings.json
+test_all_models.ps1
+free_memory.ps1
+free_memory_profiles.txt

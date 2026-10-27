@@ -1,0 +1,4 @@
+                if type_str.lower().startswith('ref'):
+                    type_str = 'ref'
+                elif type_str.lower().startswith('in'):
+                    type_str = 'in'

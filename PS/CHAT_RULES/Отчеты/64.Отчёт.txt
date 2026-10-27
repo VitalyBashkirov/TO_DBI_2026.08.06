@@ -1,0 +1,54 @@
+============================================
+  64.ОТЧЁТ (чат 64, 2026-10-25)
+  Хост: LGGRAMA8V7Q8U (hostTag=LG)
+============================================
+
+## Итог
+
+- HEAD = dcbec34, push OK (58cdf27..dcbec34).
+- pytest: 6 passed (t3/t4), 378 passed, 3 warnings (шум \\s).
+- t3/t4 ЗАКРЫТ: try/finally settings.json (restore + remove backup + WARN, не бросаем).
+- A8 ЗАКРЫТ документально (08_Окружение.md, 64.Старт.txt).
+
+## Шаги
+
+| # | Файл | Результат |
+|---|---|---|
+| 64_01 | 64.Старт.txt (Где искать правила) | OK, путь 01-08 -> подпапка |
+| 64_02a | 00_INDEX.md restore (6622 b) | OK |
+| 64_02b | 00_INDEX.md paths | OK (префикс подпапки) |
+| 64_03 | 01_Правила_PS.md + 64_1..64_4 | OK (.ps1 с BOM) |
+| 64_04 | 08_Окружение.md, 64.Старт.txt (A8) | OK |
+| 64_05 | проверка A8 | RESULT=64_04_APPLIED |
+| 64_06 | test_ds183_k4_model_setting.py t3/t4 | OK, commit dcbec34, push OK |
+| 64_07 | 01_Правила_PS.md + 64_10 | OK |
+| 64_08 | 00_INDEX.md (долги) | OK |
+
+## Новые правила
+
+- 64_1: генерация .ps1/.py только PS-кодом в Скрипты чатов\, запуск одним блоком.
+- 64_2: многострочные блоки, меняющие файлы — .ps1 + -File; throw не останавливает; бэкап до записи; WriteAllText последней.
+- 64_3: Clear-Host — первая команда в новом PS-сеансе.
+- 64_4: BOM/кодировка по расширению (.ps1/.py BOM; .md/.txt/.json/msgfile no-BOM).
+- 64_10: удаление нулевых логов — не трогать активный лог (исключать по имени/LastWriteTime).
+
+## Инциденты
+
+- 00_INDEX.md был затёрт пустым $idx (построчная вставка, throw не остановил) — восстановлен из бэкапа подпапки.
+- chat64_02b .ps1 с here-string внутри $L — parse error; переписан без here-string.
+- chat64_06_patch.py: str(e) на верхнем уровне -> NameError; заменено на {e} в f-string.
+- chat64_06 dvojnoj BOM (\ufeff\ufeff) -> AST SyntaxError; read utf-8-sig, write utf-8-sig.
+- chat64_06 AST в .ps1 с encoding='utf-8' -> U+FEFF; заменено на utf-8-sig.
+- chat64_06 Remove-Item активного лога -> gen_exitcode=1 (при зелёных тестах) -> правило 64_10.
+
+## Артефакты
+
+- Скрипты чатов\: chat64_02b_apply_paths.ps1 (удалён), chat64_03_add_rules.ps1, chat64_06_patch.py, chat64_06_fix_t3t4.ps1, chat64_06_fix_bom.py, chat64_07_add_rule_64_10.ps1.
+- Логи F:\TO_DBI\PS\LG_64_*.log.
+- Бэкапы: CHAT_RULES\_backup_path_fix\.
+
+## Что дальше (чат 65)
+
+- 64_10 — применить в 07_Шаблон_PS.md (обновить шаблон).
+- Мониторить \\s-warnings (шум).
+- Не коммитить EXCHANGE/bot.log, *.ds183bak.

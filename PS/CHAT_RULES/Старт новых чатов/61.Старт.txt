@@ -1,0 +1,84 @@
+﻿============================================
+  61.СТАРТ (сгенерировано 2026-10-25 из чата 60)
+  Хост: LGGRAMA8V7Q8U (hostTag=LG)
+  Python: C:\Users\ainf1\AppData\Local\Programs\Python\Python312\python.exe
+============================================
+
+## Где искать правила (ОБЯЗАТЕЛЬНО в новом чате)
+
+F:\TO_DBI\PS\CHAT_RULES\ — единое место:
+  1. 00_INDEX.md              — карта, порядок чтения, долги
+  2. 01_Правила_PS.md         — правила PS 5.1 (1–13, 60_1..60_9)
+  3. 02_Сокращения_GUI.md     — К1–К4, ОР, ГТ, ИКА, КР, ПК, МПК, ВТИК, НеАФ, УЛ/УЛМ/УЛП, ЖВ, ПОР, ПСВ
+  4. 03_Матрица_флагов.md     — МПК/ВТИК/НеАФ -> Я/П/В
+  5. 04_Регламент_логов.md    — путь, имя, Start-Transcript, pytest-выхлоп
+  6. 05_Регламент_тестов.md   — -W error::..., EAP=Continue, регресс
+  7. 06_Регламент_коммитов.md — msgfile без BOM, -F, push, два пути
+  8. 07_Шаблон_PS.md          — шаблон .ps1
+  9. 08_Окружение.md          — LG/MBE, python, сервисы, DS_183b, долги
+
+  Отчеты\              — 6 файлов (49, 50, 53, 54, 55, 60)
+  Скрипты чатов\       — +chat60_*
+  Старт новых чатов\   — 21..26, 27..47, 49..56, 59, 61
+
+
+## Статус на 2026-10-25 (после чата 60)
+
+- DS_185 — ЗАКРЫТ, коммит 9d36b0f, push OK
+    gui_app.py: _closing/_after_ids, _safe_after, on_close с after_cancel,
+    строка 2492 -> _safe_after(100, _update_buttons_state).
+    test (t3/t4): root.destroy() -> app.on_close() с fallback.
+    Target: 6 passed. Regress: 378 passed. invalid command name — 0.
+- CHAT_RULES обновлён: 01 (+60_1..60_9), 02 (+ПОР, ПСВ), 00 (долги),
+  Отчеты/60.Отчёт.txt, Старт новых чатов/61.Старт.txt.
+
+## Долги чата 60 -> 61
+
+1. DS_186 (ПОР): t3/t4 — гарантированный откат settings.json
+   (try/finally + copy2(BACKUP, SETTINGS) до первого изменения).
+2. EXCHANGE/* — 2 грязных файла + 54 удалённых в корне F:\TO_DBI\ +
+   gui_app.py.ds185bak (untracked). Разобрать.
+3. A8 — предположительно закрыт через DS_184 (e5459c3, B4).
+4. 49.Отчёт.txt.chat59.bak — удалить (или оставить?).
+
+## Окружение
+
+- LG: LGGRAMA8V7Q8U, python C:\Users\ainf1\...\Python312\python.exe
+- MBE: MateBook, python C:\Users\Виталий\...\Python311\python.exe
+- Репо: F:\TO_DBI\SRC, ветка feature/dockerization, remote origin.
+- HEAD = 9d36b0f. origin/feature/dockerization = 9d36b0f.
+
+## Первые шаги чата 61
+
+1. Прочитать CHAT_RULES\00_INDEX.md -> 01..08.
+2. Взять долг: DS_186 (ПОР).
+3. Действовать по регламентам: 04, 05, 06, 07.
+4. В конце чата — дописать в CHAT_RULES: новые правила, сокращения,
+   отчёты (в Отчеты\), старт 62 (в Старт новых чатов\).
+
+## Правила PS (краткая выжимка, полные — в 01_Правила_PS.md)
+
+1. Логи — F:\TO_DBI\PS\<hostTag>_<чат>_<номер>_<action>.log
+2. hostTag — авто (LGGram*->LG, MateBook*->MBE)
+3. python — авто (Get-Command + fallback)
+4. Удалять нулевые логи после PS
+5. git commit — только -F <msgfile>
+6. Start-Transcript — без -Encoding
+7. Here-string и if/else — только в .ps1, не в интерактивной вставке
+8. "$"var.."" -> ".."
+9. EAP=Continue на pytest-блоки; 0 — верить
+10. Финальная пауза — НИКАКАЯ
+11. msgfile — UTF-8 БЕЗ BOM (UTF8Encoding(False))
+12. Два пути: SRC/tests/test_ds183_k4_model_setting.py (корень репо) / tests/test_ds183_k4_model_setting.py (от F:\TO_DBI\SRC)
+13. Отчёты/старты/скрипты — только в CHAT_RULES
+60_1. PS-сеанс начинать с UTF-8
+60_2. CHAT_RULES в новый чат — копированием файлов, не Get-Content
+60_3. Разведочные Select-String — тоже в лог
+60_4. ПОР — Правило Обязательного Регламента
+60_5. ПСВ — Предложи свой однозначный вариант
+60_6. Get-Clipboard -Raw ненадёжен; длинные .ps1 — WriteAllText + ASCII here-string / Python-helper
+60_7. Start-Transcript — в КАЖДОМ шаге
+60_8. Python-helper UTF-8 BOM — без coding: ascii
+60_9. Python-helper лог — отдельный файл (..._XXa_...log)
+
+============================================

@@ -1,0 +1,215 @@
+﻿52.Старт.txt
+============
+
+На русском.
+
+## Контекст
+
+АРМ «Адаптация под DBI» — миграция PL/SQL (Oracle) -> PostgreSQL (DBI).
+Репозиторий F:\TO_DBI. Ветка feature/dockerization.
+Роли: Автор DS — DeepSeek. Пользователь — Vitaly.
+
+ВАЖНО: KODA не запускается. Karing не нужна.
+Все DS — вручную PowerShell (правило F, DS_125).
+Все PS-блоки логируются через Start-Transcript в F:\TO_DBI\PS (правило 155, DS_151).
+Формат PS-блока — Markdown ```powershell (копирование одной кнопкой <Copy>).
+
+## ПРАВИЛО АВТОРА DS (КРИТИЧНО)
+
+Автор DS НЕ создаёт файлы на диске Пользователя.
+Автор DS выдаёт ГОТОВЫЙ PS-блок в Markdown ```powershell, который Пользователь
+копирует одной кнопкой <Copy> и вставляет в консоль PowerShell.
+
+ЗАПРЕЩЕНО:
+- Создавать .ps1 через Set-Content, New-Item, here-string.
+- Просить Пользователя "создать файл".
+- Использовать <ps1>...</ps1> как "файл для сохранения".
+- Set-Content -Encoding UTF8 (не BOM — правило 6at-1).
+
+РАЗРЕШЕНО:
+- Markdown ```powershell — Пользователь копирует и запускает.
+- Внутри блока — Start-Transcript, Write-Host, python, git, pytest.
+- После Stop-Transcript — Get-Content $log -Encoding UTF8 | Out-String | Write-Host.
+- В конце — Write-Host пути лога -ForegroundColor Green.
+
+## ПРАВИЛА ВЫВОДА (уточнения чатов 50-51)
+
+- В конце КАЖДОГО PS-блока: полный путь лога зелёным:
+  Write-Host ("=== Полный путь лога: {0} ===" -f $log) -ForegroundColor Green
+- Кириллица в литералах — через [System.IO.File]::WriteAllText с
+  New-Object System.Text.UTF8Encoding($true). НЕ Set-Content.
+- Для python-скриптов из PS выставлять:
+  $env:PYTHONIOENCODING = "utf-8"; $env:PYTHONUTF8 = "1"
+- При патче файлов учитывать CRLF: читать/писать io.open(..., newline=""),
+  нормализовать \r\n -> \n, писать обратно в исходном формате.
+- Commit msg писать через UTF8Encoding($false) (без BOM — артефакт DS_180).
+- При `$out = & python ... 2>&1` stdout python буферизуется; для прогресса
+  использовать `& python -u script.py *> out.txt` и читать out.txt.
+- При импорте analyzer/* добавлять в sys.path именно SRC (analyzer — корневой
+  пакет внутри SRC, scanner.py использует абсолютный `from analyzer...`).
+- `PLPlusScanner.scan_file` требует config['paths']['source_dir'] (иначе
+  KeyError: 'paths').
+- `RubricatorPrompts(<Path>)` — принимает Path, не str.
+- `selected_rules=[]` -> загружаются ВСЕ 332 правила; `selected_rules=['plpcheck.']`
+  -> ОТКЛЮЧАЕТ DS_033-многострочные проверки (_is_rule_selected=False).
+  Для К3/К4 на DS_033 брать selected_rules=[] + постфильтр по issue_type
+  (как в PS\50_49).
+- Ollama на слабом хосте: 7b не тянет prompt >6 КБ; 3b — ~20-30 с/проблема.
+  Перед К4: выгрузить модели (keep_alive=0), keep_alive="0s" в запросе,
+  format=json, num_predict=128, timeout=60, батч по 1 проблеме.
+
+## КОНТЕКСТ ПЕРЕЕЗДА (главная тема чата 52)
+
+Чат 51 прерван: исчерпан лимит. Пользователь переехал с MateBook E на LG,
+«в основном все настройки восстановил». Состояние репозитория и окружения
+на LG ДОЛЖНО БЫТЬ ПРОВЕРЕНО — до любых правок и прогонов.
+
+Известные риски переезда:
+- F:\TO_DBI мог быть скопирован не полностью (git-объекты, PS\, PATCH_IN,
+  PATCH_CALC\backups, DATA\Рубрикатор v5, EXCHANGE).
+- git-репозиторий мог быть скопирован с рабочей копией, но без .git
+  (или с чужим owner — "dubious ownership" на Windows).
+- Кодировка/BOM/CRLF могли измениться при копировании (артефакты).
+- Python/зависимости (requirements.txt), pytest, Ollama (3b/7b) — на LG
+  могут отсутствовать или быть других версий.
+- PowerShell 5.1 vs 7.x — синтаксис блоков DS рассчитан на 5.1.
+- Пути: F:\TO_DBI на LG может быть другим диском/буквой.
+
+## Состояние на начало чата 52 (по последним известным данным)
+
+- Ветка: feature/dockerization, HEAD 8eb83b8, ahead 5.
+  Коммиты чата 50: 593914e (DS_180), 8eb83b8 (DS_181).
+- Тестов на конец чата 50: 347 passed.
+- DS_180 (МПК для det) — закрыт, коммит 593914e.
+- DS_181 (_preai -> PATCH_CALC\backups) — закрыт, коммит 8eb83b8.
+- К3/К4 на 3b — подтверждён (PS\50_49): issues 7/1/0, fixes 7/1/0, auto 7/1/0.
+- Отчёт 50 — F:\TO_DBI\50.Отчёт.txt (9727 байт).
+- Старт 51 — F:\TO_DBI\51.Старт.txt (14250 байт), но чат 51 прерван
+  (что успели сделать — НЕ зафиксировано, проверить git log/status).
+- 49_Results.log — был удалён, найден в корзине (PS\51_03), восстановление
+  InvokeVerb не сработало (PS\51_04), fallback-блок 51_05 — статус неизвестен.
+  ПРОВЕРИТЬ: есть ли F:\TO_DBI\PS\49_Results.log на LG; если нет —
+  восстановить из корзины LG или из 49.Отчёт.txt.
+- EXCHANGE/OUTBOX/DS_CNT_007_pilot_report.md и EXCHANGE/bot.log — НЕ ТРОГАТЬ.
+
+## ПЛАН ЧАТА 52
+
+### Этап A. Контроль корректности переезда (главное)
+
+A1. Диски и путь: Get-PSDrive, Test-Path F:\TO_DBI, размер/состав верхнего
+    уровня (SRC, PS, PATCH_IN, PATCH_CALC, DATA, EXCHANGE, .git).
+A2. Git: git --version; git -C F:\TO_DBI status -sb; git branch -vv;
+    git log --oneline -5; git config --get user.name/email;
+    проверка safe.directory (dubious ownership).
+    Ожидание: HEAD 8eb83b8, feature/dockerization, ahead 5 (или больше,
+    если в 51 были коммиты), M только EXCHANGE/*.
+A3. .git целостность: git fsck --no-progress (кратко), git count-objects -v.
+A4. Python/pytest: python --version; python -m pytest SRC\tests -q
+    (ожидание >=347 passed; если в 51 добавляли тесты — больше).
+A5. PowerShell: $PSVersionTable (5.1?); кодировка консоли; chcp.
+A6. Ollama: процесс, /api/tags (3b/7b), /api/ps, короткий тест 3b (30с).
+A7. Целостность ключевых файлов: SRC/fixer/code_fixer.py,
+    SRC/fixer/variable_parser.py, SRC/ai_exchange.py — размеры,
+    py_compile, наличие маркеров DS_180/DS_181 (_predict_det_changes,
+    _det_changes_to_unified, _insert_anchors, _preai_target_dir).
+A8. PS\49_Results.log — есть/нет; если нет — восстановить (из корзины LG
+    или из 49.Отчёт.txt).
+A9. BOM/CRLF-артефакты: проверить ключевые .py на BOM (первые 3 байта),
+    на смешанные CRLF/LF (для файлов, которые DS патчил).
+A10. Сводная таблица «проверка -> ожидание -> факт -> OK/FAIL».
+     Только после A10 — переходить к этапу B.
+
+### Этап B. Закрыть остаток чата 51 (после A10 = OK)
+
+B1. Если в 51 были коммиты — зафиксировать их в 52.Отчёт.txt.
+B2. DS_182 — К3/К4 на полном наборе 9 issues (как в матрице 49), а не 7/1/0.
+    Причина: selected_rules=['plpcheck.'] отключает DS_033; selected_rules=[]
+    даёт 569 issues. Варианты: (a) постфильтр по issue_type (как 50_49);
+    (b) доработка scanner.py (разделить selected regex и DS_033);
+    (c) зафиксировать конфиг GUI, при котором issues=9. Тест
+    test_ds182_k3k4_9issues.py. Регресс >=348. Коммит DS_182.
+B3. DS_183 — 7b/3b в GUI К4: дефолт 3b на слабом хосте, предупреждение
+    о 7b, сохранение выбора в settings.json. Тест/документация. Коммит DS_183.
+B4. К3/К4 с mark_in_code=True — получить [Ai]-якоря в .plp (в 50_49 шло
+    через process_response/apply_fixes, anchors=0). Прогон 3 .plp,
+    фиксация [Ai]/xN/[AI-REMOVED]/диапазонов в PS\52_Results.log.
+B5. git push origin feature/dockerization (по команде).
+
+### Этап C. Отчёт 52
+
+52.Отчёт.txt: результаты A (переезд), B (DS_182/DS_183/К3-К4), состояние
+ветки/тестов, артефакты PS\52_*.
+
+## Сокращения GUI (правило 6as, полный текст — PS\46_Сокращения_GUI.txt)
+
+Кнопки: К1 «1. Сканировать», К2 «2. Исправить код», К3 «3. В Ai»,
+К4 «4. Из Ai», ГТ «Генерация тестовых .plp».
+BOX «1. Пути и настройки сканирования»: ИКА — Исходный каталог,
+КР — Каталог результатов.
+BOX «3. Опции…»: МПК — «Маркировка правок»; Применять — применять правки;
+ВТИК — «Верни только исправленный код…» (= clean_output);
+НеАФ — ignore (не автофиксить, только лог).
+УЛ / УЛМ / УЛП — уровень логирования.
+Приоритет: ВТИК=on -> МПК отменяется; НеАФ=on -> правки не применяются,
+МПК может ставить якоря.
+Формат якоря: -- YYYY.MM.DD HH:MI|<Правило>[xN][[Ai]]|Строка NN
+              -- YYYY.MM.DD HH:MI|<Правило>[xN][[Ai]]|Строки NN-NN
+
+## Матрица флагов (PS\46_Матрица_флагов.txt)
+
+| МПК | ВТИК | НеАФ | Якоря | Правки | Возврат кода |
+|-----|------|------|-------|--------|--------------|
+| off | off  | off  | нет   | да     | полный файл |
+| on  | off  | off  | да    | да     | полный файл с якорями |
+| on  | off  | on   | да    | нет    | полный файл с якорями; правки только в лог (сухой прогон) |
+| on  | on   | off  | нет   | да     | только исправленный код, без якорей (ВТИК перекрывает МПК) |
+| off | on   | off  | нет   | да     | только исправленный код |
+| off | off  | on   | нет   | нет    | без изменений, только лог |
+
+## Фактическая матрица К1->К2 (PS\49_Results.log, чат 49)
+
+| case | MPK | VTIK | NAF | issues | fixmod | out changed | anchors | AI-REMOVED |
+|------|-----|------|-----|--------|--------|-------------|---------|------------|
+| 000  | 0   | 0    | 0   | 9      | 2      | 2           | 0       | 0          |
+| 100  | 1   | 0    | 0   | 9      | 2      | 2           | 0       | 0          |
+| 101  | 1   | 0    | 1   | 9      | 0      | 0           | 0       | 0          |
+| 110  | 1   | 1    | 0   | 9      | 2      | 2           | 0       | 0          |
+| 010  | 0   | 1    | 0   | 9      | 2      | 2           | 0       | 0          |
+| 001  | 0   | 0    | 1   | 9      | 0      | 0           | 0       | 0          |
+
+После DS_180 (PS\50_11_ds180_matrix.log):
+| case | anchors | code_changed |
+|------|---------|--------------|
+| 100  | 17 (3/3 файлов) | True |
+| 101  | 17 (3/3 файлов) | False |
+
+## Набор входных .plp (PS\47_InputSet.log, 3 файла)
+
+1. F:\TO_DBI\PATCH_IN\patch_suboptimal_test_3\ENTITY\DEPN\PSH_ED_PRC_SCHM.plp
+2. F:\TO_DBI\PATCH_IN\patch_suboptimal_test_3\ENTITY\PL_US\PSH_PS_DEL.plp
+3. F:\TO_DBI\PATCH_IN\patch_suboptimal_test_3\ENTITY\RKO\PSH_VK_UNK_INP.plp
+
+## Ollama (важно)
+
+- qwen2.5-coder:3b — рабочая для К4: ~20-30 с/проблема, JSON валидный.
+- qwen2.5-coder:7b — не тянет prompt >6 КБ (таймаут 240 с); только
+  короткие промпты. Для К4 на слабом хосте — 3b.
+- Перед К4: выгрузить модели (keep_alive=0), проверить RAM.
+- В запросе: format=json, keep_alive="0s", num_predict=128, timeout=60,
+  батч по 1 проблеме.
+- Python stdout буферизуется под `& ... 2>&1`; использовать
+  `& python -u script.py *> out.txt`.
+
+## Команды (справочно)
+
+- git push origin feature/dockerization — синхронизация (когда будет команда).
+- python -m pytest SRC\tests -q — регресс (>=347; после DS_182 — >=348).
+- python SRC\gui_app.py — запуск АРМ.
+
+## Последние коммиты (известные)
+
+8eb83b8 DS_181: _preai копии перенесены из PATCH_IN в PATCH_CALC/backups
+593914e DS_180: МПК-маркировка det-правок (DeterministicFixer) через единый anchor pipeline
+1d8a66d DS_179: дополнение отчёта чата 49 - причина _preai в PATCH_IN (ai_exchange.py:546), план DS_181
+afb862f DS_179: отчёт чата 49 + матрица К1->К2 (расхождение МПК по det-правкам -> DS_180)
+8df57e4 DS_179: SUBOPTIMAL_QUERY_WROWNUM — многострочная проверка (exit в for loop без rownum/offset/fetch)

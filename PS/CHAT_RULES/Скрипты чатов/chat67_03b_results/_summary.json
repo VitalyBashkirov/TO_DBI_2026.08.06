@@ -1,0 +1,51 @@
+{
+    "chat":  "67_03b",
+    "host":  "MBE",
+    "ika":  "F:\\TO_DBI\\PATCH_IN\\patch_suboptimal_test_3",
+    "model":  "qwen2.5-coder:7b",
+    "files":  2,
+    "valid":  0,
+    "non_empty":  0,
+    "p50_ms":  170879,
+    "p95_ms":  237211,
+    "m3_clean":  null,
+    "m5_repeatable":  null,
+    "finnigan":  [
+
+                 ],
+    "results":  [
+                    {
+                        "name":  "PSH_ED_PRC_SCHM.plp",
+                        "ok":  false,
+                        "error":  "Ollama call failed (ms): Запрос был прерван: Время ожидания операции истекло."
+                    },
+                    {
+                        "name":  "PSH_PS_DEL.plp",
+                        "ok":  true,
+                        "valid":  false,
+                        "n_fixes":  0,
+                        "clean":  null,
+                        "ms":  170879,
+                        "prompt_eval_count":  382,
+                        "eval_count":  512,
+                        "total_duration_ns":  168759204800,
+                        "finnigan":  "",
+                        "truncated":  false,
+                        "raw":  "```json\n{\n  \"fixes\": [\n    {\n      \"rule\": \"PLSQL_001\",\n      \"line\": 10,\n      \"comment\": \"Remove unnecessary variable declaration\"\n    },\n    {\n      \"rule\": \"PLSQL_002\",\n      \"line\": 12,\n      \"comment\": \"Add missing \u0027loop\u0027 keyword\"\n    },\n    {\n      \"rule\": \"PLSQL_003\",\n      \"line\": 14,\n      \"comment\": \"Remove duplicate \u0027for\u0027 loop\"\n    },\n    {\n      \"rule\": \"PLSQL_004\",\n      \"line\": 16,\n      \"comment\": \"Remove unnecessary \u0027exit\u0027 statement\"\n    },\n    {\n      \"rule\": \"PLSQL_005\",\n      \"line\": 18,\n      \"comment\": \"Remove unnecessary \u0027continue\u0027 statement\"\n    },\n    {\n      \"rule\": \"PLSQL_006\",\n      \"line\": 20,\n      \"comment\": \"Remove unnecessary \u0027end loop\u0027 statement\"\n    },\n    {\n      \"rule\": \"PLSQL_007\",\n      \"line\": 22,\n      \"comment\": \"Remove unnecessary \u0027end loop\u0027 statement\"\n    },\n    {\n      \"rule\": \"PLSQL_008\",\n      \"line\": 24,\n      \"comment\": \"Remove unnecessary \u0027end loop\u0027 statement\"\n    },\n    {\n      \"rule\": \"PLSQL_009\",\n      \"line\": 26,\n      \"comment\": \"Remove unnecessary \u0027end loop\u0027 statement\"\n    },\n    {\n      \"rule\": \"PLSQL_010\",\n      \"line\": 28,\n      \"comment\": \"Remove unnecessary \u0027end loop\u0027 statement\"\n    },\n    {\n      \"rule\": \"PLSQL_011\",\n      \"line\": 30,\n      \"comment\": \"Remove unnecessary \u0027end loop\u0027 statement\"\n    },\n    {\n      \"rule\": \"PLSQL_012\",\n      \"line\": 32,\n      \"comment\": \"Remove unnecessary \u0027end loop\u0027 statement\"\n    },\n    {\n      \"rule\": \"PLSQL_013\",\n      \"line\": 34,\n      \"comment\": \"Remove unnecessary \u0027end loop\u0027 statement\"\n    },\n    {\n      \"rule\": \"PLSQL_014\",\n      \"line\": 36,\n      \"comment\": \"Remove"
+                    },
+                    {
+                        "name":  "PSH_VK_UNK_INP.plp",
+                        "ok":  true,
+                        "valid":  false,
+                        "n_fixes":  0,
+                        "clean":  null,
+                        "ms":  237211,
+                        "prompt_eval_count":  1195,
+                        "eval_count":  512,
+                        "total_duration_ns":  237122473000,
+                        "finnigan":  "",
+                        "truncated":  true,
+                        "raw":  "```json\n{\n  \"fixes\": [\n    {\n      \"rule\": \"missing_semicolon\",\n      \"line\": 15,\n      \"comment\": \"Add missing semicolon at the end of the line\"\n    },\n    {\n      \"rule\": \"missing_semicolon\",\n      \"line\": 21,\n      \"comment\": \"Add missing semicolon at the end of the line\"\n    },\n    {\n      \"rule\": \"missing_semicolon\",\n      \"line\": 27,\n      \"comment\": \"Add missing semicolon at the end of the line\"\n    },\n    {\n      \"rule\": \"missing_semicolon\",\n      \"line\": 33,\n      \"comment\": \"Add missing semicolon at the end of the line\"\n    },\n    {\n      \"rule\": \"missing_semicolon\",\n      \"line\": 39,\n      \"comment\": \"Add missing semicolon at the end of the line\"\n    },\n    {\n      \"rule\": \"missing_semicolon\",\n      \"line\": 45,\n      \"comment\": \"Add missing semicolon at the end of the line\"\n    },\n    {\n      \"rule\": \"missing_semicolon\",\n      \"line\": 51,\n      \"comment\": \"Add missing semicolon at the end of the line\"\n    },\n    {\n      \"rule\": \"missing_semicolon\",\n      \"line\": 57,\n      \"comment\": \"Add missing semicolon at the end of the line\"\n    },\n    {\n      \"rule\": \"missing_semicolon\",\n      \"line\": 63,\n      \"comment\": \"Add missing semicolon at the end of the line\"\n    },\n    {\n      \"rule\": \"missing_semicolon\",\n      \"line\": 69,\n      \"comment\": \"Add missing semicolon at the end of the line\"\n    },\n    {\n      \"rule\": \"missing_semicolon\",\n      \"line\": 75,\n      \"comment\": \"Add missing semicolon at the end of the line\"\n    },\n    {\n      \"rule\": \"missing_semicolon\",\n      \"line\": 81,\n      \"comment\": \"Add missing semicolon at the end of the line\"\n    },\n    {\n      \"rule\": \"missing_semicolon\",\n      \"line\": 87,\n      \"comment\": \"Add missing semicolon at the end of the line\"\n    },\n    {\n      \"rule\": \"missing"
+                    }
+                ]
+}

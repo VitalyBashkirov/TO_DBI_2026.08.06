@@ -1,0 +1,23 @@
+# Отчёт чата 68 (2026-10-27, LG/MBE)
+
+## Главное
+- Восстановлен рабочий ИКА patch_suboptimal_test_3 (3 .plp) из zip-эталона 2026.10.18_X_suboptimal_query_wrownum.zip.
+- Исправлен дефект SUBOPTIMAL_QUERY_WROWNUM: не ловил return / raise / pragma error / message.error / app_error.
+- В ЖВ К1 добавлен блок «ВЫБОР ПОЛЬЗОВАТЕЛЯ В РУБРИКАТОРЕ».
+- Коммит a045f4d, push в origin/feature/dockerization.
+
+## Что сделано
+- 68_01..68_03: инвентаризация PATCH_IN, найдены 3 изменённых .plp (23.10 02:42, 22.10 12:29), восстановлены из zip-эталона, бэкапы в backup_68.
+- 68_04..68_06: найдено — _check_plp_suboptimal_wrownum (scanner.py:1252) ловил только \bexit\b; v5.json regex тоже.
+- 68_06b3: v5.json 5.3.0 -> 5.3.1, паттерн расширен (exit|return|raise|pragma error|message.error|app_error).
+- 68_06e: scanner.py _check_plp_suboptimal_wrownum расширена тем же паттерном; py_compile=0.
+- 68_06f/68_12: test_ds186 — зелёный (SCHM=1, VK_UNK_INP=2, PS_DEL=0), 1 passed.
+- 68_11/68_17c: gui_app.py — блок «ВЫБОР ПОЛЬЗОВАТЕЛЯ В РУБРИКАТОРЕ» в ЖВ К1 (2 места), py_compile=0.
+- 68_13: К1 в бою — 3 срабатывания wrownum (SCHM стр.112, VK_UNK_INP стр.9 и 42), блок ЖВ подтверждён.
+- 68_19c: коммит a045f4d (4 файла: v5.json, scanner.py, gui_app.py, test_ds186), push OK.
+
+## Долги 68 -> 69
+1. Блок «ВЫБОР ПОЛЬЗОВАТЕЛЯ В РУБРИКАТОРЕ» в отчётах (scan_report_*.md, scan_VVVxVV_*.md, plpcheck_report_*.html) — НЕ сделано. Делать в gui_app.py (дописывание после generate_report), отдельным чатом, тесты на три формата. Правка scanner.py «на ходу» уже 4 раза ломала файл — не повторять.
+2. SyntaxWarning: invalid escape sequence '\s' в scanner.py:1257 — заменить на r'...'.
+3. PSH_PS_DEL.plp: for v_ps in this(idx).[B_PS] — это не suboptimal_query_wrownum (не select). Если IDE ЦФТ метит — другое правило, отдельно.
+4. EXCHANGE/bot.log, Ollama и LM Studio.bat, SRC/settings.json, test_all_models.ps1 — грязные фоновые, не коммитить.

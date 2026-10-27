@@ -1,0 +1,264 @@
+# Проект TO_DBI. Чат 43. DS_144d закрыт (a-e + отчет), переход к открытым задачам
+
+## Контекст
+
+АРМ «Адаптация под DBI» - миграция PL/SQL (Oracle) -> PostgreSQL (DBI).
+Репозиторий F:\TO_DBI. Ветка feature/dockerization.
+Роли: Автор DS - DeepSeek. Пользователь - Vitaly.
+
+ВАЖНО: KODA не запускается. Karing не нужна.
+Все DS - вручную PowerShell (правило F, DS_125).
+
+## Сокращения (кнопки GUI)
+
+| Код | Кнопка | Метод в gui_app.py | Что делает |
+|-----|--------|--------------------|------------|
+| К1 | «1. Сканировать» | start_scan -> _run_scan(False) | Скан ИК через PLPlusScanner + зеркало ИК->КР |
+| К2 | «2. Исправить код» | start_fix -> fixer | Фикс по результату К1 |
+| К3 | «3. В Ai» | send_to_ai | Отправка AI_REQUEST_*.md в Ollama |
+| К4 | «4. Из Ai» | receive_from_ai | Приём AI_RESPONSE_*.md, применение |
+
+## Что сделано в чате 42 (DS_144d a-e + отчет)
+
+### DS_144d - вариант B: тестирование АРМа по параметрам рубрикаторов
+
+**Контекст:** проверка того, как GUI применяет фильтры rules / priorities / categories / sources из v5.json ко всем 4 источникам (plpcheck / v53 / тдс20240828 / тклоик20240828).
+
+**Базовая линия:** 257 passed. **Итог:** 276 passed (+19 тестов, 6 коммитов).
+
+### DS_144d-a - аудит фильтров (коммит 42f9b26)
+- GUI `_run_test_generation` передает 4 фильтра в `TestGeneratorV2`: sources, priorities, categories, rules (через matched_rules).
+- `TestGeneratorV2._passes_filters` обрабатывает self.sources / self.priorities / self.categories.
+- categories - гибрид A (`PLPCHECK_RULE_TO_CATEGORY`, 7 агрегатов) + B (subcategory из v5.json).
+- `PLPCHECK_RULE_TO_CATEGORY` определен в SRC/analyzer/scanner.py.
+- Факты v5.json: 332 правила; source plpcheck=152, v53=98, тдс=39, тклоик=43; subcategory=61 (plpcheck=34); category=9; priority HIGH=189/MEDIUM=79/LOW=64.
+- **Дефект E2 (слепок):** categories (PlpCheck-специфичные) передавались в `TestGeneratorV2` для ВСЕХ источников -> PlpCheck-фильтр категорий протекал на v53/тдс/тклоик и отфильтровывал все не-plpcheck правила в OTHER.
+- Тесты: SRC/tests/test_ds144d_a_ast.py (6 тестов).
+
+### DS_144d-b - полнота маппинга (коммит d9601be)
+- Диагностика: 8 DEV.* subcategory (16 plpcheck-правил) были неявно OTHER.
+- Решение B2c: явный маппинг для 16 DEV.* правил: 10 -> STYLE.SYNTAX; 3 -> WEB.ADAPTATION; 3 -> OTHER (FIXME_NOT_ALLOWED, METHOD_AVAILABILITY, NATIONAL_CURRENCY).
+- Распределение до: OTHER=17, STYLE.SYNTAX=1, WEB.ADAPTATION=7. После: OTHER=4, STYLE.SYNTAX=11, WEB.ADAPTATION=10. mapping size=152.
+- Тесты: SRC/tests/test_ds144d_b_ast.py (4 теста).
+
+### DS_144d-c - удаление rubricator_priority_mapping.py (коммит 503ef61)
+- Legacy-файл (15162 байт, PRIORITY_RULES), runtime-импортов 0.
+- DS_147c и DS_149d-доп уже заменили его на rule.priority из v5.json.
+- Удален из репо; обновлены docs (AGENTS.md, DOCUMENTATION_ARM.md, PROMPTS/DS_PROJECT_CONTEXT.md).
+- Тесты: SRC/tests/test_ds144d_c_ast.py (3 теста).
+
+### DS_144d-d - замена legacy-комментариев PRIORITY_RULES (коммит 844dc71)
+- 6 комментариев в gui_app.py заменены на актуальные ссылки на rule.priority из v5.json.
+- D2: исправлен отступ # Формируем ... (стр. 4763).
+- Тесты: SRC/tests/test_ds144d_d_ast.py (3 теста).
+
+### DS_144d-e - фикс дефекта E2 (коммит 657b984)
+- В `_run_test_generation` categories (PlpCheck) теперь передаются только если sources непусто и все его элементы нормализуются в plpcheck; иначе categories=None.
+- Тесты: SRC/tests/test_ds144d_e_ast.py (3 теста).
+- Обновлены 2 старых теста-слепка: test_ds144d_a_e2_defect_fixed, test_ds147d_gui_passes_categories.
+
+### DS_144d-report - сводный отчет (коммит 52dd864)
+- EXCHANGE/OUTBOX/DS_144d_report.md (6548 байт, UTF-8 без BOM, на русском).
+
+## Состояние (на момент старта чата 43)
+
+- Ветка: feature/dockerization, ahead 0 (все запушено).
+- git status: M EXCHANGE/OUTBOX/DS_CNT_007_pilot_report.md (НЕ ТРОГАТЬ).
+- INBOX: пусто (проверить).
+- PROCESSED: DS_118...DS_149 (плюс DS_144d).
+- OUTBOX: DS_118...DS_150 (плюс DS_144d_report.md).
+- SRC/gui_app.py: ~343 KB (после правок чата 42).
+- SRC/analyzer/test_generator_v2.py: ~16 KB.
+- Тестов: 33 файла test_*.py в SRC/tests/.
+- BOM: False для всех .py, .md, .json, .ini, .sql.
+- PS: логи chat42_* (архив), chat43_* (новые).
+- ast.parse warnings: 0. pytest: 276 passed.
+- KODA: 1.2.2 (откат с 1.2.3), автообновление ОТКЛЮЧЕНО.
+- Ollama: http://localhost:11434, qwen2.5-coder:7b.
+
+## НОВЫЕ ПРАВИЛА / УРОКИ ЧАТА 42 (раздел 6.6.34, копилка)
+
+### 6u - ROOT для диагностических скриптов в SRC/tests/
+Диагностический/тестовый скрипт в SRC/tests/ - ROOT = Path(__file__).resolve().parents[2], а не parents[1].
+Симптом ошибки: FileNotFoundError: ...\\SRC\\SRC\\analyzer\\scanner.py (двойной SRC).
+
+### 6v - regex для конкретного словаря
+При правке конкретного словаря в большом .py - regex должен быть привязан к имени словаря и его границам { } на нулевом отступе.
+Иначе regex матчит первое вхождение кода в файле - а он может быть в PLPCHECK_RULE_NAMES, PLPCHECK_RULE_TYPES и т.п.
+Пример: re.search(r"PLPCHECK_RULE_TO_CATEGORY\\s*:\\s*Dict\\[str,\\s*str\\]\\s*=\\s*\\{", src) + поиск закрывающей } на нулевом отступе -> править только блок.
+
+### 6w - dry-run перед записью файла
+Перед записью файла - вывести diff-предпросмотр (old -> new) и применять только с флагом --apply.
+Иначе откат стоит git checkout + повторного прогона.
+
+### 6x / 6y - python -c и git внутри Start-Transcript
+python -c и git внутри Start-Transcript в PS 5.1 могут терять stdout.
+Симптом: Write-Host до/после python виден, а вывод python - нет.
+Решение: критичные проверки (AST, git status, git diff) - отдельным блоком без Transcript, прикладывать консольный вывод.
+Для pytest - Start-Process -NoNewWindow -PassThru (без Transcript) или -RedirectStandardOutput в файл.
+
+### 6z - кириллица в PS 5.1 (уточненный)
+Кириллица портится только в here-string с кавычками (PS 5.1 интерпретирует байты как CP866/CP1251).
+В массиве отдельных PS-строк кириллица не портится, если файл пишется через [IO.File]::WriteAllLines($path, $lines, (New-Object System.Text.UTF8Encoding($false))).
+Правило: для русского текста - массив PS-строк + WriteAllLines, не here-string.
+
+### 6aa - нельзя вставлять присваивания/if/for внутрь аргументов вызова
+При правке аргументов вызова функции (например, TestGeneratorV2(...)) нельзя вставлять присваивания/if/for внутрь скобок - это SyntaxError: invalid syntax.
+Выносить блок перед вызовом, а внутри оставлять только финальное значение (categories=_cats,).
+Проверка: ast.parse после правки.
+
+### 6ab - обновлять ВСЕ тесты-слепки
+При фиксе дефекта, зафиксированного тестом-слепком (например, test_ds144d_a_e2_defect_snapshot), обязательно обновить все тесты, которые этот дефект фиксируют.
+В нашем случае - два: test_ds144d_a_e2_defect_snapshot (DS_144d-a) и test_ds147d_gui_passes_categories (DS_147d).
+Правило: перед фиксом - git grep <старый_паттерн> SRC/tests/ и обновить все совпадения.
+
+### 6ac - если PS-блок упал на парсере
+Если PS-блок упал на парсере - он не выполнился частично; но если WriteAllLines до ошибки прошел, скрипты _fix_*.py созданы и могли быть запущены в другой сессии.
+Всегда проверять Get-Item tools\\_fix_*.py + git status + Select-String "^def test_" до повторного запуска.
+Иначе - двойное применение фикса (первый раз - успешно, второй - падает на assert not found).
+
+### 6ad - правка строк по индексам, а не replace
+При правке многострочного блока по тексту replace может вставить блок не туда (из-за неоднозначного OLD).
+Правило: для правки аргументов вызова - использовать ReadAllLines -> заменить строку по индексу -> вставить блок перед вызовом (по индексу) -> WriteAllLines.
+Пример: gen_idx = find("gen = TestGeneratorV2("), cats_idx = find("categories=list(...)") -> lines[cats_idx] = prefix + "categories=_cats," -> new_lines = lines[:gen_idx] + block + lines[gen_idx:].
+
+### 6ae - несколько тестов на один фикс
+Если фикс меняет поведение, зафиксированное несколькими тестами (в т.ч. в разных файлах), - обновлять все (6ab).
+Проверка: git grep <измененный_код> SRC/tests/ перед фиксом.
+
+### 6af - git add до close_ds.ps1
+Новые файлы (.py, .md) - git add ДО close_ds.ps1, потому что close_ds.ps1 коммитит только отслеживаемые файлы.
+Если забыли - git add + git commit --amend --no-edit + git push --force-with-lease (п.6h, уже было, подтверждено).
+
+### 6ag - подсветка путей логов
+Всегда подсвечивать зеленым (-ForegroundColor Green) строки с путями логов:
+stdout: <path>, stderr: <path>, лог: <path>, выходной файл <path>, written: <path>, summary: <path>.
+Служебные заголовки секций (=== ... ===) - голубым (Cyan).
+
+### 6ah - PS 5.1: quotes in text (new, from chat 42, EN)
+In PS 5.1 do NOT use backslash + single-quote inside a single-quoted PS string in an array - it is a SyntaxError, not an escape.
+Escape for a single quote inside a single-quoted PS string is only two single quotes (double single quote).
+Also do NOT put the text at-sign + single-quote (here-string start) or single-quote + at-sign (here-string end) inside a PS string - the PS parser gets confused.
+Rule: for text in a PS-string array use either no quotes, or two single quotes; never backslash + single-quote, never at-sign + single-quote / single-quote + at-sign inside a string.
+
+## ГЛАВНАЯ ТЕМА ЧАТА 43 - открытые задачи
+
+### Из старта чата 42 (не сделано)
+
+1. [DS_144d] .mcs, .mp, .pck и др. - нужна разведка от Vitaly. Форматы исходников, которые сейчас не обрабатываются.
+2. [DS_119] CLI-сканер run_scanner.py (низкий приоритет).
+3. Ночной pipeline CNT без [ - отдельная тема.
+4. АПК DBI v0.82 - сверка рубрикатора с разделом 4.3.2 (PLP_* параметры), позиционирование TO_DBI в AGENTS.md. Не срочно.
+5. _generate_default_rules в DeepScanner - захардкоженный фолбэк. Отдельный DS.
+6. Legacy-рубрикатор (1.RUBRICATOR_FILES.md + 3.RUBRICATOR_FIXES.md) - поддерживается ли? Отдельный DS.
+7. Araxis - обновление софта (переход в отдельный чат).
+
+### Новые (из чата 42)
+
+8. subcategory в v5.json: старт чата 42 говорил 33, фактически 34 (plpcheck) и 61 (всего). Если появится новый subcategory - обновить EXPECTED_PLPCHECK_SUBCATEGORIES = 34 в test_ds144d_b_ast.py.
+9. PLPCHECK_RULE_TO_CATEGORY: 7 агрегатов vs 34 subcategory - после DS_144d-b все 152 plpcheck-правила явно замаплены (B2c). При обновлении v5.json - проверить, что все новые plpcheck-коды явно замаплены (тест test_ds144d_b_each_plpcheck_code_explicitly_mapped).
+10. categories для не-plpcheck - исправлено (E2). Больше не протекают на v53/тдс/тклоик.
+
+## AI-инфраструктура
+
+- Ollama: http://localhost:11434, работает (qwen2.5-coder:7b).
+- LM Studio: закрыт.
+- Мок-сервер: tools\\mock_ollama_invalid.py, порт 11500.
+- ai_local_worker.py --check: OK (available).
+- KODA: 1.2.2 (откат с 1.2.3), автообновление ОТКЛЮЧЕНО.
+- KODA запускается БЕЗ Karing.
+
+## Реальный путь и имена (важно!)
+
+- Проект: F:\TO_DBI\ (SRC\ - исходники, tools\ - утилиты).
+- Класс GUI: DBIMigrationApp (SRC\gui_app.py, ~343 KB).
+- Тесты: F:\TO_DBI\SRC\tests\ - pytest exit code 0, 276 passed.
+- Python 3.11 в PATH. pytest 8.3.4.
+- pytest.ini в корне - testpaths = SRC/tests, addopts = --capture=no.
+- BOM - критичная тема. Правило в DS_STANDARD.md раздел 6.1.
+- Task Scheduler TO_DBI_CNT_NightlyPipeline - S4U, daily 01:00.
+- AI-контур: tools\\ai_local_worker.py, tools\\ai_local_worker_config.json.
+- tools\\close_ds.ps1 - универсальный скрипт закрытия DS (v2.1, -DsNumber, -CommitMessage, -BotLogMessage, -Push, BOM=True).
+- SRC\tests\conftest.py - pytest-фикстуры (v4).
+- SRC\tests\test_ds144d_a_ast.py - 6 тестов.
+- SRC\tests\test_ds144d_b_ast.py - 4 теста.
+- SRC\tests\test_ds144d_c_ast.py - 3 теста.
+- SRC\tests\test_ds144d_d_ast.py - 3 теста.
+- SRC\tests\test_ds144d_e_ast.py - 3 теста.
+- SRC\analyzer\scanner.py - сканер (PLPlusScanner), PLPCHECK_RULE_TO_CATEGORY.
+- SRC\analyzer\deep_scanner.py - CLI DeepScanner.
+- SRC\analyzer\test_generator_v2.py - TestGeneratorV2 (~16 KB).
+- SRC\rubricator_prompts.py - RubricatorPrompts (для PLPlusScanner).
+- SRC\fixer\markdown_rubricator_loader_v3.py - MarkdownRubricatorLoaderV3 (для TestGeneratorV2).
+- tools\gen_test_plp.py - CLI-генератор (DS_147a).
+- tools\validate_gen_plp.py - CLI-валидатор (DS_147b).
+- DATA\ - каталоги с .plp (patch_WORK, patch_IN, patch_OUT и др.).
+- DATA\Тестовые файлы\ - сгенерированные .plp (в .gitignore).
+- DATA\generated_plp\ - тоже в .gitignore.
+- DATA\Рубрикатор v5\4.RUBRICATOR_PROMPT v5.json - 332 правила (plpcheck 152, v53 98, тдс20240828 39, тклоик20240828 43).
+- logs_Deep\ - отчеты DeepScanner (CLI).
+- F:\DBI.Compare\TOOL_COMPARE\ - инструмент сравнения патчей (готов).
+
+## Регламент работы (обновлен в чате 42)
+
+0-98 - как в чате 40, плюс:
+99-128 - как в чате 40 (без изменений).
+129. close_ds.ps1 коммитит только отслеживаемые файлы -> git add новых ДО close_ds.ps1 (п.6h).
+130. Tee-Object -Encoding нет в PS 5.1 -> Out-File -Encoding UTF8 / [IO.File]::WriteAllText (п.6i).
+131. f-string Python 3.11 - без бэкслеш-кавычки внутри выражений (п.6j).
+132. Правки Python из PS - chr(34)/chr(92) или WriteAllText (п.6k).
+133. [IO.File]::WriteAllText UTF8 -> BOM; BOM=False - UTF8Encoding($false) (п.6l).
+134. ast.parse не принимает BOM (п.6m).
+135. НЕ Start-Transcript + Start-Process в одном блоке (п.6n).
+136. Stop-Transcript упал -> новая сессия (п.6o).
+137. pytest: Start-Process -NoNewWindow -PassThru в чистой сессии, без Transcript (п.6p).
+138. Python-код в PS-сессию - нельзя, только .py или python -c (п.6q).
+139. chr(39)+chr(39) без обрамляющих кавычек (п.6r).
+140. Не разрывать выражение в Python без скобок (п.6s).
+141. Блок «коммит + push» - с Start-Transcript chat43_NN_commit.log (п.6t).
+142. Диагностические скрипты в SRC/tests/ - ROOT = parents[2] (п.6u).
+143. Regex для конкретного словаря - привязывать к имени и границам { } (п.6v).
+144. Перед записью файла - dry-run с diff-предпросмотром, применять только с --apply (п.6w).
+145. python -c и git внутри Start-Transcript могут терять stdout; запускать отдельно без Transcript (п.6x/6y).
+146. Кириллица в here-string с кавычками PS 5.1 портится; массив PS-строк + WriteAllLines - не портится (п.6z, уточненный).
+147. Нельзя вставлять присваивания/if/for внутрь аргументов вызова функции; выносить блок перед вызовом (п.6aa).
+148. При фиксе теста-слепка обновлять ВСЕ тесты, которые этот дефект фиксируют (п.6ab).
+149. Если PS-блок упал на парсере, частичный WriteAllLines мог выполниться; проверять перед перезапуском (п.6ac).
+150. Правка аргументов вызова - по индексам строк, не replace (п.6ad).
+151. Несколько тестов на один фикс - обновлять все (п.6ae).
+152. git add до close_ds.ps1 (п.6af, подтверждено).
+153. Подсветка путей логов зеленым, заголовков секций - голубым (п.6ag).
+154. PS 5.1: нельзя backslash + одинарная кавычка внутри PS-строки; escape - только две одинарные подряд. Нельзя at-sign + одинарная / одинарная + at-sign внутри строки (п.6ah).
+
+## Первый шаг (чат 43)
+
+1. Прочитать этот стартовый файл (43.Старт.txt).
+2. Проверить git: git status -sb / git branch -vv. Ожидание: синхронизировано, 1 modified (DS_CNT_007_pilot_report.md).
+3. Проверить INBOX: должен быть пуст.
+4. Проверить Ollama: python tools\\ai_local_worker.py --check.
+5. Запустить регресс: python -m pytest SRC\\tests\\ -q -> 276 passed.
+6. Решение Vitaly: с какой задачи начать (DS_119 / ночной pipeline / АПК DBI v0.82 / _generate_default_rules / legacy-рубрикатор 1/3.RUBRICATOR_FILES / Araxis / DS_144d .mcs-.mp-.pck).
+7. Разведка выбранной задачи + реализация.
+
+## Команды (справочно)
+
+- git push origin feature/dockerization - синхронизация.
+- python tools\\ai_local_worker.py --check - доступность Ollama.
+- python -m pytest SRC\\tests\\ -q - регресс (276 passed).
+- python SRC\\gui_app.py - запуск АРМ.
+- git status -sb / git branch -vv - состояние ветки.
+- .\\tools\\close_ds.ps1 -DsNumber <N> -CommitMessage "DS_<N>: closed (bot.log)" -BotLogMessage "..." -Push - закрытие DS.
+- python SRC\\analyzer\\deep_scanner.py -s <ИК> --rules v50 - CLI DeepScanner.
+- python tools\\gen_test_plp.py -s PlpCheck -o DATA\\generated_plp --rules X --categories Y --priorities Z --dry-run - CLI-генератор (DS_147a/d).
+- python tools\\validate_gen_plp.py -d DATA\\generated_plp --rules X - CLI-валидатор (DS_147b).
+- F:\\DBI.Compare\\0.compare_anchors.bat - инструмент сравнения патчей (запуск из корня).
+
+## Последние коммиты
+
+52dd864 DS_144d: сводный отчет (a-e)
+657b984 DS_144d-e (E2): categories only for plpcheck sources in _run_test_generation
+844dc71 DS_144d-d: замена 6 legacy-комментариев PRIORITY_RULES в gui_app.py + 3 AST-теста
+503ef61 DS_144d-c: удаление legacy rubricator_priority_mapping.py + 3 AST-теста
+d9601be DS_144d-b: полнота маппинга 34 plpcheck-subcategory <-> 7 агрегатов (B2c)
+42f9b26 DS_144d-a: аудит фильтров АРМа по параметрам рубрикаторов + 6 AST-слепков
+33a768d DS_147e: sources-фильтр нормализует префикс (PlpCheck, тдс, тклоик), 257 passed

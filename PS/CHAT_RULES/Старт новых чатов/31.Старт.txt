@@ -1,0 +1,354 @@
+# Проект TO_DBI. Чат 31. Продолжение работы: pytest-миграция legacy-тестов + отложенные задачи.
+
+## Контекст
+
+АРМ «Адаптация под DBI» — миграция PL/SQL (Oracle) → PostgreSQL (DBI).
+Репозиторий F:\TO_DBI. Ветка feature/dockerization.
+Роли: Автор DS — DeepSeek. Пользователь — Vitaly.
+
+ВАЖНО: KODA не запускается. Karing не нужна.
+Все DS — вручную PowerShell (правило F, DS_125).
+
+## Что сделано в чате 30 (6 DS)
+
+| Commit | DS | Что | Результат |
+|--------|-----|-----|-----------|
+| 06ae134 | DS_138 | удаление 26 .bak_ в SRC | 26 → 0, освобождено ~7.5 МБ |
+| f075aa7 | DS_138b | DS_STANDARD.md §6.6.1–6.6.7 | Уроки FF/GG/HH/II, правила 19/62/60 |
+| 0717aa9 | DS_138c | формат bot.log + §6.6.8 (Урок JJ) | bot.log к единому формату |
+| bf6515d | DS_139 | test_ds086_ui_hide.py fix | 13/15 → 15/15 PASSED |
+| 704c499 | DS_141 | кириллица U+FFFD в ЖВ | UTF-8 в воркере + PYTHONIOENCODING в GUI |
+| 04aa0d6 | DS_141b | §6.6.9 Урок JJJ | -like vs .Contains() |
+
+Все DS закрыты: задания в PROCESSED, отчёты в OUTBOX, bot.log обновлён.
+
+## Состояние (на момент старта чата 31)
+
+- Ветка: feature/dockerization на 04aa0d6, синхронизирована с origin.
+- git status: M EXCHANGE/OUTBOX/DS_CNT_007_pilot_report.md (тестирование LM Studio — НЕ ТРОГАТЬ, не наш).
+- INBOX: пусто.
+- PROCESSED: DS_118…DS_141b — на месте.
+- OUTBOX: DS_118…DS_141b — на месте.
+- bot.log: ~101591 B, единый формат [YYYY-MM-DD HH:MM] DS_XXX:.
+- SRC\gui_app.py: 6063 строки, BOM=False.
+- tools\ai_local_worker.py: 1027 строк, BOM=False.
+- SRC\tests\test_ds086_ui_hide.py: 221 строка, BOM=False (legacy, 15 проверок).
+- SRC\tests\test_ds133_buttons_state.py: 284 строки, BOM=False (legacy, 18 проверок).
+- EXCHANGE\DS_STANDARD.md: ~43444 B, 9 подразделов §6.6.x.
+- BOM: False для всех .py, .md, .json, .ini, .sql.
+- PS: каталог для логов PS-блоков (ignored). Очищается перед каждым логом (N7).
+- 23.Старт.txt … 31.Старт.txt — ignored.
+- ast.parse warnings: 0.
+- .bak_ в SRC: 0 (удалены в DS_138).
+- pycache: очищены (кроме .kilo/worktrees/).
+- SRC\settings.json: НЕ в git (правки локальные).
+- pytest: 77 passed, exit=0.
+- DS_133 script: 18/18 PASSED, exit=0.
+- DS_086 script: 15/15 PASSED, exit=0.
+
+## НОВЫЕ ПРАВИЛА / УРОКИ ЧАТА 30
+
+Зафиксированы в DS_STANDARD.md §6.6.1–§6.6.9.
+
+### §6.6.1 — Урок FF: логирование внешних процессов
+
+Start-Transcript в PS 5.1 НЕ перехватывает stdout/stderr внешних
+процессов (python.exe, git.exe, ollama.exe). Их вывод не попадает
+в лог-файл транскрипта.
+
+Решение: для каждого вызова внешнего процесса:
+    python tools\ai_local_worker.py --check 2>&1 | Out-Host
+    git status -sb 2>&1 | Out-Host
+    git log -1 --oneline 2>&1 | Out-Host
+
+Расширяет Урок V (правило 62) и Урок T (правило 60).
+
+### §6.6.2 — Урок GG: bot.log для DS без кода
+
+Правило 29 (bot.log до коммита) обязательно для DS, меняющих
+код/тесты/конфиги. Для DS без кода (гигиена, удаление файлов,
+чистка .bak_, обновление документации) — bot.log НЕ ОБЯЗАТЕЛЕН.
+Решение принимает Автор DS, фиксирует в отчёте.
+
+### §6.6.3 — Уточнение правила 19: fail-fast return
+
+Fail-fast return в PS-блоках допустим, если:
+- return внутри if ($условие_ошибки);
+- перед return Stop-Transcript | Out-Null;
+- после return не остаётся полезной работы.
+
+Иначе — правило 19 («никаких return») действует.
+
+### §6.6.4 — Урок T расширен: NativeCommandError
+
+PS 5.1 помечает любой stderr внешнего процесса как
+«NativeCommandError», даже если это warning от git (LF/CRLF).
+Ориентир — $LASTEXITCODE (должен быть 0). Не глушить через 2>$null.
+
+### §6.6.5 — Обязательное логирование PS-блоков
+
+Каждый PS-блок, выполняющий работу, ОБЯЗАН:
+- начинаться с очистки PS\ (N7);
+- содержать Start-Transcript -Path PS\<имя>.log -Force | Out-Null;
+- заканчиваться Stop-Transcript + вывод пути к логу.
+
+Исключение: тривиальные однострочные проверки.
+
+### §6.6.6 — Урок HH: идемпотентность append-блоков
+
+Любой PS-блок, дописывающий текст в файл, должен быть
+идемпотентным. Перед записью — Select-String по сигнатуре.
+Если найдено — fail-fast.
+
+Инцидент DS_138b: случайный двойной запуск дал дубль
+§6.6.1..§6.6.4, потом чинили вручную.
+
+### §6.6.7 — Урок II: границы блоков в .md
+
+При автоматическом поиске границ фрагмента в .md НЕЛЬЗЯ
+полагаться на «ожидаемое» число пустых строк. Выводить ВСЕ
+строки вокруг границы, проверять фактические индексы.
+Если хотя бы одна проверка не совпала — fail-fast.
+
+Инцидент DS_138b: первый fix-блок остановился на fail-fast
+из-за неверного предположения о пустой строке.
+
+### §6.6.8 — Урок JJ: формат bot.log
+
+Перед append в bot.log — Get-Content -Tail 3, скопировать
+фактический формат. Существующий формат:
+    [YYYY-MM-DD HH:MM] DS_XXX: текст
+Не append «по памяти». Проверять идемпотентность.
+
+Инцидент DS_138b: строка записана без скобок и времени.
+
+### §6.6.9 — Урок JJJ: -like в PS — wildcard
+
+Оператор -like в PowerShell трактует [ ], * , ? как wildcard.
+Если анкор содержит [ ] (Python-код: списки, срезы) —
+WildcardPatternException.
+
+Для проверки подстроки использовать МЕТОД .Contains():
+    # ПЛОХО:
+    if ($content -like ("*" + $old + "*")) { ... }
+    # ХОРОШО:
+    if ($content.Contains($old)) { ... }
+
+Инцидент DS_141 Шаг 3: анкор с [sys.executable, ...]
+упал на -like. Файл не пострадал (fail-fast).
+
+### Урок ККК (не в DS_STANDARD, наблюдение процесса)
+
+Перед финальным блоком DS (задание + отчёт + bot.log + git)
+проверять, не закоммичен ли DS уже. Инцидент DS_141: коммит
+704c499 был сделан раньше, повторный блок остановился на
+fail-fast по bot.log. Полезно, но не зафиксировано как правило.
+
+## Открытые задачи
+
+1. [DS_140] pytest-миграция legacy-тестов (Вариант 2 — полный перенос).
+   Файлы: test_ds133_buttons_state.py (18 проверок), test_ds086_ui_hide.py (15 проверок).
+   План (5 шагов):
+     Шаг 0: превью полного test_ds133_buttons_state.py.
+     Шаг 1: создать SRC/tests/conftest.py + мигрировать test_ds133.
+     Шаг 2: проверить — pytest 95 passed.
+     Шаг 3: мигрировать test_ds086.
+     Шаг 4: проверить — pytest 110 passed.
+     Шаг 5: задание + отчёт + bot.log + коммит.
+   Открытые решения:
+     - scope fixture app: function или module (рекоменд. function);
+     - conftest.py: создаём (рекоменд. да);
+     - legacy-стиль: убрать полностью (рекоменд. да).
+   Риски: Tkinter fixtures, after()-таймеры, settings.json backup/restore,
+   winfo_manager после update_idletasks.
+
+2. [DS_142] «Только Ai» по умолчанию — обсуждение.
+
+3. [DS_143] deep_scanner.py — фильтр временных (из DS_135, не сделан).
+
+4. DS_CNT_007_pilot_report.md — modified, тестирование LM Studio,
+   НЕ ТРОГАТЬ. Не забыть, что висит в git status.
+
+5. Отложено: DS_119 CLI-сканер run_scanner.py (низкий приоритет).
+
+6. [DS_CNT_001] в bot.log — НЕ трогаем.
+
+7. Ночной pipeline CNT без [ — отдельная тема.
+
+## AI-инфраструктура
+
+- Ollama: http://localhost:11434, работает (qwen2.5-coder:7b, 3b,
+  nomic-embed-text, llama3.1:8b, deepseek-coder:6.7b).
+- LM Studio: закрыт (использовался в тесте DS_CNT_007).
+- Мок-сервер: tools\mock_ollama_invalid.py, порт 11500.
+- ai_local_worker.py --check: OK (available).
+- KODA: 1.2.2 (откат с 1.2.3), автообновление ОТКЛЮЧЕНО.
+- KODA запускается БЕЗ Karing.
+
+## Реальный путь и имена (важно!)
+
+- Проект: F:\TO_DBI\ (SRC\ — исходники, tools\ — утилиты).
+- Класс GUI: DBIMigrationApp (SRC\gui_app.py, 6063 строки).
+- Тесты: F:\TO_DBI\SRC\tests\ — pytest exit code 0.
+- Python 3.11 в PATH. pytest 8.3.4.
+- pytest.ini в корне — testpaths = SRC/tests, addopts = --capture=no.
+- BOM — критичная тема. Правило в DS_STANDARD.md §6.1.
+  .py / .md / .json / .ini / .sql — UTF-8 БЕЗ BOM.
+  .ps1 с кириллицей — UTF-8 С BOM.
+- Task Scheduler TO_DBI_CNT_NightlyPipeline — S4U, daily 01:00.
+- AI-контур: tools\ai_local_worker.py, конфиг tools\ai_local_worker_config.json.
+- tools\close_ds.ps1 — универсальный скрипт закрытия DS (v2.1, -InboxFile, BOM=True).
+
+## Инфраструктура версионирования
+
+- EXCHANGE\INBOX\ — игнор.
+- EXCHANGE\OUTBOX\ — в git.
+- EXCHANGE\PROCESSED\ — в git.
+- EXCHANGE\bot.log — в git.
+- EXCHANGE\AI_IN\, AI_OUT\, AI_IN_PROCESSED\, AI_OUT_PROCESSED\ — игнор.
+- PS\ — игнор.
+- 23.Старт.txt … 31.Старт.txt — игнор.
+- SRC\settings.json — НЕ в git (локальный).
+
+## Регламент имён отчётов (DS_109, действует)
+
+- Отчёты: EXCHANGE\OUTBOX\DS_XXX_<краткое_описание>_report.md.
+- Задания: EXCHANGE\PROCESSED\DS_XXX_<краткое_описание>.md.
+- Запрещено: DS_XXX_report.md, транслит, пробелы.
+
+## Регламент работы (обновлён в чате 30)
+
+0. ШАПКА БЛОКА (Правило N1).
+1. Команда 0 — кодировка.
+2. Секции с заголовками.
+3. Готовность к одной кнопке.
+4. Ожидание — таблицей вне блока.
+5. Кодировка — UTF8Encoding($false) для .py/.ini/.json/.md.
+6. Прогноз KODA — НЕ запрашиваем.
+7. Не трогать SRC без явного указания в DS.
+8. Логи — только EXCHANGE\bot.log. Транскрипты PS — в PS\.
+9. Отчёты — в EXCHANGE\OUTBOX\, UTF-8 без BOM, русский.
+10. GIT / PUSH / GP — по запросу.
+11. Ограничения — DS_STANDARD.md раздел 2 + 6.1.
+12. Не открывать LM Studio одновременно с Ollama.
+13. Транслит не использовать.
+14. Git-гигиена: .gitignore содержит *.bak_*, *.broken_*, *.before_*, *.lnk, *Старт*.txt, PS/.
+15. Перед GP — проверить git status (clean).
+16. После GP — проверить git branch -vv (синхронизация).
+17. §5 (Проверка) обязателен.
+18. Прямые слэши в git add.
+19. Никаких return в ручных блоках PowerShell, КРОМЕ fail-fast
+    return в if-ветке ошибки (см. §6.6.3).
+20. Для создания файлов — @'...'@ ИЛИ массив строк + WriteAllLines.
+21. Get-ChildItem + Format-Table — отложенный вывод.
+22. $LASTEXITCODE после Select-String — не работает.
+23. Дробить большие блоки на маленькие шаги.
+24. BOM-check — только из корня проекта.
+25. Читать фактический git diff, не пересказ KODA.
+26. Проверять, не занят ли номер DS_XXX.
+27. Проверочный блок запускать только ПОСЛЕ выполнения DS.
+28. Не доверять описанию состояния — предполётная проверка.
+29. bot.log пишется ДО коммита, не после.
+30. KODA работает по имени INBOX-файла, а не по содержимому.
+31. Koda 1.2.3 имела баги Agent-режима — откат до 1.2.2.
+32. DS_082b писал в bot.log при dry-run — исправлено в DS_121.
+33. [ОПРОВЕРГНУТ] Karing нужна для Koda.
+34. api.kodacode.ru может отдавать 429 service_busy.
+35. Koda.gallerycdn.vsassets.io может блокироваться DPI.
+36. Простые DS — вручную PS, без KODA.
+37. close_ds.ps1 v2.1 — универсальный скрипт, -InboxFile, BOM=True.
+38. Проверять settings.json на plain-text секреты.
+39. -SimpleMatch не понимает | (DS_125, §6.2.1).
+40. Select-String находит docstring и сигнатуры (DS_125, §6.2.1).
+41. ReadAllBytes/WriteAllText — только абсолютные пути (DS_125/126).
+42. Вложенные ``` в Text Copy Download ломают разметку (DS_125, §3.2).
+43. INBOX-гигиена при ручном выполнении DS (DS_125).
+44. -Filter в Get-ChildItem не поддерживает regex-классы (DS_126).
+45. [Parser]::ParseFile и BOM — ложные ошибки при отсутствии BOM (DS_126).
+46. .ps1 с кириллицей требует BOM в PS 5.1 (DS_126).
+47. $matches в PS — Hashtable, не массив (DS_128).
+48. Аудит источника, не только симптома (DS_128).
+49. -replace в PS — regex, не строковая замена (DS_129).
+50. Глобальный -replace без указания строки — опасно (DS_129).
+51. Шапка PS-блока (N1, DS_129, §6.6).
+52. Логирование PS-блоков: Start-Transcript в PS\ (N2, DS_129).
+53. Стартовые файлы чатов — сразу в файл (N4, чат 23).
+54. .Replace заменяет ВСЕ вхождения подстроки (Урок N, DS_131).
+55. -ForegroundColor требует Write-Host (Урок O).
+56. Длинные here-string + backtick — дробить (Урок P).
+57. AppendAllLines в PS 5.1 отсутствует (Урок Q).
+58. Очистка F:\TO_DBI\PS\ перед новым логом (N7).
+59. Resolve-DnsName | Select-Object — риск пустой таблицы (Урок S).
+60. git ls-files --error-unmatch шумит в stderr (Урок T).
+61. Start-Transcript принимает только -Path в PS 5.1 (Урок U).
+62. Out-Host для гарантированного попадания таблиц в транскрипт (Урок V).
+63. Legacy-файлы — проверять импорты и git-историю перед удалением (Урок W).
+64. EmptyPipeElement при } | Out-Host — аккумулировать в переменную (Урок X, N9).
+65. .Replace на строке, не присваивание целиком (N10, Урок Y).
+66. git rm -f для modified-файлов (N11, Урок Z).
+67. Скрипты if name == 'main' не в pytest (N12).
+68. При замене блока — сохранять ВСЕ строки, особенно return (N13, Урок AA).
+69. Тесты через new — guard в методах через hasattr (N14, Урок CC).
+70. Python-код в PS-консоли → ParserError (Урок DD, чат 29).
+71. pytest зелёный ≠ скрипт зелёный — N12 работает.
+72. CRLF/LF-предупреждения git — .md LF→CRLF, .log/.py CRLF→LF.
+73. Start-Transcript не перехватывает stdout внешних процессов (Урок FF, §6.6.1).
+74. bot.log для DS без кода — не обязателен (Урок GG, §6.6.2).
+75. Fail-fast return в PS-блоках допустим в if-ветке ошибки (§6.6.3).
+76. NativeCommandError в PS 5.1 — шум, ориентир $LASTEXITCODE (§6.6.4).
+77. Обязательное логирование PS-блоков (§6.6.5).
+78. Идемпотентность append-блоков (Урок HH, §6.6.6).
+79. Не полагаться на пустые строки в .md (Урок II, §6.6.7).
+80. Формат bot.log — копировать из последних строк (Урок JJ, §6.6.8).
+81. -like в PS — wildcard, для подстроки .Contains() (Урок JJJ, §6.6.9).
+
+## Справочники (читать перед работой, не задания)
+
+- F:\TO_DBI\AGENTS.md — инструкция KODA.
+- F:\TO_DBI\EXCHANGE\DS_STANDARD.md — стандарт оформления DS.
+  §3.1 — язык отчёта. §3.2 — имена отчётов.
+  §6.1 — BOM. §6.2 — сводные блоки. §6.2.1 — грабли PowerShell.
+  §6.3 — порядок завершения DS. §6.4 — типовой результат DS.
+  §6.5 — общие правила завершения. §6.6 — логирование PS-блоков
+  (§6.6.1–§6.6.9 — новые из чата 30).
+  §9.1 — §5 обязателен.
+- F:\TO_DBI\EXCHANGE\DS_CONTEXT.md — общий контекст.
+- F:\TO_DBI\EXCHANGE\DS_FILES.md — карта файлов.
+- F:\TO_DBI\EXCHANGE\CNT_REFERENCE.md — справочник по Continue (CNT).
+
+## Отдельный трек: CNT (Continue) — ЗАКРЫТ
+
+Трек обучения CNT закрыт 07.10.2026.
+Ночной pipeline: TO_DBI_CNT_NightlyPipeline — S4U, daily 01:00, LastTaskResult=0.
+Тестирование LM Studio (DS_CNT_007) — в работе, вне трека CNT.
+
+## Первый шаг
+
+1. Прочитать этот стартовый файл (31.Старт.txt).
+2. Проверить Ollama: python tools\ai_local_worker.py --check.
+3. Проверить DNS: Resolve-DnsName api.kodacode.ru | Format-List *.
+4. Проверить git: git status -sb / git branch -vv.
+   Ожидание: 04aa0d6, sync с origin, 1 modified (DS_CNT_007_pilot_report.md).
+5. Проверить INBOX: должен быть пуст.
+6. Запустить регресс: python -m pytest SRC\tests\ -q → ожидание 77 passed.
+7. Запустить скрипт DS_133: python SRC\tests\test_ds133_buttons_state.py
+   (правило N12) → ожидание 18/18 PASSED.
+8. Запустить скрипт DS_086: python SRC\tests\test_ds086_ui_hide.py
+   (правило N12) → ожидание 15/15 PASSED.
+9. Основная тема чата 31 — DS_140 (pytest-миграция Вариант 2).
+   Открытые задачи: DS_142, DS_143.
+
+## Команды (справочно)
+
+- ollama list — модели.
+- ollama ps — загруженные модели (RAM).
+- python tools\ai_local_worker.py --check — доступность Ollama.
+- python -m pytest SRC\tests\ -q — регресс.
+- python SRC\tests\test_ds133_buttons_state.py — скрипт DS_133.
+- python SRC\tests\test_ds086_ui_hide.py — скрипт DS_086.
+- python SRC\gui_app.py — запуск АРМ.
+- python tools\mock_ollama_invalid.py --port 11500 --fail-first.
+- git status -sb — состояние ветки.
+- git branch -vv — синхронизация с origin.
+- .\tools\close_ds.ps1 — закрытие DS.
+- Resolve-DnsName api.kodacode.ru | Format-List * — DNS Koda.

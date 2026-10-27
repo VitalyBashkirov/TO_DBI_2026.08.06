@@ -1,0 +1,259 @@
+# Проект TO_DBI. Чат 38. Генерация тестовых .plp — Доработка
+
+## Контекст
+
+АРМ «Адаптация под DBI» — миграция PL/SQL (Oracle) -> PostgreSQL (DBI).
+Репозиторий F:\TO_DBI. Ветка feature/dockerization.
+Роли: Автор DS — DeepSeek. Пользователь — Vitaly.
+
+ВАЖНО: KODA не запускается. Karing не нужна.
+Все DS — вручную PowerShell (правило F, DS_125).
+
+## Сокращения (кнопки GUI) — ВАЖНО
+
+Кнопки на GUI форме, далее по тексту — К1..К4:
+
+| Код | Кнопка           | Метод в gui_app.py | Что делает |
+|-----|------------------|--------------------|------------|
+| К1  | «1. Сканировать» | start_scan -> _run_scan(False) | Скан ИК через PLPlusScanner + зеркало ИК->КР |
+| К2  | «2. Исправить код» | start_fix -> fixer | Фикс по результату К1 |
+| К3  | «3. В Ai»        | send_to_ai | Отправка AI_REQUEST_*.md в Ollama |
+| К4  | «4. Из Ai»       | receive_from_ai | Приём AI_RESPONSE_*.md, применение |
+
+## Что сделано в чате 37
+
+### DS_147 — TestGeneratorV2 (генерация тестовых .plp)
+
+- SRC/analyzer/test_generator_v2.py (~15830 B) — класс TestGeneratorV2.
+  Режимы single / per-rule, фильтры sources / priorities, safe_name.
+  Источник: DATA/Рубрикатор v5/4.RUBRICATOR_PROMPT v5.json (332 правила).
+- SRC/tests/test_ds147_gen_v2.py (16 pytest-тестов).
+- SRC/gui_app.py: _run_test_generation -> TestGeneratorV2.generate(...).
+- EXCHANGE/DS_STANDARD.md: §6.6.28-31.
+- EXCHANGE/OUTBOX/DS_147_report.md: отчёт.
+- .gitignore: DATA/Тестовые файлы/, DATA/generated_plp/.
+- Коммиты: 49ea292 (DS_147), fb0286f (DS_147 closed).
+- Регресс: 197 passed.
+
+### DS_148 — Нормализация MIXED + BOM в .md
+
+- 6 файлов: DS_CONTEXT, DS_090, DS_CNT_004a, DS_CNT_021,
+  DS_082b_AI_REQUEST_test, README_GIT.
+- MIXED -> CRLF, BOM -> no BOM, cp1251 -> UTF-8.
+- Коммиты: a86b8b3 (DS_148), 47295d8 (DS_148 closed).
+
+### DS_149 — Кнопки «Выделить все» / «Сбросить все» в дереве рубрикатора
+
+- SRC/gui_app.py (~353435 B): toolbar над rules_tree, 4 метода, тултипы.
+- Методы: _select_all_current_rubricator, _deselect_all_current_rubricator,
+  _set_all_rules_for_current_rubricator, _get_current_rubricator_file_code.
+- Тултипы через class Tooltip: «Выделить все правила рубрикатора»,
+  «Сбросить все правила рубрикатора».
+- Лог генерации: полный путь к .plp (pp, не pp.name).
+- EXCHANGE/DS_STANDARD.md: §6.6.32.
+- EXCHANGE/OUTBOX/DS_149_report.md: отчёт.
+- Коммиты: 415fd29 (DS_149), 07a154f (DS_149 closed).
+- Регресс: 197 passed.
+
+## Состояние (на момент старта чата 38)
+
+- Ветка: feature/dockerization на 07a154f, синхронизирована с origin.
+- git status: M EXCHANGE/OUTBOX/DS_CNT_007_pilot_report.md (тестирование LM Studio — НЕ ТРОГАТЬ).
+- INBOX: пусто (проверить).
+- PROCESSED: DS_118...DS_146.
+- OUTBOX: DS_118...DS_149 (+ DS_147_report.md, DS_149_report.md).
+- bot.log: обновлён записью DS_149.
+- SRC/gui_app.py: ~353435 B.
+- SRC/analyzer/test_generator_v2.py: ~15830 B.
+- SRC/tests/test_ds147_gen_v2.py: ~6800 B.
+- EXCHANGE/DS_STANDARD.md: §6.6.1-§6.6.32.
+- BOM: False для всех .py, .md, .json, .ini, .sql.
+- PS\ — каталог для логов PS-блоков (ignored).
+- PS\persist\ — каталог, переживающий N7 v7 (см. §6.6.18).
+- ast.parse warnings: 0.
+- .bak_ в SRC: 0.
+- pytest: 197 passed.
+
+## НОВЫЕ ПРАВИЛА / УРОКИ ЧАТА 37
+
+### §6.6.28 — DS_147: TestGeneratorV2
+
+Создан SRC/analyzer/test_generator_v2.py — генератор тестовых .plp по
+4.RUBRICATOR_PROMPT v5.json (332 правила). Режимы single / per-rule,
+фильтры sources (plpcheck/v53/тдс20240828/тклоик20240828), priorities.
+categories — ОТКЛЮЧЁН (маппинг PLPCHECK_CATEGORIES <-> subcategory отсутствует).
+GUI-интеграция через _run_test_generation.
+Схема имён single: test_<src>_<prio>_<cat>_<sel|all>_single_<ts>.plp.
+Схема имён per-rule: test_<safe_name>_<ts>.plp.
+
+### §6.6.29 — Уроки чата 37: PS here-string + Python
+
+1. Никогда не использовать обратный слэш перед кавычкой в here-string.
+2. Не использовать тройные кавычки внутри here-string.
+3. f-строка с одинарными кавычками внутри.
+4. Или: писать Python-скрипт-правку через Path.write_text() — без here-string.
+5. После записи — ast.parse.
+6. .log через Get-Content в PS 5.1 — только Python с utf-8.
+
+### §6.6.30 — _split_declare: внешние begin/end/declare
+
+Внешние begin/end убирать через re.sub, нормализовать отступы (min indent),
+снимать префикс declare через re.sub (r"^\s*declare\s+").
+
+### §6.6.31 — pytest Test* class: __test__ = False
+
+Если в модуле есть класс Test* (TestGeneratorV2), pytest его соберёт и
+выдаст PytestCollectionWarning. Пометка __test__ = False в классе.
+
+### §6.6.32 — DS_149: кнопки «Выделить все» / «Сбросить все»
+
+В gui_app.py над rules_tree добавлены кнопки + 4 метода + тултипы.
+Порядок pack в rules_frame (важно): toolbar (TOP) -> scroll_y (RIGHT) ->
+scroll_x (BOTTOM) -> rules_tree (LEFT). Иначе toolbar не виден.
+В логе генерации: [OK] Создан: <полный путь к .plp> — pp, не pp.name.
+
+## ЗАКРЫТО В ЧАТЕ 37
+
+- DS_147 — TestGeneratorV2.
+- DS_148 — Нормализация MIXED + BOM в .md.
+- DS_149 — Кнопки «Выделить все» / «Сбросить все».
+
+## ГЛАВНАЯ ТЕМА ЧАТА 38 — Генерация тестовых .plp — Доработка
+
+### Цель
+
+Доработать TestGeneratorV2 и инфраструктуру вокруг него:
+- CLI-интерфейс;
+- валидация через PLPlusScanner;
+- полная поддержка фильтров (PRIORITY_RULES для plpcheck, маппинг категорий).
+
+### Что уже есть (из DS_147)
+
+- TestGeneratorV2 (SRC/analyzer/test_generator_v2.py):
+  generate(rule_codes, mode="single"|"per-rule", out_dir),
+  фильтры sources, priorities;
+  safe_name; транслит кириллицы.
+- Тесты: SRC/tests/test_ds147_gen_v2.py (16).
+- GUI: _run_test_generation -> TestGeneratorV2.generate(...).
+
+### Что НЕ сделано (из отчёта DS_147)
+
+1. CLI tools/gen_test_plp.py — НЕТ.
+2. Валидация через PLPlusScanner — НЕТ.
+3. PRIORITY_RULES для plpcheck.* — НЕ ПОЛНЫЙ (в rubricator_priority_mapping.py).
+4. Маппинг PLPCHECK_CATEGORIES <-> subcategory — НЕТ (categories отключён).
+5. Тесты AST для кнопок DS_149 — НЕТ.
+6. Toggle детей при клике на родителя — НЕТ.
+
+### План чата 38 (по порядку)
+
+1. **DS_147a** — CLI tools/gen_test_plp.py.
+   Ключи: --rules <c1,c2> | --all | --source plpcheck,v53 | --priority HIGH,MEDIUM |
+   --mode single|per-rule | --out <dir> | --validate.
+2. **DS_147b** — валидация через PLPlusScanner.
+   После генерации прогнать сканер, сверить найденные ошибки с ожидаемыми.
+3. **DS_147c** — PRIORITY_RULES для plpcheck.*.
+   Дополнить rubricator_priority_mapping.py или перейти на rule.priority из v5.json.
+4. **DS_147d** — маппинг PLPCHECK_CATEGORIES <-> subcategory.
+   Явная таблица, включить фильтр categories в TestGeneratorV2.
+5. **DS_149a** — toggle детей при клике на родителя (опционально).
+6. **DS_149b** — тесты AST для кнопок (опционально).
+
+## ОТКРЫТЫЕ ЗАДАЧИ (в чат 38)
+
+1. **[DS_147a]** CLI tools/gen_test_plp.py — ГЛАВНАЯ.
+2. **[DS_147b]** Валидация через PLPlusScanner.
+3. **[DS_147c]** PRIORITY_RULES для plpcheck.*.
+4. **[DS_147d]** Маппинг PLPCHECK_CATEGORIES <-> subcategory.
+5. **[DS_149a]** Toggle детей при клике на родителя.
+6. **[DS_149b]** Тесты AST для кнопок.
+7. **[DS_144d]** .mcs, .mp, .pck и др. — нужна разведка от Vitaly.
+8. **DS_CNT_007_pilot_report.md** — modified, тестирование LM Studio, НЕ ТРОГАТЬ.
+9. **DS_119** CLI-сканер run_scanner.py (низкий приоритет).
+10. **Ночной pipeline CNT** без [ — отдельная тема.
+11. **АПК DBI v0.82** — сверка рубрикатора с §4.3.2 (PLP_* параметры),
+    позиционирование TO_DBI в AGENTS.md. Не срочно.
+12. **_generate_default_rules** в DeepScanner — захардкоженный фолбэк. Отдельный DS.
+13. **Legacy-рубрикатор** (1.RUBRICATOR_FILES.md + 3.RUBRICATOR_FIXES.md) —
+    поддерживается ли? Отдельный DS.
+
+## AI-инфраструктура
+
+- Ollama: http://localhost:11434, работает (qwen2.5-coder:7b).
+- LM Studio: закрыт (использовался в тесте DS_CNT_007).
+- Мок-сервер: tools\mock_ollama_invalid.py, порт 11500.
+- ai_local_worker.py --check: OK (available).
+- KODA: 1.2.2 (откат с 1.2.3), автообновление ОТКЛЮЧЕНО.
+- KODA запускается БЕЗ Karing.
+
+## Реальный путь и имена (важно!)
+
+- Проект: F:\TO_DBI\ (SRC\ — исходники, tools\ — утилиты).
+- Класс GUI: DBIMigrationApp (SRC\gui_app.py, ~353435 B).
+- Тесты: F:\TO_DBI\SRC	ests\ — pytest exit code 0, 197 passed.
+- Python 3.11 в PATH. pytest 8.3.4.
+- pytest.ini в корне — testpaths = SRC/tests, addopts = --capture=no.
+- BOM — критичная тема. Правило в DS_STANDARD.md §6.1.
+- Task Scheduler TO_DBI_CNT_NightlyPipeline — S4U, daily 01:00.
+- AI-контур: toolsi_local_worker.py, toolsi_local_worker_config.json.
+- tools\close_ds.ps1 — универсальный скрипт закрытия DS (v2.1, -InboxFile, BOM=True).
+- SRC	ests\conftest.py — pytest-фикстуры (v4).
+- SRCnalyzer\scanner.py — сканер (PLPlusScanner, 153941 B).
+- SRCnalyzer\deep_scanner.py — CLI DeepScanner (36950 B).
+- SRCnalyzer	est_generator_v2.py — TestGeneratorV2 (~15830 B).
+- DATA\ — каталоги с .plp (patch_WORK, patch_IN, patch_OUT и др.).
+- DATA\Тестовые файлы\ — сгенерированные .plp (в .gitignore).
+- DATA\generated_plp\ — тоже в .gitignore.
+- logs_Deep\ — отчёты DeepScanner (CLI).
+
+## Регламент работы (обновлён в чате 37)
+
+0-98 — как в чате 33/34/35/36, плюс:
+99. Here-string ≤ 60 строк; не вкладывать Python-тройные кавычки внутрь PS here-string.
+100. N7 v7: очистка PS\ в каждом блоке (§6.6.23).
+101. Строки «Лог: <путь>», OK, PASSED — зелёным.
+102. Заголовки секций === ... === — Cyan.
+103. Ошибки FAILED, [FATAL] — красным.
+104. Данные (таблицы, git diff) — через | Out-Host.
+105. Перед патчем кода — диагностика repr() якорей.
+106. Каждая правка патча = отдельный файл + write + удаление.
+107. Временные файлы PS\ удалять в том же блоке (§6.6.25).
+108. Python inline с $ в строке — только через here-string + .py.
+109. Stop-Transcript | Out-Null в конце каждого блока.
+110. Правки .py — через splitlines(keepends=True), не replace (§6.6.27).
+111. DeepScanner.run() возвращает (stats, report_path) — не dict.
+112. close_ds.ps1 — не дублировать DsNumber в -BotLogMessage.
+113. **PS here-string + Python: без \" и """ (§6.6.29).**
+114. **_split_declare: снимать declare через re.sub (§6.6.30).**
+115. **pytest Test* class: __test__ = False (§6.6.31).**
+
+## Первый шаг (чат 38)
+
+1. Прочитать этот стартовый файл (38.Старт.txt).
+2. Проверить Ollama: python toolsi_local_worker.py --check.
+3. Проверить git: git status -sb / git branch -vv.
+   Ожидание: 07a154f, синхронизировано с origin,
+   1 modified (DS_CNT_007_pilot_report.md).
+4. Проверить INBOX: должен быть пуст.
+5. Запустить регресс: python -m pytest SRC	ests\ -q -> ожидание 197 passed.
+6. **Разведка по DS_147a (CLI):**
+   - посмотреть SRC/analyzer/test_generator_v2.py — API для CLI;
+   - посмотреть tools/ — шаблоны CLI (deep_scanner.py и др.);
+   - определить CLI-фреймворк (argparse / click / ручной);
+   - определить формат вывода (--rules, --all, --source, --priority, --mode, --out).
+7. **Решение Vitaly:** уточнить объём DS_147a (какие ключи, default).
+8. Реализация + тесты.
+
+## Команды (справочно)
+
+- ollama list — модели.
+- ollama ps — загруженные модели (RAM).
+- python toolsi_local_worker.py --check — доступность Ollama.
+- python -m pytest SRC	ests\ -q — регресс (197 passed).
+- python SRC\gui_app.py — запуск АРМ.
+- git status -sb — состояние ветки.
+- git branch -vv — синхронизация с origin.
+- .	ools\close_ds.ps1 — закрытие DS.
+- python SRCnalyzer\deep_scanner.py -s <ИК> --rules v50 — CLI DeepScanner.
+- python tools\gen_test_plp.py — CLI генератора (будет создан в DS_147a).
+

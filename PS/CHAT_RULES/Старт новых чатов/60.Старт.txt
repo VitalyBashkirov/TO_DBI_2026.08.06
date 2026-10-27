@@ -1,0 +1,94 @@
+============================================
+  60.СТАРТ (сгенерировано 2026-10-25 из чата 59)
+  Хост: LGGRAMA8V7Q8U (hostTag=LG)
+  Python: C:\Users\ainf1\AppData\Local\Programs\Python\Python312\python.exe
+============================================
+
+## Где искать правила (ОБЯЗАТЕЛЬНО в новом чате)
+
+F:\TO_DBI\PS\CHAT_RULES\ — единое место:
+  1. 00_INDEX.md              — карта, порядок чтения, долги
+  2. 01_Правила_PS.md         — правила PS 5.1 (1–13)
+  3. 02_Сокращения_GUI.md     — К1–К4, ОР, ГТ, ИКА, КР, МПК, ВТИК, НеАФ, УЛ/УЛМ/УЛП, ЖВ
+  4. 03_Матрица_флагов.md     — МПК/ВТИК/НеАФ -> Я/П/В
+  5. 04_Регламент_логов.md    — путь, имя, Start-Transcript, pytest-выхлоп
+  6. 05_Регламент_тестов.md   — -W error::..., EAP=Continue, регресс
+  7. 06_Регламент_коммитов.md — msgfile без BOM, -F, push, два пути
+  8. 07_Шаблон_PS.md          — шаблон .ps1
+  9. 08_Окружение.md          — LG/MBE, python, сервисы, DS_183b, долги
+
+  Отчеты\              — 5 файлов (49, 50, 53, 54, 55)
+  Скрипты чатов\       — 65 файлов (chat46_*, test_*, fix_*, analyze_*, ...)
+  Старт новых чатов\   — 36 файлов (21..26, 27..47, 49..56, 59) + этот 60
+
+## Статус на 2026-10-25 (после чата 59)
+
+- DS_183_assert_fix — ЗАКРЫТ, коммит e14ca65
+    test_ds183_k4_model_setting.py: return -> assert; 5 passed; регресс 377 passed.
+- DS_183b (per-host k4_model) — ЗАКРЫТ, коммит 1b1f878
+    local_settings.py + apply_local_k4_override в gui_app.py (было в коде).
+    Тест t6: 5 сценариев (no-file, 7b, другой хост, битый JSON, пустой k4_model).
+    Фикс t3/t4: root.destroy() в try/except + root.update_idletasks().
+    Target: 6 passed, регресс: 378 passed.
+- CHAT_RULES создан (59_16), наполнен:
+    9 .md (00..08), Отчеты (5), Скрипты чатов (65), Старт новых чатов (36).
+    Правило 13: отчёты/старты — только в CHAT_RULES.
+    00_INDEX.md, 01_Правила_PS.md — обновлены (59_22).
+- 55.Отчёт.txt — создан (4250 b). DS_184 ЗАКРЫТ (e5459c3), A8 — предположительно
+    закрыт через DS_184 (B4), config = settings.json.
+- 49.Отчёт.txt — актуализирован (6523 b): DS_180 ЗАКРЫТ (593914e),
+    DS_181 ЗАКРЫТ (8eb83b8), DS_179 подтверждён (8df57e4).
+- settings.json — k4_model = qwen2.5-coder:3b (59_15, git checkout).
+- F:\TO_DBI\ (корень) — чисто, только requirements.txt + подкаталоги.
+
+## Долги чата 59 -> 60
+
+1. DS_185: DBIMigrationApp — отменять .after-id (_update_buttons_state)
+   при destroy()/_on_close(). Симптом: invalid command name в stderr t3/t4.
+   Правка gui_app.py (root.after), отдельный коммит.
+2. DS_186: t3/t4 — гарантированный откат settings.json
+   (try/finally + copy2(BACKUP, SETTINGS) до первого изменения).
+   Сейчас t4 пишет k4_model=7b и не возвращает 3b; 59_15 спасает вручную.
+3. EXCHANGE/* — 2 грязных файла (DS_CNT_007_pilot_report.md, bot.log).
+   Разобрать: .gitignore / skip-worktree / удалить.
+4. A8 — предположительно закрыт через DS_184 (e5459c3, B4).
+   Если есть точные данные из чата 54 — подтвердить.
+5. 49.Отчёт.txt.chat59.bak — бэкап, удалить (или оставить?).
+
+## Окружение
+
+- LG: LGGRAMA8V7Q8U, python C:\Users\ainf1\...\Python312\python.exe
+- MBE: MateBook, python C:\Users\Виталий\...\Python311\python.exe
+- SSD физически на LG, расшарен. Работаем то на MBE, то на LG.
+- LM Studio на MBE закрыт, Ollama остановлена, батник убит.
+- Репо: F:\TO_DBI\SRC, ветка feature/dockerization, remote origin.
+
+## Первые шаги чата 60
+
+1. Прочитать CHAT_RULES\00_INDEX.md -> 01..08.
+2. Взять долг из списка выше (ПОР: DS_185 — наивысший приоритет,
+   т.к. DS_186 и EXCHANGE — косметика, A8 — предположительно закрыт).
+3. Действовать по регламентам: 04 (логи), 05 (тесты), 06 (коммиты),
+   07 (шаблон .ps1).
+4. В конце чата — дописать в CHAT_RULES: новые правила, сокращения,
+   отчёты (в Отчеты\), старт 61 (в Старт новых чатов\).
+
+## Правила PS (краткая выжимка, полные — в 01_Правила_PS.md)
+
+1. Логи — F:\TO_DBI\PS\<hostTag>_<чат>_<номер>_<action>.log
+2. hostTag — авто (LGGram*->LG, MateBook*->MBE)
+3. python — авто (Get-Command + fallback)
+4. Удалять нулевые логи после PS
+5. git commit — только -F <msgfile>
+6. Start-Transcript — без -Encoding
+7. Here-string и if/else — только в .ps1, не в интерактивной вставке
+8. "$"var.."" -> ".."
+9. EAP=Continue на pytest-блоки; $LASTEXITCODE — верить
+10. Финальная пауза — НИКАКАЯ (ReadLine/Read-Host/cmd pause висят);
+    только Write-Host "LOG: ..." -ForegroundColor Green
+11. msgfile — UTF-8 БЕЗ BOM (UTF8Encoding($false))
+12. Два пути: $targetRepo (корень репо) / $targetRel (от $repo);
+    не путать в git add/checkout/status
+13. Отчёты/старты/скрипты — только в CHAT_RULES.
+
+============================================

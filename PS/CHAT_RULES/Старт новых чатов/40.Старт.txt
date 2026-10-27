@@ -1,0 +1,209 @@
+# Проект TO_DBI. Чат 40. DS_149 — Генерация и сводные тесты
+
+## Контекст
+
+АРМ «Адаптация под DBI» — миграция PL/SQL (Oracle) -> PostgreSQL (DBI).
+Репозиторий F:\TO_DBI. Ветка feature/dockerization.
+Роли: Автор DS — DeepSeek. Пользователь — Vitaly.
+
+ВАЖНО: KODA не запускается. Karing не нужна.
+Все DS — вручную PowerShell (правило F, DS_125).
+
+## Сокращения (кнопки GUI) — ВАЖНО
+
+Кнопки на GUI форме, далее по тексту — К1..К4:
+
+| Код | Кнопка           | Метод в gui_app.py | Что делает |
+|-----|------------------|--------------------|------------|
+| К1  | «1. Сканировать» | start_scan -> _run_scan(False) | Скан ИК через PLPlusScanner + зеркало ИК->КР |
+| К2  | «2. Исправить код» | start_fix -> fixer | Фикс по результату К1 |
+| К3  | «3. В Ai»        | send_to_ai | Отправка AI_REQUEST_*.md в Ollama |
+| К4  | «4. Из Ai»       | receive_from_ai | Приём AI_RESPONSE_*.md, применение |
+
+## Что сделано в чате 39
+
+### DS_149 — баги АРМ (найдены Vitaly при тестировании)
+
+- DS_149a — «Сбросить все» не трогает selected_rules (вариант B). _update_rubricator_parent_state(file_code, update_var=False).
+- DS_149a-fix (откат) — значок ✗ при полном сбросе (семантика A: ✓/◐/✗). Откат ◐.
+- DS_149b-fix — клик по одному правилу = одно правило (убрали plpcheck_enabled_var.set из дочерней ветки).
+- DS_149c — тултипы «Выбрать/Сбросить все правила текущего рубрикатора (N/M)».
+- DS_149c-fix — N/M при старте — fallback на первый выбранный рубрикатор.
+- DS_149g / g2 / g3 / g5 — окно 1127×1027 (факт 1127×818), minsize 900×600.
+- DS_149h — «Сбросить все» без клика (fallback _current_rubricator).
+- DS_149b — сохранение правил + загрузка + ◐ при частичном выборе.
+  - _sync_plpcheck_checkbox не включается при _populating_tree=True (39.44).
+  - _populate_rules_tree — значок ◐ при частичном выборе (39.46).
+  - settings.json — исправлен (1 True).
+
+## Состояние (на момент старта чата 40)
+
+- Ветка: feature/dockerization.
+- git status: M EXCHANGE/OUTBOX/DS_CNT_007_pilot_report.md (НЕ ТРОГАТЬ), M SRC/gui_app.py (+78/−52).
+- INBOX: пусто (проверить).
+- PROCESSED: DS_118...DS_149.
+- OUTBOX: DS_118...DS_150.
+- SRC/gui_app.py: ~6155 строк.
+- SRC/settings.json: 1 True (plpcheck.SUBOPTIMAL_QUERY_WROWNUM).
+- EXCHANGE/DS_STANDARD.md: §6.6.1-§6.6.33 (§6.6.34 — уроки PS — добавить в чате 40).
+- BOM: False для всех .py, .md, .json, .ini, .sql.
+- PS\ — каталог для логов PS-блоков (ignored). PS\persist\ — переживает N7 v7.
+- ast.parse warnings: 0. .bak_ в SRC: 0 (проверить).
+- pytest: 197 passed.
+
+## НОВЫЕ ПРАВИЛА / УРОКИ ЧАТА 39
+
+### §6.6.34 — PS-строки с Python-кодом (критично)
+
+1. \n в PS-одинарной строке '...' → в Python-файл \n (перевод строки) — правильно.
+   \\n в PS-одинарной строке → в Python-файл \\n (литерал) — ошибка (ast.parse не ловит, если внутри #).
+2. \' в PS-одинарной строке — не экранирование. Использовать chr(39) или chr(95) для _.
+3. Start-Transcript — только абсолютный путь от F:\TO_DBI + -ErrorAction Stop.
+4. Очистка PS\ в начале каждого блока. Исключение — файлы, открытые pytest (-notlike 'pytest_*'), удалять отдельным блоком.
+5. Start-Process + RedirectStandardOutput + WaitForExit(ms) — для долгих команд (pytest). Tee-Object — буферизует до завершения → кажется, что висим.
+6. $p.ExitCode после WaitForExit — может быть $null в PS 5.1. Фикс: $p.Refresh() или $p.HasExited.
+7. Start-Process ollama serve (не ollama serve в текущей сессии). ollama list не вызывать (зависает на Windows). Использовать Invoke-WebRequest /api/tags.
+8. Python inline с $ в строке — только через here-string + .py (не python -c).
+9. repr() кириллицы в Tee-Object — портится (cp1251). Использовать $env:PYTHONIOENCODING = 'utf-8'.
+
+### §6.6.35 — Семантика значков дерева правил
+
+- ✓ — все правила выбраны (all_on).
+- ◐ — хотя бы одно, но не все (enabled).
+- ✗ — ни одного (not enabled).
+
+Значок рубрикатора не зависит от var (selected_rules[file_code]) — только от состояния правил. var остаётся True при «Сбросить все» (вариант B), но значок ✗.
+
+### §6.6.36 — _populating_tree — защита от рекурсии
+
+При _populate_rules_tree устанавливается _populating_tree = True. _sync_plpcheck_checkbox проверяет флаг и выходит — иначе trace plpcheck_enabled_var → все 152 правила PlpCheck. Флаг снимается в конце _populate_rules_tree.
+
+## ЗАКРЫТО В ЧАТЕ 39
+
+- DS_149a, DS_149a-fix, DS_149b, DS_149b-fix, DS_149c, DS_149c-fix, DS_149g/g2/g3/g5, DS_149h.
+- settings.json исправлен (1 True).
+- Регресс: 197 passed.
+
+## ГЛАВНАЯ ТЕМА ЧАТА 40 — Продолжение DS_149
+
+### Цель
+
+Закрыть оставшиеся пункты DS_149 (d, e, f) и перейти к DS_147 (CLI, валидация, фильтры).
+
+### Что осталось (из DS_149)
+
+1. DS_149d — генерация только выбранных + предупреждение при 0.
+2. DS_149e — сводные AST-тесты на все DS_149.
+3. DS_149f — §6.6.34–§6.6.36 в DS_STANDARD.md.
+
+### DS_149d — план
+
+В _run_test_generation:
+1. Пересечение selected_rules ∩ _rubricator_rule_vars (только выбранные пользователем).
+2. Убрать PRIORITY_RULES (перейти на rule.priority из v5.json — DS_147c).
+3. Передать categories в TestGeneratorV2(...) (если DS_147d будет готов).
+4. Починить processed_rules (NameError при прерывании).
+5. Предупреждение при 0 выбранных правилах.
+
+## ОТКРЫТЫЕ ЗАДАЧИ (в чат 40)
+
+1. [DS_149d] Генерация только выбранных + предупреждение при 0 — ГЛАВНАЯ.
+2. [DS_149e] Сводные AST-тесты на все DS_149.
+3. [DS_149f] §6.6.34–§6.6.36 в DS_STANDARD.md.
+4. [DS_147a] CLI tools/gen_test_plp.py.
+5. [DS_147b] Валидация через PLPlusScanner.
+6. [DS_147c] PRIORITY_RULES для plpcheck.* (или rule.priority из v5.json).
+7. [DS_147d] Маппинг PLPCHECK_CATEGORIES <-> subcategory.
+8. [DS_147e] Фикс фильтра sources в TestGeneratorV2.
+9. [DS_144d] .mcs, .mp, .pck и др. — нужна разведка от Vitaly.
+10. DS_CNT_007_pilot_report.md — modified, тестирование LM Studio, НЕ ТРОГАТЬ.
+11. DS_119 CLI-сканер run_scanner.py (низкий приоритет).
+12. Ночной pipeline CNT без [ — отдельная тема.
+13. АПК DBI v0.82 — сверка рубрикатора с §4.3.2 (PLP_* параметры), позиционирование TO_DBI в AGENTS.md. Не срочно.
+14. _generate_default_rules в DeepScanner — захардкоженный фолбэк. Отдельный DS.
+15. Legacy-рубрикатор (1.RUBRICATOR_FILES.md + 3.RUBRICATOR_FIXES.md) — поддерживается ли? Отдельный DS.
+16. Araxis — обновление софта (переход в отдельный чат).
+
+## AI-инфраструктура
+
+- Ollama: http://localhost:11434, работает (qwen2.5-coder:7b).
+- LM Studio: закрыт (использовался в тесте DS_CNT_007).
+- Мок-сервер: tools\mock_ollama_invalid.py, порт 11500.
+- ai_local_worker.py --check: OK (available).
+- KODA: 1.2.2 (откат с 1.2.3), автообновление ОТКЛЮЧЕНО.
+- KODA запускается БЕЗ Karing.
+
+## Реальный путь и имена (важно!)
+
+- Проект: F:\TO_DBI\ (SRC\ — исходники, tools\ — утилиты).
+- Класс GUI: DBIMigrationApp (SRC\gui_app.py, ~6155 строк).
+- Тесты: F:\TO_DBI\SRC\tests\ — pytest exit code 0, 197 passed.
+- Python 3.11 в PATH. pytest 8.3.4.
+- pytest.ini в корне — testpaths = SRC/tests, addopts = --capture=no.
+- BOM — критичная тема. Правило в DS_STANDARD.md §6.1.
+- Task Scheduler TO_DBI_CNT_NightlyPipeline — S4U, daily 01:00.
+- AI-контур: tools\ai_local_worker.py, tools\ai_local_worker_config.json.
+- tools\close_ds.ps1 — универсальный скрипт закрытия DS (v2.1, -InboxFile, BOM=True).
+- SRC\tests\conftest.py — pytest-фикстуры (v4).
+- SRC\analyzer\scanner.py — сканер (PLPlusScanner, 153941 B).
+- SRC\analyzer\deep_scanner.py — CLI DeepScanner (36950 B).
+- SRC\analyzer\test_generator_v2.py — TestGeneratorV2 (~15830 B).
+- DATA\ — каталоги с .plp (patch_WORK, patch_IN, patch_OUT и др.).
+- DATA\Тестовые файлы\ — сгенерированные .plp (в .gitignore).
+- DATA\generated_plp\ — тоже в .gitignore.
+- logs_Deep\ — отчёты DeepScanner (CLI).
+- F:\DBI.Compare\TOOL_COMPARE\ — инструмент сравнения патчей (готов).
+
+## Регламент работы (обновлён в чате 39)
+
+0-98 — как в чате 33/34/35/36/37/38, плюс:
+99. Here-string ≤ 60 строк; не вкладывать Python-тройные кавычки внутрь PS here-string.
+100. N7 v7: очистка PS\ в каждом блоке (§6.6.23).
+101. Строки «Лог: <путь>», OK, PASSED — зелёным.
+102. Заголовки секций === ... === — Cyan.
+103. Ошибки FAILED, [FATAL] — красным.
+104. Данные (таблицы, git diff) — через | Out-Host.
+105. Перед патчем кода — диагностика repr() якорей.
+106. Каждая правка патча = отдельный файл + write + удаление.
+107. Временные файлы PS\ удалять в том же блоке (§6.6.25).
+108. Python inline с $ в строке — только через here-string + .py.
+109. Stop-Transcript | Out-Null в конце каждого блока.
+110. Правки .py — через splitlines(keepends=True), не replace (§6.6.27).
+111. DeepScanner.run() возвращает (stats, report_path) — не dict.
+112. close_ds.ps1 — не дублировать DsNumber в -BotLogMessage.
+113. PS here-string + Python: без \" и """ (§6.6.29).
+114. _split_declare: снимать declare через re.sub (§6.6.30).
+115. pytest Test* class: __test__ = False (§6.6.31).
+116. Кириллица в PS here-string → Python-скрипт-правка или массивы строк (§6.6.32).
+117. \n в PS-одинарной строке (не \\n) — для Python-кода (§6.6.34).
+118. \' в PS-одинарной строке — не экранирование. chr(39) / chr(95) (§6.6.34).
+119. Start-Process + RedirectStandardOutput + WaitForExit(ms) — для pytest (§6.6.34).
+120. $p.Refresh() после WaitForExit — иначе $p.ExitCode = $null (§6.6.34).
+121. Tee-Object буферизует до завершения — не использовать для долгих команд (§6.6.34).
+
+## Первый шаг (чат 40)
+
+1. Прочитать этот стартовый файл (40.Старт.txt).
+2. Проверить Ollama: python tools\ai_local_worker.py --check.
+3. Проверить git: git status -sb / git branch -vv.
+   Ожидание: синхронизировано, 2 modified (DS_CNT_007_pilot_report.md + gui_app.py).
+4. Проверить INBOX: должен быть пуст.
+5. Запустить регресс: python -m pytest SRC\tests\ -q -> 197 passed.
+6. Разведка DS_149d:
+   - посмотреть SRC/gui_app.py _run_test_generation (после 39.x — где selected_file_codes, PRIORITY_RULES, categories);
+   - определить формат пересечения selected_rules ∩ _rubricator_rule_vars;
+   - определить предупреждение при 0 правилах.
+7. Решение Vitaly: уточнить поведение DS_149d.
+8. Реализация + тесты.
+
+## Команды (справочно)
+
+- ollama list / ollama ps — модели.
+- python tools\ai_local_worker.py --check — доступность Ollama.
+- python -m pytest SRC\tests\ -q — регресс (197 passed).
+- python SRC\gui_app.py — запуск АРМ.
+- git status -sb / git branch -vv — состояние ветки.
+- .\tools\close_ds.ps1 — закрытие DS.
+- python SRC\analyzer\deep_scanner.py -s <ИК> --rules v50 — CLI DeepScanner.
+- python tools\gen_test_plp.py — CLI генератора (будет создан в DS_147a).
+- F:\DBI.Compare\0.compare_anchors.bat — инструмент сравнения патчей (запуск из корня).

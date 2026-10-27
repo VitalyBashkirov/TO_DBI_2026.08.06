@@ -1,0 +1,48 @@
+============================================
+  65.ОТЧЁТ (чат 65, 2026-10-26)
+  Хост: LGGRAMA8V7Q8U (hostTag=LG)
+============================================
+
+## Итог
+- HEAD = dcbec34 (без изменений кода, только правила и .bat).
+- t3/t4, A8, 64_10 — ЗАКРЫТЫ.
+- 7B-модели перенесены на LG (F:).
+- .bat доработан: вывод хоста, UTF-8 BOM.
+
+## Шаги
+| # | Файл | Результат |
+|---|---|---|
+| 65_01 | grep-аудит 64_10 | OK (0 голых вхождений в исполняемом коде) |
+| 65_01b | проверка шаблона 07 | 64_10 APPLIED (подтверждено) |
+| 65_02 | list new models | NEW_OLLAMA: gpt-oss:20b, gemma3:1b, qwen3:8b, gemma3:4b, deepseek-r1:8b |
+| 65_02d | find 7B on F: (LG) | NO_7B_GGUF_FOUND_ON_F |
+| 65_02f | probe paths (MBE) | env OLLAMA_MODELS=C:\...\ .ollama; D:\LMStudio_Models |
+| 65_04b | check LG after copy | DeepSeek-R1-7B на месте (4.36 GB); qwen2.5-coder:7b MISSING |
+| 65_05 | copy 7B GGUF | F:\LMStudio_Models\models\local-bank\DeepSeek-R1-7B.gguf (OK) |
+| 65_05b | ollama pull 7b | qwen2.5-coder:7b скачана (4.7 GB) |
+| 65_07 | patch bat | добавлен вывод %COMPUTERNAME% |
+| 65_07d | final fix bat | UTF-8 BOM, Title True, Host True |
+
+## Новые правила
+- **65_1**: Для сообщений с кодом .ps1/.py обязательно указывать «Запускать на: LG/MBE/любом».
+- **65_2**: Генерация отчётов и стартов новых чатов одним PS-блоком.
+
+## Инциденты
+- 65_02f: зависание при полном рекурсе D: (QuickEdit/большой диск) -> решено точечным сканированием.
+- 65_07c: попытка чтения .bat в OEM 866 -> кракозябры -> исправлено на UTF-8 BOM.
+
+## Артефакты
+- chat65_01_audit_zero_logs.ps1
+- chat65_01b_template07_check.ps1
+- chat65_02_list_new_models.ps1
+- chat65_02d_find_7b_lms.ps1
+- chat65_02f_probe_paths_mbe.ps1
+- chat65_04b_check_lg.ps1
+- chat65_05_copy_7b_to_F.ps1
+- chat65_07d_final_fix.ps1
+- Бэкап: Ollama и LM Studio.bat.ds65bak
+
+## Что дальше (чат 66)
+- Протестировать новые модели (test_all_models.ps1).
+- Обновить 01_Правила_PS.md (добавить 65_1, 65_2).
+- Настроить LM Studio на LG для сканирования F:\LMStudio_Models (если ещё не сделано).

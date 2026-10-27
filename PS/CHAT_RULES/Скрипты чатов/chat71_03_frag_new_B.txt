@@ -1,0 +1,27 @@
+        # Объявленные функции
+        func_re = re.compile(r'^\s*function\s+(\w+)\s*\(', re.IGNORECASE)
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('--'):
+                continue
+            fm = func_re.match(line)
+            if fm:
+                declared[fm.group(1)] = (i, 'func', stripped)
+
+
+        extra_kinds = (
+            (re.compile(r'^\s*batch\s+method\s+(\w+)\s+is\b', re.IGNORECASE), 'batch_method'),
+            (re.compile(r'^\s*method\s+(\w+)\s+is\b', re.IGNORECASE), 'method'),
+            (re.compile(r'^\s*public\s+function\s+(\w+)\s*\(', re.IGNORECASE), 'func'),
+            (re.compile(r'^\s*public\s+procedure\s+(\w+)\s*\(', re.IGNORECASE), 'proc'),
+            (re.compile(r'^\s*procedure\s+(\w+)\s*\(', re.IGNORECASE), 'proc'),
+        )
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('--'):
+                continue
+            for rx, kind in extra_kinds:
+                m = rx.match(line)
+                if m:
+                    declared[m.group(1)] = (i, kind, stripped)
+                    break

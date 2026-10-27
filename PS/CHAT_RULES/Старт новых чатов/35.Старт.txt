@@ -1,0 +1,330 @@
+# Проект TO_DBI. Чат 35. DS_145 (deep_scanner — фильтр временных) + вывод в PS и логи
+
+## Контекст
+
+АРМ «Адаптация под DBI» — миграция PL/SQL (Oracle) -> PostgreSQL (DBI).
+Репозиторий F:\TO_DBI. Ветка feature/dockerization.
+Роли: Автор DS — DeepSeek. Пользователь — Vitaly.
+
+ВАЖНО: KODA не запускается. Karing не нужна.
+Все DS — вручную PowerShell (правило F, DS_125).
+
+## Что сделано в чате 34 (1 коммит)
+
+| Commit | Что | Результат |
+|--------|-----|-----------|
+| d646cf7 | DS_144c+DS_144c2+N7 v7 | +655/-46, 6 файлов |
+
+Все DS закрыты: задания в PROCESSED, отчёты в OUTBOX, bot.log обновлён.
+Коммит отправлен в origin (push сделан).
+
+## Состояние (на момент старта чата 35)
+
+- Ветка: feature/dockerization на d646cf7, **синхронизирована с origin** (push сделан).
+- git status: M EXCHANGE/OUTBOX/DS_CNT_007_pilot_report.md (тестирование LM Studio — НЕ ТРОГАТЬ).
+- INBOX: пусто (проверить).
+- PROCESSED: DS_118...DS_144c.
+- OUTBOX: DS_118...DS_144c.
+- bot.log: 518+ строк, последняя запись — DS_144c+N7 v7.
+- SRC\gui_app.py: 357058 B (DS_144c + DS_144c2).
+- SRC\tests\test_ds144c_k1_k2_pytest.py: 11150 B, 9 тестов.
+- SRC\tests\test_ds144b_copy_pattern_pytest.py: 14 тестов.
+- EXCHANGE\DS_STANDARD.md: 58478 B, §6.6.1-§6.6.23.
+- BOM: False для всех .py, .md, .json, .ini, .sql.
+- PS\ — каталог для логов PS-блоков (ignored).
+- PS\persist\ — каталог, переживающий N7 v7 (см. §6.6.18).
+- ast.parse warnings: 0.
+- .bak_ в SRC: 0.
+- pytest: **145 passed, exit=0** (136 старых + 8 DS_144c + 1 DS_144c2).
+- logs_Deep: 50+ файлов.
+
+### Бэкапы (tools\_archive\)
+
+- gui_app.py.bak_ds144c — 356907 B (до DS_144c)
+- gui_app.py.bak_ds144c2 — 356566 B (до DS_144c2)
+- ai_exchange.py.bak_ds143
+- rule_based_fixer.py.bak_ds143
+- ai_local_worker.py.bak_ds143
+
+## НОВЫЕ ПРАВИЛА / УРОКИ ЧАТА 34
+
+### §6.6.23 — N7 v7: очистка PS\ в КАЖДОМ блоке
+
+N7 v6 (чат 32): очистка F:\TO_DBI\PS\ с сохранением PS\persist\.
+**N7 v7 (чат 34):** очистка — в начале **каждого** PS-блока, который
+пишет в PS\. Не только в первом блоке чата.
+
+Типовой фрагмент (вставлять в начало каждого PS-блока):
+
+~~~powershell
+if (Test-Path "$proj\PS") {
+    Get-ChildItem "$proj\PS" -Exclude 'persist' -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+} else {
+    New-Item -ItemType Directory -Path "$proj\PS" | Out-Null
+}
+if (-not (Test-Path "$proj\PS\persist")) {
+    New-Item -ItemType Directory -Path "$proj\PS\persist" | Out-Null
+}
+~~~
+
+Инцидент чата 34: 7 файлов в PS\ от трёх блоков (preflight, recon, run_fix).
+
+### Here-string > 100 строк + вложенные Python-строки — гарантированно ломают PS 5.1
+
+Правило чата 34:
+- 1 here-string ≤ 60 строк контента.
+- Не вкладывать Python-строки в тройных кавычках внутрь PS here-string.
+- Если нужно записать длинный Python-скрипт — разбить на 2-3 блока,
+  писать в отдельные .py, потом AppendAllText или склеивать.
+
+Инцидент: блок с отчётом DS_144c (~250 строк + вложенные Python-строки)
+повесил PS — >> prompt, пришлось Ctrl+C и перезапуск.
+
+### git diff / git diff --stat — только через | Out-Host
+
+Правило §6.6.1 (подтверждено чатом 34): git diff ... | Out-Host
+гарантирует попадание вывода в Start-Transcript. Без | Out-Host —
+буферизация, пустой лог.
+## Вывод в PS и логи — правила чата 34
+
+### Принципы
+
+1. Строки типа Лог: <путь> — зелёным: Write-Host "Лог: $log" -ForegroundColor Green.
+2. Ошибки — красным: Write-Host "FAILED" -ForegroundColor Red.
+3. Заголовки секций — Cyan: Write-Host "=== ... ===" -ForegroundColor Cyan.
+4. Итоговый статус (OK) — зелёным: Write-Host "OK" -ForegroundColor Green.
+5. Данные (таблицы, git diff) — через | Out-Host (не | Format-Table без пайпа).
+6. Кириллица в Python-print через cp866-консоль — кракозябры (§6.6.21),
+   данные в файле корректны, не влияет на результат.
+
+### Типовой шаблон блока
+
+~~~powershell
+# ============================================================
+# N1. <Название блока>
+# Дата: YYYY-MM-DD
+# Назначение: <что делаем>
+# Ожидание: <что должно быть>
+# Риски: <что может пойти не так>
+# ============================================================
+
+$ErrorActionPreference = 'Continue'
+$proj = 'F:\TO_DBI'
+Set-Location $proj
+
+# N7 v7: очистка PS\ (сохраняя persist\)
+if (Test-Path "$proj\PS") {
+    Get-ChildItem "$proj\PS" -Exclude 'persist' -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+} else {
+    New-Item -ItemType Directory -Path "$proj\PS" | Out-Null
+}
+if (-not (Test-Path "$proj\PS\persist")) {
+    New-Item -ItemType Directory -Path "$proj\PS\persist" | Out-Null
+}
+
+$log = "$proj\PS\<имя_блока>.log"
+Start-Transcript -Path $log -Force | Out-Null
+
+# ... работа ...
+
+Write-Host "`n=== Секция ===" -ForegroundColor Cyan
+<команда> 2>&1 | Out-Host
+
+Write-Host "`nOK" -ForegroundColor Green
+Write-Host "Лог: $log" -ForegroundColor Green
+
+Stop-Transcript | Out-Null
+~~~
+
+### Что НЕ делать
+
+- Не использовать return в ручных блоках (правило №19), кроме fail-fast
+  в if-ветке ошибки (§6.6.3).
+- Не полагаться на $LASTEXITCODE после Select-String (правило №22).
+- Не читать .log через Get-Content в PS 5.1 (§6.6.15) — только через Python
+  с encoding='utf-8'.
+- Не использовать -like для подстроки (§6.6.9) — использовать .Contains().
+- Не использовать Add-Content -Encoding UTF8 в PS 5.1 (§6.6.20) — только
+  [System.IO.File]::AppendAllText с UTF8Encoding($false).
+
+### Кодировки
+
+- .py / .md / .json / .ini / .sql — UTF-8 БЕЗ BOM (§6.1).
+- .ps1 с кириллицей — UTF-8 С BOM.
+- Все файлы через [System.IO.File]::WriteAllText или AppendAllText
+  с UTF8Encoding($false).
+
+## ЗАКРЫТО В ЧАТЕ 34
+
+### DS_144c — K1=скан+зеркало; K2 без повторного скана
+
+- SRC\gui_app.py:
+  - K1 (_run_scan): после _progress_update(50) — зеркало ИК->КР
+    через _copy_files_to_result(only_edited=False).
+    При aborted -> прогресс 100 + лог + диалог + return.
+    При scan_aborted=True — зеркало не делается.
+  - K2 (_run_fix): scanner берётся из self.scan_results['scanner'] (K1),
+    fail-fast без K1; scan_directory и _copy_files_to_result удалены;
+    final_results_dir = result_dir (K2a).
+- Тест: SRC\tests\test_ds144c_k1_k2_pytest.py (8 тестов).
+- pytest: +8 (144 passed).
+
+### DS_144c2 — звук при aborted в K1
+
+- SRC\gui_app.py: 3 правки — флаг _k1_copy_aborted.
+  _sound_ok = (not self.scan_aborted) and (not getattr(self, '_k1_copy_aborted', False)).
+- Тест: test_ds144c2_k1_aborted_flag_set (9-й).
+- pytest: +1 (145 passed).
+
+### N7 v7 — §6.6.23 в DS_STANDARD.md
+
+- Очистка PS\ в каждом блоке, не только в первом.
+## ОТКРЫТЫЕ ЗАДАЧИ (в чат 35)
+
+1. **[DS_145] deep_scanner.py — фильтр временных** — ГЛАВНАЯ ТЕМА ЧАТА 35.
+   См. ниже разъяснение.
+
+2. **[DS_144d] .mcs, .mp, .pck и др.** — позже. Нужна разведка от Vitaly:
+   формат, правила, что с ними делать.
+
+3. **DS_CNT_007_pilot_report.md** — modified, тестирование LM Studio,
+   НЕ ТРОГАТЬ. Не забыть, что висит в git status.
+
+4. **DS_119** CLI-сканер run_scanner.py (низкий приоритет).
+
+5. **Ночной pipeline CNT без [** — отдельная тема.
+
+6. **Нормализовать CRLF в оставшихся .md** — при случае (§6.6.22).
+
+## DS_145 — deep_scanner.py — фильтр временных (разъяснение)
+
+### Что такое deep_scanner.py
+
+SRC\analyzer\deep_scanner.py — модуль углублённого сканирования
+PL/SQL-кода. Используется в K1 (_run_scan(deep_mode=True)) — вызывается
+из АРМ при включённой галке «Углублённое сканирование» (или по кнопке).
+
+В отличие от обычного scanner.py, deep_scanner:
+- Обходит все подкаталоги ИК (рекурсивно).
+- Анализирует PL/SQL AST (не просто регулярки).
+- Ищет сложные паттерны (контекстные зависимости, цепочки вызовов).
+
+### Проблема: временные файлы
+
+В ИК бывают временные / служебные файлы:
+- *.plp~ — резервные копии редакторов.
+- *.plp.bak, *.bak — бэкапы.
+- *.tmp, *.temp — временные.
+- ~$*.plp — lock-файлы MS Office.
+- .DS_Store, Thumbs.db — мусор ОС.
+- Файлы в каталогах .git/, __pycache__/, node_modules/.
+- Файлы с временными метками в имени (file_20260101_120000.plp).
+- Файлы с расширениями .swp, .swo (Vim).
+
+Что происходит сейчас: deep_scanner обрабатывает такие файлы —
+тратит время, выдаёт ложные issues, замусоривает отчёты.
+
+### Задача DS_145
+
+Добавить в deep_scanner фильтр — пропускать временные/служебные файлы
+до анализа. Требования:
+1. Список паттернов (mutable — вынести в конфиг или константы).
+2. Пропуск по имени (glob) и по пути (каталоги).
+3. Логирование количества пропущенных (как skipped_temporary в DS_135).
+4. Не ломать существующие тесты.
+
+### Контекст: DS_135 уже сделал это для scanner.py
+
+В scanner.py уже есть аналогичный фильтр (DS_135, не закрыт полностью):
+
+~~~python
+skipped_temporary = scan_results.get('skipped_temporary', 0)
+~~~
+
+В _run_scan (gui_app.py) это уже логируется:
+
+~~~python
+_n_temp = scan_results.get('skipped_temporary', 0)
+if _n_temp > 0:
+    self.root.after(0, lambda n=_n_temp: self.log(
+        f'[i] Пропущено файлов с временными метками: {n} (не обрабатываются)','info'))
+~~~
+
+DS_145 = распространить эту логику на deep_scanner.py.
+
+### Что нужно уточнить у Vitaly
+
+1. Список паттернов — какие именно временные файлы встречаются в реальных ИК?
+   Взять из scanner.py или составить заново?
+2. Где хранить список — в коде (константа), settings.json или отдельный .json?
+3. Логирование — в общий skipped_temporary (как scanner.py) или отдельный
+   счётчик skipped_temporary_deep?
+4. Каталоги-исключения — .git, __pycache__ — фиксированный список или
+   настраиваемый?
+
+### Что нужно сделать в чате 35
+
+1. Разведка deep_scanner.py — прочитать код, найти место для фильтра.
+2. Разведка scanner.py — посмотреть, как DS_135 реализовал фильтр.
+3. Разведка gui_app.py — посмотреть, как _run_scan(deep_mode=True)
+   вызывает deep_scanner.
+4. DS_145 — задание + реализация + тесты + регресс.
+5. Всё в одном коммите (или отдельно — по решению Vitaly).
+
+## AI-инфраструктура
+
+- Ollama: http://localhost:11434, работает.
+- LM Studio: закрыт (использовался в тесте DS_CNT_007).
+- Мок-сервер: tools\mock_ollama_invalid.py, порт 11500.
+- ai_local_worker.py --check: OK (available).
+- KODA: 1.2.2 (откат с 1.2.3), автообновление ОТКЛЮЧЕНО.
+- KODA запускается БЕЗ Karing.
+
+## Реальный путь и имена (важно!)
+
+- Проект: F:\TO_DBI\ (SRC\ — исходники, tools\ — утилиты).
+- Класс GUI: DBIMigrationApp (SRC\gui_app.py, ~357058 B).
+- Тесты: F:\TO_DBI\SRC\tests\ — pytest exit code 0, 145 passed.
+- Python 3.11 в PATH. pytest 8.3.4.
+- pytest.ini в корне — testpaths = SRC/tests, addopts = --capture=no.
+- BOM — критичная тема. Правило в DS_STANDARD.md §6.1.
+- Task Scheduler TO_DBI_CNT_NightlyPipeline — S4U, daily 01:00.
+- AI-контур: tools\ai_local_worker.py, tools\ai_local_worker_config.json.
+- tools\close_ds.ps1 — универсальный скрипт закрытия DS (v2.1, -InboxFile, BOM=True).
+- SRC\tests\conftest.py — pytest-фикстуры (v4).
+- SRC\analyzer\scanner.py — обычный сканер (со skipped_temporary).
+- SRC\analyzer\deep_scanner.py — глубокий сканер (DS_145 — добавить фильтр).
+
+## Регламент работы (обновлён в чате 34)
+
+0-98 — как в чате 33/34, плюс:
+99. Here-string ≤ 60 строк; не вкладывать Python-тройные кавычки внутрь PS here-string.
+100. N7 v7: очистка PS\ в каждом блоке (§6.6.23).
+101. Строки Лог: <путь>, OK, PASSED — зелёным.
+102. Заголовки секций === ... === — Cyan.
+103. Ошибки FAILED, [FATAL] — красным.
+104. Данные (таблицы, git diff) — через | Out-Host, не Format-Table без пайпа.
+
+## Первый шаг (чат 35)
+
+1. Прочитать этот стартовый файл (35.Старт.txt).
+2. Проверить Ollama: python tools\ai_local_worker.py --check.
+3. Проверить git: git status -sb / git branch -vv.
+   Ожидание: d646cf7, sync с origin, 1 modified (DS_CNT_007_pilot_report.md).
+4. Проверить INBOX: должен быть пуст.
+5. Запустить регресс: python -m pytest SRC\tests\ -q -> ожидание 145 passed.
+6. Основная тема чата 35 — DS_145 (deep_scanner.py — фильтр временных).
+   Открытые задачи: DS_144d (.mcs,.mp), DS_119 (CLI), ночной pipeline CNT.
+
+## Команды (справочно)
+
+- ollama list — модели.
+- ollama ps — загруженные модели (RAM).
+- python tools\ai_local_worker.py --check — доступность Ollama.
+- python -m pytest SRC\tests\ -q — регресс (145 passed).
+- python SRC\gui_app.py — запуск АРМ.
+- git status -sb — состояние ветки.
+- git branch -vv — синхронизация с origin.
+- .\tools\close_ds.ps1 — закрытие DS.

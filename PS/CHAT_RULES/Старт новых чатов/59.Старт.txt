@@ -1,0 +1,72 @@
+============================================
+  59.СТАРТ (сгенерировано 2026-10-24 15:49:58 из 56.Старт.txt)
+  Хост: LGGRAMA8V7Q8U (hostTag=LG)
+  Python: C:\Users\ainf1\AppData\Local\Programs\Python\Python312\python.exe
+============================================
+============================================
+  СТАТУС НА 2026-10-24 12:41:10 (перед чатом 57)
+============================================
+- DS_182: подтверждён, коммит a94a175 (_is_rule_selected понимает 'plpcheck.')
+- ai_local_worker_config.json: model 7b -> 3b (56_01c2, лог MBE_56_01c2_fix_format.log)
+- 56.Старт.txt: дополнен переездом MBE<->LG, правилами логов, статусом DS_182
+- DS_183b (per-host k4_model): В РАБОТЕ
+    - патч: PS\56_03_ds183b_patch.py (4 вставки в gui_app.py, py_compile до записи)
+    - следующий шаг: запустить 56_03, затем тест 56_04 и регресс, затем коммит
+- Не забыть: git push origin feature/dockerization
+============================================
+  СТАТУС НА 2026-10-24 15:44:36 (перед чатом 59)
+============================================
+
+## Закрыто в чате 58
+- DS_086_fix  (9265953): minsize(1026, 1000) -> minsize(1026, UI_MIN_WINDOW_HEIGHT).
+- DS_086_fix2 (ec6c76b): test_ds149g обновлён под minsize(1026, UI_MIN_WINDOW_HEIGHT|400).
+- Подтверждено: test_ds086_ui_hide_pytest.py — 15 passed; полный регресс — 377 passed, 0 failed.
+- origin/feature/dockerization = ec6c76b.
+
+## Правила PS (чат 58, обязательны для всех скриптов)
+1. Логи — ТОЛЬКО F:\TO_DBI\PS\.
+   Имя: <hostTag>_<чат>_<номер>_<action>.log.
+   %TEMP% и любые другие каталоги — запрещены.
+2. LG — АВТООПРЕДЕЛЕНИЕ (LGGram* -> LG, MateBook* -> MBE).
+   Хардкод запрещён. Проверка  на совпадение префикса.
+3. C:\Users\ainf1\AppData\Local\Programs\Python\Python312\python.exe (python.exe) — АВТООПРЕДЕЛЕНИЕ:
+   Get-Command python.exe + fallback на Python311/Python312
+   в %LOCALAPPDATA% и C:\Users\{ainf1,Виталий}\...; хардкод запрещён.
+4. После работы PS — удалять все файлы НУЛЕВОЙ длины из F:\TO_DBI\PS\.
+5. git commit — только через -F <msgfile> (многострочный -m в PS 5.1 ломается).
+6. Start-Transcript в PS 5.1 — БЕЗ -Encoding.
+7. Here-string (@'...'@) в ИНТЕРАКТИВНОЙ вставке — НЕ использовать.
+   Только .ps1-файл, Set-Content массивом строк, или ручная правка.
+8. ".." -> ".." (парсер PS 5.1).
+
+## Окружение
+- SSD физически на LG, расшарен; работаем то на MBE, то на LG.
+- LG: python C:\Users\ainf1\AppData\Local\Programs\Python\Python312\python.exe
+- MBE: python C:\Users\Виталий\AppData\Local\Programs\Python\Python311\python.exe
+- LM Studio на MBE закрыт (LMS + LM Studio процессы убиты),
+  Ollama остановлена, батник "Ollama и LM Studio.bat" убит.
+
+## Долги чата 58 -> 59
+1. DS_183_assert_fix: test_ds183_k4_model_setting.py возвращает True вместо assert
+   (PytestReturnNotNoneWarning). Переписать на assert.
+2. Переименование логов: MBE_58_02_* -> LG_58_02_* (сделано в 59_01_start).
+3. 55.Отчёт.txt (A8, config, сводка DS_184) — из старта 56.
+4. A8-долг: 49.Отчёт.txt fallback — принять / пересоздать.
+
+## Первые шаги чата 59
+1. Прочитать 56.Старт.txt (этот блок).
+2. DS_183_assert_fix: переписать 5 тестов на assert, точечно + регресс, коммит, push.
+3. 55.Отчёт.txt (A8, config, сводка DS_184).
+4. A8-долг: 49.Отчёт.txt fallback — решение.
+============================================
+
+============================================
+  ПРАВИЛА PS (чат 58, обязательны)
+============================================
+1. Логи — ТОЛЬКО F:\TO_DBI\PS\<hostTag>_<чат>_<номер>_<action>.log.
+2. LG — автоопределение (LGGram* -> LG, MateBook* -> MBE); хардкод запрещён.
+3. C:\Users\ainf1\AppData\Local\Programs\Python\Python312\python.exe — автоопределение (Get-Command + fallback Python311/312 в известных путях).
+4. После работы PS — удалять файлы нулевой длины из F:\TO_DBI\PS\.
+5. git commit — только -F <msgfile>; Start-Transcript в PS 5.1 — без -Encoding.
+6. Here-string в интерактивной вставке не использовать; только .ps1.
+7. "$"var.."" -> "..".

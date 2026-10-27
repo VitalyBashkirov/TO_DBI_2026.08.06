@@ -1,0 +1,73 @@
+﻿# 49. Отчёт (чат 49)
+
+## Итог
+- DS_179 закрыт: plpcheck.SUBOPTIMAL_QUERY_WROWNUM теперь находится многострочно.
+  - Коммит: 8df57e4.
+  - На PSH_ED_PRC_SCHM.plp: 1 issue, строки 112-118 (block_start=112, block_end=118).
+  - Регресс: 337 passed (332 + 5 новых тестов test_ds179_suboptimal_wrownum.py).
+
+## Матрица флагов (К1->К2, 3 plp: PSH_ED_PRC_SCHM, PSH_PS_DEL, PSH_VK_UNK_INP)
+Факт (PS\49_Results.log):
+| case | MPK | VTIK | NAF | issues | fixmod | out changed | anchors | AI-REMOVED |
+|------|-----|------|-----|--------|--------|-------------|---------|------------|
+| 000  | 0   | 0    | 0   | 9      | 2      | 2           | 0       | 0          |
+| 100  | 1   | 0    | 0   | 9      | 2      | 2           | 0       | 0          |
+| 101  | 1   | 0    | 1   | 9      | 0      | 0           | 0       | 0          |
+| 110  | 1   | 1    | 0   | 9      | 2      | 2           | 0       | 0          |
+| 010  | 0   | 1    | 0   | 9      | 2      | 2           | 0       | 0          |
+| 001  | 0   | 0    | 1   | 9      | 0      | 0           | 0       | 0          |
+
+Сверка с PS\46_Матрица_флагов.txt:
+- 000: OK (правки, changed, без якорей).
+- 110 / 010: OK (ВТИК отменяет МПК, changed=2).
+- 001: OK (НеАФ сухой прогон, changed=0).
+- 100 / 101: РАСХОЖДЕНИЕ. Ожидались якоря (МПК=on, ВТИК=off), факт — 0 якорей.
+
+## Причина расхождения 100/101 (DS_180, отдельный дефект)
+1. В SRC\settings.json отсутствует блок anchor_settings — фиксер использует дефолтные шаблоны, но...
+2. Правки PREFIX_TYPE (и другие детерминированные) идут через DeterministicFixer и НЕ формируют issue_changes.
+   В code_fixer.py:1567 якоря ставятся только if issue_changes and self.mark_in_code and not self.clean_output,
+   поэтому для детерминированных правок МПК-маркировка не срабатывает.
+3. Фиксер возвращает was_mod=True и fix_count=3 (это det_changes), но issue_changes пуст → нет якорей.
+
+Решение: DS_180 — расширить механизм якорей на DeterministicFixer-правки
+(нужен changes-массив и из det_changes, либо общий anchor pipeline после применения всех правок).
+Выполнять в отдельном чате; в чате 49 только фиксируем факт.
+
+## Что осталось (К3/К4, Ai-цикл)
+К3 (В Ai) и К4 (Из Ai) по матрице в этом чате НЕ прогонялись (Ollama + ai_exchange).
+Это следующая задача, после DS_180 (или параллельно, с пометкой как отдельный прогон).
+
+## Файлы сессии
+- PS\49_Results.log — фактические результаты матрицы.
+- PS\chat49_01..18_*.log — все транскрипты.
+- SRC\tests\test_ds179_suboptimal_wrownum.py — новые тесты (5).
+- SRC\analyzer\scanner.py — DS_179.
+## Дополнение (chat49_21): _preai-копии в PATCH_IN (DS_181)
+
+Найдено: в F:\TO_DBI\PATCH_IN\patch_suboptimal_test_3\ENTITY\DEPN\ лежат
+файлы *_preai.plp (PSH_ED_PRC_SCHM_20261022_115639_preai.plp и др.).
+
+Источник: SRC\ai_exchange.py:546
+    backup_file = source.with_name(f"{source.stem}_{ts}_preai{source.suffix}")
+    shutil.copy2(source, backup_file)
+
+Кто/когда: DS_081 (коммит 57ace3f, 2026-09-28).
+Назначение: снимок «до Ai» для отображения «было/стало» в GUI при К4 и
+           для повторного скана (_rescan_ai_files, gui_app.py:5897-5908).
+
+Почему в PATCH_IN: source = путь из AI_REQUEST (Источник: ...), т.е. исходник
+из PATCH_IN; копия делается через source.with_name(...) — в том же каталоге.
+
+Вердикт:
+- функционально by design (нужна для «было/стало»);
+- гигиенически — нежелательно: PATCH_IN «зарастает» промежуточными файлами.
+  Копии «до Ai» логичнее держать в PATCH_CALC/backups (как code_fixer.py)
+  или в специальном AI_BACKUPS.
+
+План DS_181 (следующий чат):
+1. Перенести _preai-бэкапы в PATCH_CALC/backups/... или AI_BACKUPS,
+   сохранив result['backup_path'] для _rescan_ai_files.
+2. Переместить текущие 4 _preai-файла из PATCH_IN\...\DEPN в PATCH_CALC/backups.
+3. Добавить _preai в exclude_patterns для scan_directory (ИКА), чтобы копии
+   не попадали в files_scanned (сейчас фильтр есть только в _rescan_ai_files).

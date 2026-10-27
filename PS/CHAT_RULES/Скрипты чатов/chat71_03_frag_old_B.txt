@@ -1,0 +1,9 @@
+        # Объявленные функции
+        func_re = re.compile(r'^\s*function\s+(\w+)\s*\(', re.IGNORECASE)
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('--'):
+                continue
+            fm = func_re.match(line)
+            if fm:
+                declared[fm.group(1)] = (i, 'func', stripped)

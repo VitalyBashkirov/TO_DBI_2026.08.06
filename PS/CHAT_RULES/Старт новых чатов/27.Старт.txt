@@ -1,0 +1,407 @@
+# Проект TO_DBI. Чат 27. Работа над GUI: тестирование кнопок.
+
+## Контекст
+
+АРМ «Адаптация под DBI» — миграция PL/SQL (Oracle) → PostgreSQL (DBI).
+Репозиторий F:\TO_DBI. Ветка feature/dockerization.
+Роли: Автор DS — DeepSeek. Пользователь — Vitaly.
+
+ВАЖНО: KODA не запускается. Karing не нужна.
+Все DS — вручную PowerShell (правило F, DS_125).
+
+## ОСНОВНАЯ ТЕМА ЧАТА 27: ТЕСТИРОВАНИЕ КНОПОК GUI
+
+Файл: SRC\gui_app.py (347 481 B, 5923 строки, класс DBIMigrationApp).
+
+Тестируем три workflow-кнопки главной панели:
+
+- К1: «1. Сканировать»        — L962, command=self.start_scan
+- К2: «2. Исправить код»      — L974, command=self.start_fix
+- К3: «3. В Ai»               — L983, command=self.start_ai_cycle
+                                    (изначально disabled, L985)
+
+Задача: проверить работоспособность каждой кнопки, поведение при нажатии,
+корректность переходов состояния (disabled/enabled), обработку ошибок.
+Формализовать как тесты К1, К2, К3. Способ (ручной прогон / unit-тест /
+интеграционный тест) — уточнить в начале чата 27.
+
+## ИНВЕНТАРЬ КНОПОК ФОРМЫ (разведка чата 26)
+
+### Основные workflow-кнопки (control_frame)
+
+| №  | Строка | Подпись                                | Обработчик                  | Атрибут          | Состояние |
+|----|--------|----------------------------------------|-----------------------------|------------------|-----------|
+| К1 | 962    | 1. Сканировать                         | self.start_scan             | btn_scan         | активна   |
+| К2 | 974    | 2. Исправить код                       | self.start_fix              | btn_fix          | активна   |
+| К3 | 983    | 3. В Ai                                | self.start_ai_cycle         | btn_to_ai        | disabled  |
+|    | 991    | От AI                                  | self.receive_from_ai        | btn_from_ai      | условно   |
+|    | 1035   | Открыть рубрикатор                     | self.open_rubricator        | btn_rubricator   | активна   |
+|    | 1038   | Генерация тестовых .plp                | self.start_test_generation  | btn_test_gen     | активна   |
+|    | 1041   | Показать SQL для ручного исправления   | self.show_sql_for_manual_fix| btn_show_sql     | disabled  |
+|    | 1045   | Отправить в Koda                       | self.send_to_koda           | btn_send_koda    | disabled  |
+|    | 1049   | Получить ответ                         | self.receive_from_koda      | btn_receive_koda | disabled  |
+|    | 1054   | История РК                             | self.show_result_dir_history| btn_result_history| активна  |
+
+### Кнопки обзора каталогов (paths_frame)
+
+- L679: «...» (исходный) — self.browse_source — btn_browse_source
+- L687: «...» (результат) — self.browse_result — btn_browse_result
+
+### Кнопки журнала (journal_buttons)
+
+- L1086: «Очистить журнал» — self.clear_log — btn_clear_log
+- L1088: «Копировать в буфер» — self.copy_log — btn_copy_log
+- L1092: «⏹ Прервать» — self.on_abort_click — btn_abort (tk.Button, многострочный)
+
+### Кнопки журнала изменений (changelog_buttons)
+
+- L1166: «Очистить журнал» — self.clear_changelog — btn_clear_changelog
+- L1168: «Сохранить журнал в файл» — self.save_changelog_to_file — btn_save_changelog
+
+### Кнопки диалогов (создаются в рантайме)
+
+- L3636: «OK» — диалог результата сканирования (смотреть L3639-3640).
+- L3686: «Копировать» — _copy — _show_copyable_dialog.
+- L3687: «Закрыть» — dialog.destroy — _show_copyable_dialog.
+
+### Чекбоксы (28 штук: ttk.Checkbutton=14, tk.Checkbutton=14)
+
+Основные:
+- L700: «Рекурсивно» — self.scan_recursive_var
+- L770: «Только модифицированные файлы» — self.only_modified_var
+- L772: «Сохранить структуру каталогов» — self.preserve_structure_var
+- L792: «"Исправить код" — только пометить найденные теги» — self.fix_only_found_var
+- L798: «2. Рубрикатор PlpCheck» — self.plpcheck_enabled_var
+- L814: «Выбрать все PlpCheck-категории» — self.var_plpcheck_all
+- L834: «PlpCheck: {code} — {descr}» — динамические
+- L868, 870, 872: HIGH / MEDIUM / LOW — приоритеты
+- L880: «Верни только исправленный код...» — self.clean_output_var
+- L886: «Архивировать результат» — self.archive_result_var
+- L924: динамические флаги фиксов
+- L1003: «Только Ai» — self.ai_only_var
+
+Остальные чекбоксы (динамические, ~14 штук) — уточнить при разведке.
+
+### Замечание по подсчёту
+
+Секция 2 разведки дала tk.Button = 20. В инвентаре видно только 4:
+L1092 (Прервать), L3636 (OK), L3686 (Копировать), L3687 (Закрыть).
+Остальные 16 tk.Button — уточнить в чате 27 отдельным Select-String:
+    $allLines | Select-String -Pattern 'tk\\.Button\\s*\\(|tk\\.Button$'
+Возможно, часть — в f-строках, шаблонах, комментариях.
+
+## Что сделано в чате 26
+
+### Предполётная проверка (без DS)
+
+- Ollama: available, http://localhost:11434 (qwen2.5-coder:7b).
+- DNS api.kodacode.ru: 161.104.57.9 (штатно, Format-List *).
+- git status: clean, синхрон с origin (на момент старта).
+- INBOX: пуст.
+- pytest SRC\tests\ -q: 65 passed in 0.41s, exit=0.
+
+### DS_132 — УДАЛЕНИЕ LEGACY gui_app (выполнен)
+
+Разведка: gui_app_OLD.py, gui_app_NEW.py, gui_app_v25_backup.py —
+tracked, но не импортируются никем, не менялись с 02ca385, в 8 раз меньше
+живого gui_app.py (347 481 B).
+
+Выполнено:
+1. git rm SRC/gui_app_OLD.py SRC/gui_app_NEW.py SRC/gui_app_v25_backup.py.
+2. .dockerignore: удалены строки 78-81 (97 -> 93 строк).
+3. Очищены 9 каталогов __pycache__ (94 файла, ~2,2 МБ).
+   Каталог .kilo/worktrees/ НЕ тронут.
+4. pytest SRC\tests\ -q: 65 passed, exit=0.
+5. bot.log: +1 строка (474 -> 475).
+6. Отчёт: EXCHANGE/OUTBOX/DS_132_remove_legacy_gui_app_versions_report.md.
+7. Задание: EXCHANGE/PROCESSED/DS_132_remove_legacy_gui_app_versions.md.
+8. Коммит: 04a31f4, push в origin выполнен.
+
+### Разведка кнопок GUI (без DS)
+
+Проведена инвентаризация элементов формы SRC\gui_app.py:
+- ttk.Button=16, tk.Button=20, ttk.Checkbutton=14, tk.Checkbutton=14.
+- Итого 34 совпадения виджетов-кнопок и 28 чекбоксов.
+- Инвентарь основных кнопок — см. выше.
+
+### Инциденты чата 26
+
+- EmptyPipeElement: `} | Out-Host` после многострочного foreach/ForEach-Object
+  в PS 5.1 — ошибка парсинга. См. Урок X.
+Все проверки и операции в итоге прошли штатно.
+
+## Состояние (на момент старта чата 27)
+
+- Ветка: feature/dockerization на 04a31f4, синхронизирована с origin.
+- git status: clean, ahead 0.
+- INBOX: пуст.
+- PROCESSED: DS_118…DS_132 — все на месте.
+- OUTBOX: отчёты DS_118…DS_132 — все на месте.
+- BOM: False для всех .py, .md, .json, .ini, .sql, .gitignore, .dockerignore.
+  True для tools\close_ds.ps1.
+- bot.log: 475 строк, BOM=False.
+- PS\: каталог для логов PS-блоков (ignored). Очищается перед каждым логом.
+- 23.Старт.txt … 27.Старт.txt — ignored.
+- ast.parse warnings: 0.
+- *.bak* всего: 6 KEEP (см. Отложенные задачи).
+- __pycache__: очищены (кроме .kilo/worktrees/).
+- gui_app_OLD/NEW/v25_backup.py — УДАЛЕНЫ (DS_132).
+- Живой GUI: SRC\gui_app.py (347 481 B, 5923 строки).
+
+## НОВЫЕ ПРАВИЛА (действуют с чата 23, обновлены в чате 26)
+
+### Правило N1: шапка PS-блока
+
+    cls
+    Set-Location -LiteralPath 'F:\TO_DBI'
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+    chcp 65001 | Out-Null
+    cls
+
+### Правило N2: логирование PS-блоков (Start-Transcript в PS\)
+
+### Правило N3: -replace в PS — regex, не строковая замена
+
+### Правило N4: стартовые файлы чатов — сразу в файл через PS
+
+### Правило N5: -ForegroundColor только с Write-Host
+
+### Правило N6: AppendAllLines в PS 5.1 нет
+
+Для ДОБАВЛЕНИЯ массива строк: ReadAllLines -> $existing + $new -> WriteAllLines.
+
+### Правило N7: очистка F:\TO_DBI\PS\ перед новым логом
+
+Перед Start-Transcript в F:\TO_DBI\PS\ — удалить все файлы каталога.
+
+### Правило N8: финал блока — зелёным, Stop-Transcript после
+
+Каждый PS-блок, который выдаёт Автор DS, содержит:
+1. Шапку (N1).
+2. Очистку PS\ (N7) + Start-Transcript (N2).
+3. Тело блока.
+4. Финал: Write-Host "=== ГОТОВО ===" -ForegroundColor Green +
+   Write-Host "Лог: $logPath" -ForegroundColor Green.
+5. Stop-Transcript | Out-Null — ПОСЛЕ финального Write-Host.
+
+Исключений для «мелких» блоков нет — любой блок логируется единообразно.
+
+### Правило N9 (НОВОЕ, чат 26): избегать `} |` в PS 5.1
+
+`foreach (...) { ... } | Out-Host` — ошибка EmptyPipeElement.
+`... | ForEach-Object { ... } | Out-Host` — тоже может упасть, если `}`
+и `|` на разных строках.
+
+Надёжно:
+    $out = foreach (...) { ... }
+    $out | Out-Host
+
+или
+
+    $out = $collection | ForEach-Object { ... }
+    $out | Out-Host
+
+или
+
+    $( ... ) | Out-Host
+
+## Уроки чата 26
+
+### Урок U: Start-Transcript принимает только -Path в PS 5.1
+
+Параметр -LiteralPath у Start-Transcript отсутствует в PS 5.1.
+Использовать -Path. В PS 7+ есть -LiteralPath — но у нас PS 5.1.
+
+### Урок V: Out-Host для гарантированного попадания таблиц в транскрипт
+
+Format-Table / Select-Object могут откладывать вывод (Правило 21).
+Для гарантированного попадания в Start-Transcript — добавлять | Out-Host.
+
+### Урок W: legacy-файлы — проверять импорты и git-историю
+
+Перед удалением «мёртвых» файлов: git log --oneline по файлу,
+Select-String по импортам, поиск упоминаний в .md/.json/.dockerignore.
+
+### Урок X: EmptyPipeElement при `} | Out-Host`
+
+`foreach (...) { ... } | Out-Host` — ошибка парсинга в PS 5.1.
+`... | ForEach-Object { ... } | Out-Host` — тоже может упасть.
+Решение: аккумулировать результат в переменную, потом пайпить.
+См. Правило N9.
+
+## Открытые задачи
+
+1. ОСНОВНАЯ ТЕМА: тестирование кнопок К1, К2, К3 (1. Сканировать,
+   2. Исправить код, 3. В Ai). Конкретный способ (ручной прогон / unit /
+   интеграционный) — уточнить в начале чата 27.
+
+2. Уточнить 16 недостающих tk.Button (см. Замечание по подсчёту).
+
+3. Уточнить ~14 динамических чекбоксов PlpCheck и флагов фиксов.
+
+4. ОТЛОЖЕНО: 6 KEEP-*.bak* (НИЗКИЙ).
+
+5. ОТЛОЖЕНО: DS_119 CLI-сканер run_scanner.py (НИЗКИЙ).
+
+6. [DS_CNT_001] в bot.log — НЕ трогаем.
+
+7. Ночной pipeline CNT без "[" — отдельная тема.
+
+## AI-инфраструктура
+
+- Ollama: http://localhost:11434, работает (qwen2.5-coder:7b).
+- LM Studio: закрыт.
+- Мок-сервер: tools\mock_ollama_invalid.py, порт 11500.
+- ai_local_worker.py --check: OK (available).
+- KODA: 1.2.2 (откат с 1.2.3), автообновление ОТКЛЮЧЕНО (DS_124).
+- KODA запускается БЕЗ Karing (опровергнут урок 33).
+- DNS api.kodacode.ru: 161.104.57.9 (резолвится штатно).
+
+## Реальный путь и имена (важно!)
+
+- Проект: F:\TO_DBI\ (SRC\ — исходники, tools\ — утилиты).
+- Класс GUI: DBIMigrationApp (SRC\gui_app.py).
+- Тесты: F:\TO_DBI\SRC\tests\ — pytest exit code 0.
+- Python 3.11 в PATH. pytest 8.3.4.
+- pytest.ini в корне — testpaths = SRC/tests, addopts = --capture=no.
+- BOM — критичная тема. Правило в DS_STANDARD.md §6.1.
+  .py / .md / .json / .ini / .sql — UTF-8 БЕЗ BOM.
+  .ps1 с кириллицей — UTF-8 С BOM (Урок I).
+- ВАЖНО: путь D:\RUBRICATOR\SRC и F:\ARM\STR — НЕ существуют.
+- Task Scheduler TO_DBI_CNT_NightlyPipeline — LogonType = S4U, daily 01:00.
+- AI-контур: tools\ai_local_worker.py, конфиг tools\ai_local_worker_config.json.
+- tools\close_ds.ps1 — универсальный скрипт закрытия DS (v2.1, -InboxFile, BOM=True).
+
+## Инфраструктура версионирования
+
+- EXCHANGE\INBOX\ — игнор (рабочие задания).
+- EXCHANGE\OUTBOX\ — в git (отчёты).
+- EXCHANGE\PROCESSED\ — в git (исполненные DS).
+- EXCHANGE\bot.log — в git (лог операций).
+- EXCHANGE\AI_IN\, AI_OUT\, AI_IN_PROCESSED\, AI_OUT_PROCESSED\ — игнор.
+- PS\ — игнор (логи PS-блоков, очищаются перед каждым логом, N7).
+- 23.Старт.txt … 27.Старт.txt — игнор (*Старт*.txt).
+
+## Регламент имён отчётов (DS_109, действует)
+
+- Отчёты: EXCHANGE\OUTBOX\DS_XXX_<краткое_описание>_report.md.
+- Задания: EXCHANGE\PROCESSED\DS_XXX_<краткое_описание>.md.
+- Запрещено: DS_XXX_report.md, транслит, пробелы.
+- Исторические отчёты (DS_100a … DS_132) — не переименовываются.
+
+## Регламент работы (обновлён в чате 26)
+
+0. ШАПКА БЛОКА (Правило N1).
+1. Команда 0 — кодировка.
+2. Секции с заголовками: # --- N. <назначение> ---.
+3. Готовность к одной кнопке.
+4. Ожидание — таблицей вне блока.
+5. Кодировка — -Encoding UTF8 для чтения; UTF8Encoding($false) для
+   записи .py/.ini/.json/.md; UTF8Encoding($true) для .ps1 с кириллицей.
+6. Прогноз KODA — НЕ запрашиваем.
+7. Не трогать SRC без явного указания в DS.
+8. Логи — только EXCHANGE\bot.log. Транскрипты PS — в PS\.
+9. Отчёты — в EXCHANGE\OUTBOX\, UTF-8 без BOM, русский.
+10. GIT / PUSH / GP — по запросу.
+11. Ограничения — DS_STANDARD.md раздел 2 + раздел 6.1 (BOM).
+12. Не открывать LM Studio одновременно с Ollama.
+13. Транслит не использовать.
+14. Git-гигиена: .gitignore содержит *.bak_*, *.broken_*, *.before_*,
+    *.lnk, *Старт*.txt, PS/.
+15. Перед GP — проверить git status (clean).
+16. После GP — проверить git branch -vv (синхронизация).
+17. §5 (Проверка) обязателен.
+18. Прямые слэши в git add.
+19. Никаких return в ручных блоках PowerShell.
+20. Для создания файлов — @'...'@ ИЛИ массив строк @(...) + WriteAllLines.
+21. Get-ChildItem + Format-Table — отложенный вывод.
+22. $LASTEXITCODE после Select-String — не работает.
+23. Дробить большие блоки на маленькие шаги.
+24. BOM-check — только из корня проекта.
+25. Читать фактический git diff, не пересказ KODA.
+26. Проверять, не занят ли номер DS_XXX.
+27. Проверочный блок запускать только ПОСЛЕ выполнения DS.
+28. Не доверять описанию состояния — предполётная проверка.
+29. bot.log пишется ДО коммита, не после.
+30. KODA работает по имени INBOX-файла, а не по содержимому.
+31. Koda 1.2.3 имела баги Agent-режима — откат до 1.2.2.
+32. DS_082b писал в bot.log при dry-run — исправлено в DS_121.
+33. [ОПРОВЕРГНУТ] Karing нужна для Koda.
+34. api.kodacode.ru может отдавать 429 service_busy.
+35. Koda.gallerycdn.vsassets.io может блокироваться DPI.
+36. Простые DS — вручную PS, без KODA.
+37. close_ds.ps1 v2.1 — универсальный скрипт, -InboxFile, BOM=True.
+38. Проверять settings.json на plain-text секреты.
+39. -SimpleMatch не понимает | (DS_125, §6.2.1).
+40. Select-String находит docstring и сигнатуры (DS_125, §6.2.1).
+41. ReadAllBytes/WriteAllText — только абсолютные пути (DS_125/126).
+42. Вложенные ``` в Text Copy Download ломают разметку (DS_125, §3.2).
+43. INBOX-гигиена при ручном выполнении DS (DS_125).
+44. -Filter в Get-ChildItem не поддерживает regex-классы (DS_126).
+45. [Parser]::ParseFile и BOM — ложные ошибки при отсутствии BOM (DS_126).
+46. .ps1 с кириллицей требует BOM в PS 5.1 (DS_126).
+47. $matches в PS — Hashtable, не массив (DS_128).
+48. Аудит источника, не только симптома (DS_128).
+49. -replace в PS — regex, не строковая замена (DS_129).
+50. Глобальный -replace без указания строки — опасно (DS_129).
+51. Шапка PS-блока (N1, DS_129, §6.6).
+52. Логирование PS-блоков: Start-Transcript в PS\ (N2, DS_129, §6.6).
+53. Стартовые файлы чатов — сразу в файл (N4, чат 23).
+54. .Replace заменяет ВСЕ вхождения подстроки (Урок N, DS_131).
+55. -ForegroundColor требует Write-Host (Урок O, DS_130/120).
+56. Длинные here-string + backtick — дробить (Урок P, DS_120).
+57. AppendAllLines в PS 5.1 отсутствует (Урок Q, чат 24).
+58. Очистка F:\TO_DBI\PS\ перед новым логом (N7, чат 25).
+59. Resolve-DnsName | Select-Object — риск пустой таблицы (Урок S, чат 25).
+60. git ls-files --error-unmatch шумит в stderr (Урок T, чат 25).
+61. Start-Transcript принимает только -Path в PS 5.1 (Урок U, чат 26).
+62. Out-Host для гарантированного попадания таблиц в транскрипт (Урок V, чат 26).
+63. Legacy-файлы — проверять импорты и git-историю перед удалением (Урок W, чат 26).
+64. EmptyPipeElement при `} | Out-Host` — аккумулировать в переменную (Урок X, N9, чат 26).
+
+## Справочники (читать перед работой, не задания)
+
+- F:\TO_DBI\AGENTS.md — инструкция KODA.
+- F:\TO_DBI\EXCHANGE\DS_STANDARD.md — стандарт оформления DS.
+  §3.1 — язык отчёта. §3.2 — имена отчётов + плоский формат.
+  §6.1 — BOM (+ исключение для .ps1). §6.2 — сводные блоки.
+  §6.2.1 — грабли PowerShell (п.1-8). §6.3 — порядок завершения DS.
+  §6.4 — типовой результат DS. §6.5 — общие правила завершения.
+  §6.6 — логирование PS-блоков. §9.1 — §5 обязателен.
+- F:\TO_DBI\EXCHANGE\DS_CONTEXT.md — общий контекст.
+- F:\TO_DBI\EXCHANGE\DS_FILES.md — карта файлов.
+- F:\TO_DBI\EXCHANGE\CNT_REFERENCE.md — справочник по Continue (CNT).
+
+## Отдельный трек: CNT (Continue) — ЗАКРЫТ
+
+Трек обучения CNT закрыт 07.10.2026.
+Ночной pipeline: TO_DBI_CNT_NightlyPipeline — S4U, daily 01:00, LastTaskResult=0.
+
+## Первый шаг
+
+1. Прочитать этот стартовый файл (27.Старт.txt).
+2. Проверить Ollama: python tools\ai_local_worker.py --check.
+3. Проверить DNS: Resolve-DnsName api.kodacode.ru | Format-List *.
+4. Проверить git: git status -sb / git branch -vv.
+5. Проверить INBOX: должен быть пуст.
+6. Запустить регресс: python -m pytest SRC\tests\ -q.
+7. Основная тема — тестирование кнопок:
+   - Уточнить способ (ручной прогон / unit / интеграционный).
+   - Разведка 16 недостающих tk.Button (см. Замечание по подсчёту).
+   - Разведка ~14 динамических чекбоксов.
+   - Сформулировать DS_133 (тесты К1, К2, К3).
+
+## Команды (справочно)
+
+- ollama list — модели.
+- ollama ps — загруженные модели (RAM).
+- python tools\ai_local_worker.py --check — доступность Ollama.
+- python -m pytest SRC\tests\ -q — регресс.
+- python SRC\gui_app.py — запуск АРМ.
+- python tools\mock_ollama_invalid.py --port 11500 --fail-first.
+- git status -sb — состояние ветки.
+- git branch -vv — синхронизация с origin.
+- .\tools\close_ds.ps1 — закрытие DS (с -InboxFile).
+- Resolve-DnsName api.kodacode.ru | Format-List * — DNS Koda (без Karing).
+

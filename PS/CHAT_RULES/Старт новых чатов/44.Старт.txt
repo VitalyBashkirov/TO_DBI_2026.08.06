@@ -1,0 +1,213 @@
+# Проект TO_DBI. Чат 44. Старт. Основная тема: тестирование флага «Исправить код»
+
+## Контекст
+
+АРМ «Адаптация под DBI» — миграция PL/SQL (Oracle) -> PostgreSQL (DBI).
+Репозиторий F:\TO_DBI. Ветка feature/dockerization.
+Роли: Автор DS — DeepSeek. Пользователь — Vitaly.
+
+ВАЖНО: KODA не запускается. Karing не нужна.
+Все DS — вручную PowerShell (правило F, DS_125).
+Все PS-блоки логируются через Start-Transcript в F:\TO_DBI\PS (правило 155, DS_151).
+
+## Сокращения (кнопки GUI)
+
+| Код | Кнопка | Метод в gui_app.py | Что делает |
+|-----|--------|--------------------|------------|
+| К1 | «1. Сканировать» | start_scan -> _run_scan(False) | Скан ИК через PLPlusScanner + зеркало ИК->КР |
+| К2 | «2. Исправить код» | start_fix -> fixer | Фикс по результату К1 (главная тема чата 44) |
+| К3 | «3. В Ai» | send_to_ai | Отправка AI_REQUEST_*.md в Ollama |
+| К4 | «4. Из Ai» | receive_from_ai | Приём AI_RESPONSE_*.md, применение |
+| Ген | «Генерация тестовых .plp» | _run_test_generation | TestGeneratorV2 + gen_test_plp.py (CLI) |
+
+## Что сделано в чате 43 (DS_150 / DS_151 / DS_152 a/b/c/summary)
+
+### DS_150 — GUI: ширины колонок секции «2. Рубрикатор. Выбор корректировок»
+- Колонка «Рубрикатор» (#0): width 180 -> 126, minwidth 140 -> 126 (-30%).
+- Колонка «Код файла» (code): width 110 -> 164, minwidth 110 -> 164 (получила Δ=54).
+- Заголовок переименован: «Код файла» -> «Код файла/правила».
+- AST-тест: SRC/tests/test_ds150_gui_rubricator_columns_ast.py (4 теста).
+- Коммит dbca704.
+
+### DS_151 — регламент: правило 155 (логирование PS-блоков)
+- Правило 155 добавлено в AGENTS.md: ВСЕ PS-блоки (в т.ч. read-only) логируются через Start-Transcript в F:\TO_DBI\PS\chatNN_MM_<name>.log.
+- Каталог PS/ — в .gitignore (логи не коммитим).
+- Исключения — только по прямому указанию Vitaly.
+- Коммит 47c1c31.
+
+### DS_152 — покрытие К1–К4 и «Генерация .plp» по фильтрам рубрикаторов
+
+**Итог:** +13 тестов, 293 passed (было 276; +4 DS_150 + 13 DS_152).
+
+#### DS_152-c — К3/К4 (AI-контур), коммит 37f5af7, +4 теста
+- AST-инвариант: send_to_ai / receive_from_ai НЕ фильтруют по self.selected_rules (фильтрация только в К1).
+- Функциональный: _ai_rubricators возвращает только коды с var.get()==True; пустой список, если ничего не выбрано.
+- Файл: SRC/tests/test_ds152c_ai_k3k4_ast.py.
+
+#### DS_152-a — CLI --rules в gen_test_plp.py, коммит c09f7ea, +4 теста
+- _parse_csv: пустая строка -> None; "a" -> [a]; "a,b" -> [a,b]; "a, b, ,c" -> [a,b,c] (пустые отброшены).
+- --rules <csv>: rules_total == len(csv), в логе ровно эти коды.
+- --rules с несуществующим кодом: [WARN] + пропуск (не падение).
+- --rules "": rules_arg=None, все правила источника.
+- Файл: SRC/tests/test_ds152a_gen_rules_filter_ast.py.
+
+#### DS_152-b — matched_rules в GUI (К1/К2/Генерация), коммит 31dda8a, +5 тестов
+- AST: file_prefixes содержит 5 ключей (v53, v50, PlpCheck, тдс20240828, тклоик20240828).
+- Функциональный: PlpCheck -> только plpcheck.*; v53+PlpCheck -> объединение; fallback без рубрикатора -> коды файлов.
+- AST: _run_test_generation содержит matched_rules.
+- Файл: SRC/tests/test_ds152b_gui_matched_rules_ast.py.
+
+#### DS_152 — сводный отчёт, коммит 32fe6d0
+- EXCHANGE/OUTBOX/DS_152_summary_report.md — матрица «К1–К4 × фильтры (sources/priorities/categories/rules)».
+- tools/_write_ds152_report.py — helper для воспроизводимости отчёта.
+
+### Итоговая сводка чата 43
+- Регресс: 276 -> 293 passed.
+- Ветка feature/dockerization синхронизирована с origin (ahead 0).
+- DS_CNT_007_pilot_report.md — модифицирован, НЕ ТРОГАТЬ.
+
+## Состояние (на момент старта чата 44)
+
+- Ветка: feature/dockerization, ahead 0 (все запушено).
+- git status: M EXCHANGE/OUTBOX/DS_CNT_007_pilot_report.md (НЕ ТРОГАТЬ).
+- INBOX: пусто (проверить).
+- PROCESSED: DS_118…DS_149 + DS_144d + DS_150 + DS_151 + DS_152 (a/b/c/summary).
+- OUTBOX: DS_118…DS_152 + DS_144d_report + DS_152_summary_report.
+- SRC/gui_app.py: ~343 KB.
+- Тестов: 36 файлов test_*.py в SRC/tests/.
+- BOM: False для всех .py, .md, .json, .ini, .sql.
+- PS-логи: F:\TO_DBI\PS\chat43_*.log (не коммитятся, PS/ в .gitignore).
+- ast.parse warnings: 0. pytest: 293 passed.
+- KODA: 1.2.2 (откат с 1.2.3), автообновление ОТКЛЮЧЕНО.
+- Ollama: http://localhost:11434, qwen2.5-coder:7b.
+
+## ГЛАВНАЯ ТЕМА ЧАТА 44 — тестирование флага «Исправить код» (К2)
+
+Кнопка К2 вызывает start_fix -> fixer (PLPlusFixer). Задача чата — покрыть тестами поведение К2 в зависимости от:
+
+1. **Фильтров рубрикатора (sources / priorities / categories / rules)** — как выбор правил в дереве влияет на то, какие issue будет исправлять fixer.
+2. **Результата К1 (scan_results)** — fixer работает по scan_results.issues и scan_results.remaining_by_rule; проверить interplay (нет скана -> fixer ничего не делает / предупреждение).
+3. **Флагов фиксера** — _current_fix_flags(), _current_header_flags(), в т.ч. «Только Ai» (ai_only_var) и др. (см. GUI).
+4. **Верификации** — _verify_file (fixer) сравнивает до/после, пишет remaining_count_by_rule; проверить, что результат верификации отражается в scan_results.remaining_by_rule и используется К3 (send_to_ai).
+5. **Маппинга правил** — fixer получает selected_rules / matched_rules из GUI; проверить, что при пустом выборе / выборе только plpcheck / v53 / тдс / тклоик — fixer ведёт себя корректно.
+6. **Бэкапов** — fixer делает бэкап исходника (_preai / _YYYYMMDD_HHMMSS); проверить, что бэкап создаётся и не попадает в повторный скан (см. _rescan_ai_files в gui_app.py, DS_108b).
+7. **Статистики** — итоговая сводка fixer (сколько исправлено, сколько осталось, по каким правилам), запись в bot.log и в changelog.
+
+### Что уже покрыто (в SRC/tests/)
+- test_ds144c_k1_k2_pytest.py — К1+К2 базовые сценарии.
+- test_ds088a_ai_cycle.py, test_ds088a_fix.py — AI-цикл + fixer (связанные).
+- test_ds089a.py, test_ds089b.py — fixer / сканер на конкретных сценариях.
+- test_ds133_buttons_state_pytest.py — состояние кнопок (в т.ч. К2).
+- test_ds147c_ast.py — К1/К2 не используют PRIORITY_RULES (legacy).
+- test_ds152b_gui_matched_rules_ast.py — matched_rules в GUI (в т.ч. _run_test_generation).
+
+### Что нужно проверить в чате 44
+- [ ] start_fix: проверка «сначала скан» (нет scan_results -> предупреждение).
+- [ ] start_fix: проверка «хотя бы одно правило выбрано» (selected_rules пусто -> предупреждение).
+- [ ] start_fix: вызов fixer с правильными selected_rules (matched_rules из GUI).
+- [ ] PLPlusFixer: фильтрация issue по rule_code (только выбранные правила).
+- [ ] PLPlusFixer: _verify_file -> remaining_count_by_rule -> scan_results.remaining_by_rule.
+- [ ] Бэкапы: _preai / _YYYYMMDD_HHMMSS, не попадают в повторный скан.
+- [ ] bot.log: запись сводки fixer.
+- [ ] changelog: запись сводки fixer.
+- [ ] «Только Ai» (ai_only_var): влияние на К2 (если включено — фильтруются ли issue перед fixer).
+
+## AI-инфраструктура
+
+- Ollama: http://localhost:11434, работает (qwen2.5-coder:7b).
+- LM Studio: закрыт.
+- Мок-сервер: tools\mock_ollama_invalid.py, порт 11500.
+- ai_local_worker.py --check: OK (available).
+- KODA: 1.2.2 (откат с 1.2.3), автообновление ОТКЛЮЧЕНО.
+- KODA запускается БЕЗ Karing.
+
+## Реальный путь и имена (важно!)
+
+- Проект: F:\TO_DBI\ (SRC\ - исходники, tools\ - утилиты, PS\ - логи транскриптов, не коммитятся).
+- Класс GUI: DBIMigrationApp (SRC\gui_app.py, ~343 KB).
+- Тесты: F:\TO_DBI\SRC\tests\ - pytest exit code 0, 293 passed.
+- Python 3.11 в PATH. pytest 8.3.4.
+- pytest.ini в корне - testpaths = SRC/tests, addopts = --capture=no.
+- BOM - критичная тема. Правило в DS_STANDARD.md раздел 6.1.
+- Task Scheduler TO_DBI_CNT_NightlyPipeline - S4U, daily 01:00.
+- AI-контур: tools\ai_local_worker.py, tools\ai_local_worker_config.json.
+- tools\close_ds.ps1 - универсальный скрипт закрытия DS (v2.1, -DsNumber, -CommitMessage, -BotLogMessage, -Push, BOM=True).
+- SRC\tests\conftest.py - pytest-фикстуры (v4).
+- SRC\analyzer\scanner.py - сканер (PLPlusScanner), PLPCHECK_RULE_TO_CATEGORY.
+- SRC\analyzer\deep_scanner.py - CLI DeepScanner.
+- SRC\analyzer\test_generator_v2.py - TestGeneratorV2 (~16 KB).
+- SRC\fixer\code_fixer.py - PLPlusFixer (главный объект темы чата 44).
+- SRC\rubricator_prompts.py - RubricatorPrompts (для PLPlusScanner).
+- SRC\fixer\markdown_rubricator_loader_v3.py - MarkdownRubricatorLoaderV3 (для TestGeneratorV2).
+- tools\gen_test_plp.py - CLI-генератор (DS_147a).
+- tools\validate_gen_plp.py - CLI-валидатор (DS_147b).
+- tools\_write_ds152_report.py - helper DS_152 (воспроизводимость отчёта).
+- DATA\ - каталоги с .plp (patch_WORK, patch_IN, patch_OUT и др.).
+- DATA\Тестовые файлы\ - сгенерированные .plp (в .gitignore).
+- DATA\generated_plp\ - тоже в .gitignore.
+- DATA\Рубрикатор v5\4.RUBRICATOR_PROMPT v5.json - 332 правила (plpcheck 152, v53 98, тдс20240828 39, тклоик20240828 43).
+- logs_Deep\ - отчеты DeepScanner (CLI).
+- F:\DBI.Compare\TOOL_COMPARE\ - инструмент сравнения патчей (готов).
+
+## Регламент работы (обновлен в чате 43)
+
+0-128 - как в чате 42 (без изменений).
+129. close_ds.ps1 коммитит только отслеживаемые файлы -> git add новых ДО close_ds.ps1 (п.6h).
+130-140 - как в чате 42.
+141. Блок «коммит + push» - с Start-Transcript chat43_NN_commit.log (п.6t).
+142-154 - как в чате 42 (п.6u..6ah).
+155. ВСЕ PS-блоки (в т.ч. read-only) логируются через Start-Transcript в F:\TO_DBI\PS\chatNN_MM_<name>.log. Каталог PS/ - в .gitignore. Исключения - только по прямому указанию Vitaly. Пути логов подсвечивать зелёным (п.6ag).
+
+## Новые уроки чата 43 (6.6.34, копилка)
+
+### 6ai - close_ds.ps1 внутри Start-Transcript может терять stdout git
+Симптом: [OK] commit / [OK] push есть, а разделы [1.1] git status, [4.x] git status, [5/8] git commit, [7.1]-[7.3] пустые.
+Причина: git запускается как subprocess; в PS 5.1 stdout может не попасть в транскрипт (п.6x/6y).
+Решение: после close_ds.ps1 ВСЕГДА проверять состояние отдельным блоком БЕЗ транскрипта: git log --oneline -3, git status -sb, git branch -vv.
+
+### 6aj - here-string с кириллицей и фигурными скобками в PS 5.1 зависает
+Симптом: вставляешь here-string с русским текстом и фигурными скобками — консоль уходит в ожидание и «висит».
+Решение (уточнение п.6z): для больших русских текстов — массив PS-строк + [IO.File]::WriteAllLines(path, lines, UTF8Encoding(false)), либо вынести текст в отдельный .py-скрипт и запустить его.
+
+### 6ak - subprocess.run с encoding=utf-8 на Windows падает на кириллице в stdout
+Симптом: PytestUnhandledThreadExceptionWarning: UnicodeDecodeError: utf-8 codec can not decode byte 0xc7.
+Причина: gen_test_plp.py (и др.) пишет русский текст в stdout в CP866/CP1251, subprocess читает как UTF-8.
+Решение: subprocess.run(..., encoding=utf-8, errors=replace) — некорректные байты заменяются, reader-thread не падает.
+
+## Первый шаг (чат 44)
+
+1. Прочитать этот стартовый файл (44.Старт.txt).
+2. Проверить git: git status -sb / git branch -vv. Ожидание: синхронизировано, 1 modified (DS_CNT_007_pilot_report.md).
+3. Проверить INBOX: должен быть пуст.
+4. Проверить Ollama: python tools\ai_local_worker.py --check.
+5. Запустить регресс: python -m pytest SRC\tests\ -q -> 293 passed.
+6. Разведка: прочитать PLPlusFixer (SRC\fixer\code_fixer.py) и start_fix / _run_fix в gui_app.py (строки 4170-4900 по разведке чата 43).
+7. Составить матрицу покрытия «фиксер × фильтры» (sources/priorities/categories/rules) по аналогии с DS_152.
+8. Подшаги DS_153-a/b/c:
+   - DS_153-a: start_fix — проверки перед запуском (нет scan_results -> предупреждение, нет selected_rules -> предупреждение).
+   - DS_153-b: PLPlusFixer — фильтрация issue по rule_code (selected_rules).
+   - DS_153-c: _verify_file -> remaining_count_by_rule -> scan_results.remaining_by_rule.
+9. Каждый подшаг: тест -> 4-5 passed -> git add -> close_ds.ps1 -> проверка без транскрипта.
+
+## Команды (справочно)
+
+- git push origin feature/dockerization - синхронизация.
+- python tools\ai_local_worker.py --check - доступность Ollama.
+- python -m pytest SRC\tests\ -q - регресс (293 passed).
+- python SRC\gui_app.py - запуск АРМ.
+- git status -sb / git branch -vv - состояние ветки.
+- .\tools\close_ds.ps1 -DsNumber N -CommitMessage DS_N_closed -BotLogMessage ... -Push - закрытие DS.
+- python SRC\analyzer\deep_scanner.py -s ИК --rules v50 - CLI DeepScanner.
+- python tools\gen_test_plp.py -s PlpCheck -o DATA\generated_plp --rules X --categories Y --priorities Z --dry-run - CLI-генератор (DS_147a/d).
+- python tools\validate_gen_plp.py -d DATA\generated_plp --rules X - CLI-валидатор (DS_147b).
+- F:\DBI.Compare\0.compare_anchors.bat - инструмент сравнения патчей (запуск из корня).
+
+## Последние коммиты
+
+32fe6d0 DS_152: сводный отчёт — покрытие К1-К4 и генерации .plp по фильтрам (a/b/c/summary)
+31dda8a DS_152-b: matched_rules — тесты фильтра правил в GUI (К1/К2/Генерация)
+c09f7ea DS_152-a: CLI --rules — тесты фильтра по правилам (CSV + missing + empty)
+37f5af7 DS_152-c: К3/К4 — тесты AI-контура (инвариант + _ai_rubricators)
+47c1c31 DS_151: регламент - ВСЕ PS-блоки логировать через Start-Transcript в F:\TO_DBI\PS (правило 155)
+dbca704 DS_150: GUI - колонки Рубрикатор -30%, Код файла/правила +delta, AST-тест
+52dd864 DS_144d: сводный отчёт (a-e)

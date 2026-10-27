@@ -1,0 +1,37 @@
+============================================
+  72.СТАРТ (сгенерировано 2026-10-27 из чата 71)
+  Хост: LGGRAMA8V7Q8U (hostTag=LG) / MATEBOOKE (hostTag=MBE)
+============================================
+
+## Где искать правила (ОБЯЗАТЕЛЬНО в новом чате)
+F:\TO_DBI\PS\CHAT_RULES
+  00_INDEX.md
+  Отчеты\ — +71
+  Скрипты чатов\ — +chat72_*
+  Старт новых чатов\ — +72
+  Старт новых чатов\01_08 Правила,регламенты,сокращения и т.п
+      00_INDEX.md, 01_Правила_PS.md, 02_Сокращения_GUI.md, 03_Матрица_флагов.md,
+      04_Регламент_логов.md, 05_Регламент_тестов.md, 06_Регламент_коммитов.md, 07_Шаблон_PS.md, 08_Окружение.md
+
+## Статус на 2026-10-27 (после чата 71)
+- HEAD = b3100ad. origin/feature/dockerization = b3100ad, ahead нет.
+- Долг 1 ЗАКРЫТ: _plp_iter_declarations + NAME in [TYPE]; _check_plp_not_mentioned + public func/proc, procedure, method, batch method.
+- Тест test_ds71_not_mentioned_real.py (3 теста) + fixtures/ds71_in_type.plp.
+- Полный регресс: 389 passed / 0 failed.
+
+## Долги 71 -> 72
+1. throw без try/catch в PS 5.1 не прерывает. Заменить на return + Stop-Transcript или try/catch.
+2. _check_plp_not_mentioned: kind proc/method/batch_method -> ветка else. Кандидат: отдельные сообщения.
+3. type_str для in [TYPE] не нормализован до in. Намеренно; отдельная правка при необходимости.
+4. Грязные фоновые (EXCHANGE/bot.log, Ollama и LM Studio.bat, SRC/settings.json, test_all_models.ps1, free_memory.ps1, free_memory_profiles.txt) — не коммитить.
+5. Бэкапы *.ds*bak — не коммитить; при желании — .gitignore.
+6. Мейкеры отчетов/стартов через python-генератор PS-строками хрупкие. Предпочтение: прямой WriteAllLines массивом PS-строк.
+
+## Первые шаги чата 72
+1. Прочитать CHAT_RULES\Старт новых чатов\01_08 ...\00_INDEX.md -> 01..08.
+2. Прочитать Отчеты\71.Отчёт.txt.
+3. Взять долг 1 (throw->return) или долг 2 (сообщения proc/method) — или новую задачу.
+4. Действовать по регламентам: 04, 05, 06, 07, 61_1, 64_2, 64_3, 64_4, 65_1, 65_2, 66_1, 66_2, 67_1.
+
+## Правила PS (краткая выжимка)
+1-13, 60_1..60_9, 61_1..61_7, 62_1, 63_1, 64_1..64_4, 64_10, 65_1, 65_2, 66_1, 66_2, 67_1.

@@ -1,0 +1,199 @@
+﻿50.Старт.txt
+============
+
+На русском.
+
+## Контекст
+
+АРМ «Адаптация под DBI» — миграция PL/SQL (Oracle) -> PostgreSQL (DBI).
+Репозиторий F:\TO_DBI. Ветка feature/dockerization.
+Роли: Автор DS — DeepSeek. Пользователь — Vitaly.
+
+ВАЖНО: KODA не запускается. Karing не нужна.
+Все DS — вручную PowerShell (правило F, DS_125).
+Все PS-блоки логируются через Start-Transcript в F:\TO_DBI\PS (правило 155, DS_151).
+Формат PS-блока — Markdown ```powershell (копирование одной кнопкой <Copy>).
+
+## ПРАВИЛО АВТОРА DS (КРИТИЧНО)
+
+Автор DS НЕ создаёт файлы на диске Пользователя.
+Автор DS выдаёт ГОТОВЫЙ PS-блок в Markdown ```powershell, который Пользователь
+копирует одной кнопкой <Copy> и вставляет в консоль PowerShell.
+
+ЗАПРЕЩЕНО:
+- Создавать .ps1 через Set-Content, New-Item, here-string.
+- Просить Пользователя "создать файл".
+- Использовать <ps1>...</ps1> как "файл для сохранения".
+- Set-Content -Encoding UTF8 (не BOM — правило 6at-1).
+
+РАЗРЕШЕНО:
+- Markdown ```powershell — Пользователь копирует и запускает.
+- Внутри блока — Start-Transcript, Write-Host, python, git, pytest.
+- После Stop-Transcript — Get-Content $log -Encoding UTF8 | Out-String | Write-Host.
+- В конце — Write-Host пути лога -ForegroundColor Green.
+
+## ПРАВИЛА ВЫВОДА (уточнения чата 49)
+
+- В конце КАЖДОГО PS-блока: полный путь лога зелёным:
+  Write-Host ("=== Полный путь лога: {0} ===" -f $log) -ForegroundColor Green
+- Кириллица в литералах — через [System.IO.File]::WriteAllText с
+  New-Object System.Text.UTF8Encoding($true). НЕ Set-Content.
+- Для python-скриптов из PS выставлять:
+  $env:PYTHONIOENCODING = "utf-8"; $env:PYTHONUTF8 = "1"
+  (иначе UnicodeEncodeError 'charmap' на '→' и кириллице).
+- При патче файлов учитывать CRLF: читать/писать io.open(..., newline=""),
+  нормализовать \r\n -> \n, писать обратно в исходном формате.
+
+## Состояние на начало чата 50
+
+- Ветка: feature/dockerization, HEAD 1d8a66d, ahead 2 (не запушено).
+  Коммиты чата 49: 8df57e4, afb862f, 1d8a66d.
+- git status: M EXCHANGE/OUTBOX/DS_CNT_007_pilot_report.md (НЕ ТРОГАТЬ),
+  M EXCHANGE/bot.log (НЕ ТРОГАТЬ).
+- Тестов: 337 passed (332 + 5 новых test_ds179_suboptimal_wrownum.py).
+- INBOX: пусто.
+- Ollama: http://localhost:11434, qwen2.5-coder:7b (запущена).
+- KODA: 1.2.2, автообновление ОТКЛЮЧЕНО.
+
+## Что сделано в чате 49
+
+- DS_179 (8df57e4): plpcheck.SUBOPTIMAL_QUERY_WROWNUM — многострочная проверка.
+  scanner.py: PLP_MULTILINE_IMPLEMENTED_RULES += правило;
+  новый метод _check_plp_suboptimal_wrownum (5-ки как _check_plp_code_in_comment);
+  вызов # 6. в scan_file после code_in_comment.
+  На PSH_ED_PRC_SCHM.plp: 1 issue, block_start=112, block_end=118.
+  Тесты: SRC\tests\test_ds179_suboptimal_wrownum.py (5 passed). Регресс 337 passed.
+- afb862f: 49.Отчёт.txt + матрица К1->К2 (PS\49_Results.log).
+- 1d8a66d: дополнение отчёта про _preai в PATCH_IN (DS_181).
+
+## ГЛАВНЫЕ ТЕМЫ ЧАТА 50
+
+1. DS_180 — МПК-маркировка DeterministicFixer-правок.
+   Факт: в матрице К1->К2 расхождение case 100 (MPK=on,VTIK=off,NAF=off) и
+   case 101 (MPK=on,VTIK=off,NAF=on): якорей 0, хотя должны быть.
+   Причина: code_fixer.py:1567 ставит якоря только при issue_changes,
+   а PREFIX_TYPE и др. детерминированные правки идут через DeterministicFixer
+   и не формируют issue_changes (fix_count=3 — это det_changes).
+   Нужно: маркировать и det-правки (общий anchor pipeline после всех правок).
+
+2. DS_181 — _preai-копии не в PATCH_IN.
+   Факт: ai_exchange.py:546 backup_file = source.with_name(f"{source.stem}_{ts}_preai{source.suffix}")
+   пишет копию рядом с исходником в PATCH_IN\...\ENTITY\DEPN\.
+   Назначение (by design, DS_081/57ace3f): снимок «до Ai» для «было/стало»
+   в GUI К4 и для _rescan_ai_files.
+   Проблема: засоряет PATCH_IN (ИКА). Сканер их фильтрует (is_temporary_filename,
+   _TEMP_MARKER_RE), но физически мусор остаётся.
+   Нужно: перенести _preai в PATCH_CALC\backups (или AI_BACKUPS), сохранив
+   result['backup_path']; перенести текущие 4 файла из PATCH_IN\...\DEPN;
+   опционально — _preai в exclude_patterns.
+
+3. К3/К4 (Ai-цикл) на наборе из 3 .plp.
+   Прогон К3 «В Ai» (AI_REQUEST) -> Ollama qwen2.5-coder:7b -> К4 «Из Ai»
+   (AI_RESPONSE, apply_fixes).
+   Фиксировать: [Ai], xN, [AI-REMOVED], диапазоны строк, чистый код (ВТИК).
+   Ai-цикл: AI_IN -> AI_OUT -> AI_OUT/processed; backup _preai (см. DS_181).
+
+## Открытый вопрос из чата 49 (перенесён в DS_180)
+
+Правило plpcheck.SUBOPTIMAL_QUERY_WROWNUM теперь находится (DS_179).
+Остаётся: МПК не маркирует det-правки. Реализовать в DS_180,
+покрыть тестом (test_ds180_mpk_det_anchors.py), проверить на case 100/101.
+
+## План чата 50
+
+1. git status -sb / git branch -vv.
+   Ожидание: ahead 2, HEAD 1d8a66d, M DS_CNT_007, M bot.log (НЕ ТРОГАТЬ).
+2. python -m pytest SRC\tests\ -q -> 337 passed.
+3. DS_180:
+   - разведка: где в code_fixer.py формируются det_changes и как они
+     возвращаются из _apply_issue_fixes/DeterministicFixer;
+   - правка: общий anchor pipeline (issue_changes + det_changes);
+   - новый тест test_ds180_mpk_det_anchors.py (MPK=on, VTIK=off -> якорь есть);
+   - прогон матрицы case 100/101 на 3 .plp (ожидание anchors > 0);
+   - регресс >=342; коммит DS_180.
+4. DS_181:
+   - правка ai_exchange.py: _preai в PATCH_CALC\backups (или AI_BACKUPS);
+   - перенос текущих 4 _preai из PATCH_IN\...\DEPN в PATCH_CALC\backups;
+   - тест test_ds181_preai_location.py; регресс; коммит DS_181.
+5. К3/К4 (Ai-цикл) на 3 .plp (PSH_ED_PRC_SCHM, PSH_PS_DEL, PSH_VK_UNK_INP):
+   - К3 -> AI_REQUEST -> Ollama -> К4 -> AI_RESPONSE -> apply;
+   - зафиксировать [Ai]/xN/[AI-REMOVED]/диапазоны/чистый код;
+   - записать в PS\50_Results.log; при расхождениях — доработки.
+6. Регресс >=342. Коммиты DS_180, DS_181.
+7. Отчёт чата 50 (50.Отчёт.txt).
+
+## Сокращения GUI (правило 6as, полный текст — PS\46_Сокращения_GUI.txt)
+
+Кнопки:
+  К1 «1. Сканировать»
+  К2 «2. Исправить код»
+  К3 «3. В Ai»
+  К4 «4. Из Ai»
+  ГТ «Генерация тестовых .plp»
+
+BOX «1. Пути и настройки сканирования»:
+  ИКА — Исходный каталог (источник .plp)
+  КР  — Каталог результатов (приёмник)
+
+BOX «3. Опции сканирования и исправления. Логирование» — флаги:
+  МПК       — «Маркировка правок»: вставляет якоря-комментарии
+  Применять — применять фактические правки (бывш. fix_only_found)
+  ВТИК      — «Верни только исправленный код без пояснений и маркеров изменений.
+              Все пояснения, изменения, удаления журналируй» (= clean_output)
+  НеАФ      — ignore (не автофиксить, только лог)
+
+Уровни логирования:
+  УЛ  — Уровень логирования
+  УЛМ — Минимальный
+  УЛП — Подробный
+
+Приоритет флагов:
+  ВТИК=on  -> МПК отменяется (якоря не ставятся); вернуть только исправленный код.
+  НеАФ=on  -> правки НЕ применяются (сухой прогон); МПК может ставить якоря.
+
+Формат якоря (МПК):
+  -- YYYY.MM.DD HH:MI|<Правило>[xN][[Ai]]|Строка NN
+  -- YYYY.MM.DD HH:MI|<Правило>[xN][[Ai]]|Строки NN-NN
+  [xN]   — только если N>1 (число срабатываний).
+  [[Ai]] — только если для правки использовался Ai.
+
+## Матрица флагов (PS\46_Матрица_флагов.txt)
+
+| МПК | ВТИК | НеАФ | Якоря | Правки | Возврат кода |
+|-----|------|------|-------|--------|--------------|
+| off | off  | off  | нет   | да     | полный файл |
+| on  | off  | off  | да    | да     | полный файл с якорями |
+| on  | off  | on   | да    | нет    | полный файл с якорями; правки только в лог (сухой прогон) |
+| on  | on   | off  | нет   | да     | только исправленный код, без якорей (ВТИК перекрывает МПК) |
+| off | on   | off  | нет   | да     | только исправленный код |
+| off | off  | on   | нет   | нет    | без изменений, только лог |
+
+## Фактическая матрица К1->К2 из чата 49 (PS\49_Results.log)
+
+| case | MPK | VTIK | NAF | issues | fixmod | out changed | anchors | AI-REMOVED |
+|------|-----|------|-----|--------|--------|-------------|---------|------------|
+| 000  | 0   | 0    | 0   | 9      | 2      | 2           | 0       | 0          |
+| 100  | 1   | 0    | 0   | 9      | 2      | 2           | 0       | 0          |  <-- DS_180
+| 101  | 1   | 0    | 1   | 9      | 0      | 0           | 0       | 0          |  <-- DS_180
+| 110  | 1   | 1    | 0   | 9      | 2      | 2           | 0       | 0          |
+| 010  | 0   | 1    | 0   | 9      | 2      | 2           | 0       | 0          |
+| 001  | 0   | 0    | 1   | 9      | 0      | 0           | 0       | 0          |
+
+## Набор входных .plp (PS\47_InputSet.log, 3 файла)
+
+1. F:\TO_DBI\PATCH_IN\patch_suboptimal_test_3\ENTITY\DEPN\PSH_ED_PRC_SCHM.plp
+2. F:\TO_DBI\PATCH_IN\patch_suboptimal_test_3\ENTITY\PL_US\PSH_PS_DEL.plp
+3. F:\TO_DBI\PATCH_IN\patch_suboptimal_test_3\ENTITY\RKO\PSH_VK_UNK_INP.plp
+
+## Команды (справочно)
+
+- git push origin feature/dockerization — синхронизация (когда будет команда).
+- python -m pytest SRC\tests\ -q — регресс (>=342).
+- python SRC\gui_app.py — запуск АРМ.
+
+## Последние коммиты
+
+1d8a66d DS_179: дополнение отчёта чата 49 - причина _preai в PATCH_IN (ai_exchange.py:546), план DS_181
+afb862f DS_179: отчёт чата 49 + матрица К1->К2 (расхождение МПК по det-правкам -> DS_180)
+8df57e4 DS_179: SUBOPTIMAL_QUERY_WROWNUM — многострочная проверка (exit в for loop без rownum/offset/fetch)
+bdb9d3b DS_168..178: стабильная версия GUI (счётчики, К3/К4, итоги, скрыт Топ-файлов) + фикс IndentationError

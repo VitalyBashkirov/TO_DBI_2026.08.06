@@ -1,0 +1,9 @@
+        decl_re = re.compile(
+            r'^\s*(\w+)\s+('
+            r'integer|number|string|varchar2|date|boolean|timestamp|rowtype'
+            r'|(?:ref\s*)?\[[\w\d_]+\]'
+            r'|in\s+\[[\w\d_]+\]'
+            r'|&[\w.]+'
+            r')\s*(\(\s*\d+\s*\))?\s*(?::=|;)',
+            re.IGNORECASE
+        )

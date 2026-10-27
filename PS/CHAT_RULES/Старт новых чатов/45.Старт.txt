@@ -1,0 +1,112 @@
+# Проект TO_DBI. Чат 45. Старт. Основная тема: OQ-1 (_is_rule_selected) + OQ-2 (close_ds.ps1)
+
+## Контекст
+
+АРМ «Адаптация под DBI» — миграция PL/SQL (Oracle) -> PostgreSQL (DBI).
+Репозиторий F:\TO_DBI. Ветка feature/dockerization.
+Роли: Автор DS — DeepSeek. Пользователь — Vitaly.
+
+ВАЖНО: KODA не запускается. Karing не нужна.
+Все DS — вручную PowerShell (правило F, DS_125).
+Все PS-блоки логируются через Start-Transcript в F:\TO_DBI\PS (правило 155, DS_151).
+
+## Итог чата 44 (закрыт)
+
+- DS_153-a (fe4deaa): +5 AST — pre-checks K2 (п.0, п.1, п.1b, п.2).
+- DS_153-b (c9b5c1d): +5 AST — _run_fix -> fixer (п.3, п.3b, п.3c, п.9).
+- DS_153-c (9d1772f): +5 AST — verify/backups/bot.log (п.5, п.6, п.7).
+- DS_153-d (fbb9415): +6 — scanner selected_rules (п.4*, 4 функц. + 1 AST + 1 баг).
+- DS_153 summary (dd4c933 + a50323f дубль): DS_153_summary_report.md (5056 bytes), AGENTS.md OQ-1.
+- Регресс: 293 -> 314 passed.
+- AGENTS.md: OQ-1 (a50323f), OQ-2 (unstaged, 42387 bytes).
+
+## ГЛАВНАЯ ТЕМА ЧАТА 45 — OQ-1 + OQ-2 (доработка кода, не тесты)
+
+### OQ-1: _is_rule_selected — фильтрация по полному коду правила
+
+**Файл:** SRC\analyzer\scanner.py, строка 728 (def _is_rule_selected).
+
+**Проблема:**
+- selected_rules с plpcheck.BAD_PREFIX не сужает набор plpcheck-правил — все plpcheck.* считаются выбранными.
+- Причина: сравнение по префиксу plpcheck, а не по полному коду правила.
+- Плюс multiline-правила (BAD_PREFIX/NOT_MENTIONED/WRONG_METHOD_SYNTAX/CODE_IN_COMMENT) выполняются всегда для .plp, независимо от selected_rules.
+
+**Задача:**
+- Сравнение по полному коду правила (plpcheck.BAD_PREFIX), а не по префиксу plpcheck.
+- Фильтрация multiline-правил по selected_rules (сейчас _is_rule_selected вызывается в scan_file, но multiline проверки _check_plp_* его не учитывают).
+- Обновить тесты: test_ds153d_scanner_selected_rules.py::test_selected_rule_does_not_narrow_plpcheck — после фикса CODE_IN_COMMENT НЕ должен попадать при selected_rules с plpcheck.BAD_PREFIX.
+
+**Тесты:**
+- SRC\tests\test_ds153d_scanner_selected_rules.py (6 тестов, обновить #6).
+- Возможно, добавить новые тесты на фильтрацию multiline.
+
+### OQ-2: close_ds.ps1 — пустой коммит (только bot.log)
+
+**Файл:** tools\close_ds.ps1 (v2.1).
+
+**Проблема:**
+- close_ds.ps1 создаёт дублирующий коммит с тем же сообщением, если запустить его повторно, когда содержательных изменений уже нет (кроме EXCHANGE/bot.log).
+- Пример: a50323f (AGENTS.md + DS_153_summary_report.md + bot.log) и dd4c933 (только bot.log).
+- Причина: git add EXCHANGE/bot.log + git commit без проверки, есть ли в staged что-то, кроме bot.log.
+
+**Задача:**
+- В close_ds.ps1 добавить проверку: git diff --cached --quiet -- EXCHANGE/bot.log (или git diff --cached --name-only | Where-Object { $_ -ne "EXCHANGE/bot.log" }).
+- Если только bot.log — коммит не делать (или делать с пометкой [botlog only]).
+
+## План чата 45
+
+1. OQ-2 (проще): доработать close_ds.ps1, тест (проверить, что повторный запуск не создаёт коммит).
+2. OQ-1 (сложнее): доработать _is_rule_selected (полный код + multiline), обновить тесты.
+3. Регресс: 314 -> ~315-317 passed.
+4. Сводный отчёт DS_154 / DS_155 (по аналогии DS_153).
+
+## Состояние (на момент старта чата 45)
+
+- Ветка: feature/dockerization, ahead 0.
+- git status: M EXCHANGE/OUTBOX/DS_CNT_007_pilot_report.md (НЕ ТРОГАТЬ), M AGENTS.md (OQ-2, unstaged).
+- HEAD: dd4c933 (DS_153 summary).
+- Тестов: 314 passed.
+- AGENTS.md: 42387 bytes (OQ-1 + OQ-2).
+- INBOX: пусто.
+- Ollama: http://localhost:11434, qwen2.5-coder:7b.
+- KODA: 1.2.2 (откат с 1.2.3), автообновление ОТКЛЮЧЕНО.
+
+## Правила чата 44 (в копилку 6.6.34, применять в чате 45)
+
+- 6al: .ps1 в PS 5.1 с кириллицей и UTF-8 без BOM -> TerminatorExpectedAtEndOfString. Решение: ASCII-only или BOM=True, либо .py-скрипт.
+- 6al-2: двойной бэкслеш в PS-строках для Python-продолжений (assert ..., \\) -> заменить на одинарный.
+- 6an: большие логи тестов — в файл (Tee-Object/Start-Transcript), в окно — tail.
+- 6ao: не копировать в PS «ожидаемый вывод» (CommandNotFoundException).
+- 6ap: запуск + проверка одним блоком.
+
+## Регламент работы (обновлен в чате 43, дополнен в 44)
+
+0-155 — как в чатах 42-43 (без изменений).
+155: ВСЕ PS-блоки (в т.ч. read-only) логируются через Start-Transcript в F:\TO_DBI\PS\chatNN_MM_<name>.log.
+
+## Первый шаг (чат 45)
+
+1. Прочитать 45.Старт.txt.
+2. Проверить git: git status -sb / git branch -vv. Ожидание: ahead 0, M DS_CNT_007_pilot_report.md (НЕ ТРОГАТЬ), M AGENTS.md (OQ-2).
+3. Проверить регресс: python -m pytest SRC\tests\ -q -> 314 passed.
+4. Разведка: прочитать _is_rule_selected (SRC\analyzer\scanner.py:728) + close_ds.ps1 (tools\close_ds.ps1).
+5. OQ-2 (проще): доработать close_ds.ps1 (проверка «только bot.log»), тест.
+6. OQ-1 (сложнее): доработать _is_rule_selected (полный код + multiline), обновить тесты DS_153-d.
+7. Регресс + close_ds (DS_154 — OQ-2, DS_155 — OQ-1).
+
+## Команды (справочно)
+
+- git push origin feature/dockerization — синхронизация.
+- python -m pytest SRC\tests\ -q — регресс (314 passed).
+- python SRC\gui_app.py — запуск АРМ.
+- git status -sb / git branch -vv — состояние ветки.
+- .\tools\close_ds.ps1 -DsNumber N -CommitMessage DS_N_closed -BotLogMessage ... -Push — закрытие DS.
+
+## Последние коммиты
+
+dd4c933 DS_153 summary: отчёт К2 + OQ-1 (_is_rule_selected)
+a50323f DS_153 summary: отчёт К2 + OQ-1 (_is_rule_selected)  [дубль, только bot.log — оставлен]
+fbb9415 DS_153d: тесты scanner — фактическое поведение фильтрации (6)
+9d1772f DS_153c: AST-тесты verify/backups/bot.log (5)
+c9b5c1d DS_153b: AST-тесты _run_fix -> fixer (5)
+fe4deaa DS_153a: AST-тесты pre-checks K2 (5)

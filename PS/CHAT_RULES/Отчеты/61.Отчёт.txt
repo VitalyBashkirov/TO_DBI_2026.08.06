@@ -1,0 +1,87 @@
+============================================
+  61.ОТЧЁТ (чат 61, 2026-10-25)
+  Хост: LGGRAMA8V7Q8U (hostTag=LG)
+  Python: C:\Users\ainf1\AppData\Local\Programs\Python\Python312\python.exe
+  HEAD: 74baf79  origin/feature/dockerization: 74baf79
+============================================
+
+## Итог чата
+
+ЗАКРЫТО:
+- DS_186: гарантированный откат settings.json в t3/t4 (test_ds183_k4_model_setting).
+- Долг 2 (EXCHANGE/*): 53 удалённых зафиксированы коммитом 03ac63f.
+- A8: подтверждён через B4/e5459c3 (DS_184), отдельного кода нет.
+
+Коммиты чата:
+- 03ac63f  DS_186-prep: перенос скриптов/отчётов/стартов в CHAT_RULES (chat 59-60)
+           53 files changed, 6879 deletions(-)
+- 74baf79  DS_186: garantirovannyy otkat settings.json v t3/t4
+           1 file changed, 26 insertions(+), 16 deletions(-)
+
+Push: 9d36b0f -> 03ac63f -> 74baf79 (feature/dockerization), origin = 74baf79.
+
+## Шаги чата 61
+
+61_01  Разведка EXCHANGE/* и рабочего дерева.
+       Обнаружено: корень репо = F:\TO_DBI (не SRC), 53 D + 1 M (bot.log) + 1 ?? (ds185bak).
+61_02  Чистка: gui_app.py.ds185bak удалён, EXCHANGE/* откачены (DS_CNT_007, bot.log — но
+       bot.log остался M, живой лог). 49.Отчёт.txt.chat59.bak — отсутствует.
+61_03  Коммит переноса 53 файлов (03ac63f), push OK. bot.log НЕ включён (правило 06).
+61_04  Разведка DS_186: test_ds183_k4_model_setting.py, t3/t4, copy2/try/finally.
+       Обнаружены баги вне DS_186: main() использует t6 до присваивания (DS_187),
+       _run() использует root вне области видимости (DS_188), SyntaxWarning \T (DS_189).
+61_05  Патч t3/t4 python-helper'ом (chat61_ds186_patch.py, WriteAllLines, cmt через
+       \u-эскейпы). 4xOK: t3 backup/finally, t4 backup/finally. WROTE 12014 chars.
+61_06  Точечный pytest: 6 passed, 1 warning (SyntaxWarning \T в docstring t6).
+       settings.json после теста: k4_model=3b, BACKUP=False — откат сработал.
+61_07  Полный регресс: 378 passed, failed=0, error=0, invalid command name=0.
+61_08  Коммит DS_186 (74baf79), push OK. bot.log не staged.
+61_09  A8: git show e5459c3 подтвердил B4 (mark_in_code -> [Ai]-anchors). A8 закрыт.
+
+## Долги чата 61 -> 62
+
+1. DS_187 (test_ds183_k4_model_setting.py, main()):
+   t6 используется в all([...]) до присваивания -> NameError при standalone-запуске.
+   ПСВ: t6 = _run(...) перенести ДО ok_all = all([...]).
+2. DS_188 (test_ds183_k4_model_setting.py, _run()):
+   root.update_idletasks() в _run без определения root -> NameError, ловится except: pass.
+   ПСВ: убрать мёртвый код или обернуть в try/except с явным комментарием.
+3. DS_189 (test_ds183_k4_model_setting.py, t6 docstring):
+   SyntaxWarning: invalid escape sequence '\T' (строка 249).
+   ПСВ: docstring -> r"""...""" или удвоить \.
+4. EXCHANGE/bot.log — известный шум, живёт постоянно, не коммитим (правило 06).
+
+## Состояние CHAT_RULES
+
+Обновлено в 61_10:
+- 00_INDEX.md — долги (DS_186 закрыт, A8 закрыт, DS_187/188/189 новые).
+- 01_Правила_PS.md — 61_1..61_6.
+- 05_Регламент_тестов.md — 61_3 (счётчики D/M/??).
+- 06_Регламент_коммитов.md — 61_1 (корень репо = F:\TO_DBI).
+
+## Новые правила/уточнения чата 61
+
+61_1 (06_Регламент_коммитов): корень репо = F:\TO_DBI (не SRC).
+    $targetRepo = 'SRC/...' от F:\TO_DBI, $targetRel = 'SRC/...' от $root для git -C.
+61_2 (01_Правила_PS): EAP=Continue на ЛЮБОЙ git-вызов с 2>&1
+    (LF/CRLF warning -> NativeCommandError при Stop).
+61_3 (05_Регламент_тестов): счётчики D/M/?? считать через StartsWith / ^M / ^\?\?,
+    не через общий Count.
+61_4 (01_Правила_PS): комментарий в python-паттерне — только через \u-эскейпы
+    (cmt = "..."), не кириллицей в here-string интерактива.
+61_5 (01_Правила_PS): python-helper и .ps1 — только файлом на диск
+    (WriteAllLines / Блокнот), не интерактивной вставкой. Here-string @'...'@ и
+    $body-маркеры в интерактиве запрещены (рвутся или записываются буквально).
+61_6 (01_Правила_PS): примеры-фрагменты с "..." в инструкциях помечать
+    "НЕ ДЛЯ КОПИРОВАНИЯ", чтобы не копировали в файл.
+
+## Окружение
+
+LG: LGGRAMA8V7Q8U, python C:\Users\ainf1\...\Python312\python.exe
+Репо: F:\TO_DBI (корень), SRC — подкаталог. Ветка feature/dockerization.
+HEAD = 74baf79. origin = 74baf79.
+
+## Тесты
+
+Точечный: test_ds183_k4_model_setting.py — 6 passed, 1 warning.
+Регресс: 378 passed, 0 failed, 0 error, invalid command name = 0.

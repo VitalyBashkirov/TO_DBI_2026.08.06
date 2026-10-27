@@ -1,0 +1,13 @@
+
+## Чат 68 (2026-10-27) — ЗАВЕРШЁН
+- Восстановлен ИКА patch_suboptimal_test_3 (3 .plp = zip-эталон 2026.10.18).
+- wrownum: v5.json 5.3.1 + scanner.py расширены паттерном exit|return|raise|pragma error|message.error|app_error.
+- ЖВ К1: блок ВЫБОР ПОЛЬЗОВАТЕЛЯ В РУБРИКАТОРЕ работает; К1 в бою 3 срабатывания.
+- Коммит a045f4d, push в origin/feature/dockerization; test_ds186 зелёный.
+
+## Чат 69 (2026-10-27) — В РАБОТЕ
+- Хост: LG.
+- Шаг 69_01: обновление этой Памятки (67_1).
+- Долг 1: блок ВЫБОР ПОЛЬЗОВАТЕЛЯ В РУБРИКАТОРЕ в отчётах (scan_report_*.md, scan_VVVxVV_*.md, plpcheck_report_*.html) — в gui_app.py после generate_report; scanner.py не править; тесты на три формата.
+- Долг 2: SyntaxWarning invalid escape sequence в scanner.py:1257 — заменить на raw-строку.
+- Долг 3: PSH_PS_DEL.plp for v_ps in this(idx).[B_PS] — отдельное правило, не wrownum.

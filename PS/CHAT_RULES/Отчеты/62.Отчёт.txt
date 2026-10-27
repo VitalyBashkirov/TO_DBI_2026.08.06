@@ -1,0 +1,40 @@
+62. Отчёт (2026-10-25, хост LGGRAMA8V7Q8U)
+============================================
+
+Цель чата 62: закрыть долги чата 61 — DS_187, DS_188, DS_189 в
+SRC/tests/test_ds183_k4_model_setting.py.
+
+Закрыто:
+- DS_187: main() — t6 = _run(...) до ok_all = all([...]); standalone-запуск без NameError.
+- DS_188: _run() — удалён мёртвый root.update_idletasks() (root вне области видимости).
+- DS_189: docstring t6 — r"""...""" (SyntaxWarning invalid escape sequence \T).
+
+Проверки:
+- Точечный pytest test_ds183_k4_model_setting.py: 6 passed in 2.44s (rc=0).
+- Полный регресс tests: 378 passed, 3 warnings in 32.13s (rc=0).
+- 3 warnings: test_ds144d_c_ast.py, test_ds153d_scanner_selected_rules.py,
+  test_ds154_scanner_oq1.py — invalid escape sequence '\s' (строка ~1256);
+  предсуществующие, не наши. Заведены как потенциальные DS_190..192.
+
+Шум (не ошибки, не коммитится):
+- EXCHANGE/bot.log (M).
+- SRC/tests/test_ds183_k4_model_setting.py.ds183bak (??, локальный бэкап).
+- stderr: [FATAL] Нет v5.json ... / [FATAL] Нет .plp ... (NativeCommandError) — от
+  test_ds147a_exit_1_on_missing_0 и др. На rc не влияет.
+
+Коммит и push:
+- HEAD: 58cdf27 "DS_187..189: fix test_ds183_k4_model_setting.py".
+- git add / commit -F / push origin feature/dockerization: rc=0.
+- status -sb: ## feature/dockerization...origin/feature/dockerization (без [ahead N]).
+
+Правила, добавленные в чате 62:
+- 62_1: генерация и запуск .ps1 — одним шагом (WriteAllLines -> Start-Transcript ->
+  запуск -> проверка -> Stop-Transcript).
+
+Скрипты чата 62 (F:\TO_DBI\PS):
+- chat62_01_read_target.ps1, chat62_02_bodies.ps1,
+- chat62_03_patch.py (python-helper, UTF-8 BOM),
+- chat62_04_ps1_write.ps1, chat62_05_commit.ps1, chat62_06_finalize.ps1,
+- LG_62_05_msgfile.txt (UTF-8 без BOM).
+
+Итог: DS_187, DS_188, DS_189 закрыты, HEAD = 58cdf27, origin синхронизирован.

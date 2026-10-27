@@ -1,0 +1,70 @@
+```json
+{
+  "fixes": [
+    {
+      "rule": "missing_semicolon",
+      "line": 15,
+      "comment": "Add missing semicolon at the end of the line"
+    },
+    {
+      "rule": "missing_semicolon",
+      "line": 21,
+      "comment": "Add missing semicolon at the end of the line"
+    },
+    {
+      "rule": "missing_semicolon",
+      "line": 27,
+      "comment": "Add missing semicolon at the end of the line"
+    },
+    {
+      "rule": "missing_semicolon",
+      "line": 33,
+      "comment": "Add missing semicolon at the end of the line"
+    },
+    {
+      "rule": "missing_semicolon",
+      "line": 39,
+      "comment": "Add missing semicolon at the end of the line"
+    },
+    {
+      "rule": "missing_semicolon",
+      "line": 45,
+      "comment": "Add missing semicolon at the end of the line"
+    },
+    {
+      "rule": "missing_semicolon",
+      "line": 51,
+      "comment": "Add missing semicolon at the end of the line"
+    },
+    {
+      "rule": "missing_semicolon",
+      "line": 57,
+      "comment": "Add missing semicolon at the end of the line"
+    },
+    {
+      "rule": "missing_semicolon",
+      "line": 63,
+      "comment": "Add missing semicolon at the end of the line"
+    },
+    {
+      "rule": "missing_semicolon",
+      "line": 69,
+      "comment": "Add missing semicolon at the end of the line"
+    },
+    {
+      "rule": "missing_semicolon",
+      "line": 75,
+      "comment": "Add missing semicolon at the end of the line"
+    },
+    {
+      "rule": "missing_semicolon",
+      "line": 81,
+      "comment": "Add missing semicolon at the end of the line"
+    },
+    {
+      "rule": "missing_semicolon",
+      "line": 87,
+      "comment": "Add missing semicolon at the end of the line"
+    },
+    {
+      "rule": "missing

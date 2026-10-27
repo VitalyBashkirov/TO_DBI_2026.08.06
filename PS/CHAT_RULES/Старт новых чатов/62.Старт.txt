@@ -1,0 +1,96 @@
+============================================
+  62.СТАРТ (сгенерировано 2026-10-25 из чата 61)
+  Хост: LGGRAMA8V7Q8U (hostTag=LG)
+  Python: C:\Users\ainf1\AppData\Local\Programs\Python\Python312\python.exe
+============================================
+
+## Где искать правила (ОБЯЗАТЕЛЬНО в новом чате)
+
+F:\TO_DBI\PS\CHAT_RULES\ — единое место:
+  1. 00_INDEX.md              — карта, порядок чтения, долги
+  2. 01_Правила_PS.md         — правила PS 5.1 (1–13, 60_1..60_9, 61_1..61_6)
+  3. 02_Сокращения_GUI.md     — К1–К4, ОР, ГТ, ИКА, КР, ПК, МПК, ВТИК, НеАФ,
+                                УЛ/УЛМ/УЛП, ЖВ, ПОР, ПСВ
+  4. 03_Матрица_флагов.md     — МПК/ВТИК/НеАФ -> Я/П/В
+  5. 04_Регламент_логов.md    — путь, имя, Start-Transcript, pytest-выхлоп
+  6. 05_Регламент_тестов.md   — -W error::..., EAP=Continue, регресс, 61_3
+  7. 06_Регламент_коммитов.md — msgfile без BOM, -F, push, 61_1 (корень репо)
+  8. 07_Шаблон_PS.md          — шаблон .ps1
+  9. 08_Окружение.md          — LG/MBE, python, сервисы, DS_183b, долги
+
+  Отчеты\              — 7 файлов (49, 50, 53, 54, 55, 60, 61)
+  Скрипты чатов\       — +chat61_*
+  Старт новых чатов\   — 21..26, 27..47, 49..56, 59, 61, 62
+
+## Статус на 2026-10-25 (после чата 61)
+
+- DS_186 — ЗАКРЫТ, коммит 74baf79, push OK.
+    test_ds183_k4_model_setting.py, t3/t4:
+    copy2(SETTINGS, BACKUP) обёрнут в try/except -> raise;
+    finally -> if not exists(BACKUP): raise; иначе copy2(BACKUP, SETTINGS) + remove.
+    Точечный: 6 passed. Регресс: 378 passed. invalid command name = 0.
+    settings.json после теста: k4_model=3b, BACKUP=False.
+- Перенос 53 файлов (чаты 59-60) — коммит 03ac63f, push OK.
+- A8 — ЗАКРЫТ через B4/e5459c3 (DS_184), отдельного кода нет.
+- CHAT_RULES обновлён: 01 (+61_1..61_6), 05 (+61_3), 06 (+61_1),
+  00 (долги), Отчеты/61.Отчёт.txt, Старт новых чатов/62.Старт.txt.
+
+## Долги чата 61 -> 62
+
+1. DS_187 (test_ds183_k4_model_setting.py, main()):
+   t6 используется в all([...]) до присваивания -> NameError при standalone-запуске.
+2. DS_188 (test_ds183_k4_model_setting.py, _run()):
+   root.update_idletasks() в _run без определения root -> NameError, ловится except: pass.
+3. DS_189 (test_ds183_k4_model_setting.py, t6 docstring):
+   SyntaxWarning: invalid escape sequence '\T' (строка 249).
+4. EXCHANGE/bot.log — известный шум, живёт постоянно, не коммитим (правило 06).
+
+## Окружение
+
+- LG: LGGRAMA8V7Q8U, python C:\Users\ainf1\...\Python312\python.exe
+- MBE: MateBook, python C:\Users\Виталий\...\Python311\python.exe
+- Репо: F:\TO_DBI (корень), SRC — подкаталог. Ветка feature/dockerization.
+- HEAD = 74baf79. origin/feature/dockerization = 74baf79.
+
+## Первые шаги чата 62
+
+1. Прочитать CHAT_RULES\00_INDEX.md -> 01..08.
+2. Взять долг: DS_187 (main()/t6 в test_ds183_k4_model_setting.py).
+   ПСВ: сначала DS_187 (одна строка: t6 = _run(...) до ok_all = all([...])),
+   затем DS_188 (_run() мёртвый код), затем DS_189 (docstring r"""...""").
+3. Действовать по регламентам: 04, 05, 06, 07.
+4. В конце чата — дописать в CHAT_RULES: новые правила, сокращения, отчёты,
+   старт 63.
+
+## Правила PS (краткая выжимка, полные — в 01_Правила_PS.md)
+
+1. Логи — F:\TO_DBI\PS\<hostTag>_<чат>_<номер>_<action>.log
+2. hostTag — авто (LGGram*->LG, MateBook*->MBE)
+3. python — авто (Get-Command + fallback)
+4. Удалять нулевые логи после PS
+5. git commit — только -F <msgfile>
+6. Start-Transcript — без -Encoding
+7. Here-string и if/else — только в .ps1, не в интерактивной вставке
+8. "$"var.."" -> ".."
+9. EAP=Continue на pytest-блоки и git с 2>&1; 0 — верить
+10. Финальная пауза — НИКАКАЯ
+11. msgfile — UTF-8 БЕЗ BOM (UTF8Encoding(False))
+12. Два пути: SRC/... (от F:\TO_DBI) / ... (от F:\TO_DBI\SRC)
+13. Отчёты/старты/скрипты — только в CHAT_RULES
+60_1. PS-сеанс начинать с UTF-8
+60_2. CHAT_RULES в новый чат — копированием файлов, не Get-Content
+60_3. Разведочные Select-String — тоже в лог
+60_4. ПОР — Правило Обязательного Регламента
+60_5. ПСВ — Предложи свой однозначный вариант
+60_6. Get-Clipboard -Raw ненадёжен; длинные .ps1 — WriteAllText / WriteAllLines
+60_7. Start-Transcript — в КАЖДОМ шаге
+60_8. Python-helper UTF-8 BOM — без coding: ascii
+60_9. Python-helper лог — отдельный файл (..._XXa_...log)
+61_1. Корень репо = F:\TO_DBI (не SRC); $targetRepo от F:\TO_DBI
+61_2. EAP=Continue на ЛЮБОЙ git с 2>&1 (LF/CRLF warning)
+61_3. Счётчики D/M/?? — StartsWith(' D ') / '^ M ' / '^\?\? '
+61_4. Комментарий в python-паттерне — через \u-эскейпы
+61_5. python-helper/.ps1 — только файлом, не интерактивом; here-string/$body запрещены
+61_6. Примеры с "..." — помечать "НЕ ДЛЯ КОПИРОВАНИЯ"
+
+============================================

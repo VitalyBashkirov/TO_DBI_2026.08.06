@@ -1,0 +1,345 @@
+# Проект TO_DBI. Чат 36. DS_146 (DeepScanner в GUI) + DS_144d + очередь
+
+## Контекст
+
+АРМ «Адаптация под DBI» — миграция PL/SQL (Oracle) -> PostgreSQL (DBI).
+Репозиторий F:\TO_DBI. Ветка feature/dockerization.
+Роли: Автор DS — DeepSeek. Пользователь — Vitaly.
+
+ВАЖНО: KODA не запускается. Karing не нужна.
+Все DS — вручную PowerShell (правило F, DS_125).
+
+## Сокращения (кнопки GUI) — ВАЖНО
+
+Кнопки на GUI форме, далее по тексту — К1..К4:
+
+| Код | Кнопка        | Метод в gui_app.py | Что делает |
+|-----|---------------|--------------------|------------|
+| К1  | «Сканировать» | `start_scan` → `_run_scan(False)` | Обычный скан ИК через PLPlusScanner + зеркало ИК→КР |
+| К2  | «Исправить код» | `start_fix` → fixer | Фикс по результату К1 |
+| К3  | «В Ai»        | `send_to_ai` | Отправка AI_REQUEST_*.md в Ollama |
+| К4  | «Из Ai»       | `receive_from_ai` | Приём AI_RESPONSE_*.md, применение |
+
+Особенность: `_run_scan(deep_mode=False)` — параметр `deep_mode` в теле НЕ используется.
+Кнопка «Deep Scan» (`start_deep_scan`, ~строка 4017) вызывает `_run_scan(True)`,
+но эффекта нет — всегда PLPlusScanner. См. DS_146 и §6.6.24.
+
+## Что сделано в чате 35 (1 коммит)
+
+| Commit | Что | Результат |
+|--------|-----|-----------|
+| 3d4a535 | DS_145: deep_scanner фильтр + расширение is_temporary_filename | +313/-7, 7 файлов |
+
+Все DS закрыты: задания в PROCESSED, отчёты в OUTBOX, bot.log обновлён.
+**Push в origin НЕ сделан** (см. ниже).
+
+## Состояние (на момент старта чата 36)
+
+- Ветка: feature/dockerization на **3d4a535**, **не синхронизирована с origin** (push НЕ сделан).
+- git status: M EXCHANGE/OUTBOX/DS_CNT_007_pilot_report.md (тестирование LM Studio — НЕ ТРОГАТЬ).
+- INBOX: пусто (проверить).
+- PROCESSED: DS_118...DS_145.
+- OUTBOX: DS_118...DS_145 (+ DS_145_report.md — новый).
+- bot.log: обновлён записью DS_145.
+- SRC\gui_app.py: **357231 B** (было 357058, +173 — docstring _run_scan).
+- SRC\analyzer\scanner.py: **153941 B** (было 156144, −2203 — расширение is_temporary_filename).
+- SRC\analyzer\deep_scanner.py: **36549 B** (было 35963, +586 — фильтр).
+- SRC\tests\test_ds145_temporary_filter_pytest.py: **новый, 167 строк, 24 теста**.
+- SRC\tests\test_ds135_temporary.py: 2478 B, 12 тестов (не сломаны).
+- EXCHANGE\DS_STANDARD.md: §6.6.1-§6.6.25 (добавлены §6.6.24, §6.6.25).
+- BOM: False для всех .py, .md, .json, .ini, .sql.
+- PS\ — каталог для логов PS-блоков (ignored).
+- PS\persist\ — каталог, переживающий N7 v7 (см. §6.6.18).
+- ast.parse warnings: 0.
+- .bak_ в SRC: 0.
+- pytest: **169 passed, exit=0** (145 старых + 24 DS_145).
+- logs_Deep: 50+ файлов.
+
+### Бэкапы (tools\_archive\)
+
+- scanner.py.bak_ds145_20261012_150908
+- deep_scanner.py.bak_ds145_20261012_150908
+- gui_app.py.bak_ds145_20261012_150908
+- scanner.py.bak_ds144c (и др. DS_144*)
+- ai_exchange.py.bak_ds143, rule_based_fixer.py.bak_ds143, ai_local_worker.py.bak_ds143
+
+## НОВЫЕ ПРАВИЛА / УРОКИ ЧАТА 35
+
+### §6.6.24 — DeepScanner не подключён в GUI (DS_145)
+
+**Факт:** `SRC/analyzer/deep_scanner.py` (класс `DeepScanner`) существует,
+но **не вызывается** из `gui_app.py`. Кнопка «Deep Scan» (`start_deep_scan`,
+~строка 4017) вызывает `_run_scan(True)`, где `deep_mode` **не используется** —
+всегда создаётся обычный `PLPlusScanner`.
+
+**Следствие:** DS_145 (фильтр временных) применён к `deep_scanner.py`
+для CLI-режима (`python analyzer/deep_scanner.py -s ...`), но в GUI
+эффекта не даёт.
+
+**DS_146 (в очередь):** интеграция `DeepScanner` в GUI. Разведка → решение
+(подключить / переименовать кнопку / удалить) → тесты → интеграция.
+
+**Правило:** перед правкой любого модуля в `SRC/analyzer/` проверять
+`Select-String -Pattern '<ClassName>' SRC\ -Recurse`, чтобы убедиться,
+что модуль реально используется.
+
+### §6.6.25 — удалять временные файлы PS\ в том же блоке
+
+**Правило:** временные `.py`-файлы в `PS\` (`_patch_*.py`, `_diag*.py`,
+`_check*.py`, `_smoke*.py`, `_parse*.py`, `_d*.py`, `_g*.py`) должны
+удаляться **в том же PS-блоке**, где создаются, сразу после использования.
+
+Итоговое содержимое `PS\` после блока — только `<имя_блока>.log` и `persist\`.
+
+**Инцидент чата 35:** после блока №8а в `PS\` накопилось 8 временных
+файлов + 2 лога. Обнаружено пользователем.
+
+### Урок чата 35 (предложение зафиксировать в §6.6.26)
+
+При патче кода через Python-скрипт: **якорь должен быть уникальной подстрокой
+из реального файла**, а не «по памяти». Регистр (`# Проверка` vs `# проверка`) —
+частая причина провала assert. **Всегда сначала диагностика `repr()` якорей.**
+
+Инцидент: `_patch_deep2.py` упал на `# проверка расширения` (строчная «п»),
+в файле было `# Проверка расширения` (заглавная «П»).
+
+### Урок чата 35 (предложение зафиксировать в §6.6.27)
+
+Патч из нескольких правок: **каждая правка = отдельный файл + отдельный write
++ удаление**. Если assert падает — падает одна правка, а не все пять.
+
+Применено в `N8a-fix` (5 отдельных `_d1.py`..`_d5.py`) — сработало.
+
+### Here-string > 100 строк + вложенные Python-строки — гарантированно ломают PS 5.1
+
+Правило чата 34:
+- 1 here-string ≤ 60 строк контента.
+- Не вкладывать Python-строки в тройных кавычках внутрь PS here-string.
+- Если нужно записать длинный Python-скрипт — разбить на 2-3 блока,
+  писать в отдельные .py, потом AppendAllText или склеивать.
+
+### git diff / git diff --stat — только через | Out-Host
+
+Правило §6.6.1: git diff ... | Out-Host
+гарантирует попадание вывода в Start-Transcript. Без | Out-Host —
+буферизация, пустой лог.
+
+## Вывод в PS и логи — правила чата 34/35
+
+### Принципы
+
+1. Строки типа Лог: <путь> — зелёным: Write-Host "Лог: $log" -ForegroundColor Green.
+2. Ошибки — красным: Write-Host "FAILED" -ForegroundColor Red.
+3. Заголовки секций — Cyan: Write-Host "=== ... ===" -ForegroundColor Cyan.
+4. Итоговый статус (OK) — зелёным: Write-Host "OK" -ForegroundColor Green.
+5. Данные (таблицы, git diff) — через | Out-Host.
+6. Кириллица в Python-print через cp866-консоль — кракозябры (§6.6.21),
+   данные в файле корректны, не влияет на результат.
+7. **Для Python inline-команд с `$` внутри строки — использовать here-string `@'...'@`,
+   писать в .py, запускать `python file.py`.** Иначе PS 5.1 парсит `$` как переменную.
+   Инцидент чата 35: `print('~$:', ...)` → ParserError InvalidVariableReference.
+8. **Stop-Transcript | Out-Null в конце КАЖДОГО блока** — иначе `.log` остаётся 0 байт.
+   Инцидент чата 35: `ds145_impl_a_fix.log` 0 байт, `ds145_impl_b.log` 0 байт.
+
+### Типовой шаблон блока
+
+~~~powershell
+# ============================================================
+# N1. <Название блока>
+# Дата: YYYY-MM-DD
+# Назначение: <что делаем>
+# Ожидание: <что должно быть>
+# Риски: <что может пойти не так>
+# ============================================================
+
+$ErrorActionPreference = 'Continue'
+$proj = 'F:\TO_DBI'
+Set-Location $proj
+
+# N7 v7: очистка PS\ (сохраняя persist\)
+if (Test-Path "$proj\PS") {
+    Get-ChildItem "$proj\PS" -Exclude 'persist' -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+} else {
+    New-Item -ItemType Directory -Path "$proj\PS" | Out-Null
+}
+if (-not (Test-Path "$proj\PS\persist")) {
+    New-Item -ItemType Directory -Path "$proj\PS\persist" | Out-Null
+}
+
+$log = "$proj\PS\<имя_блока>.log"
+Start-Transcript -Path $log -Force | Out-Null
+$env:PYTHONIOENCODING = 'utf-8'
+chcp 65001 | Out-Null
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+# ... работа ...
+
+Write-Host "`n=== Секция ===" -ForegroundColor Cyan
+<команда> 2>&1 | Out-Host
+
+Write-Host "`nOK" -ForegroundColor Green
+Write-Host "Лог: $log" -ForegroundColor Green
+
+Stop-Transcript | Out-Null
+~~~
+
+### Что НЕ делать
+
+- Не использовать return в ручных блоках (правило №19), кроме fail-fast
+  в if-ветке ошибки (§6.6.3).
+- Не полагаться на $LASTEXITCODE после Select-String (правило №22).
+- Не читать .log через Get-Content в PS 5.1 (§6.6.15) — только через Python
+  с encoding='utf-8'.
+- Не использовать -like для подстроки (§6.6.9) — использовать .Contains().
+- Не использовать Add-Content -Encoding UTF8 в PS 5.1 (§6.6.20) — только
+  [System.IO.File]::AppendAllText с UTF8Encoding($false).
+- Не использовать Out-File -Encoding UTF8 для .py — даёт BOM.
+  Использовать [System.IO.File]::WriteAllText с UTF8Encoding($false).
+
+### Кодировки
+
+- .py / .md / .json / .ini / .sql — UTF-8 БЕЗ BOM (§6.1).
+- .ps1 с кириллицей — UTF-8 С BOM.
+- Все файлы через [System.IO.File]::WriteAllText или AppendAllText
+  с UTF8Encoding($false).
+
+## ЗАКРЫТО В ЧАТЕ 35
+
+### DS_145 — deep_scanner фильтр временных + расширение is_temporary_filename
+
+- **SRC\analyzer\scanner.py:** расширена `is_temporary_filename`
+  (DS_135 timestamp + DS_145 суффиксы/префиксы/точные имена).
+  Добавлены константы `_TEMP_SUFFIXES`, `_TEMP_PREFIXES`, `_TEMP_EXACT`.
+- **SRC\analyzer\deep_scanner.py:**
+  - `exclude_patterns` расширены: `.git`, `__pycache__`, `node_modules`.
+  - Локальный импорт `is_temporary_filename` в `run()`.
+  - `skipped_temporary = 0`, фильтр в цикле, логирование, return dict.
+- **SRC\gui_app.py:** docstring `_run_scan` — комментарий про DS_146.
+- **Тест:** SRC\tests\test_ds145_temporary_filter_pytest.py (24 теста).
+- **Регресс:** 169 passed (145 + 24). test_ds135_temporary.py не сломан (12).
+- **Документация:** §6.6.24, §6.6.25 в DS_STANDARD.md; отчёт DS_145_report.md.
+- **Коммит:** 3d4a535, +313/-7, 7 файлов.
+
+## ОТКРЫТЫЕ ЗАДАЧИ (в чат 36)
+
+1. **[DS_146] Интеграция DeepScanner в GUI** — ГЛАВНАЯ ТЕМА ЧАТА 36 (возможно).
+   Факт: `start_deep_scan` → `_run_scan(True)`, `deep_mode` не используется.
+   Нужна разведка: что даёт DeepScanner vs обычный скан (AST, контекстные
+   зависимости, цепочки вызовов — см. стартовый 35).
+   Решение Vitaly: подключить / переименовать кнопку / удалить.
+   См. §6.6.24.
+
+2. **[DS_144d] .mcs, .mp, .pck и др.** — позже. Нужна разведка от Vitaly:
+   формат, правила, что с ними делать.
+
+3. **DS_CNT_007_pilot_report.md** — modified, тестирование LM Studio,
+   НЕ ТРОГАТЬ. Не забыть, что висит в git status.
+
+4. **DS_119** CLI-сканер run_scanner.py (низкий приоритет).
+
+5. **Ночной pipeline CNT без [** — отдельная тема.
+
+6. **Нормализовать CRLF в оставшихся .md** — при случае (§6.6.22).
+   git diff показывает warning LF→CRLF для DS_STANDARD.md, DS_145_report.md.
+
+7. **Push в origin** — на 3d4a535 не сделан (сделать в начале чата 36).
+
+## DS_146 — DeepScanner в GUI (контекст)
+
+### Что известно из разведки чата 35
+
+- `DeepScanner` (SRC\analyzer\deep_scanner.py) — **мёртвый код для GUI**.
+- `start_deep_scan` (gui_app.py:4017) → `_run_scan(True)` → тот же PLPlusScanner.
+- Внутри `DeepScanner.run()` использует `PLPlusScanner` (импорт в строке 491),
+  передаёт ему `selected_rules` из своего рубрикатора. То есть Deep — надстройка.
+- `deep_scanner.py` работает в CLI-режиме:
+  `python analyzer/deep_scanner.py -s F:/TO_DBI/DATA/patch_WORK --rules v50`.
+- `logs_Deep\` — 50+ файлов отчётов (значит CLI-режим использовался).
+- 0 тестов на DeepScanner (кроме 2 новых DS_145 smoke).
+
+### Что нужно сделать в чате 36
+
+1. **Разведка:** чем `DeepScanner` отличается от `PLPlusScanner` по существу.
+   Прочитать `_get_selected_patterns`, `_load_rubricator_files`, `_load_rubricator_fixes`,
+   `_parse_rule_code`, `_generate_default_rules`, `scan_file_with_details`.
+2. **Сравнение:** один и тот же ИК через обычный скан и через Deep — diff.
+3. **Решение Vitaly:**
+   - (A) Подключить DeepScanner: кнопка «Deep Scan» → реальный Deep.
+   - (B) Переименовать кнопку (например, «AI-скан»), убрать иллюзию.
+   - (C) Удалить кнопку + deep_scanner.py (если не нужен).
+4. **Реализация** по выбранному варианту + тесты.
+
+### Что нужно уточнить у Vitaly
+
+1. Кнопка «Deep Scan» — она нужна вообще? Кто-то ей пользуется?
+2. Если да — что ожидается от неё (что должно отличаться от обычного скана)?
+3. `logs_Deep\` — это результаты CLI-режима, или кнопки?
+4. DeepScanner в CLI (`python analyzer/deep_scanner.py -s ...`) — нужен?
+
+## AI-инфраструктура
+
+- Ollama: http://localhost:11434, работает (qwen2.5-coder:7b).
+- LM Studio: закрыт (использовался в тесте DS_CNT_007).
+- Мок-сервер: tools\mock_ollama_invalid.py, порт 11500.
+- ai_local_worker.py --check: OK (available).
+- KODA: 1.2.2 (откат с 1.2.3), автообновление ОТКЛЮЧЕНО.
+- KODA запускается БЕЗ Karing.
+
+## Реальный путь и имена (важно!)
+
+- Проект: F:\TO_DBI\ (SRC\ — исходники, tools\ — утилиты).
+- Класс GUI: DBIMigrationApp (SRC\gui_app.py, ~357231 B).
+- Тесты: F:\TO_DBI\SRC\tests\ — pytest exit code 0, **169 passed**.
+- Python 3.11 в PATH. pytest 8.3.4.
+- pytest.ini в корне — testpaths = SRC/tests, addopts = --capture=no.
+- BOM — критичная тема. Правило в DS_STANDARD.md §6.1.
+- Task Scheduler TO_DBI_CNT_NightlyPipeline — S4U, daily 01:00.
+- AI-контур: tools\ai_local_worker.py, tools\ai_local_worker_config.json.
+- tools\close_ds.ps1 — универсальный скрипт закрытия DS (v2.1, -InboxFile, BOM=True).
+- SRC\tests\conftest.py — pytest-фикстуры (v4).
+- SRC\analyzer\scanner.py — обычный сканер (PLPlusScanner, ~153941 B).
+- SRC\analyzer\deep_scanner.py — глубокий сканер (DeepScanner, ~36549 B, CLI-режим).
+
+## Регламент работы (обновлён в чате 35)
+
+0-98 — как в чате 33/34, плюс:
+99. Here-string ≤ 60 строк; не вкладывать Python-тройные кавычки внутрь PS here-string.
+100. N7 v7: очистка PS\ в каждом блоке (§6.6.23).
+101. Строки Лог: <путь>, OK, PASSED — зелёным.
+102. Заголовки секций === ... === — Cyan.
+103. Ошибки FAILED, [FATAL] — красным.
+104. Данные (таблицы, git diff) — через | Out-Host, не Format-Table без пайпа.
+105. **Перед патчем кода — диагностика `repr()` якорей** (урок чата 35).
+106. **Каждая правка патча = отдельный файл + write + удаление** (урок чата 35).
+107. **Временные файлы PS\ удалять в том же блоке** (§6.6.25).
+108. **Python inline с `$` в строке — только через here-string + .py** (урок чата 35).
+109. **Stop-Transcript | Out-Null в конце каждого блока** (иначе .log 0 байт).
+
+## Первый шаг (чат 36)
+
+1. Прочитать этот стартовый файл (36.Старт.txt).
+2. Проверить Ollama: python tools\ai_local_worker.py --check.
+3. Проверить git: git status -sb / git branch -vv.
+   Ожидание: 3d4a535, ahead of origin на 1 (push не сделан),
+   1 modified (DS_CNT_007_pilot_report.md).
+4. **Сделать push в origin** (долг чата 35):
+   git push origin feature/dockerization
+   git status -sb  (ожидание: синхронизировано)
+5. Проверить INBOX: должен быть пуст.
+6. Запустить регресс: python -m pytest SRC\tests\ -q -> ожидание 169 passed.
+7. Основная тема чата 36 — DS_146 (DeepScanner в GUI) или DS_144d (.mcs, .mp).
+   Решение Vitaly.
+
+## Команды (справочно)
+
+- ollama list — модели.
+- ollama ps — загруженные модели (RAM).
+- python tools\ai_local_worker.py --check — доступность Ollama.
+- python -m pytest SRC\tests\ -q — регресс (169 passed).
+- python SRC\gui_app.py — запуск АРМ.
+- git status -sb — состояние ветки.
+- git branch -vv — синхронизация с origin.
+- git push origin feature/dockerization — push (долг чата 35).
+- .\tools\close_ds.ps1 — закрытие DS.
+- python analyzer\deep_scanner.py -s <ИК> --rules v50 — CLI DeepScanner.

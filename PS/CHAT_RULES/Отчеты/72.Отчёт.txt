@@ -1,0 +1,35 @@
+# Отчёт чата 72 (2026-10-27, LG)
+
+## Главное
+- Долг 1 ЗАКРЫТ: throw в PS 5.1. Правило 68_1 в 01_Правила_PS.md (throw только внутри try/catch/finally; эталон — try/finally с пробросом).
+- Долг 2 ЗАКРЫТ: _check_plp_not_mentioned — отдельные сообщения для proc/method/batch_method. Коммит 57277f3 (2 files, +17/-6), push OK, HEAD==origin, ahead нет.
+- Полный регресс: 389 passed / 0 failed (после 72_02c_fix и 72_02d).
+- 68_1 дополнено живым инцидентом из 72_02b: throw вне try/catch не остановил WriteAllText после неудачной AST-проверки.
+
+## Что сделано
+- 72_00: Памятка обновлена (чат 71 -> ЗАКРЫТ, чат 72 -> В РАБОТЕ), WriteAllText no-BOM, без python-генератора (долг 6).
+- 72_01: зонды throw A/B/C: A (без try, -File) rc=-1 прерывает; B (try/catch/finally) rc=0 catch поглотил; C (try/finally) rc=-1, finally выполнен, throw проброшен. Правило 68_1 записано в 01_Правила_PS.md.
+- 72_01b: формулировка 68_1 уточнена по фактам зондов; интерактивная вставка помечена как непроверенная в 72 (по отчёту 71 — предохранитель вхолостую).
+- 72_02: разведка scanner.py (1095-1151) + test_ds71_not_mentioned_real.py (102 строки) + fixtures/ds71_in_type.plp (29 строк). Подтверждено: proc/method/batch_method уходят в else -> «Переменная …».
+- 72_02b: патч scanner.py (явная ветка по kind) + патч теста (expected_prefix по kind). scanner записан OK. Тест записан, но ast.parse упал на BOM (utf-8 без -sig) и — ключевое — throw вне try/catch НЕ прервал WriteAllText. Живой инцидент, зафиксирован в 68_1.
+- 72_02c_fix: (1) _name_from_issue: регексп расширен до (Функция|Процедура|Метод|Батч-метод|Переменная); (2) AST-проверка через utf-8-sig в try/catch (astOk управляет записью); (3) 68_1 дополнено живым инцидентом. Точечный 3 passed, полный 389 passed.
+- 72_02d: msgfile no-BOM, git add ровно 2 файла, commit 57277f3, push OK. HEAD==origin, ahead нет. Памятка обновлена 4 строками (72_02, 72_02b, 72_02c_fix, 72_02d).
+- 72_02e: косметика Памятки — слипшаяся строка 654 символа разбита на 4 отдельные строки.
+
+## Долги 72 -> 73
+1. type_str для NAME in [TYPE] не нормализован до "in" — намеренно (отдельная правка при необходимости).
+2. Грязные фоновые (EXCHANGE/bot.log, Ollama и LM Studio.bat, SRC/settings.json, test_all_models.ps1, free_memory.ps1, free_memory_profiles.txt) — не коммитить.
+3. Бэкапы *.ds*bak — не коммитить; при желании — .gitignore (сейчас их 20+ в SRC/ и DATA/).
+4. Мейкеры отчётов/стартов через python-генератор PS-строками — устарели. В 72 перешли на прямой WriteAllLines массивом PS-строк; закрепить как практику (65_2 уточнить в 73).
+
+## Артефакты
+- Коммит: 57277f3 (scanner.py + test_ds71_not_mentioned_real.py, +17/-6).
+- Правило 68_1: 01_Правила_PS.md (len 19861 -> 20525 после 72_02c_fix).
+- Бэкапы: scanner.py.ds72_02bak, test_ds71_not_mentioned_real.py.ds72_02bak, test_ds71_not_mentioned_real.py.ds72_02cbak, 01_Правила_PS.md.ds72_01bak, 01_Правила_PS.md.ds72_01bbak, 01_Правила_PS.md.ds72_02cbak, Памятка_чатов.txt.ds72_00bak / ds72_01bbak / ds72_02dbak / ds72_02ebak. Все *.ds*bak — не коммитить.
+- Зонды-эталоны: chat72_01_probe_B.ps1 (try/catch/finally), chat72_01_probe_C.ps1 (try/finally, throw проброшен).
+- Скрипты чатов: chat72_00_pamyatka.ps1, chat72_01_throw.ps1, chat72_01b_fix68.ps1, chat72_02_recon.ps1, chat72_02b_patch.ps1, chat72_02c_fix.ps1, chat72_02d_commit.ps1, chat72_02e_pam.ps1.
+- msgfile коммита: chat72_msg.txt (no-BOM, 982 B).
+- Логи: F:\TO_DBI\PS\LG_72_*.log.
+
+## Итог чата 72
+Долги 1, 2, 6 закрыты. Долг 3 оставлен намеренно. Долги 4, 5 — дисциплина (не коммитить грязное/бэкапы), соблюдены. HEAD = 57277f3, origin == HEAD, ahead нет.

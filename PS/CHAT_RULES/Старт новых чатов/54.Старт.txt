@@ -1,0 +1,249 @@
+﻿54.Старт.txt
+============
+
+На русском.
+
+## Контекст
+
+АРМ «Адаптация под DBI» — миграция PL/SQL (Oracle) -> PostgreSQL (DBI).
+Репозиторий F:\TO_DBI. Ветка feature/dockerization.
+Роли: Автор DS — DeepSeek. Пользователь — Vitaly.
+
+ВАЖНО: KODA не запускается. Karing не нужна.
+Все DS — вручную PowerShell (правило F, DS_125).
+Все PS-блоки логируются через Start-Transcript в F:\TO_DBI\PS
+(правило 155, DS_151).
+Формат PS-блока — Markdown ```powershell (копирование одной кнопкой <Copy>).
+
+## ХОСТ
+
+LG (LGGRAMA8V7Q8U), пользователь ainf1. PowerShell 5.1.26100.9711.
+Репозиторий F:\TO_DBI. Переезд с MateBook E выполнен в чате 52.
+
+## ПРАВИЛА АВТОРА DS (КРИТИЧНО)
+
+Автор DS НЕ создаёт файлы на диске Пользователя.
+Автор DS выдаёт ГОТОВЫЙ PS-блок в Markdown ```powershell, который Пользователь
+копирует одной кнопкой <Copy> и вставляет в консоль PowerShell.
+
+ЗАПРЕЩЕНО:
+- Создавать .ps1 через Set-Content, New-Item, here-string.
+- Просить Пользователя "создать файл".
+- Использовать <ps1>...</ps1> как "файл для сохранения".
+- Set-Content -Encoding UTF8 (не BOM — правило 6at-1).
+
+РАЗРЕШЕНО:
+- Markdown ```powershell — Пользователь копирует и запускает.
+- Внутри блока — Start-Transcript, Write-Host, python, git, pytest.
+- После Stop-Transcript — печать пути лога.
+
+## ПРАВИЛА ВЫВОДА (утверждены в чате 53, обязательны)
+
+1. ПЕРВОЙ командой в каждом PS-блоке — кодовая страница и кодировки:
+   $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+   [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+   chcp 65001 | Out-Null
+2. ПУТЬ ЛОГА печатать РОВНО ОДИН РАЗ — до Stop-Transcript:
+   Write-Host ("=== Полный путь лога: {0} ===" -f $log) -ForegroundColor Green
+   Stop-Transcript | Out-Null
+   После Stop-Transcript — НИЧЕГО не печатать (иначе в консоли две строки).
+3. $ErrorActionPreference:
+   - "Stop" на старте (упасть на реальной ошибке);
+   - "Continue" вокруг ВСЕХ git-вызовов (git пишет в stderr;
+     при Stop PS 5.1 ловит NativeCommandError и валит скрипт).
+4. python-скрипты — через Start-Process:
+   Start-Process -FilePath $python -ArgumentList @("-u", $script) `
+       -WorkingDirectory $repo `
+       -RedirectStandardOutput $pyOut `
+       -RedirectStandardError  $pyErr `
+       -NoNewWindow -PassThru -Wait
+   НЕ использовать `& python -u $script *> file` — PS 5.1 подставляет
+   ParameterBinding(Out-File) и дублирует вывод.
+   Для тестов/скриптов всегда:
+   $env:PYTHONIOENCODING = "utf-8"; $env:PYTHONUTF8 = "1"
+5. Кириллица в литералах — через [System.IO.File]::WriteAllText с
+   New-Object System.Text.UTF8Encoding($false) (для стартов — можно $true).
+   НЕ Set-Content.
+6. Commit msg — через UTF8Encoding($false) во временный файл + git commit -F.
+7. Test-Path -LiteralPath для путей с $ и кириллицей.
+8. Патч файлов — учитывать CRLF: читать/писать io.open(..., newline=""),
+   нормализовать \r\n -> \n, писать обратно в исходном формате.
+
+## ПРАВИЛА ПОВЕДЕНИЯ DS (из чатов 50-53)
+
+- При импорте analyzer/* добавлять в sys.path именно SRC (analyzer — корневой
+  пакет внутри SRC, scanner.py использует абсолютный `from analyzer...`).
+- PLPlusScanner.scan_file требует config['paths']['source_dir'] (иначе
+  KeyError: 'paths').
+- RubricatorPrompts(<Path>) — принимает Path, не str.
+- selected_rules=[] -> загружаются ВСЕ 332 правила; selected_rules=['plpcheck.']
+  -> ОТКЛЮЧАЕТ DS_033-многострочные проверки. Для К3/К4 на DS_033 брать
+  selected_rules=[] + постфильтр по issue_type (как PS\50_49).
+- Ollama: 7b не тянет prompt >6 КБ; 3b — ~20-30 с/проблема. Перед К4:
+  keep_alive=0, keep_alive="0s" в запросе, format=json, num_predict=128,
+  timeout=60, батч по 1 проблеме.
+- При работе с корзиной: $R... — реальные байты файла, $I... — метаданные.
+  InvokeVerb("Восстановить") на локализованной Windows может не срабатывать;
+  fallback — [System.IO.File]::ReadAllBytes($src) + WriteAllBytes($dst).
+- EXCHANGE/OUTBOX/DS_CNT_007_pilot_report.md и EXCHANGE/bot.log — НЕ ТРОГАТЬ
+  (остаются M в рабочем дереве; не коммитить, не stash).
+
+## Состояние на начало чата 54
+
+- Хост LG. HEAD e212049. Ветка feature/dockerization СИНХРОННА с origin
+  (последний push в чате 53: bdb9d3b..e212049, ahead 0, behind 0).
+- Тестов: 357 passed, 3 warnings in 26.99s (A4, чат 53).
+- Этап A (A1-A10) — ЗАКРЫТ:
+  * A1-A7, A9 = OK;
+  * A8 = MISSING 49_Results.log, fallback = 49.Отчёт.txt (см. 53.Отчёт.txt §5).
+- B1 — ЗАКРЫТ: коммиты 51/52 зафиксированы в 53.Отчёт.txt §7.
+- B5 — ЗАКРЫТ: push выполнен.
+- 53.Отчёт.txt — создан и закоммичен (e212049).
+- B3 (DS_183) и B4 (DS_184) — НЕ СДЕЛАНЫ, перенесены в чат 54.
+
+## Последние коммиты (на начало 54)
+
+e212049 DS_183c: отчёт чата 53 (A1-A10 OK, B1 закрыт, B3/B4 -> чат 54)
+bf9025c DS_183b: добавлен отчёт чата 50 (50.Отчёт.txt)
+eeaba3c DS_183a: A9-fix - снят BOM с 4 тестов (test_ds166/179/180/181), регресс 357 passed
+a94a175 DS_182: _is_rule_selected понимает префикс-фильтр 'plpcheck.'
+8eb83b8 DS_181: _preai копии перенесены из PATCH_IN в PATCH_CALC/backups
+593914e DS_180: МПК-маркировка det-правок (DeterministicFixer) через единый anchor pipeline
+
+УТОЧНЕНИЕ (важно): в 53.Старт.txt a94a175 был описан как "DS_182: К3/К4
+на полном наборе 9 issues". Фактическое сообщение a94a175 — "_is_rule_selected
+понимает префикс-фильтр 'plpcheck.'". Это разные DS_182. В чате 54 не путать
+с будущим DS_183.
+
+## ГЛАВНЫЕ ТЕМЫ ЧАТА 54
+
+1. B3 -> DS_183 (3b/7b в GUI К4).
+   a) settings.json: поле k4_model, default "qwen2.5-coder:3b".
+   b) GUI К4: выпадающий список моделей (3b/7b) + предупреждение при выборе 7b.
+   c) Сохранение выбора в settings.json (между запусками).
+   d) Тест: SRC/tests/test_ds183_k4_model_setting.py — default 3b, сохранение,
+      загрузка, предупреждение не ломает запуск.
+   e) Документация: PS\46_Сокращения_GUI.txt или отдельный раздел.
+   f) Commit DS_183.
+   g) Регресс: python -m pytest SRC\tests -q -> >= 358 passed (было 357).
+
+2. B4 -> DS_184 (К3/К4 mark_in_code=True -> [Ai]-якоря).
+   a) Прогон 3 .plp:
+      F:\TO_DBI\PATCH_IN\patch_suboptimal_test_3\ENTITY\DEPN\PSH_ED_PRC_SCHM.plp
+      F:\TO_DBI\PATCH_IN\patch_suboptimal_test_3\ENTITY\PL_US\PSH_PS_DEL.plp
+      F:\TO_DBI\PATCH_IN\patch_suboptimal_test_3\ENTITY\RKO\PSH_VK_UNK_INP.plp
+   b) Проверить, что при mark_in_code=True в .plp появляются [Ai]-якоря
+      (в PS\50_49 шло через process_response/apply_fixes, anchors=0).
+   c) Фиксация [Ai], [Ai]xN, [AI-REMOVED], диапазонов строк в PS\54_Results.log.
+   d) Commit DS_184.
+
+3. A8-долг (решение принять в чате 54):
+   - либо пересоздать 49_Results.log прогоном матрицы К1->К2
+     (18 сканов + 2 fix-мода);
+   - либо принять fallback 49.Отчёт.txt окончательно.
+   Решение зафиксировать в 54.Отчёт.txt.
+
+4. 54.Отчёт.txt + git push (по команде).
+
+## Сокращения GUI (правило 6as, полный текст — PS\46_Сокращения_GUI.txt)
+
+Кнопки: К1 «1. Сканировать», К2 «2. Исправить код», К3 «3. В Ai»,
+К4 «4. Из Ai», ГТ «Генерация тестовых .plp».
+BOX «1. Пути и настройки сканирования»: ИКА — Исходный каталог,
+КР — Каталог результатов.
+BOX «3. Опции…»: МПК — «Маркировка правок»; Применять — применять правки;
+ВТИК — «Верни только исправленный код…» (= clean_output);
+НеАФ — ignore (не автофиксить, только лог).
+УЛ / УЛМ / УЛП — уровень логирования.
+Приоритет: ВТИК=on -> МПК отменяется; НеАФ=on -> правки не применяются,
+МПК может ставить якоря.
+Формат якоря: -- YYYY.MM.DD HH:MI|<Правило>[xN][[Ai]]|Строка NN
+              -- YYYY.MM.DD HH:MI|<Правило>[xN][[Ai]]|Строки NN-NN
+
+## Матрица флагов (PS\46_Матрица_флагов.txt)
+
+| МПК | ВТИК | НеАФ | Якоря | Правки | Возврат кода |
+|-----|------|------|-------|--------|--------------|
+| off | off  | off  | нет   | да     | полный файл |
+| on  | off  | off  | да    | да     | полный файл с якорями |
+| on  | off  | on   | да    | нет    | полный файл с якорями; правки только в лог (сухой прогон) |
+| on  | on   | off  | нет   | да     | только исправленный код, без якорей (ВТИК перекрывает МПК) |
+| off | on   | off  | нет   | да     | только исправленный код |
+| off | off  | on   | нет   | нет    | без изменений, только лог |
+
+## Фактическая матрица К1->К2 (PS\49_Results.log, чат 49)
+
+| case | MPK | VTIK | NAF | issues | fixmod | out changed | anchors | AI-REMOVED |
+|------|-----|------|-----|--------|--------|-------------|---------|------------|
+| 000  | 0   | 0    | 0   | 9      | 2      | 2           | 0       | 0          |
+| 100  | 1   | 0    | 0   | 9      | 2      | 2           | 0       | 0          |
+| 101  | 1   | 0    | 1   | 9      | 0      | 0           | 0       | 0          |
+| 110  | 1   | 1    | 0   | 9      | 2      | 2           | 0       | 0          |
+| 010  | 0   | 1    | 0   | 9      | 2      | 2           | 0       | 0          |
+| 001  | 0   | 0    | 1   | 9      | 0      | 0           | 0       | 0          |
+
+После DS_180 (PS\50_11_ds180_matrix.log):
+| case | anchors | code_changed |
+|------|---------|--------------|
+| 100  | 17 (3/3 файлов) | True |
+| 101  | 17 (3/3 файлов) | False |
+
+49_Results.log = MISSING (см. 53.Отчёт.txt §5). Fallback — 49.Отчёт.txt.
+
+## Ollama (проверено в чате 53)
+
+- ollama version 0.18.2.
+- qwen2.5-coder:3b (1.9 GB) — рабочая для К4, тест 3.51 s JSON valid.
+- qwen2.5-coder:7b (4.7 GB) — не тянет prompt >6 КБ (таймаут 240 с);
+  только короткие промпты. Для К4 на LG — 3b.
+- RAM: 15.7 GB total, 7.3 GB free (до теста). 3b выгружается после
+  keep_alive="0s" (ps -> Stopping).
+- Перед К4: выгрузить модели (keep_alive=0), проверить RAM.
+- В запросе: format=json, keep_alive="0s", num_predict=128, timeout=60,
+  батч по 1 проблеме.
+- python stdout: Start-Process -RedirectStandardOutput (см. правила вывода п.4).
+
+## Команды (справочно)
+
+- python -m pytest SRC\tests -q  — регресс (>=357; после DS_183 — >=358).
+- python SRC\gui_app.py          — запуск АРМ.
+- git push origin feature/dockerization  — синхронизация (по команде).
+
+## Артефакты чата 53 (для справки)
+
+PS\53_01_a9fix.log
+PS\53_02b_git.log
+PS\53_03_pytest.log (неудачный, прерван TerminatingError — не использовать как эталон)
+PS\53_04_diff.log
+PS\53_05_pytest.log (+ 53_05_pytest.stdout.txt, 53_05_pytest.stderr.txt)
+PS\53_06_commit_a9fix.log
+PS\53_07_a6_a7_a8.log (+ 53_07_ollama_probe.out.txt, _53_ollama_probe.py)
+PS\53_08_push_report.log
+53.Отчёт.txt
+
+## Известные шумы (не баги, не чинить в 54)
+
+- PS 5.1 NativeCommandError на stderr от git (LF->CRLF warning, push progress)
+  при $ErrorActionPreference=Stop — лечится "Continue" вокруг git-вызова
+  (правило вывода п.3).
+- PS 5.1 ParameterBinding(Out-File) при `& python ... *> file` — лечится
+  Start-Process -RedirectStandardOutput (правило вывода п.4).
+- pytest: 3 SyntaxWarning "invalid escape sequence '\s'" в чужих тестах
+  (test_ds144d_c_ast, test_ds153d_scanner_selected_rules,
+  test_ds154_scanner_oq1). На passed не влияют.
+
+## ПЛАН ЧАТА 54
+
+Шаг 1. B3 -> DS_183: settings.json + GUI К4 (3b/7b) + тест + коммит.
+        Ожидание: регресс >=358 passed.
+Шаг 2. B4 -> DS_184: К3/К4 mark_in_code=True -> [Ai]-якоря на 3 .plp,
+        фиксация в PS\54_Results.log, коммит.
+Шаг 3. A8-долг: решение восстанавливать 49_Results.log или принять fallback.
+Шаг 4. 54.Отчёт.txt.
+Шаг 5. git push origin feature/dockerization (по команде).
+
+## Счётчик лимита
+
+Правило из чата 53: считать ходы, при остатке 2 — предупредить и свернуть
+в отчёт с зафиксированным состоянием. 1 ход = 1 ответ ассистента + 1 ответ
+пользователя.

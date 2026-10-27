@@ -1,0 +1,56 @@
+﻿============================================
+  60.ОТЧЁТ (2026-10-25, LG)
+  Хост: LGGRAMA8V7Q8U (hostTag=LG)
+============================================
+
+## Итог чата 60
+
+### DS_185 — ЗАКРЫТ (коммит 9d36b0f, push OK)
+
+Проблема: invalid command name ..._update_buttons_state / ..._wrapper в stderr t3/t4.
+Tk .after-callback прилетал на уничтоженный root.
+
+Что сделано (gui_app.py):
+- __init__: self._closing = False, self._after_ids = set().
+- _safe_after(delay_ms, callback): сохраняет after-id, _wrapper проверяет
+  _closing и root.winfo_exists().
+- Строка ~2492: root.after(100, _update_buttons_state) -> _safe_after(...).
+- on_close: _closing=True, after_cancel всех id, clear(), затем save_settings + destroy.
+
+Тест tests/test_ds183_k4_model_setting.py (t3/t4):
+- root.destroy() -> app.on_close() с fallback на root.destroy в except.
+
+Проверки:
+- Target: 6 passed, invalid command name — 0.
+- Regress: 378 passed, invalid command name — 0.
+- [FATAL] Нет v5.json / Нет .plp — шум из test_ds147a/b (правило 05).
+
+### Новые правила (60_1..60_9, в 01_Правила_PS.md)
+
+- 60_1: PS-сеанс начинать с UTF-8.
+- 60_2: CHAT_RULES в новый чат — копированием файлов, не Get-Content.
+- 60_3: разведочные Select-String — тоже в лог.
+- 60_4: ПОР — Правило Обязательного Регламента.
+- 60_5: ПСВ — Предложи свой однозначный вариант.
+- 60_6: Get-Clipboard -Raw ненадёжен; длинные .ps1 — WriteAllText + ASCII here-string / Python-helper.
+- 60_7: Start-Transcript — в КАЖДОМ шаге.
+- 60_8: Python-helper UTF-8 BOM — без coding: ascii.
+- 60_9: Python-helper лог — отдельный файл (..._XXa_...log).
+
+### Долги чата 60 -> 61
+
+1. DS_186 (ПОР): t3/t4 — гарантированный откат settings.json.
+2. EXCHANGE/*: 2 грязных + 54 удалённых в корне + gui_app.py.ds185bak.
+3. A8: подтвердить через DS_184 (e5459c3, B4).
+4. 49.Отчёт.txt.chat59.bak — удалить/оставить?
+
+### Артефакты
+
+- Коммит: 9d36b0f.
+- Логи: LG_60_04_ds185_patch.log, LG_60_07_ds185a_safe_after.log,
+  LG_60_07a_ds185a_py.log, LG_60_09_ds185a_test.log, LG_60_10_commit_diag.log,
+  LG_60_11_push_check.log, LG_60_12_finalize.log.
+- Целевые/регресс: LG_60_05_ds185_target.txt, LG_60_06_ds185_regress.txt,
+  LG_60_08_ds185a_target.txt, LG_60_08_ds185b_target.txt.
+- Скрипты: chat60_ds185_patch.py, chat60_ds185a.py, chat60_ds185b.py,
+  chat60_finalize.py, chat60_report.py.

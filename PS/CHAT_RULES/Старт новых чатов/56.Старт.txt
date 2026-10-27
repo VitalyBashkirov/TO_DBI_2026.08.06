@@ -1,0 +1,229 @@
+56.Старт.txt
+============
+
+На русском.
+
+## Сгенерировано
+- Дата/время (локально): 2026-10-24 12:31:19
+- Хост: MATEBOOKE
+- Пользователь: Виталий
+- Python: 3.11.9  (C:\Users\Виталий\AppData\Local\Programs\Python\Python311\python.exe)
+- Репозиторий: F:\TO_DBI
+- Ветка: feature/dockerization
+
+## Git
+```
+e5459c3 DS_184: K3/K4 mark_in_code -> [Ai]-anchors (B4)
+* feature/dockerization e5459c3 [origin/feature/dockerization: ahead 1] DS_184: K3/K4 mark_in_code -> [Ai]-anchors (B4)
+  main                  5241ad5 [origin/main] Merge feature/dockerization: AGENTS.md с разделом Git-процедуры (DS_051)
+```
+
+### git status --short -uall
+```
+M EXCHANGE/OUTBOX/DS_CNT_007_pilot_report.md
+ M EXCHANGE/bot.log
+```
+
+## Тесты
+- `pytest SRC/tests --collect-only -q` -> `370 tests collected in 1.23s`
+
+## Артефакты PS\55_* и PS\56_*
+```
+56_00_gen_start.err.txt
+56_00_gen_start.log
+56_00_gen_start.out.txt
+56_00_python_probe.log
+56_12_cmd.err.txt
+56_12_cmd.out.txt
+56_12_models_recon.log
+```
+
+## Ollama (если доступна)
+```
+NAME                       ID              SIZE      MODIFIED     
+qwen2.5-coder:3b           f72c60cabf62    1.9 GB    2 weeks ago     
+qwen2.5-coder:7b           dae161e27b0e    4.7 GB    3 weeks ago     
+nomic-embed-text:latest    0a109f422b47    274 MB    3 weeks ago     
+llama3.1:8b                46e0c10c039e    4.9 GB    6 months ago    
+deepseek-coder:6.7b        ce298d984115    3.8 GB    6 months ago
+```
+
+## tools\ai_local_worker_config.json
+```json
+{
+    "max_tokens":  2000,
+    "timeout_sec":  600,
+    "ollama_url":  "http://localhost:11434",
+    "batch_size":  10,
+    "fallback_on_invalid":  true,
+    "num_ctx":  4096,
+    "merge_same_line":  true,
+    "model":  "qwen2.5-coder:7b",
+    "fallback_batch_size":  5,
+    "temperature":  0.1
+}
+```
+
+## LM Studio settings (downloadsFolder)
+- downloadsFolder: `D:\LMStudio_Models`
+
+## Статус задач 55/56
+- DS_184 (B4): ЗАКРЫТ, коммит e5459c3, тесты 370 passed (362 + 8 новых).
+- 55.Отчёт.txt: (не создан / уточнить).
+- A8-долг: fallback 49.Отчёт.txt — решение: принять / пересоздать (уточнить).
+- ai_local_worker_config.json: сейчас 7b; 7b в Ollama ОТСУТСТВУЕТ (есть 3b) — переключить на 3b (рекомендация).
+- LM Studio: чат-моделей нет, только embedding; GGUF на F: не импортированы.
+
+## Правила 56 (кратко)
+- Хвост PS-блока: `Write-Host путь` -> `Stop-Transcript` -> `Get-Content $log -Encoding UTF8 | Out-String | Write-Host`.
+- here-string для Python: без `\` в конце строк; длинные — через `(...)`.
+- git: через `Start-Process -RedirectStandardOutput/-RedirectStandardError` (PS 5.1 теряет stdout git в транскрипте).
+- `ai_exchange._read_lines` возвращает строки БЕЗ `\n` (newline.join добавляет сам) — якоря вставлять без `\n`.
+- Тесты: `io.open(..., encoding='utf-8-sig')` (BOM), якоря искать `lstrip().startswith('-- ')`.
+- Палитра WT: `Campbell Powershell` (settings.json починен, зелёный работает).
+
+## Первые шаги чата 56
+1. Прочитать 56.Старт.txt.
+2. Подтвердить: модель для ai_local_worker_config.json (3b / 7b), импорт GGUF в LM Studio (все / Qwen3-4B+Llama-3.1-8B+Gemma-3-4B / нет), A8-долг (принять fallback / пересоздать).
+3. Правка конфига (3b), импорт GGUF (`lms import --symbolic-link`, после запуска LM Studio GUI).
+4. 55.Отчёт.txt (A8, config, сводка DS_184).
+5. git push origin feature/dockerization.
+
+## Последние коммиты
+```
+e5459c3 DS_184: K3/K4 mark_in_code -> [Ai]-anchors (B4)
+b4d80b7 DS_183e: отчёт чата 54 (DS_183 закрыт, B4/A8 -> чат 55)
+bc3d0a3 DS_183: K4 model 3b/7b in GUI + settings.json + --model to ai_local_worker
+e212049 DS_183c: отчёт чата 53 (A1-A10 OK, B1 закрыт, B3/B4 -> чат 54)
+bf9025c DS_183b: добавлен отчёт чата 50 (50.Отчёт.txt)
+```
+
+
+============================================
+  ДОПОЛНЕНИЕ 2026-10-24 (из чата 56)
+============================================
+
+## Переезд между хостами (важно)
+
+Проект должен работать на двух хостах с одним SSD F: (MBE и LG Gram).
+Переключение — переткнуть SSD, дождаться буквы F:, работать.
+
+Сделано на обоих хостах (один раз, глобально):
+- git config --global --add safe.directory F:/TO_DBI
+- git config --global user.name  "Vitaly Bashkirov"
+- git config --global user.email "ainf17@mail.ru"
+
+Модели Ollama:
+- MBE: qwen2.5-coder:3b (1.9 GB) и :7b (4.7 GB). Дефолт для К4 = 3b.
+- LG:  обе есть, 16 GB RAM. Дефолт для К4 = 7b.
+
+LM Studio: не запускать во время работы АРМ (занимает RAM, проекту не нужна).
+
+## Кто за что отвечает (settings.json)
+
+- F:\TO_DBI\SRC\settings.json — общий для обоих хостов (пути, флаги,
+  рубрикатор, выбранные правила).
+- k4_model в settings.json — исторически общий. По DS_183 сделан
+  per-host override: локальный <COMPUTERNAME>.local.json в
+  %APPDATA%\TO_DBI\ переопределяет k4_model. Реализация: см. DS_183.
+
+## Правила логов (новое с чата 56)
+
+Префикс хоста в НАЧАЛЕ имени лога, не в конце:
+  LG_51_10_regress.log, MBE_51_10_regress.log
+Автоопределение:
+  $hostTag = if (MATEBOOKE -like "LGGram*") { "LG" } else { "MBE" }
+  $log = Join-Path F:\TO_DBI\PS ("{0}_<номер>_<action>.log" -f MBE)
+
+## DS_182 — состояние на 2026-10-24
+
+Из логов чата 51: правка _is_rule_selected в scanner.py сделана
+и проверена (347 passed до, 347 после; 10 новых = 357).
+Но в git-истории коммита DS_182 НЕТ (проверить: git log --grep DS_182).
+Рабочий каталог тоже чист (git status: только M EXCHANGE/*).
+
+ЗАДАЧА ЧАТА 56: выяснить, куда делись правки DS_182, и либо
+восстановить из PS-логов/бэкапа (scanner_20261023_143745.py.bak
+в PATCH_CALC\backups), либо воспроизвести заново и закоммитить.
+Это блокирующий пункт: без DS_182 базлайн матрицы 49 (9 issues
+при ['plpcheck.']) не восстанавливается.
+
+## Первые шаги чата 56 (уточнённые)
+
+1. Прочитать 56.Старт.txt (этот файл, с дополнением).
+2. Выяснить судьбу DS_182:
+   - git log --all --grep DS_182;
+   - diff scanner.py с бэкапом scanner_20261023_143745.py.bak;
+   - если правки нет — восстановить, прогнать 51_02_baseline_v3,
+     test_ds182_k3k4_9issues.py, регресс, закоммитить DS_182.
+3. Подтвердить модель для ai_local_worker_config.json (3b / 7b):
+   на MBE — 3b, на LG — 7b (per-host).
+4. 55.Отчёт.txt (A8, config, сводка DS_184).
+5. git push origin feature/dockerization.
+
+## Открытые вопросы (для Пользователя)
+
+1. DS_182: восстановить / пересоздать / признать утерянным и не возвращаться?
+2. ai_local_worker_config.json: сейчас "qwen2.5-coder:7b", но 7b в Ollama
+   на MBE ОТСУТСТВУЕТ (в списке есть; см. лог 56_12_models_recon: 7b
+   есть в ollama list, значит на MBE он всё-таки лежит — уточнить).
+3. LM Studio GGUF-импорт: нужен вообще? Проект работает через Ollama,
+   LM Studio не используется АРМ. Предложение: не импортировать.
+4. A8-долг: 49.Отчёт.txt fallback — принять / пересоздать.
+============================================
+  СТАТУС НА 2026-10-24 12:41:10 (перед чатом 57)
+============================================
+- DS_182: подтверждён, коммит a94a175 (_is_rule_selected понимает 'plpcheck.')
+- ai_local_worker_config.json: model 7b -> 3b (56_01c2, лог MBE_56_01c2_fix_format.log)
+- 56.Старт.txt: дополнен переездом MBE<->LG, правилами логов, статусом DS_182
+- DS_183b (per-host k4_model): В РАБОТЕ
+    - патч: PS\56_03_ds183b_patch.py (4 вставки в gui_app.py, py_compile до записи)
+    - следующий шаг: запустить 56_03, затем тест 56_04 и регресс, затем коммит
+- Не забыть: git push origin feature/dockerization
+============================================
+  СТАТУС НА 2026-10-24 15:44:36 (перед чатом 59)
+============================================
+
+## Закрыто в чате 58
+- DS_086_fix  (9265953): minsize(1026, 1000) -> minsize(1026, UI_MIN_WINDOW_HEIGHT).
+- DS_086_fix2 (ec6c76b): test_ds149g обновлён под minsize(1026, UI_MIN_WINDOW_HEIGHT|400).
+- Подтверждено: test_ds086_ui_hide_pytest.py — 15 passed; полный регресс — 377 passed, 0 failed.
+- origin/feature/dockerization = ec6c76b.
+
+## Правила PS (чат 58, обязательны для всех скриптов)
+1. Логи — ТОЛЬКО F:\TO_DBI\PS\.
+   Имя: <hostTag>_<чат>_<номер>_<action>.log.
+   %TEMP% и любые другие каталоги — запрещены.
+2. LG — АВТООПРЕДЕЛЕНИЕ (LGGram* -> LG, MateBook* -> MBE).
+   Хардкод запрещён. Проверка  на совпадение префикса.
+3. C:\Users\ainf1\AppData\Local\Programs\Python\Python312\python.exe (python.exe) — АВТООПРЕДЕЛЕНИЕ:
+   Get-Command python.exe + fallback на Python311/Python312
+   в %LOCALAPPDATA% и C:\Users\{ainf1,Виталий}\...; хардкод запрещён.
+4. После работы PS — удалять все файлы НУЛЕВОЙ длины из F:\TO_DBI\PS\.
+5. git commit — только через -F <msgfile> (многострочный -m в PS 5.1 ломается).
+6. Start-Transcript в PS 5.1 — БЕЗ -Encoding.
+7. Here-string (@'...'@) в ИНТЕРАКТИВНОЙ вставке — НЕ использовать.
+   Только .ps1-файл, Set-Content массивом строк, или ручная правка.
+8. ".." -> ".." (парсер PS 5.1).
+
+## Окружение
+- SSD физически на LG, расшарен; работаем то на MBE, то на LG.
+- LG: python C:\Users\ainf1\AppData\Local\Programs\Python\Python312\python.exe
+- MBE: python C:\Users\Виталий\AppData\Local\Programs\Python\Python311\python.exe
+- LM Studio на MBE закрыт (LMS + LM Studio процессы убиты),
+  Ollama остановлена, батник "Ollama и LM Studio.bat" убит.
+
+## Долги чата 58 -> 59
+1. DS_183_assert_fix: test_ds183_k4_model_setting.py возвращает True вместо assert
+   (PytestReturnNotNoneWarning). Переписать на assert.
+2. Переименование логов: MBE_58_02_* -> LG_58_02_* (сделано в 59_01_start).
+3. 55.Отчёт.txt (A8, config, сводка DS_184) — из старта 56.
+4. A8-долг: 49.Отчёт.txt fallback — принять / пересоздать.
+
+## Первые шаги чата 59
+1. Прочитать 56.Старт.txt (этот блок).
+2. DS_183_assert_fix: переписать 5 тестов на assert, точечно + регресс, коммит, push.
+3. 55.Отчёт.txt (A8, config, сводка DS_184).
+4. A8-долг: 49.Отчёт.txt fallback — решение.
+============================================
+

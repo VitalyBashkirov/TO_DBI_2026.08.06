@@ -1,0 +1,87 @@
+============================================
+  55.ОТЧЁТ (составлен в чате 59, 2026-10-25)
+  Источники: git log, git grep, settings.json, 59_17
+============================================
+
+## 1. DS_184 — AI-якоря (МПК) в ai_exchange
+
+ЗАКРЫТ. Коммит: e5459c3
+  e5459c3 DS_184: K3/K4 mark_in_code -> [Ai]-anchors (B4)
+
+Что сделано:
+- AI-правки (K3 -> ai_exchange.apply_fixes / process_response)
+  получают МПК-якоря в том же формате, что CodeFixer._insert_anchors.
+- Вхождения в коде:
+    ai_exchange.py:343  — """DS_184: построить якоря для AI-правок
+                          (формат CodeFixer._insert_anchors)."""
+    ai_exchange.py:532  — # DS_184: МПК-якоря для AI-правок
+                          (аналог CodeFixer._insert_anchors).
+- Тест: tests/test_ds184_ai_anchors.py
+    """DS_184: AI-якоря (МПК) в ai_exchange.apply_fixes / process_response."""
+
+Проверено: в коде 3 вхождения DS_184; тест присутствует.
+
+## 2. A8 — задача из чата 54
+
+ПРЕДПОЛОЖИТЕЛЬНО ЗАКРЫТ вместе с DS_184. Требует подтверждения, если A8 != B4.
+
+Источник:
+- b4d80b7 DS_183e: отчёт чата 54 (DS_183 закрыт, B4/A8 -> чат 55)
+- e5459c3 DS_184: K3/K4 mark_in_code -> [Ai]-anchors (B4)
+
+В обоих коммитах фигурирует B4. A8 в коде отдельно не встречается
+(git grep "A8" — нет совпадений). Предположительно A8 — часть B4,
+закрытая реализацией DS_184 (AI-якоря).
+
+## 3. config — это settings.json
+
+Отдельного config.py / config.json нет. В коде config — словарь,
+который строится из settings.json:
+  - gui_app.py:3823, 4427 — config = { ... } (из settings.json)
+  - fixer/code_fixer.py:2449 — config_path = ... / "settings.json"
+
+Секции settings.json:
+  paths          — source_dir, result_dir (ИКА/КР)
+  scan           — file_pattern, recursive, exclude_patterns
+  output         — only_modified, preserve_structure
+  logging        — level (УЛ)
+  fix_flags      — regex, hybrid, ai_fallback, ignore, backup, other
+  clean_output   — ВТИК
+  fix_only_found — Применять (DEPRECATED alias apply_fixes)
+  mark_in_code   — МПК
+  k4_model       — qwen2.5-coder:3b (общий; per-host — local_settings.py, DS_183b)
+  conf_low, conf_high
+  plpcheck_categories
+  rubricator_selected_rules
+  ui_hidden_elements
+
+## 4. Коммиты чата 55
+
+- e5459c3 DS_184: K3/K4 mark_in_code -> [Ai]-anchors (B4)
+- b4d80b7 DS_183e: отчёт чата 54 (DS_183 закрыт, B4/A8 -> чат 55)
+
+## 5. Что осталось после чата 55 (по git log)
+
+- DS_185 (новый): DBIMigrationApp — отменять .after-id
+  (_update_buttons_state) при destroy()/on_close().
+  Симптом: invalid command name "..._update_buttons_state" в stderr
+  после root.destroy() в t3/t4 test_ds183_k4_model_setting.py.
+  В gui_app.py .after(...) для _update_buttons_state.
+
+- DS_186 (новый): t3/t4 — гарантированный откат settings.json
+  (try/finally + copy2(BACKUP, SETTINGS) до первого изменения).
+  Сейчас t4 пишет k4_model=7b и не возвращает 3b; 59_15 спасает вручную.
+
+- 55.Отчёт.txt — ЭТОТ ФАЙЛ (был должен в чате 55, создан в 59).
+- 49.Отчёт.txt — есть (5114 b), A8-долг: принять/пересоздать.
+
+## 6. Итог
+
+DS_184 — ЗАКРЫТ (e5459c3).
+A8 — ПРЕДПОЛОЖИТЕЛЬНО ЗАКРЫТ через DS_184 (e5459c3, B4).
+config — settings.json, отдельного файла нет.
+Открытые долги после 55: DS_185, DS_186, 49.Отчёт.txt (fallback).
+
+============================================
+Конец отчёта.
+============================================

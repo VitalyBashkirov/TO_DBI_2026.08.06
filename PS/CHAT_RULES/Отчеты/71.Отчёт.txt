@@ -1,0 +1,36 @@
+# Отчёт чата 71 (2026-10-27, LG)
+
+## Главное
+- Долг 1 (из чата 70) ЗАКРЫТ: _plp_iter_declarations + NAME in [TYPE]; _check_plp_not_mentioned + public func/proc, procedure, method, batch method.
+- scanner.py: +21/-0 (git diff --numstat 21 0), LF, py_compile=0 strict_syntax=0.
+- Тест test_ds71_not_mentioned_real.py (3 теста) + fixtures/ds71_in_type.plp.
+- Полный регресс: 389 passed / 0 failed (386 + 3 новых).
+- Коммит b3100ad (3 files, 150 insertions), push OK, HEAD==origin, ahead нет.
+
+## Что сделано
+- 71_00: старт, Памятка (chat71_00_maker.py).
+- 71_01..71_01c: разведка _plp_iter_declarations и _check_plp_not_mentioned в SRC/analyzer/scanner.py; фикстуры patch_suboptimal_test_3.
+- 71_02..71_02b: зонд дизайна + своя фикстура ds71_in_type.plp (in [TYPE], public func/proc, method, batch method, used, Default_Mes).
+- 71_03..71_03h: патч scanner.py через 6 .txt-фрагментов + короткий python-патчер (PS-экранирование, 61_5/64_2/66_1).
+- 71_03i..71_03k: диагностика, LF-нормализация, фикс elif == in (integer не превращается в in).
+- 71_04..71_04d: test_ds71_not_mentioned_real.py (фикс regex), 13 passed в точечном.
+- 71_05: полный регресс 389 passed / 0 failed.
+- 71_06: коммит b3100ad, push OK, HEAD==origin. Предохранитель throw не прервал (долг 1).
+- 71_07, 71_07a..71_07k: закрытие чата. Мейкер 72 несколько раз падал на PS-экранировании; итог — прямая запись 71.Отчёт.txt и 72.Старт.txt через WriteAllLines(no-BOM).
+
+## Долги 71 -> 72
+1. throw без try/catch в PS 5.1 не прерывает скрипт. Заменить на return + Stop-Transcript или try/catch.
+2. _check_plp_not_mentioned: kind proc/method/batch_method -> ветка else. Кандидат: отдельные сообщения.
+3. type_str для in [TYPE] не нормализован до in. Намеренно; отдельная правка.
+4. Грязные фоновые (EXCHANGE/bot.log, Ollama и LM Studio.bat, SRC/settings.json, test_all_models.ps1, free_memory.ps1, free_memory_profiles.txt) — не коммитить.
+5. Бэкапы *.ds*bak — не коммитить; при желании — .gitignore.
+6. Мейкеры отчетов/стартов через python-генератор PS-строками хрупкие. Предпочтение: прямой WriteAllLines массивом PS-строк.
+
+## Артефакты
+- Коммит: b3100ad (3 files: scanner.py + test_ds71_not_mentioned_real.py + fixtures/ds71_in_type.plp, +150).
+- Бэкапы: scanner.py.ds71_03bak, scanner.py.ds71_03k_prev, scanner.py.ds70_01bak (не коммитились).
+- Патчеры: chat71_03_patch_scanner.py, chat71_03k_fix_in_type.py, chat71_04d_fix_test.py.
+- Мейкеры/фиксы: chat71_00_maker.py, chat72_00_maker.py, chat71_07*.py.
+- Зонды: chat71_02_probe.py, chat71_02b_probe_fixture.py, chat71_04b_probe_not_mentioned.py.
+- Фрагменты: chat71_03_frag_*.txt (6 шт.).
+- Логи: F:\TO_DBI\PS\LG_71_*.log.

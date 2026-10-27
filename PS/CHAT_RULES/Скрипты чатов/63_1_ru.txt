@@ -1,0 +1,10 @@
+## 63_1. Get-Content -Encoding UTF8 на без-BOM кириллице врёт (чат 63)
+PS 5.1 читает UTF-8 файл **без BOM** как ANSI -> кириллица превращается в
+кракозябры при `Get-Content -Encoding UTF8`. Сама запись через
+`[System.IO.File]::WriteAllText(..., UTF8Encoding($false))` корректна —
+проблема только в чтении-для-показа.
+Решение: для проверки без-BOM файлов с кириллицей — только
+`[System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8)`.
+`Get-Content` годится для BOM-файлов, ASCII, чисел.
+BOM-детект: первые 3 байта через `[System.IO.File]::OpenRead`; BOM = (EF BB BF).
+См. также 61_4; в `.ps1`, вставляемый через консоль, примеров-кракозябр избегать.

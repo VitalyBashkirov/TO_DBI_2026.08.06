@@ -1,0 +1,41 @@
+# Отчёт чата 70 (2026-10-27, LG)
+
+## Главное
+- Долги 69 -> 70 закрыты: DS_182 (test_ds182), SyntaxWarning scanner.py:1257, EXIST_ALL_OR_COLLECTIONS.
+- scanner.py менялся только в L1254: docstring -> r-docstring. Остальное — тест + JSON рубрикатора.
+- Полный регресс: 386 passed / 0 failed. HEAD = d9547a8, origin = d9547a8, ahead нет.
+
+## Что сделано
+- 70_00: старт чата 70, Памятка + 70.Старт.txt (мейкер chat70_00_maker.py).
+- 70_01..70_01c: диагностика SyntaxWarning. Оказалось: scanner.py лежит в SRC/analyzer/, не SRC/.
+  Точная строка: scanner.py:1254 (docstring метода _check_plp_suboptimal_wrownum), warning — на 1257 "invalid escape \s".
+- 70_02: патч (Python-патчер, UTF-8 BOM): docstring -> r-docstring на 1254. compile rc=0,
+  python -W error::SyntaxWarning -m py_compile scanner.py -> rc=0. Точечно pytest test_ds154 + test_ds153d = 8 passed.
+- 70_04: коммит 4470ac8 (1 file, +1/-1, SRC/analyzer/scanner.py), push OK.
+- 70_05..70_06b: разведка DS_182. test_ds182_k3k4_9issues.py; проверены три фикстуры patch_suboptimal_test_3.
+  Установлено: _check_plp_not_mentioned корректно даёт 0 (все объявления used=True);
+  assert NOT_MENTIONED in found на этих фикстурах невыполним; _plp_iter_declarations не видит public/in/method.
+- 70_07/70_07b/70_07c: патч теста. 70_07 — сбой компиляции патчера (кавычки), 70_07b — OLD=0 (нет ведущих пробелов),
+  70_07c — успех: assert ... not in found с комментарием, 10 passed. Тест 70_07b/70_07c — без записи при сбое (предохранитель).
+- 70_08: коммит f24cc10 (1 file, +12/-1, SRC/tests/test_ds182_k3k4_9issues.py), push OK.
+- 70_09: полный регресс 386 passed / 0 failed.
+- 70_10..70_12: разведка и правка EXIST_ALL_OR_COLLECTIONS. Правило в JSON: for_search не ловил
+  in this(idx).[B_PS] / in this.[...]. Расширили: this(?:(\w+))?\.\[\w+\] добавлено к ::\[\w+\].
+  Патчер chat70_12_patch_exist_all.py, бэкап ds70_12bak, _scan_all по трём фикстурам даёт x1/x1/x2.
+- 70_13: полный регресс 386 passed / 0 failed — новые +3 issues не сломали тесты.
+- 70_14: коммит d9547a8 (1 file, +1/-1, DATA/Рубрикатор v5/4.RUBRICATOR_PROMPT v5.json), push OK.
+- 70_15: закрытие чата 70, Памятка + 70.Отчёт.txt + 71.Старт.txt (мейкер chat71_00_maker.py).
+
+## Долги 70 -> 71
+- 1. Расширить _plp_iter_declarations под реальный DBI-синтаксис объявлений:
+     public NAME [TYPE], NAME in [TYPE], method/batch method/function/procedure NAME —
+     отдельная задача, после неё можно писать тест на NOT_MENTIONED с настоящим неиспользуемым объявлением.
+- 2. Грязные фоновые (EXCHANGE/bot.log, Ollama и LM Studio.bat, SRC/settings.json, test_all_models.ps1) —
+     не коммитить.
+
+## Артефакты
+- Коммиты: 4470ac8 (scanner.py r-docstring), f24cc10 (test_ds182 not in found), d9547a8 (EXIST_ALL_OR_COLLECTIONS for_search).
+- Бэкапы: scanner.py.ds70_01bak, test_ds182_k3k4_9issues.py.ds70_07bak, 4.RUBRICATOR_PROMPT v5.json.ds70_12bak.
+- Патчеры: chat70_02_patch.py, chat70_07_patch_test.py, chat70_07b_patch_test.py, chat70_07c_patch_test.py, chat70_12_patch_exist_all.py.
+- Зонды: chat70_06_probe.py, chat70_06b_probe.py, chat70_10_probe.py, chat70_11_probe.py, chat70_12_check.py, chat70_12_probe_scan.py.
+- Логи: F:\TO_DBI\PS\LG_70_*.log.

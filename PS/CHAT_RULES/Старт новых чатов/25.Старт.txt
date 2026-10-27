@@ -1,0 +1,359 @@
+# Проект TO_DBI. Чат 25. Продолжение работы.
+
+## Контекст
+
+АРМ «Адаптация под DBI» — миграция PL/SQL (Oracle) → PostgreSQL (DBI).
+Репозиторий F:\TO_DBI. Ветка feature/dockerization.
+Роли: Автор DS — DeepSeek. Пользователь — Vitaly.
+
+ВАЖНО: KODA не запускается. Karing не нужна.
+Все DS — вручную PowerShell (правило F, DS_125).
+
+## Что сделано в чате 24
+
+### DS_130 (закрыт, коммит f8c1c20)
+
+Удалён дубль-логгер write_log в exchange_bot.py.
+- write_log (L29-L36) открывал bot.log в режиме 'w' (перезапись!)
+  и писал [HH:MM:SS] без даты — мина: первый вызов снёс бы весь bot.log.
+- Удалена def write_log (9 строк: функция + пустая после).
+- 6 вызовов write_log -> _log_bot (канон DS_050/DS_129).
+- L133: снят внешний префикс [HH:MM:SS], write_log -> _log_bot.
+- exchange_bot.py: 268 -> 259 строк, 10746 -> 10515 B, BOM=False.
+- bot.log: 471 -> 472 строки, не перезаписан (код не запускался).
+- pytest 65 passed, py_compile exit=0.
+- Отчёт: EXCHANGE\OUTBOX\DS_130_udalenie_write_log_exchange_bot_report.md.
+- Задание: EXCHANGE\PROCESSED\DS_130_udalenie_write_log_exchange_bot.md.
+
+### DS_131 (закрыт, коммит 5f0cb26)
+
+Устранены 14 invalid escape sequence в 6 файлах.
+- Найдено через ast.parse + warnings.catch_warnings (Python).
+- 14 hits: code_fixer.py L2403, ai_exchange.py L674+L683,
+  gui_app.py L1238+1289+5320+5407+5409+5417+5531,
+  ai_local_worker.py L865+L866, check_standard.py L2, explain_log.py L2.
+- Все строки с Windows-путями (EXCHANGE\AI_IN, EXCHANGE\AI_OUT,
+  F:\TO_DBI, EXCHANGE\DS_STANDARD) переведены в raw-string.
+- ast.parse warnings: 14 -> 0. py_compile x6 exit=0. pytest 65 passed.
+- ИНЦИДЕНТ: .Replace('"""', 'r"""') на однострочных docstring (L1238,
+  L1289, L5531 gui_app.py) заменил ОБА вхождения — открывающее И
+  закрывающее: r"""...AI_OUT.r""". Исправлено .Replace('.r"""', '."""').
+- Урок N: .Replace заменяет ВСЕ вхождения подстроки.
+- Отчёт: EXCHANGE\OUTBOX\DS_131_invalid_escape_sequence_report.md.
+- Задание: EXCHANGE\PROCESSED\DS_131_invalid_escape_sequence.md.
+
+### DS_120 (закрыт, коммит 783c873)
+
+12 messagebox.showinfo -> self._show_copyable_dialog в gui_app.py.
+- _show_copyable_dialog (DS_114) — кастомный диалог с кнопкой «Копировать».
+- Причина: messagebox не поддерживает копирование (путей AI_IN/AI_OUT).
+- Заменены L1399, 4137, 4199, 4575, 4817, 5154, 5226, 5245, 5269,
+  5336, 5414, 5539.
+- Добавлено подавление в _show_copyable_dialog: проверка
+  getattr(self, '_ai_cycle_running', False) — тихо логировать в автономном.
+- gui_app.py: 5918 -> 5923 строк, 347146 -> 347481 B, BOM=False.
+- messagebox остались нативными: askyesno 2, showerror 18, showwarning 6.
+- pytest exit=0, import gui_app OK.
+- Урок: подавление messagebox через monkey-patch (L5794-5800) НЕ покрывает
+  пользовательские диалоги — нужна проверка флага в самом методе.
+- Отчёт: EXCHANGE\OUTBOX\DS_120_zamena_showinfo_na_dialog_report.md.
+- Задание: EXCHANGE\PROCESSED\DS_120_zamena_showinfo_na_dialog.md.
+
+### Гигиена (без DS)
+
+Удалены 14 DS-бэкапов (*.bak_ds120..*.bak_ds131), ~1.4 МБ:
+  code_fixer.py.bak_ds131, ai_exchange.py.bak_ds129/131,
+  exchange_bot.py.bak_ds129/130, gui_app.py.bak_ds120/129/131,
+  process_inbox.py.bak_ds129, ai_local_worker.py.bak_ds129/131,
+  check_standard.py.bak_ds131, explain_log.py.bak_ds131,
+  rule_based_fixer.py.bak_ds129.
+СОХРАНЕНЫ: EXCHANGE\bot.log.bak_ds127, EXCHANGE\bot.log.bak_ds128
+  (резерв bot.log — удалить позже).
+
+
+### Инциденты чата 24 (все закрыты)
+
+1. -ForegroundColor в else {} без Write-Host — 2х ошибка парсинга
+   (DS_130, DS_120). Исправлено: Write-Host "..." -ForegroundColor Yellow.
+   Урок: строка-выражение НЕ принимает параметр; нужен Write-Host.
+2. .Replace('"""', 'r"""') испортил закрывающие кавычки в 3 однострочных
+   docstring (DS_131). Обнаружено по размеру (+10 вместо +8).
+   Исправлено .Replace('.r"""', '."""'). Урок N.
+3. Длинный PS-блок финализации DS_120 (here-string с Python-кодом +
+   тройные backtick + кириллица) «завис» — вставка не завершилась.
+   Разбит на 3 коротких блока — прошёл. Урок: дробить (Правило 23).
+
+## Состояние (на момент старта чата 25)
+
+- Ветка: feature/dockerization на 783c873, синхронизирована с origin.
+- git status: clean, ahead 0.
+- INBOX: пуст.
+- PROCESSED: DS_118…DS_131 — все на месте.
+- OUTBOX: отчёты DS_118…DS_131 — все на месте.
+- BOM: False для всех .py, .md, .json, .ini, .sql, .gitignore.
+  True для tools\close_ds.ps1.
+- bot.log: 474 строки, BOM=False.
+- bot.log.bak_ds127, bot.log.bak_ds128 — сохранены (ignored).
+- PS\: каталог для логов PS-блоков (ignored).
+- 23.Старт.txt, 24.Старт.txt — ignored.
+- ast.parse warnings: 0 (после DS_131).
+
+## НОВЫЕ ПРАВИЛА (действуют с чата 23, обновлены в чате 24)
+
+### Правило N1: шапка PS-блока
+
+    cls
+    Set-Location -LiteralPath 'F:\TO_DBI'
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+    chcp 65001 | Out-Null
+    cls
+
+### Правило N2: логирование PS-блоков (Start-Transcript в PS\)
+
+### Правило N3: -replace в PS — regex, не строковая замена
+
+### Правило N4: стартовые файлы чатов — сразу в файл через PS
+
+### Правило N5 (НОВОЕ, чат 24): -ForegroundColor только с Write-Host
+
+Строка-выражение "текст" -ForegroundColor X в else {} — ошибка парсинга.
+Нужно: Write-Host "текст" -ForegroundColor X. См. урок O.
+
+### Правило N6 (НОВОЕ, чат 24): AppendAllLines в PS 5.1 нет
+
+В .NET Framework (PS 5.1) НЕТ [System.IO.File]::AppendAllLines.
+Есть: AppendAllText (одна строка), WriteAllLines (перезапись),
+WriteAllText (перезапись).
+Для ДОБАВЛЕНИЯ массива строк: ReadAllLines -> $existing + $new ->
+WriteAllLines. См. урок Q.
+
+## Уроки чата 24 (в DS_STANDARD.md §6.2.1 при следующей правке)
+
+### Урок N: .Replace заменяет ВСЕ вхождения подстроки
+
+.Replace('"""', 'r"""') на однострочном docstring """...""" заменит
+И открывающую, И закрывающую кавычки. Получится r"""...r""" —
+валидный синтаксис, но семантически сломанный docstring (.r в конце).
+Решение: ограничить контекст (.Replace('    """', '    r"""') — с
+отступом), либо править только первое вхождение.
+
+### Урок O: -ForegroundColor требует Write-Host
+
+В PowerShell выражение "текст" -ForegroundColor Red НЕ работает в
+блоке else { } (строка — не команда). Только Write-Host "текст"
+-ForegroundColor Red. Ошибка проявляется на этапе парсинга, до выполнения.
+
+### Урок P: длинные here-string с Python-кодом + backtick — дробить
+
+PS-блок с @'...'@, содержащий тройные backtick (Markdown) и кириллицу,
+может «зависнуть» при вставке — PowerShell не видит закрывающий @'@.
+Решение: не использовать тройные backtick внутри here-string;
+формировать файлы через массив строк @( 'строка1', 'строка2', ... )
+и WriteAllLines. Дробить большие блоки на части.
+
+### Урок Q: AppendAllLines в PS 5.1 отсутствует
+
+[System.IO.File]::AppendAllLines — метод .NET Core/5+. В PS 5.1
+(.NET Framework 4.x) его НЕТ, ошибка MethodCountCouldNotFindBest.
+Для добавления массива строк к файлу:
+  $existing = [System.IO.File]::ReadAllLines($path, $enc)
+  $all = $existing + $newLines
+  [System.IO.File]::WriteAllLines($path, $all, $enc)
+
+
+## Открытые задачи (актуально на старт чата 25)
+
+1. DS_119 — CLI-сканер run_scanner.py отсутствует.
+   Приоритет: НИЗКИЙ.
+   - Формулировка неясна. Нужна разведка: где упоминается,
+     что за требование, откуда взялось.
+
+2. bot.log.bak_ds127, bot.log.bak_ds128 — удалить (резерв bot.log).
+   Приоритет: ОТЛОЖЕНО (1-2 чата).
+
+3. Техдолг: SRC\gui_app_NEW.py, SRC\gui_app_OLD.py,
+   SRC\gui_app_v25_backup.py — отслеживаются git, старые версии.
+   Приоритет: СРЕДНИЙ. Нужна разведка (актуальность каждого).
+
+4. Прочие бэкапы (Ollama и LM Studio.bat.bak_*, test_all_models.ps1.bak_*,
+   *.bak_dedup*, *.bak_utf8*, *.bak_chcp*, *.bak_20261005_*) — 37 шт.
+   Приоритет: ОТЛОЖЕНО. Не наши DS — решает Vitaly.
+
+5. [DS_CNT_001] ... (8 строк без даты) в bot.log — вывод внешнего
+   CNT-процесса. НЕ трогаем.
+
+6. Ночной pipeline CNT пишет без '[' — отдельная тема.
+
+## AI-инфраструктура
+
+- Ollama: http://localhost:11434, работает (qwen2.5-coder:7b).
+- LM Studio: закрыт.
+- Мок-сервер: tools\mock_ollama_invalid.py, порт 11500.
+- ai_local_worker.py --check: OK (available).
+- KODA: 1.2.2 (откат с 1.2.3), автообновление ОТКЛЮЧЕНО (DS_124).
+- KODA запускается БЕЗ Karing (опровергнут урок 33).
+- DNS api.kodacode.ru: 161.104.57.9 (резолвится штатно).
+
+## Реальный путь и имена (важно!)
+
+- Проект: F:\TO_DBI\ (SRC\ — исходники, tools\ — утилиты).
+- Класс GUI: DBIMigrationApp.
+- Тесты: F:\TO_DBI\SRC\tests\ — pytest exit code 0.
+- Python 3.11 в PATH. pytest 8.3.4.
+- pytest.ini в корне — testpaths = SRC/tests, addopts = --capture=no.
+- BOM — критичная тема. Правило в DS_STANDARD.md §6.1.
+  .py / .md / .json / .ini / .sql — UTF-8 БЕЗ BOM.
+  .ps1 с кириллицей — UTF-8 С BOM (Урок I).
+- ВАЖНО: путь D:\RUBRICATOR\SRC и F:\ARM\STR — НЕ существуют.
+- Task Scheduler TO_DBI_CNT_NightlyPipeline — LogonType = S4U,
+  daily 01:00. Работает штатно.
+- AI-контур: tools\ai_local_worker.py, конфиг
+  tools\ai_local_worker_config.json.
+- tools\close_ds.ps1 — универсальный скрипт закрытия DS (v2.1,
+  -InboxFile, BOM=True).
+
+## Инфраструктура версионирования
+
+- EXCHANGE\INBOX\ — игнор (рабочие задания).
+- EXCHANGE\OUTBOX\ — в git (отчёты).
+- EXCHANGE\PROCESSED\ — в git (исполненные DS).
+- EXCHANGE\bot.log — в git (лог операций).
+- EXCHANGE\AI_IN\, AI_OUT\, AI_IN_PROCESSED\, AI_OUT_PROCESSED\ — игнор.
+- EXCHANGE\bot.log.bak_ds127, bot.log.bak_ds128 — игнор (*.bak_*).
+- PS\ — игнор (логи PS-блоков).
+- 23.Старт.txt, 24.Старт.txt, 25.Старт.txt — игнор (*Старт*.txt).
+
+## Регламент имён отчётов (DS_109, действует)
+
+- Отчёты: EXCHANGE\OUTBOX\DS_XXX_<краткое_описание>_report.md.
+- Задания: EXCHANGE\PROCESSED\DS_XXX_<краткое_описание>.md
+  (без суффикса _report).
+- Запрещено: DS_XXX_report.md, транслит, пробелы.
+- Исторические отчёты (DS_100a … DS_131) — не переименовываются.
+
+## Регламент работы (обновлён в чате 24)
+
+0. ШАПКА БЛОКА (Правило N1):
+   cls / Set-Location / кодировка / chcp | Out-Null / cls.
+1. Команда 0 — кодировка: [Console]::OutputEncoding + $OutputEncoding.
+2. Секции с заголовками: # --- N. <назначение> ---.
+3. Готовность к одной кнопке.
+4. Ожидание — таблицей вне блока.
+5. Кодировка — -Encoding UTF8 для чтения; UTF8Encoding($false) для
+   записи .py/.ini/.json/.md; UTF8Encoding($true) для .ps1 с кириллицей.
+6. Прогноз KODA — НЕ запрашиваем.
+7. Не трогать SRC без явного указания в DS.
+8. Логи — только EXCHANGE\bot.log. (Отладочные транскрипты PS —
+   в PS\, это НЕ логи проекта, см. §6.6.)
+9. Отчёты KODA — в EXCHANGE\OUTBOX\, UTF-8 без BOM, русский.
+10. GIT / PUSH / GP — по запросу.
+11. Ограничения — DS_STANDARD.md раздел 2 + раздел 6.1 (BOM).
+12. Не открывать LM Studio одновременно с Ollama.
+13. KODA пишет отчёты на русском. Транслит не использовать.
+14. Git-гигиена: .gitignore содержит *.bak_*, *.broken_*,
+    *.before_*, *.lnk, *Старт*.txt, PS/.
+15. Перед GP — проверить git status (clean).
+16. После GP — проверить git branch -vv (синхронизация).
+17. §5 (Проверка) обязателен.
+18. Прямые слэши в git add.
+19. Никаких return в ручных блоках PowerShell.
+20. Никаких @"..."@ (here-string) с бэктиками/кавычками/кириллицей
+    в ручных блоках, ЕСЛИ это ломает разметку Text Copy Download.
+    Для создания файлов — @'...'@ (однокавычный here-string)
+    ИЛИ массив строк @(...) + WriteAllLines (предпочтительно, см. урок P).
+21. Get-ChildItem + Format-Table — отложенный вывод.
+22. $LASTEXITCODE после Select-String — не работает.
+23. Дробить большие блоки на маленькие шаги.
+24. BOM-check — только из корня проекта.
+25. Читать фактический git diff, не пересказ KODA.
+26. Проверять, не занят ли номер DS_XXX.
+27. Проверочный блок запускать только ПОСЛЕ выполнения DS.
+28. Не доверять описанию состояния в стартовом файле — предполётная
+    проверка Select-String / BOM / git status перед формированием DS.
+29. bot.log пишется ДО коммита, не после.
+30. KODA работает по имени INBOX-файла, а не по содержимому.
+31. Koda 1.2.3 имела баги Agent-режима — откат до 1.2.2.
+32. DS_082b писал в bot.log при dry-run — исправлено в DS_121.
+33. [ОПРОВЕРГНУТ в чате 21] Karing нужна для Koda.
+34. api.kodacode.ru может отдавать 429 service_busy.
+35. Koda.gallerycdn.vsassets.io может блокироваться DPI.
+36. Простые DS — вручную PS, без KODA.
+37. close_ds.ps1 v2.1 — универсальный скрипт закрытия DS,
+    параметр -InboxFile (авто-очистка INBOX), BOM=True.
+38. Проверять settings.json на plain-text секреты.
+39. -SimpleMatch не понимает | (DS_125, §6.2.1).
+40. Select-String находит docstring и сигнатуры (DS_125, §6.2.1).
+41. [System.IO.File]::ReadAllBytes/WriteAllText — только абсолютные
+    пути (DS_125/126, §6.2.1).
+42. Вложенные ``` в Text Copy Download ломают разметку (DS_125, §3.2).
+43. INBOX-гигиена при ручном выполнении DS (DS_125, AGENTS.md L624).
+44. -Filter в Get-ChildItem не поддерживает regex-классы
+    (DS_126, §6.2.1 п.4).
+45. [Parser]::ParseFile и BOM — ложные ошибки при отсутствии BOM
+    (DS_126, §6.2.1 п.5).
+46. .ps1 с кириллицей требует BOM в PS 5.1 (DS_126, §6.2.1 п.6).
+47. $matches в PS — Hashtable, не массив (DS_128, §6.2.1 п.7).
+48. Аудит источника, не только симптома (DS_128, §6.2.1 п.8).
+49. -replace в PS — regex, не строковая замена (DS_129, §6.2.1).
+50. Глобальный -replace без указания строки — опасно (DS_129).
+51. Шапка PS-блока (Правило N1, DS_129, §6.6).
+52. Логирование PS-блоков: Start-Transcript в F:\TO_DBI\PS\
+    (Правило N2, DS_129, §6.6).
+53. Стартовые файлы чатов — формировать сразу в файл
+    (Правило N4, чат 23).
+54. .Replace заменяет ВСЕ вхождения подстроки — ограничивать контекст
+    (Урок N, DS_131).
+55. -ForegroundColor требует Write-Host (Урок O, DS_130/120).
+56. Длинные here-string с Python-кодом + backtick — дробить
+    (Урок P, DS_120). Массив строк @(...) + WriteAllLines.
+57. AppendAllLines в PS 5.1 отсутствует (Урок Q, чат 24).
+    Для добавления: ReadAllLines + массив + WriteAllLines.
+
+## Справочники (читать перед работой, не задания)
+
+- F:\TO_DBI\AGENTS.md — инструкция KODA (команды DS, GIT, PUSH, GP).
+- F:\TO_DBI\EXCHANGE\DS_STANDARD.md — стандарт оформления DS.
+  §3.1 — язык отчёта. §3.2 — имена отчётов + плоский формат.
+  §6.1 — BOM (+ исключение для .ps1). §6.2 — сводные блоки.
+  §6.2.1 — грабли PowerShell (п.1-8). §6.3 — порядок завершения DS.
+  §6.4 — типовой результат DS. §6.5 — общие правила завершения.
+  §6.6 — логирование PS-блоков. §9.1 — §5 обязателен.
+- F:\TO_DBI\EXCHANGE\DS_CONTEXT.md — общий контекст.
+- F:\TO_DBI\EXCHANGE\DS_FILES.md — карта файлов.
+- F:\TO_DBI\EXCHANGE\CNT_REFERENCE.md — справочник по Continue (CNT).
+
+## Отдельный трек: CNT (Continue) — ЗАКРЫТ
+
+Трек обучения CNT закрыт 07.10.2026.
+Ночной pipeline: TO_DBI_CNT_NightlyPipeline — S4U, daily 01:00,
+LastTaskResult = 0.
+Логи: logs\ds_cnt_007.log, logs\ds_cnt_005c_run.log.
+
+## Первый шаг
+
+1. Прочитать этот стартовый файл (25.Старт.txt).
+2. Проверить Ollama: python tools\ai_local_worker.py --check.
+3. Проверить DNS: Resolve-DnsName api.kodacode.ru.
+4. Проверить git: git status -sb / git branch -vv.
+5. Проверить INBOX: должен быть пуст.
+6. Запустить регресс: python -m pytest SRC\tests\ -q.
+7. По результатам — приоритет:
+   - Если тесты падают → чинить.
+   - Если OK → DS_119 (разведка CLI-сканера) /
+     техдолг gui_app_OLD/NEW/v25 (разведка) /
+     удаление bot.log.bak_ds127/128.
+
+## Команды (справочно)
+
+- ollama list — модели.
+- ollama ps — загруженные модели (RAM).
+- python tools\ai_local_worker.py --check — доступность Ollama.
+- python -m pytest SRC\tests\ -q — регресс.
+- python SRC\gui_app.py — запуск АРМ.
+- python tools\mock_ollama_invalid.py --port 11500 --fail-first.
+- git status -sb — состояние ветки.
+- git branch -vv — синхронизация с origin.
+- .\tools\close_ds.ps1 — закрытие DS (с -InboxFile).
+- Resolve-DnsName api.kodacode.ru — DNS Koda (без Karing).
+

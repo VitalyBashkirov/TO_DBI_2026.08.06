@@ -1,0 +1,54 @@
+============================================
+  63.ОТЧЁТ (чат 63, 2026-10-25)
+  Хост: LGGRAMA8V7Q8U (hostTag=LG)
+============================================
+
+## Итог
+
+- DS_190..192 (3 чужих \\s-warnings): РЕШЕНИЕ — оставить как шум, не заводить.
+- DS_184 (DBIMigrationApp .after): ЗАКРЫТ документально. Код уже в DS_185 (58cdf27).
+
+## Проверка (шаг 63_03)
+
+- HEAD = 58cdf27 = origin/feature/dockerization.
+- Точечный test_ds183_k4_model_setting.py: 6 passed in 2.56s, exit=0.
+- Полный регресс: 378 passed, 3 warnings in 30.60s, exit=0.
+- invalid command name в stderr: target hits=0, regress hits=0.
+- 3 warnings: SyntaxWarning invalid escape sequence \\s (строка ~1256) в
+  test_ds144d_c_ast.py, test_ds153d_scanner_selected_rules.py,
+  test_ds154_scanner_oq1.py — чужие, предсуществующие, шум по решению 63.
+
+## Подтверждение DS_184 (шаг 63_02)
+
+- gui_app.py:204 self._closing = False
+- gui_app.py:205 self._after_ids = set()
+- gui_app.py:2497-2517 _safe_after: discard/add/after_cancel-совместимый,
+  проверяет _closing и winfo_exists().
+- gui_app.py:5636-5648 on_close: _closing=True, after_cancel всех,
+  clear, save_settings, root.destroy.
+- gui_app.py:6514 root.protocol("WM_DELETE_WINDOW", app.on_close).
+- gui_app.py:461 пункт меню «Выход» -> self.on_close.
+- Прямых .after( и def destroy в gui_app.py нет.
+
+## Долги чата 63 -> 64
+
+- \\s-warnings: шум (зафиксировано в 00_INDEX и 08_Окружение).
+- EXCHANGE/bot.log — известный шум, не коммитим.
+- SRC/tests/test_ds183_k4_model_setting.py.ds183bak — локальный бэкап, не коммитим.
+- t3/t4: гарантированный откат settings.json (try/finally) — кандидат в 64.
+- A8-долг: 49.Отчёт.txt fallback — кандидат в 64.
+
+## Коммитов в чате 63
+
+- НЕТ. Изменений кода нет. Закрытие DS_184 документальное.
+
+## Финал чата 63
+
+- Правило 63_1 добавлено в 01_Правила_PS.md:
+  Get-Content -Encoding UTF8 на без-BOM кириллице врёт (PS 5.1 -> ANSI);
+  для проверки — только [System.IO.File]::ReadAllText(..., UTF8).
+- 63.Отчёт.txt и 64.Старт.txt: UTF-8 без BOM, 2203 b / 2318 b,
+  кириллица читается корректно через ReadAllText.
+- git: HEAD = 58cdf27 = origin; коммитов нет; SRC чист;
+  в корне только известный шум (EXCHANGE/bot.log, *.ds183bak).
+- Чат 63 закрыт.

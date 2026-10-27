@@ -1,5 +1,5 @@
 {
-  "version": "5.3.0",
+  "version": "5.3.1",
   "total_rules": 332,
   "based_on": "Объединение 4a-4d, v53, тдс20240828, тклоик20240828, plpcheck",
   "last_updated": "2026-08-21",
@@ -9782,7 +9782,7 @@
       "regex_patterns": {
         "for_search": [
           {
-            "pattern": "for\\s*\\(.*select.*\\)\\s+loop.*\\bexit\\b",
+            "pattern": "for\\s*\\(.*?select.*?\\)\\s*loop.*?(?:\\bexit\\b|\\breturn\\b|\\braise\\b|pragma\\s+error|message\\.error|app_error)",
             "description": "EXIT в цикле"
           }
         ],

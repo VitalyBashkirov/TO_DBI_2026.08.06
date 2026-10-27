@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 АРМ "Адаптация под DBI"
@@ -417,6 +417,19 @@ class DBIMigrationApp:
             self.log("ФИЛЬТРЫ ПО ПРИОРИТЕТУ: не выбраны (используются все правила)", 'info')
             self.log("=" * 60, 'info')
     
+    def _collect_user_selection(self) -> dict:
+        """DS_187: собрать выбор пользователя для отчётов (mode/files/rules/total_rules)."""
+        files = [c for c, v in self.selected_rules.items() if v.get()]
+        all_vars = getattr(self, '_rubricator_rule_vars', {}) or {}
+        rules = [rc for rc, rv in all_vars.items() if rv.get()]
+        total_rules = 332
+        if not files:
+            mode = '\u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u0432\u044b\u0431\u0440\u0430\u043d\u043e'
+        elif not rules or len(rules) == total_rules:
+            mode = '\u0432\u0441\u0435 \u043f\u0440\u0430\u0432\u0438\u043b\u0430'
+        else:
+            mode = f'\u043a\u043e\u043d\u043a\u0440\u0435\u0442\u043d\u044b\u0435 \u043f\u0440\u0430\u0432\u0438\u043b\u0430 ({len(rules)} \u0438\u0437 {total_rules})'
+        return {'mode': mode, 'files': files, 'rules': rules, 'total_rules': total_rules}
     def display_log_line(self, line: str):
         """Вывод строки PlpCheck-отчёта с цветовой подсветкой (DS 030, DS 032).
         
@@ -3889,6 +3902,24 @@ class DBIMigrationApp:
             self.root.after(0, lambda: self.log("\nВЫБРАННЫЕ ФАЙЛЫ РУБРИКАТОРА:", 'highlight'))
             for f in selected_files:
                 self.root.after(0, lambda ff=f: self.log(f"  [+] {ff}", 'highlight'))
+            self.root.after(0, lambda: self.log("\n\u0412\u042b\u0411\u041e\u0420 \u041f\u041e\u041b\u042c\u0417\u041e\u0412\u0410\u0422\u0415\u041b\u042f \u0412 \u0420\u0423\u0411\u0420\u0418\u041a\u0410\u0422\u041e\u0420\u0415:", 'highlight'))
+            _sel_files = [c for c, v in self.selected_rules.items() if v.get()]
+            _all_rule_vars = getattr(self, '_rubricator_rule_vars', {}) or {}
+            _sel_rules = [rc for rc, rv in _all_rule_vars.items() if rv.get()]
+            _total_rules = len(_all_rule_vars)
+            if not _sel_files:
+                _mode = '\u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u0432\u044b\u0431\u0440\u0430\u043d\u043e'
+            elif not _sel_rules or len(_sel_rules) == _total_rules:
+                _mode = '\u0432\u0441\u0435 \u043f\u0440\u0430\u0432\u0438\u043b\u0430'
+            else:
+                _mode = f'\u043a\u043e\u043d\u043a\u0440\u0435\u0442\u043d\u044b\u0435 \u043f\u0440\u0430\u0432\u0438\u043b\u0430 ({len(_sel_rules)} \u0438\u0437 {_total_rules})'
+            self.root.after(0, lambda: self.log(f"  \u0420\u0435\u0436\u0438\u043c: {_mode}", 'info'))
+            self.root.after(0, lambda: self.log(f"  \u0412\u044b\u0431\u0440\u0430\u043d\u043e \u0444\u0430\u0439\u043b\u043e\u0432 \u0440\u0443\u0431\u0440\u0438\u043a\u0430\u0442\u043e\u0440\u0430: {len(_sel_files)}", 'info'))
+            self.root.after(0, lambda: self.log(f"  \u0412\u044b\u0431\u0440\u0430\u043d\u043e \u043f\u0440\u0430\u0432\u0438\u043b: {len(_sel_rules)}", 'info'))
+            for _rc in _sel_rules[:30]:
+                self.root.after(0, lambda r=_rc: self.log(f"    [+] {r}", 'info'))
+            if len(_sel_rules) > 30:
+                self.root.after(0, lambda: self.log(f"    ... \u0438 \u0435\u0449\u0451 {len(_sel_rules) - 30} \u043f\u0440\u0430\u0432\u0438\u043b", 'info'))
             
             # Если выбраны приоритеты — используем правила из выбранных приоритетов (DS 018: HIGH/MEDIUM/LOW)
             # DS 024: защита от пустого результата — если после фильтра не осталось ни одного правила,
@@ -3981,6 +4012,7 @@ class DBIMigrationApp:
                     if any(r['code'].lower().startswith(c.lower()) for c in selected_rules)
                 ]
             scanner = PLPlusScanner(config, _sel_rule_codes, self.rubricator_prompts,
+                                    user_selection=self._collect_user_selection(),
                                     plpcheck_categories=getattr(self, 'plpcheck_categories_filter', []),
                                     abort_callback=self._abort_requested,  # DS 038
                                     stop_event=self._stop_event,            # DS_089b
@@ -4503,6 +4535,24 @@ class DBIMigrationApp:
             self.root.after(0, lambda: self.log("\nВЫБРАННЫЕ ФАЙЛЫ РУБРИКАТОРА:", 'highlight'))
             for f in selected_files:
                 self.root.after(0, lambda ff=f: self.log(f"  [+] {ff}", 'highlight'))
+            self.root.after(0, lambda: self.log("\n\u0412\u042b\u0411\u041e\u0420 \u041f\u041e\u041b\u042c\u0417\u041e\u0412\u0410\u0422\u0415\u041b\u042f \u0412 \u0420\u0423\u0411\u0420\u0418\u041a\u0410\u0422\u041e\u0420\u0415:", 'highlight'))
+            _sel_files = [c for c, v in self.selected_rules.items() if v.get()]
+            _all_rule_vars = getattr(self, '_rubricator_rule_vars', {}) or {}
+            _sel_rules = [rc for rc, rv in _all_rule_vars.items() if rv.get()]
+            _total_rules = len(_all_rule_vars)
+            if not _sel_files:
+                _mode = '\u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u0432\u044b\u0431\u0440\u0430\u043d\u043e'
+            elif not _sel_rules or len(_sel_rules) == _total_rules:
+                _mode = '\u0432\u0441\u0435 \u043f\u0440\u0430\u0432\u0438\u043b\u0430'
+            else:
+                _mode = f'\u043a\u043e\u043d\u043a\u0440\u0435\u0442\u043d\u044b\u0435 \u043f\u0440\u0430\u0432\u0438\u043b\u0430 ({len(_sel_rules)} \u0438\u0437 {_total_rules})'
+            self.root.after(0, lambda: self.log(f"  \u0420\u0435\u0436\u0438\u043c: {_mode}", 'info'))
+            self.root.after(0, lambda: self.log(f"  \u0412\u044b\u0431\u0440\u0430\u043d\u043e \u0444\u0430\u0439\u043b\u043e\u0432 \u0440\u0443\u0431\u0440\u0438\u043a\u0430\u0442\u043e\u0440\u0430: {len(_sel_files)}", 'info'))
+            self.root.after(0, lambda: self.log(f"  \u0412\u044b\u0431\u0440\u0430\u043d\u043e \u043f\u0440\u0430\u0432\u0438\u043b: {len(_sel_rules)}", 'info'))
+            for _rc in _sel_rules[:30]:
+                self.root.after(0, lambda r=_rc: self.log(f"    [+] {r}", 'info'))
+            if len(_sel_rules) > 30:
+                self.root.after(0, lambda: self.log(f"    ... \u0438 \u0435\u0449\u0451 {len(_sel_rules) - 30} \u043f\u0440\u0430\u0432\u0438\u043b", 'info'))
             
             # Если выбраны приоритеты — используем правила из выбранных приоритетов (DS 018: HIGH/MEDIUM/LOW)
             # DS 024: защита от пустого результата — если после фильтра не осталось ни одного правила,
@@ -6003,7 +6053,8 @@ class DBIMigrationApp:
             from analyzer.scanner import PLPlusScanner
             ver = PLPlusScanner(base_sc.config, base_sc.selected_rules,
                                 base_sc.rubricator_prompts,
-                                base_sc.plpcheck_categories)
+                                base_sc.plpcheck_categories,
+                                user_selection=getattr(base_sc, "user_selection", None))
         except Exception as e:
             self.log(f"  [!] Rescan: не создан verification-сканер: {e}", 'warning')
             return stats

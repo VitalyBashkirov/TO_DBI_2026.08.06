@@ -506,7 +506,7 @@ class PLPlusScanner:
     def in_block_comment(self, val):
         self.lexer_state.in_block_comment = val
 
-    def __init__(self, config: dict, selected_rules: List[str] = None, rubricator_prompts=None,
+    def __init__(self, config: dict, selected_rules: List[str] = None, rubricator_prompts=None, user_selection: dict = None,
                  plpcheck_categories: List[str] = None, abort_callback=None, fix_flags: Dict[str, bool] = None,
                  stop_event=None):
         self.config = config
@@ -540,6 +540,7 @@ class PLPlusScanner:
         self.ai_results: List[AIAnalysisResult] = []  # Результаты AI-анализа
         self.ai_analyzer = None
         self.rubricator_prompts = rubricator_prompts  # Объект рубрикатора
+        self.user_selection = user_selection or {}  # DS_187: выбор пользователя для отчётов
         
         # Загрузка паттернов из рубрикатора
         self.PATTERNS = self._load_patterns_from_rubricator()
@@ -1263,7 +1264,7 @@ class PLPlusScanner:
             return []
 
         text = '\n'.join(lines)
-        pattern = re.compile(r'for\s*\(.*?select.*?\)\s+loop.*?\bexit\b',
+        pattern = re.compile(r'for\s*\(.*?select.*?\)\s*loop.*?(?:\bexit\b|\breturn\b|\braise\b|pragma\s+error|message\.error|app_error)',
                              re.IGNORECASE | re.DOTALL)
         ignore_re = re.compile(r'\b(fetch|rownum|offset)\b', re.IGNORECASE)
         issues = []
@@ -1987,6 +1988,26 @@ class PLPlusScanner:
                 return 'ERROR_STYLE'
         return 'WARNING_STYLE'
     
+    def _generate_user_selection_lines(self) -> List[str]:
+        """DS_187: блок 'ВЫБОР ПОЛЬЗОВАТЕЛЯ В РУБРИКАТОРЕ' для отчётов."""
+        us = getattr(self, 'user_selection', None) or {}
+        if not us:
+            return []
+        lines = []
+        lines.append('ВЫБОР ПОЛЬЗОВАТЕЛЯ В РУБРИКАТОРЕ:')
+        mode = us.get('mode', '')
+        files = us.get('files', []) or []
+        rules = us.get('rules', []) or []
+        total = us.get('total_rules', 0)
+        lines.append(f'  Режим: {mode}')
+        lines.append(f'  Выбрано файлов рубрикатора: {len(files)}')
+        lines.append(f'  Выбрано правил: {len(rules)}')
+        for r in rules[:30]:
+            lines.append(f'    [+] {r}')
+        if len(rules) > 30:
+            lines.append(f'    ... и ещё {len(rules) - 30} правил')
+        lines.append('')
+        return lines
     def _generate_active_rubricators_lines(self) -> List[str]:
         """DS 037: строки блока «Активные рубрикаторы и флаги» для отчёта.
 
@@ -2345,6 +2366,22 @@ class PLPlusScanner:
         return lines
 
     def _generate_html_report(self, output_path: Path):
+        # DS_187: подготовка блока выбора пользователя для HTML
+        _us = getattr(self, 'user_selection', None) or {}
+        if _us:
+            _mode = _us.get('mode', '')
+            _files = _us.get('files', []) or []
+            _rules = _us.get('rules', []) or []
+            _lines = [f'  Режим: {_mode}',
+                      f'  Выбрано файлов рубрикатора: {len(_files)}',
+                      f'  Выбрано правил: {len(_rules)}']
+            for _r in _rules[:30]:
+                _lines.append(f'    [+] {_r}')
+            if len(_rules) > 30:
+                _lines.append(f'    ... и ещё {len(_rules) - 30} правил')
+            user_selection_html = '\n'.join(_lines)
+        else:
+            user_selection_html = ''
         """Генерация HTML-отчёта в формате дистрибутивного PlpCheck-отчёта (DS 025).
         
         Таблица: # | Класс | Метод | Секция | Строка | Тип | Уровень | Описание
@@ -2478,6 +2515,7 @@ class PLPlusScanner:
     <h1>PlpCheck Отчёт</h1>
     {meta_html}
     <div class="active-rubricators">{html_module.escape(chr(10).join(self._generate_active_rubricators_lines()))}</div>
+        <div class="active-rubricators">{user_selection_html}</div>
     <h2>Статистика</h2>
     <table>
         <thead><tr><th>Уровень</th><th>Количество</th></tr></thead>

@@ -6851,7 +6851,7 @@
       "regex_patterns": {
         "for_search": [
           {
-            "pattern": "in\\s+::\\[\\w+\\]\\s*(?!all|collection)",
+            "pattern": "in\\s+(?:::\\[\\w+\\]|this(?:\\(\\w+\\))?\\.\\[\\w+\\])\\s*(?!all|collection)",
             "description": "Выборка без ALL/COLLECTION"
           }
         ],

@@ -1251,7 +1251,7 @@ class PLPlusScanner:
         return issues
     
     def _check_plp_suboptimal_wrownum(self, lines: List[str]) -> List[Tuple[int, str, str, int, int]]:
-        """DS_179: SUBOPTIMAL_QUERY_WROWNUM - exit в for-loop без rownum/offset/fetch.
+        r"""DS_179: SUBOPTIMAL_QUERY_WROWNUM - exit в for-loop без rownum/offset/fetch.
 
         Многострочный паттерн (из JSON-рубрикатора):
             for\s*\(.*select.*\)\s+loop.*\bexit\b

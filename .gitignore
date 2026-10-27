@@ -123,3 +123,12 @@ chat46_*.py
 chat46_commit_msg.txt
 chat46_commit_msg_*.py
 chat46_commit_msg_*.txt
+# 75_01: не коммитить артефакты
+__pycache__/
+*.pyc
+*.bad_*
+*.bak
+PS/CHAT_RULES/Скрипты чатов/_w.py
+PS/CHAT_RULES/Скрипты чатов/analysis_results.json
+PS/CHAT_RULES/Скрипты чатов/chat67_03b_results/
+PS/CHAT_RULES/Скрипты чатов/chat67_03c_results/

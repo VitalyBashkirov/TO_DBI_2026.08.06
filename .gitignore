@@ -104,8 +104,10 @@ lang/
 *Старт*.txt
 
 # Отладочные логи PS-блоков (DS_129)
-PS/
-
+# CHAT_RULES — правила/отчёты/старты/скрипты чатов (чат 74)
+PS/*
+!PS/CHAT_RULES/
+!PS/CHAT_RULES/**
 # DS_147: сгенерированные тестовые .plp (TestGeneratorV2)
 DATA/Тестовые файлы/
 DATA/generated_plp/

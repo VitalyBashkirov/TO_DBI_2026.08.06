@@ -109,7 +109,7 @@ PS/*
 !PS/CHAT_RULES/
 !PS/CHAT_RULES/**
 # DS: бэкапы и промежуточные (*.ds*bak, *.ds*_prev, *.bak_*)
-*.ds*bak
+*.ds*bak*
 *.ds*_prev
 *.bak_*
 # DS_147: сгенерированные тестовые .plp (TestGeneratorV2)

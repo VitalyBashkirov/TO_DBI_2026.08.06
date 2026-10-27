@@ -1,0 +1,26 @@
+# Отчёт чата 74 (2026-10-27, LG)
+
+## Главное
+- Регресс на HEAD 7d64b18: 401 passed / 1 skipped (было 389; +12 новых тестов test_ds74_01_gui_checklist.py).
+- CHAT_RULES в git: .gitignore PS/* + !PS/CHAT_RULES/ + !PS/CHAT_RULES/**; PS/*.log вне git (DS_129).
+- Новые правила: 64_11 (обрамление: Clear-Host первой, LOG: зелёным последней), 64_12 (без exit в конце .ps1), 64_13 (единственный способ .ps1/.py — генерация PS-кодом, без VS Code/Блокнота), 64_14 (генерация+запуск одним блоком), 64_15 (без if/elseif/else в консоли).
+- ДВОБ (Действую В Обход Блокировки) — в 02_Сокращения_GUI.md; ДОСБ отменён.
+- Тест test_ds74_01_gui_checklist.py: 12 passed / 1 skipped; skip = 02_k1_ika_has_plp (ИКА пуст).
+
+## Коммиты чата 74
+- f5b79e2: CHAT_RULES в git + 64_11 + ДВОБ.
+- dc37ca2: 64_12 без exit + 64_13 генерация PS-кодом.
+- eb5fc8a: .gitignore — *.ds*bak / *.ds*_prev / *.bak_*.
+- 7d64b18: 64_14 + 64_15 + 08_Окружение.md.
+- (74_10) — коммит отчёта/старта/памятки/теста — см. 74_10c.
+
+## Долги 74 -> 75
+1. Грязные фоновые (EXCHANGE/bot.log, Ollama и LM Studio.bat, SRC/settings.json, test_all_models.ps1, free_memory.ps1, free_memory_profiles.txt) — не коммитить.
+2. Бэкапы *.ds*bak* — вне git (.gitignore), не коммитить.
+3. Интерактивная вставка — 64_14/64_15 действуют; класс инцидентов закрыт.
+4. BOM при правке существующих .py/.ps1 — 65_3; тест test_ds74_01_gui_checklist.py — BOM=True (= test_ds183).
+5. Тест 02_k1_ika_has_plp SKIPPED — ИКА пуст; при желании создать F:\TO_DBI\PATCH_IN\patch_suboptimal_test_3\*.plp (вне теста).
+
+## Артефакты
+- Тест: SRC/tests/test_ds74_01_gui_checklist.py (12 passed / 1 skipped).
+- Логи: LG_74_00_regress.log … LG_74_10a_rep.log.

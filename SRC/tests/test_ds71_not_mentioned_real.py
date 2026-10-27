@@ -35,7 +35,7 @@ def _make():
 
 def _name_from_issue(it):
     _, msg, _ = it
-    m = re.search(r"(?:Функция|Переменная)\s+(\w+)", msg)
+    m = re.search(r"(?:Функция|Процедура|Метод|Батч-метод|Переменная)\s+(\w+)", msg)
     assert m, f"не удалось извлечь имя из сообщения: {msg!r}"
     return m.group(1)
 
@@ -77,14 +77,19 @@ def test_not_mentioned_real_issues():
     # Default_Mes — не объявление
     assert "Default_Mes" not in name_set
 
-    # вид сообщения для func и для остальных
+    # вид сообщения по kind: func/proc/method/batch_method — свои префиксы
+    expected_prefix = {
+        "unused_pub_func":     "Функция ",
+        "unused_pub_proc":     "Процедура ",
+        "unused_method":       "Метод ",
+        "unused_batch_method": "Батч-метод ",
+    }
+    default_prefix = "Переменная "
     for it in issues:
         name = _name_from_issue(it)
         msg = it[1]
-        if name == "unused_pub_func":
-            assert msg.startswith("Функция "), msg
-        else:
-            assert msg.startswith("Переменная "), msg
+        pref = expected_prefix.get(name, default_prefix)
+        assert msg.startswith(pref), f"{name}: {msg!r} не начинается с {pref!r}"
 
 
 def test_not_mentioned_does_not_fire_on_fixture_without_unused():

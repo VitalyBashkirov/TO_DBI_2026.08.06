@@ -30,7 +30,7 @@ def test_74_01_01_app_start():
 def test_74_01_02_k1_ika_has_plp():
     files = _has_plp()
     if not files: pytest.skip("ИКА пуст или нет .plp: " + IKA)
-    import scanner
+    from analyzer import scanner
     assert hasattr(scanner, "scan_file")
 
 # 3: матрица 03 - 6 комбинаций МПК/ВТИК/НеАФ -> Я/П/В

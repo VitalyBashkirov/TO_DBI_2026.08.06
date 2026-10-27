@@ -38,7 +38,7 @@ DATA/Рубрикатор v5/OLD v5/
 *.bak
 
 # Patches (input)
-PATCH_IN/
+PATCH_IN/*
 !PATCH_IN/patch_suboptimal_test_3/
 !PATCH_IN/patch_suboptimal_test_3/*.plp
 

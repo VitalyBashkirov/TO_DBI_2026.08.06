@@ -2694,6 +2694,12 @@ def save_scan_only_log(logs_dir: Path, source_name: str, flags: Dict[str, bool],
     # сканера, где канон флагов зашит и only_ai не печатается).
     lines = append_only_ai_flag(lines, flags, indent='  ')
     lines.append("")
+    # DS_187: user selection block
+    try:
+        lines.extend(scanner._generate_user_selection_lines())
+    except Exception as e:
+        logger.warning(f"[FIXER] user_selection block unavailable: {e}")
+
     lines.append(f"**Дата**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"**Источник**: {source_name}")
     lines.append("")

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 АРМ "Адаптация под DBI"
@@ -194,6 +194,60 @@ def inject_only_ai_flag(report_path, flags: dict) -> bool:
     nl = '\r\n' if '\r\n' in raw else '\n'
     p.write_text(nl.join(out) + nl, encoding='utf-8')
     return True
+
+
+
+def inject_user_selection_block(report_path, user_selection: dict) -> bool:
+    p = Path(report_path)
+    if not p.exists(): return False
+    us = user_selection or {}
+    if not us: return False
+    raw = p.read_text(encoding="utf-8", errors="replace")
+    if "ВЫБОР ПОЛЬЗОВАТЕЛЯ В РУБРИКАТОРЕ:" in raw: return False
+    nl = "\r\n" if "\r\n" in raw else "\n"
+    lines = ["ВЫБОР ПОЛЬЗОВАТЕЛЯ В РУБРИКАТОРЕ:"]
+    lines.append(f"  Режим: {us.get('mode', '')}")
+    f = us.get('files', []) or []
+    r = us.get('rules', []) or []
+    lines.append(f"  Выбрано файлов рубрикатора: {len(f)}")
+    lines.append(f"  Выбрано правил: {len(r)}")
+    for x in r[:30]: lines.append(f"    [+] {x}")
+    if len(r) > 30: lines.append(f"    ... и ещё {len(r)-30} правил")
+    block = nl.join(lines) + nl
+    m = "Активные рубрикаторы и флаги:"
+    if m in raw:
+        pos = raw.index(m); end = raw.find(nl+nl, pos)
+        if end >= 0: new = raw[:end+len(nl)] + block + raw[end+len(nl):]
+        else: new = raw + nl + block
+    else: new = raw + nl + block
+    p.write_text(new, encoding="utf-8"); return True
+
+def inject_user_selection_html(report_path, user_selection: dict) -> bool:
+    p = Path(report_path)
+    if not p.exists(): return False
+    us = user_selection or {}
+    if not us: return False
+    raw = p.read_text(encoding="utf-8", errors="replace")
+    if "ВЫБОР ПОЛЬЗОВАТЕЛЯ В РУБРИКАТОРЕ:" in raw: return False
+    nl = "\r\n" if "\r\n" in raw else "\n"
+    lines = ["ВЫБОР ПОЛЬЗОВАТЕЛЯ В РУБРИКАТОРЕ:"]
+    lines.append(f"  Режим: {us.get('mode', '')}")
+    f = us.get('files', []) or []
+    r = us.get('rules', []) or []
+    lines.append(f"  Выбрано файлов рубрикатора: {len(f)}")
+    lines.append(f"  Выбрано правил: {len(r)}")
+    for x in r[:30]: lines.append(f"    [+] {x}")
+    if len(r) > 30: lines.append(f"    ... и ещё {len(r)-30} правил")
+    import html as h
+    div = "<div class=""active-rubricators"">" + h.escape(chr(10).join(lines)) + "</div>"
+    m = "<div class=""active-rubricators"">"
+    i = raw.find(m)
+    if i >= 0:
+        e = raw.find("</div>", i)
+        if e >= 0: new = raw[:e+6] + chr(10) + div + raw[e+6:]
+        else: new = raw + chr(10) + div
+    else: new = raw + chr(10) + div
+    p.write_text(new, encoding="utf-8"); return True
 
 
 class DBIMigrationApp:
@@ -4264,6 +4318,16 @@ class DBIMigrationApp:
                                  skipped_temporary=0):
         """DS 040: окно результата сканирования (обычное или прерванное).
         Нативный messagebox не поддерживает смену фона — используется tk.Toplevel.
+            try:
+                inject_user_selection_block(output_path, self._collect_user_selection())
+            except Exception as _e:
+                self.log(f"  [!] user_selection .md: {_e}", 'warning')
+            try:
+                inject_user_selection_html(html_report_path, self._collect_user_selection())
+            except Exception as _e:
+                self.log(f"  [!] user_selection .html: {_e}", 'warning')
+
+
 
         DS_053_Уточнение_5 (задача C): показываются все три лога —
         Основной (scan_report_*), Прогноз (scan_VVxVVx_*), PlpCheck

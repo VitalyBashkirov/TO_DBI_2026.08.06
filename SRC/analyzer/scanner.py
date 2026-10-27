@@ -942,6 +942,7 @@ class PLPlusScanner:
             r'^\s*(\w+)\s+('
             r'integer|number|string|varchar2|date|boolean|timestamp|rowtype'
             r'|(?:ref\s*)?\[[\w\d_]+\]'
+            r'|in\s+\[[\w\d_]+\]'
             r'|&[\w.]+'
             r')\s*(\(\s*\d+\s*\))?\s*(?::=|;)',
             re.IGNORECASE
@@ -959,6 +960,8 @@ class PLPlusScanner:
                 # 'ref [CLASS]' — нормализуем к 'ref'
                 if type_str.lower().startswith('ref'):
                     type_str = 'ref'
+                elif type_str.lower() == 'in':
+                    type_str = 'in'
                 yield i, var_name, type_str, sections.get(i, 'PRIVATE') == 'EXECUTE'
     
     def _plp_suggest_var_name(self, var_name: str, type_str: str, is_param: bool = False) -> str:
@@ -1109,6 +1112,24 @@ class PLPlusScanner:
             fm = func_re.match(line)
             if fm:
                 declared[fm.group(1)] = (i, 'func', stripped)
+
+
+        extra_kinds = (
+            (re.compile(r'^\s*batch\s+method\s+(\w+)\s+is\b', re.IGNORECASE), 'batch_method'),
+            (re.compile(r'^\s*method\s+(\w+)\s+is\b', re.IGNORECASE), 'method'),
+            (re.compile(r'^\s*public\s+function\s+(\w+)\s*\(', re.IGNORECASE), 'func'),
+            (re.compile(r'^\s*public\s+procedure\s+(\w+)\s*\(', re.IGNORECASE), 'proc'),
+            (re.compile(r'^\s*procedure\s+(\w+)\s*\(', re.IGNORECASE), 'proc'),
+        )
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('--'):
+                continue
+            for rx, kind in extra_kinds:
+                m = rx.match(line)
+                if m:
+                    declared[m.group(1)] = (i, kind, stripped)
+                    break
         
         # Поиск упоминаний вне строки объявления
         for name, (decl_line, kind, original_line) in declared.items():

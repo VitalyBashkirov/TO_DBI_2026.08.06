@@ -1,0 +1,28 @@
+class ds71_in_type
+
+  public function unused_pub_func(p_x integer) return integer is
+    v_local integer := 0;
+    return v_local;
+  end;
+
+  public procedure unused_pub_proc(p_y varchar2(10)) is
+    v_tmp varchar2(10) := p_y;
+  end;
+
+  method unused_method is
+    v_m integer := 0;
+  end;
+
+  batch method unused_batch_method is
+    v_b integer := 0;
+  end;
+
+  execute
+    r_ref in [DEPN];
+    v_used integer;
+    v_unused_in in [BRANCH];
+    v_used := 1;
+    if &Default_Mes then
+      null;
+    end if;
+  end;

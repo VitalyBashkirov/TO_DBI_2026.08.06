@@ -1,0 +1,40 @@
+77.СТАРТ (сгенерировано 2026-10-28 из чата 76; инцидент 68 — восстановление .git)
+Хост: LGGRAMA8V7Q8U (LG) / MATEBOOKE (MBE)
+
+## Где искать правила (ОБЯЗАТЕЛЬНО в новом чате)
+F:\TO_DBI\PS\CHAT_RULES\Старт новых чатов\01_08 Правила,регламенты,сокращения и т.п\
+  00_INDEX.md -> 01..08; 01_Правила_PS.md: 64_11..64_16, 68_07.
+
+## Статус на 2026-10-28 (после чата 76)
+- HEAD = f414282; origin == HEAD, ahead нет.
+- Регресс на MBE (68_06k): 402 passed / 0 skipped. test_ds186 — 1 passed.
+- Действуют: 64_11..64_16, ДВОБ, 65_1..65_3, 66_1/66_2, 67_1, 68_1, 68_07.
+- .git восстановлен из origin (7b3fea6) после NTFS-порчи F:; .gitignore восстановлен из 53ec851.
+- 76_02: f414282 (76.Старт + памятка + 68_07 + fix .gitignore).
+- 68_06: 53ec851 (scanner.py + 4.RUBRICATOR_PROMPT v5.json 5.3.1 + test_ds186).
+- 76_01f: 7b3fea6 (fix test 02 from analyzer import scanner).
+- 76_01d: 8a148b3 (ИКА: 3 .plp-фикстуры).
+
+## ИНЦИДЕНТ 68 (NTFS-порча F:)
+- .git/objects битый -> .git восстановлен из origin/feature/dockerization (7b3fea6).
+- .gitignore был заменен транскриптом LG_74_05c_gitignore.log -> восстановлен из 53ec851.
+- temp_broken_20261028\__init__.py, tools/, 69.Отчёт.txt — битые (git status: could not open directory).
+- chkdsk F: /scan -> Access denied (нужен admin); /f offline — на LG после перезагрузки.
+
+## Долги 76 -> 77
+1. chkdsk F: /scan (admin) -> chkdsk /f (offline) — на LG; бэкап: клон F:\TO_DBI_clone_20261028.
+   Ожидаемо: temp_broken_20261028, tools/, .git/objects починятся/исчезнут; сотни D/M в git status уйдут.
+2. 77.Старт.txt — HEAD = f414282 (актуальный); 76.Старт.txt устарел (53ec851) — можно удалить или оставить для истории.
+3. pytest.ini в SRC/tests (локальный обход temp) — решить: коммит или .gitignore.
+4. chat76_01f_gen/all.ps1 — исчезли из F: (порча); 76_01f уже в origin (7b3fea6) — не восстанавливать.
+5. ERROR: в 76_02b (warning temp_broken) — ложный; после chkdsk /f исчезнет.
+
+## 68_07 (НОВОЕ, действует)
+Перед сменой хоста MBE <-> LG ОБЯЗАТЕЛЬНО проверить F: (vol F: Ai NFTS E82B-3734, .git рабочий, ключевые файлы читаются).
+Без проверки ЗАПРЕЩЕНО: git commit/push, chkdsk /f, Remove-Item/Move-Item крупных каталогов.
+
+## Первые шаги чата 77
+1. Прочитать 00_INDEX.md -> 01..08; 01_Правила_PS.md: 64_11..64_16, 68_07.
+2. Прочитать Отчеты\74.Отчёт.txt, 68.Отчёт.txt (создать), 76_00..76_02 в git.
+3. chkdsk F: /scan (admin) -> /f (offline) — на LG (или другая задача).
+4. Действовать по 04, 05, 06, 07, 64_11..64_16, 65_1..65_3, 66_1/66_2, 67_1, 68_1, 68_07.

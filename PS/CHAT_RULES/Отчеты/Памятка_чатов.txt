@@ -69,3 +69,12 @@ $lines68 = @(
 68_06: recovery = 53ec851 (3 файла), запушен в origin/feature/dockerization.
 Новое правило 68_07: проверка F: перед сменой хоста MBE<->LG.
 
+
+--- ЧАТ 76 (2026-10-28, MBE) ---
+76_01d: ИКА 3 .plp + самокоммит B (8a148b3).
+76_01f: fix test 02 (from analyzer import scanner) + .gitignore PATCH_IN (7b3fea6).
+68_06a..k: DS_186 fix (scanner.py + 4.RUBRICATOR_PROMPT v5.json 5.3.1 + test_ds186). test_ds186: 1 passed.
+Инцидент 68: NTFS-порча F: -> .git/objects битый -> .git восстановлен из origin (клон F:\TO_DBI_clone_20261028).
+68_06: recovery = 53ec851 (3 файла) + 76_02: f414282 (старт 76 + памятка + 68_07 + .gitignore fix).
+Долги 77: chkdsk F:, pytest.ini, temp_broken_20261028, tools/, .gitignore (восстановлен).
+

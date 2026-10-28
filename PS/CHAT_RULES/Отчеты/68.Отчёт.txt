@@ -1,23 +1,24 @@
-# Отчёт чата 68 (2026-10-27, LG/MBE)
+# Отчёт чата 68 (2026-10-27..28, MBE)
 
 ## Главное
-- Восстановлен рабочий ИКА patch_suboptimal_test_3 (3 .plp) из zip-эталона 2026.10.18_X_suboptimal_query_wrownum.zip.
-- Исправлен дефект SUBOPTIMAL_QUERY_WROWNUM: не ловил return / raise / pragma error / message.error / app_error.
-- В ЖВ К1 добавлен блок «ВЫБОР ПОЛЬЗОВАТЕЛЯ В РУБРИКАТОРЕ».
-- Коммит a045f4d, push в origin/feature/dockerization.
+- DS_186: SUBOPTIMAL_QUERY_WROWNUM — расширен pattern (return/raise/pragma error/message.error/app_error).
+- scanner.py: r-for-pattern расширен; py_compile rc=0.
+- DATA/Рубрикатор v5/4.RUBRICATOR_PROMPT v5.json: version 5.3.0 -> 5.3.1 + pattern. Восстановлен из backup_68.
+- SRC/tests/test_ds186_wrownum_return_pragma.py: config paths/scan (PLPlusScanner); 1 passed (68_06k).
 
-## Что сделано
-- 68_01..68_03: инвентаризация PATCH_IN, найдены 3 изменённых .plp (23.10 02:42, 22.10 12:29), восстановлены из zip-эталона, бэкапы в backup_68.
-- 68_04..68_06: найдено — _check_plp_suboptimal_wrownum (scanner.py:1252) ловил только \bexit\b; v5.json regex тоже.
-- 68_06b3: v5.json 5.3.0 -> 5.3.1, паттерн расширен (exit|return|raise|pragma error|message.error|app_error).
-- 68_06e: scanner.py _check_plp_suboptimal_wrownum расширена тем же паттерном; py_compile=0.
-- 68_06f/68_12: test_ds186 — зелёный (SCHM=1, VK_UNK_INP=2, PS_DEL=0), 1 passed.
-- 68_11/68_17c: gui_app.py — блок «ВЫБОР ПОЛЬЗОВАТЕЛЯ В РУБРИКАТОРЕ» в ЖВ К1 (2 места), py_compile=0.
-- 68_13: К1 в бою — 3 срабатывания wrownum (SCHM стр.112, VK_UNK_INP стр.9 и 42), блок ЖВ подтверждён.
-- 68_19c: коммит a045f4d (4 файла: v5.json, scanner.py, gui_app.py, test_ds186), push OK.
+## ИНЦИДЕНТ 68: NTFS-порча F:
+- .git/objects битый (corrupt loose object: 0a0858, 131c64, 168f4f и др.).
+- .git восстановлен из origin/feature/dockerization (7b3fea6) через клон F:\TO_DBI_clone_20261028.
+- .gitignore был заменён транскриптом LG_74_05c_gitignore.log (2359 B).
+- .gitignore восстановлен из 53ec851 (PS/*, !PS/CHAT_RULES/, !PS/CHAT_RULES/**).
+- temp_broken_20261028\__init__.py — битый (WinError 1392), tools/ — битый, 69.Отчёт.txt — short read.
+- chkdsk F: /scan -> Access denied + snapshot error. /f offline — на LG (admin).
 
-## Долги 68 -> 69
-1. Блок «ВЫБОР ПОЛЬЗОВАТЕЛЯ В РУБРИКАТОРЕ» в отчётах (scan_report_*.md, scan_VVVxVV_*.md, plpcheck_report_*.html) — НЕ сделано. Делать в gui_app.py (дописывание после generate_report), отдельным чатом, тесты на три формата. Правка scanner.py «на ходу» уже 4 раза ломала файл — не повторять.
-2. SyntaxWarning: invalid escape sequence '\s' в scanner.py:1257 — заменить на r'...'.
-3. PSH_PS_DEL.plp: for v_ps in this(idx).[B_PS] — это не suboptimal_query_wrownum (не select). Если IDE ЦФТ метит — другое правило, отдельно.
-4. EXCHANGE/bot.log, Ollama и LM Studio.bat, SRC/settings.json, test_all_models.ps1 — грязные фоновые, не коммитить.
+## Коммиты 68
+- 68_06: 53ec851 (scanner.py + 4.RUBRICATOR_PROMPT v5.json 5.3.1 + test_ds186).
+- .git восстановлен из 7b3fea6; 53ec851 запушен в origin.
+
+## Долги 68 -> 77
+1. chkdsk F: /scan -> /f (LG, admin, offline). Починит temp_broken_20261028, tools/, .git/objects (старые).
+2. pytest.ini в SRC/tests — локальный обход temp; решить: коммит/ignore.
+3. 76.Старт.txt (53ec851) и 77.Старт.txt (f414282) — актуализировать на 8e13bf6.

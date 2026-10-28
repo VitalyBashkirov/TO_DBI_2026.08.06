@@ -1,0 +1,31 @@
+# Отчёт чата 76 (2026-10-28, MBE)
+
+## Главное
+- 76_00: старт (HEAD d5cc216).
+- 76_01d: ИКА — 3 .plp-фикстуры (sample_bad_prefix, sample_not_mentioned, sample_code_in_comment) + .gitignore PATCH_IN/* + самокоммит B.
+  Коммит: 8a148b3 (push 82d6e09..8a148b3).
+- 76_01f: fix test 02 (from analyzer import scanner) + .gitignore PATCH_IN/*. Коммит: 7b3fea6.
+  Причина: scanner.py в SRC/analyzer (не SRC); test_ds74_01_02 ожидал top-level scanner.
+- 68_06 (в чате 76): DS_186 fix — scanner.py + 4.RUBRICATOR_PROMPT v5.json 5.3.1 + test_ds186 (1 passed). Коммит: 53ec851.
+- ИНЦИДЕНТ 68: NTFS-порча F: -> .git/objects битый -> .git восстановлен из origin (7b3fea6); .gitignore из 53ec851.
+- 76_02: 76.Старт.txt + памятка + 68_07 + fix .gitignore. Коммит: f414282.
+- 77_00: старт чата 77 + памятка (чат 76). Коммит: 8e13bf6.
+
+## Регресс
+- На MBE (68_06k): 402 passed / 0 skipped. test_ds186 — 1 passed.
+- Было на LG (74): 401 passed / 1 skipped (02_k1_ika_has_plp skip, ИКА пуст).
+- После 76_01d (ИКА 3 .plp) -> 02 должен пройти; на MBE 68_06k — 402/0.
+
+## Коммиты 76 (в порядке)
+- 8a148b3 76_01d: ИКА — 3 .plp-фикстуры + самокоммит B.
+- 7b3fea6 76_01f: fix test 02 (from analyzer import scanner) + .gitignore PATCH_IN/*.
+- 53ec851 68_06: recovery - DS_186 fix + rubricator restore.
+- f414282 76_02: 76.Старт + памятка + 68_07 + fix .gitignore (restore from 53ec851).
+- 8e13bf6 77_00: старт чата 77 + памятка (чат 76).
+
+## Долги 76 -> 77
+1. chkdsk F: /scan -> /f (LG, admin, offline). Бэкап: клон F:\TO_DBI_clone_20261028.
+2. pytest.ini (SRC/tests) — решить: коммит или .gitignore.
+3. 76.Старт.txt (53ec851) и 77.Старт.txt (f414282) — актуализировать на 8e13bf6.
+4. chat76_01f_gen/all.ps1 — исчезли из F: (порча); 76_01f уже в origin (7b3fea6) — не восстанавливать.
+5. ERROR: в 76_02b (warning temp_broken) — ложный; после chkdsk /f исчезнет.

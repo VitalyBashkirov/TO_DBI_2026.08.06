@@ -942,7 +942,6 @@ class PLPlusScanner:
             r'^\s*(\w+)\s+('
             r'integer|number|string|varchar2|date|boolean|timestamp|rowtype'
             r'|(?:ref\s*)?\[[\w\d_]+\]'
-            r'|in\s+\[[\w\d_]+\]'
             r'|&[\w.]+'
             r')\s*(\(\s*\d+\s*\))?\s*(?::=|;)',
             re.IGNORECASE
@@ -960,8 +959,6 @@ class PLPlusScanner:
                 # 'ref [CLASS]' — нормализуем к 'ref'
                 if type_str.lower().startswith('ref'):
                     type_str = 'ref'
-                elif re.match(r'^in\s*\[', type_str, re.IGNORECASE):
-                    type_str = 'in'
                 yield i, var_name, type_str, sections.get(i, 'PRIVATE') == 'EXECUTE'
     
     def _plp_suggest_var_name(self, var_name: str, type_str: str, is_param: bool = False) -> str:
@@ -1112,24 +1109,6 @@ class PLPlusScanner:
             fm = func_re.match(line)
             if fm:
                 declared[fm.group(1)] = (i, 'func', stripped)
-
-
-        extra_kinds = (
-            (re.compile(r'^\s*batch\s+method\s+(\w+)\s+is\b', re.IGNORECASE), 'batch_method'),
-            (re.compile(r'^\s*method\s+(\w+)\s+is\b', re.IGNORECASE), 'method'),
-            (re.compile(r'^\s*public\s+function\s+(\w+)\s*\(', re.IGNORECASE), 'func'),
-            (re.compile(r'^\s*public\s+procedure\s+(\w+)\s*\(', re.IGNORECASE), 'proc'),
-            (re.compile(r'^\s*procedure\s+(\w+)\s*\(', re.IGNORECASE), 'proc'),
-        )
-        for i, line in enumerate(lines, 1):
-            stripped = line.strip()
-            if stripped.startswith('--'):
-                continue
-            for rx, kind in extra_kinds:
-                m = rx.match(line)
-                if m:
-                    declared[m.group(1)] = (i, kind, stripped)
-                    break
         
         # Поиск упоминаний вне строки объявления
         for name, (decl_line, kind, original_line) in declared.items():
@@ -1144,12 +1123,6 @@ class PLPlusScanner:
             if not used:
                 if kind == 'func':
                     msg = f'Функция {name} нигде не вызывается. Проверьте внимательно программный код.'
-                elif kind == 'proc':
-                    msg = f'Процедура {name} нигде не вызывается. Проверьте внимательно программный код.'
-                elif kind == 'method':
-                    msg = f'Метод {name} нигде не вызывается. Проверьте внимательно программный код.'
-                elif kind == 'batch_method':
-                    msg = f'Батч-метод {name} нигде не вызывается. Проверьте внимательно программный код.'
                 else:
                     msg = f'Переменная {name} более нигде не упоминается. Проверьте внимательно программный код.'
                 issues.append((decl_line, msg, original_line))
@@ -1278,7 +1251,7 @@ class PLPlusScanner:
         return issues
     
     def _check_plp_suboptimal_wrownum(self, lines: List[str]) -> List[Tuple[int, str, str, int, int]]:
-        r"""DS_179: SUBOPTIMAL_QUERY_WROWNUM - exit в for-loop без rownum/offset/fetch.
+        """DS_179: SUBOPTIMAL_QUERY_WROWNUM - exit в for-loop без rownum/offset/fetch.
 
         Многострочный паттерн (из JSON-рубрикатора):
             for\s*\(.*select.*\)\s+loop.*\bexit\b
@@ -2901,3 +2874,4 @@ def read_file_with_encoding(file_path: Path) -> Tuple[str, str]:
 
 if __name__ == '__main__':
     main()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           
